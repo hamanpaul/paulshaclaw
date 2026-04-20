@@ -7,6 +7,12 @@ from pathlib import Path
 from typing import Mapping
 
 
+def _require_fields(payload: Mapping[str, object], *, prefix: str, fields: tuple[str, ...]) -> None:
+    for field in fields:
+        if field not in payload:
+            raise ValueError(f"{prefix}.{field} 缺失")
+
+
 @dataclass(frozen=True)
 class CoordinatorSettings:
     phase: str
@@ -31,13 +37,37 @@ class AppConfig:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, object]) -> "AppConfig":
+        _require_fields(
+            payload,
+            prefix="config",
+            fields=("daemon_name", "default_project", "coordinator", "pane_assignments"),
+        )
         coordinator_payload = payload.get("coordinator")
         if not isinstance(coordinator_payload, Mapping):
             raise ValueError("config.coordinator 缺失")
+        _require_fields(coordinator_payload, prefix="config.coordinator", fields=("phase",))
 
         raw_panes = payload.get("pane_assignments")
         if not isinstance(raw_panes, list):
             raise ValueError("config.pane_assignments 缺失")
+
+        pane_assignments: list[PaneAssignment] = []
+        for index, item in enumerate(raw_panes):
+            if not isinstance(item, Mapping):
+                raise ValueError(f"config.pane_assignments[{index}] 格式錯誤")
+            _require_fields(
+                item,
+                prefix=f"config.pane_assignments[{index}]",
+                fields=("pane_id", "title", "task_id", "status"),
+            )
+            pane_assignments.append(
+                PaneAssignment(
+                    pane_id=str(item["pane_id"]),
+                    title=str(item["title"]),
+                    task_id=str(item["task_id"]),
+                    status=str(item["status"]),
+                )
+            )
 
         return cls(
             daemon_name=str(payload["daemon_name"]),
@@ -47,15 +77,7 @@ class AppConfig:
                 phase=str(coordinator_payload["phase"]),
                 default_payload=dict(coordinator_payload.get("default_payload", {})),
             ),
-            pane_assignments=tuple(
-                PaneAssignment(
-                    pane_id=str(item["pane_id"]),
-                    title=str(item["title"]),
-                    task_id=str(item["task_id"]),
-                    status=str(item["status"]),
-                )
-                for item in raw_panes
-            ),
+            pane_assignments=tuple(pane_assignments),
         )
 
 

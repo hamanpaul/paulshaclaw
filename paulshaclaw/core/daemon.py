@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -76,8 +77,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--command", required=True, help="要執行的最小指令")
     args = parser.parse_args(argv)
 
-    daemon = PaulShiaBroDaemon(config=load_config(config_path=args.config))
-    result = daemon.handle_command(args.command)
+    try:
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=args.config))
+        result = daemon.handle_command(args.command)
+    except (ValueError, FileNotFoundError, KeyError) as error:
+        print(f"錯誤: {error}", file=sys.stderr)
+        return 1
+
     print(json.dumps(result, ensure_ascii=False))
     return 0
 

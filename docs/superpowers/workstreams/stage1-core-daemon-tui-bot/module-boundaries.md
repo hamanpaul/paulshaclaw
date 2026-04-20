@@ -3,11 +3,12 @@
 ## core
 
 - 路徑：`paulshaclaw/core/`
-- 責任：載入 Stage 1 JSON 設定、提供 `PaulShiaBroDaemon` 最小指令路由、轉送 coordinator dispatch。
+- 責任：載入 Stage 1 JSON 設定、提供 `PaulShiaBroDaemon` 最小指令路由、轉送 coordinator dispatch seam。
 - 對外介面：
   - `load_config(...)`
   - `PaulShiaBroDaemon.handle_command(...)`
   - `python -m paulshaclaw.core.daemon --config ... --command ...`
+- 本輪界線：只固定 `CoordinatorClient` dispatch 契約與 local fallback；真實 coordinator transport 留待後續整合。
 
 ## tui
 

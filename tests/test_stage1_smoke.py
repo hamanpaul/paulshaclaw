@@ -100,6 +100,30 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertEqual(config.daemon_name, "PaulShiaBro")
         self.assertEqual(config.default_project, "stage1-demo")
 
+    def test_load_config_rejects_missing_required_fields(self) -> None:
+        config = {
+            "default_project": "stage1-demo",
+            "allowed_user_ids": [1001],
+            "coordinator": {
+                "phase": "build",
+                "default_payload": {
+                    "source": "stage1-smoke",
+                },
+            },
+            "pane_assignments": [],
+        }
+        handle = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+        try:
+            json.dump(config, handle)
+            handle.flush()
+        finally:
+            handle.close()
+        config_path = Path(handle.name)
+        self.addCleanup(config_path.unlink, missing_ok=True)
+
+        with self.assertRaisesRegex(ValueError, "config.daemon_name 缺失"):
+            load_config(config_path=config_path)
+
     def test_dispatch_command_calls_coordinator(self) -> None:
         config_path = self.make_config_path()
         coordinator = FakeCoordinator()
@@ -111,6 +135,14 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertEqual(result["job_id"], "job-1")
         self.assertEqual(coordinator.calls[0]["scope"], "stage1-smoke")
         self.assertEqual(coordinator.calls[0]["payload"]["source"], "stage1-smoke")
+
+    def test_sample_config_file_loads(self) -> None:
+        sample_config = Path(__file__).resolve().parents[1] / "config" / "paulshaclaw-stage1.sample.json"
+
+        config = load_config(config_path=sample_config)
+
+        self.assertEqual(config.daemon_name, "PaulShiaBro")
+        self.assertEqual(config.default_project, "stage1-demo")
 
     def test_tui_view_lists_panes_and_tasks(self) -> None:
         config_path = self.make_config_path()
@@ -145,6 +177,17 @@ class Stage1SmokeTest(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertIn("不支援的指令", result["message"])
+
+    def test_telegram_router_dispatches_authorized_command(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/dispatch stage1-smoke")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("job-1", result["message"])
+        self.assertEqual(result["result"]["scope"], "stage1-smoke")
 
     def test_cli_entry_outputs_json_status(self) -> None:
         config_path = self.make_config_path()
@@ -192,6 +235,29 @@ class Stage1SmokeTest(unittest.TestCase):
         payload = json.loads(completed.stdout)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["project"], "stage1-demo")
+
+    def test_cli_entry_returns_clean_error_for_invalid_command(self) -> None:
+        config_path = self.make_config_path()
+        env = dict(os.environ)
+        env["PSC_STAGE1_CONFIG"] = str(config_path)
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "paulshaclaw.core.daemon",
+                "--command",
+                "/unknown",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertIn("不支援的指令", completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
 
 
 if __name__ == "__main__":
