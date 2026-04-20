@@ -1,0 +1,25 @@
+{
+  "daemon_name": "PaulShiaBro",
+  "default_project": "stage1-demo",
+  "allowed_user_ids": [1001],
+  "coordinator": {
+    "phase": "build",
+    "default_payload": {
+      "source": "stage1-smoke"
+    }
+  },
+  "pane_assignments": [
+    {
+      "pane_id": "%1",
+      "title": "manager",
+      "task_id": "stage1-core",
+      "status": "running"
+    },
+    {
+      "pane_id": "%2",
+      "title": "tester",
+      "task_id": "stage1-smoke",
+      "status": "idle"
+    }
+  ]
+}

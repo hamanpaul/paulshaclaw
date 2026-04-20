@@ -1,0 +1,10 @@
+test_cli_entry_outputs_json_status (tests.test_stage1_smoke.Stage1SmokeTest.test_cli_entry_outputs_json_status) ... ok
+test_daemon_loads_config_and_returns_status (tests.test_stage1_smoke.Stage1SmokeTest.test_daemon_loads_config_and_returns_status) ... ok
+test_dispatch_command_calls_coordinator (tests.test_stage1_smoke.Stage1SmokeTest.test_dispatch_command_calls_coordinator) ... ok
+test_telegram_router_rejects_unauthorized_user (tests.test_stage1_smoke.Stage1SmokeTest.test_telegram_router_rejects_unauthorized_user) ... ok
+test_tui_view_lists_panes_and_tasks (tests.test_stage1_smoke.Stage1SmokeTest.test_tui_view_lists_panes_and_tasks) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.036s
+
+OK
