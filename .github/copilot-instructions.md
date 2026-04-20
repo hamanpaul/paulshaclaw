@@ -1,0 +1,58 @@
+# Copilot Instructions for `paulshaclaw`
+
+## Project snapshot
+
+- This repository is a **docs-first design repo** for the `paulshaclaw` agent workflow system.
+- The most important source files are the staged research docs under `docs/research/`.
+- Read the architecture docs before making changes:
+  - `docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md`
+  - `docs/research/03.stage3-lifecycle-slash-commands-artifacts-phase-gating-research.md`
+  - `docs/research/04.stage4-persona-role-catalog-handoff-guardrails-research.md`
+  - `docs/research/01.prompt-define-plan-build-verify-review-ship-resear.md`
+
+## Big-picture architecture
+
+- The system is organized as a staged lifecycle:
+  - **Stage 0**: tool / naming cleanup and OpenSpec + Superpowers setup
+  - **Stage 1**: `PaulShiaBro` daemon, TUI, Telegram bot, registry
+  - **Stage 2**: `~/.agents/memory` as the memory substrate
+  - **Stage 3**: slash-command lifecycle with artifacts and gates
+  - **Stage 4**: persona contracts, handoff, and guardrails
+  - **Stage 5+**: observability, security, and deployment hardening
+- The operating model is **hub-and-spoke**:
+  - one manager / orchestrator owns task authority
+  - workers do bounded execution and return artifacts
+  - avoid direct worker-to-worker mesh behavior unless a doc explicitly calls for it
+- The lifecycle is **artifact-first and event-first**:
+  - prompt text is not the source of truth
+  - canonical state lives in artifacts and event logs
+  - gate decisions should be based on files, schemas, and recorded events
+
+## Key conventions
+
+- Use the staged docs as the source of truth for scope, terminology, and phase boundaries.
+- Preserve the existing naming system:
+  - `paulshaclaw` for the repo
+  - `PaulShiaBro` for the daemon/bot
+  - `psc` for short CLI / env naming
+  - `PoHsiaBro` for the font / glyph family
+- Keep changes aligned with the repository’s path split:
+  - `paulshaclaw/` for repo code and templates
+  - `~/.agents/` for private runtime state and memory
+  - `~/.config/paulshaclaw/` for secrets and machine-local config
+- Treat `docs/spec.md`, `docs/plan.md`, `docs/roadmap.md`, `docs/test.md`, `docs/task.md`, and `docs/todo.md` as lifecycle artifacts with explicit phase roles.
+- When adding or editing docs, prefer the existing zh-TW terminology and the repo’s stage numbering instead of inventing new labels.
+- Persona work should follow the contract model from Stage 4:
+  - persona = contract
+  - agent instance = runtime execution
+  - skill = reusable capability
+
+## Tooling and commands
+
+- No repository-local build, test, or lint commands are defined in this snapshot.
+- If code or scripts are added later, document the canonical commands alongside the relevant stage or tool docs.
+
+## Working notes
+
+- `openspec` and `superpowers` are part of the intended workflow scaffold; keep related changes consistent with the stage docs.
+- Favor small, staged edits that keep the lifecycle readable and replayable.
