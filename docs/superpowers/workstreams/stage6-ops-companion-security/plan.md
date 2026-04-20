@@ -25,6 +25,8 @@
 
 - `openspec/specs/stage6/`
 - `paulshaclaw/security/`
+- `custom-skills/ops-companion/`
+- `tests/test_ops_companion_security.py`
 - `openspec/specs/stage0/tool-matrix.md`
 
 ## Verification
@@ -36,3 +38,4 @@
 ## Decisions
 
 - `ops-companion` 最終需回寫 `custom-skills/ops-companion`，回寫前必須通過 Stage 6 測試。
+- Stage 7 只 consume Stage 6 security check 結果，不直接改寫 Stage 6 規則。
