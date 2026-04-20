@@ -1,0 +1,21 @@
+version: 1
+updated_at: "2026-04-20"
+policy:
+  sync_back_requires_stage_tests: true
+  evidence_required: true
+skills:
+  - name: ops-companion
+    source_repo: hamanpaul/custom-claw-tools
+    target_repo: hamanpaul/custom-skills
+    stage: 6
+    status: planned
+  - name: paulsha-memory
+    source_repo: hamanpaul/custom-claw-tools
+    target_repo: hamanpaul/custom-skills
+    stage: 2
+    status: planned
+  - name: coordinator
+    source_repo: hamanpaul/custom-skills
+    target_repo: hamanpaul/custom-skills
+    stage: 0
+    status: baseline
