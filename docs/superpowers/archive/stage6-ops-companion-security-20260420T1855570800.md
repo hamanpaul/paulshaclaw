@@ -17,8 +17,9 @@
 2. 建立 `/ship`、`git push`、deploy、package install、remote op 的高風險 gate。
 3. 建立 bearer token / password / GitHub token redaction 規則。
 4. 建立 `AppendOnlyAuditTrail` 與 `record_approval_decision(...)`，把 gate decision 寫入 audit。
-5. 新增 `tests/test_ops_companion_security.py`，最終共 8 個測試。
-6. 建立 `custom-skills/ops-companion/README.md` 作為 sync-back scaffold。
+5. 擴充 `package-install` 規則，涵蓋 `npm add` / `pnpm add` / `yarn add`。
+6. 新增 `tests/test_ops_companion_security.py`，最終共 8 個測試。
+7. 建立 `custom-skills/ops-companion/README.md` 作為 sync-back scaffold。
 
 ## 測試證據
 
@@ -29,6 +30,8 @@
 - `docs/superpowers/workstreams/stage6-ops-companion-security/evidence/05-git-diff-check.txt`
 - `docs/superpowers/workstreams/stage6-ops-companion-security/evidence/06-red-audit-integration.txt`
 - `docs/superpowers/workstreams/stage6-ops-companion-security/evidence/07-green-audit-integration.txt`
+- `docs/superpowers/workstreams/stage6-ops-companion-security/evidence/08-red-package-add.txt`
+- `docs/superpowers/workstreams/stage6-ops-companion-security/evidence/09-green-package-add.txt`
 
 ## review 結論
 
