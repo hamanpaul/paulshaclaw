@@ -7,8 +7,9 @@ skills:
   - name: ops-companion
     source_repo: hamanpaul/custom-claw-tools
     target_repo: hamanpaul/custom-skills
+    target_path: custom-skills/ops-companion
     stage: 6
-    status: planned
+    status: scaffolded
   - name: paulsha-memory
     source_repo: hamanpaul/custom-claw-tools
     target_repo: hamanpaul/custom-skills
