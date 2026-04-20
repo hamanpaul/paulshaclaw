@@ -30,3 +30,6 @@ env/
 # Logs / temp
 *.log
 tmp/
+
+# External reference repos (Stage 0)
+ref/
