@@ -1,8 +1,38 @@
 # stage6-ops-companion-security / plan
 
-- 階段：Stage 6
-- 目標：以 `ops-companion` 建立 approval/redaction/audit 安全治理
-- 先決依賴：Stage 0 命名 baseline + Stage 1 action path
-- 可寫範圍：`paulshaclaw/security/`、`openspec/specs/stage6/`
-- 禁止寫入：Stage1 core daemon 核心流程（除 hook）
-- 測試 gate：approval flow + redaction fuzz + audit append-only 驗證
+## Scope
+
+- Stage: 6
+- 目標: 以 `ops-companion` 建立 approval/redaction/audit 治理
+- 先決依賴: Stage 0 命名 baseline + Stage 1 action path
+- In scope: `paulshaclaw/security/`、`openspec/specs/stage6/`
+- Out of scope: Stage1 core workflow 重構、Stage2 memory pipeline 重構
+
+## Steps
+
+### Phase 1: Approval gate
+1. 對 `git push/deploy/package install/remote op` 建立統一 gate。
+
+### Phase 2: Redaction/Audit
+1. 建立 redaction 與 classification 規則。
+2. 建立 append-only audit trail。
+
+### Phase 3: 安全驗證
+1. 建立 approval flow 測試。
+2. 建立 redaction fuzz 與 audit 驗證。
+
+## Relevant files
+
+- `openspec/specs/stage6/`
+- `paulshaclaw/security/`
+- `openspec/specs/stage0/tool-matrix.md`
+
+## Verification
+
+1. 高風險命令無 approval 必拒絕。
+2. redaction 可命中常見敏感字串規則。
+3. audit trail 具 append-only 特性且可追溯 actor。
+
+## Decisions
+
+- `ops-companion` 最終需回寫 `custom-skills/ops-companion`，回寫前必須通過 Stage 6 測試。

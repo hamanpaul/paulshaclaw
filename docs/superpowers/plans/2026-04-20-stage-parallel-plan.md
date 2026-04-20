@@ -28,9 +28,9 @@
 
 每個 workstream 目錄固定三份文件：
 
-- `plan.md`: 範圍、邊界、介面契約
-- `task.md`: 可驗證任務清單（每項可獨立完成）
-- `todo.md`: 當前短迭代執行細項
+- `plan.md`：遵循 writing-plans 結構（`Scope/Steps/Relevant files/Verification/Decisions`）
+- `task.md`：可驗證任務清單（每項可獨立完成）
+- `todo.md`：遵循短迭代格式（`Current Sprint/Blockers/Evidence/Handoff`）
 
 路徑格式：
 
