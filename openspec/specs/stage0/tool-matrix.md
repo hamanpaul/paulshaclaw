@@ -24,14 +24,14 @@
 
 ## B. Stage 0 refine 工具矩陣
 
-| 工具/主題 | 舊名 | 目標名 | 來源 repo | 最終落點 | Claude Code 支援狀態 | refine PR |
+| 工具/主題 | 舊名 | 目標名 | 來源 repo | 最終落點 | Claude Code 支援狀態 | refine PR / tracking |
 |---|---|---|---|---|---|---|
-| Security gate companion | `picoclaw-ops-companion` | `ops-companion` | `custom-claw-tools` | `custom-skills/ops-companion`（新子專案） | pending（命名與介面待調校） | TBD |
-| Stage 2 memory core | `obs-auto-moc` | `paulsha-memory` | `custom-claw-tools` | `custom-skills/paulsha-memory`（新子專案） | partial（已有 Decayed/record-agent-reference，待專案化） | TBD |
-| Session lesson | `codex-lesson` | `session-lesson`（暫定） | `custom-skills` | `custom-skills/session-lesson`（可同 repo evolve） | partial（以 codex 命名為主） | TBD |
-| Cross-session insights | `codex-project-insights` | `project-insights`（暫定） | `custom-skills` | `custom-skills/project-insights`（可同 repo evolve） | partial（以 codex 命名為主） | TBD |
-| Session health parser | `session-health` | `session-health`（暫維持） | `hamanpaul/session-health`（未納入 ref） | 依 Stage 0 決策後回寫 `custom-skills` | unknown（待補 clone + 驗證） | TBD |
-| Multi-agent coordinator | `coordinator` | `coordinator`（維持） | `custom-skills` | `custom-skills/coordinator` | partial（provider 預設偏 `codex`） | TBD |
+| Security gate companion | `picoclaw-ops-companion` | `ops-companion` | `custom-claw-tools` | `custom-skills/ops-companion`（新子專案） | pending（命名與介面待調校） | 未開 PR；先完成 rename、介面對齊與 Stage 6 gate 驗證 |
+| Stage 2 memory core | `obs-auto-moc` | `paulsha-memory` | `custom-claw-tools` | `custom-skills/paulsha-memory`（新子專案） | partial（已有 Decayed/record-agent-reference，待專案化） | 未開 PR；先完成 Stage 2 邊界聲明與專案化切分 |
+| Session lesson | `codex-lesson` | `session-lesson`（暫定） | `custom-skills` | `custom-skills/session-lesson`（可同 repo evolve） | partial（以 codex 命名為主） | 未開 PR；先補 alias/rename 與 Claude Code session adapter |
+| Cross-session insights | `codex-project-insights` | `project-insights`（暫定） | `custom-skills` | `custom-skills/project-insights`（可同 repo evolve） | partial（以 codex 命名為主） | 未開 PR；先補 alias/rename 與跨 session 查詢驗證 |
+| Session health parser | `session-health` | `session-health`（暫維持） | `hamanpaul/session-health`（未納入 ref） | 依 Stage 0 決策後回寫 `custom-skills` | unknown（待補 clone + 驗證） | 未開 PR；先補 clone、Claude Code session parser 與輸出 schema 對齊 |
+| Multi-agent coordinator | `coordinator` | `coordinator`（維持） | `custom-skills` | `custom-skills/coordinator` | partial（provider 預設偏 `codex`） | 未開 PR；先補 `claude` provider 預設與 delegate template |
 
 ---
 
@@ -39,7 +39,7 @@
 
 1. Stage 0 `ref/` 主清單現為 5 個 repo（`obs-note-cron` 已移除），本地可直接閱讀與比對。
 2. `ops-companion` 與 `paulsha-memory` 已列為明確 rename 目標，且最終落點均為 `custom-skills` 新子專案。
-3. Stage 0 的 rename/refine 尚未開 PR，現階段屬「盤點完成、改名未執行」。
+3. Stage 0 的 rename/refine 尚未開 PR，現階段先以 tracking 欄位標示各項前置條件，待證據齊備後再送 PR。
 
 ---
 

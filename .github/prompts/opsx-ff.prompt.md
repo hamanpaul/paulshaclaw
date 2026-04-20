@@ -17,6 +17,7 @@ description: Fleet-friendly 平行切分檢查與分支啟動
    - 已宣告寫入邊界
    - 已宣告跨 stage 依賴
    - 已宣告測試 gate 與證據路徑
+   - `config/worktrees/stage-worktrees.tsv` 與 `origin/<branch>` remote 追蹤一致
 3. 驗證後輸出 fleet 切分清單：
    - 可平行任務
    - 不可平行任務（需串行）

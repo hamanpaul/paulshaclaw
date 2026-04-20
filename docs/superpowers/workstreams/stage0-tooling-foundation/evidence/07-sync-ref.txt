@@ -1,0 +1,42 @@
+[clone] custom-claw-tools
+Cloning into '/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage0-tooling-foundation/ref/custom-claw-tools'...
+From https://github.com/hamanpaul/custom-claw-tools
+ * branch            8bd0f156606eb078f8979a7a40441ee0e9d96e34 -> FETCH_HEAD
+HEAD is now at 8bd0f15 Merge pull request #2 from hamanpaul/copilot/obs-auto-moc-reactivation-trigger
+[clone] custom-skills
+Cloning into '/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage0-tooling-foundation/ref/custom-skills'...
+From https://github.com/hamanpaul/custom-skills
+ * branch            056104aef3ac9b66c3dfe59495de37ada3909d14 -> FETCH_HEAD
+HEAD is now at 056104a feat(project-usage-assess): add skill for per-project premium/token report
+[clone] max
+Cloning into '/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage0-tooling-foundation/ref/max'...
+From https://github.com/hamanpaul/max
+ * branch            9c2204cd0d531c303763f1735c6956117353cc0c -> FETCH_HEAD
+HEAD is now at 9c2204c feat(config): 支援推理強度設定並更新 SDK 依賴
+[clone] serialwrap
+Cloning into '/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage0-tooling-foundation/ref/serialwrap'...
+From https://github.com/hamanpaul/serialwrap
+ * branch            dc57a547ce5357c9d60cd7923e2b515770e98525 -> FETCH_HEAD
+HEAD is now at dc57a54 Merge pull request #36 from hamanpaul/feat/remote-support
+[clone] testpilot
+Cloning into '/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage0-tooling-foundation/ref/testpilot'...
+From https://github.com/hamanpaul/testpilot
+ * branch            7963cff9037effb736ae2ef16660e6ae9867cc63 -> FETCH_HEAD
+HEAD is now at 7963cff Merge pull request #26 from hamanpaul/release/v0.2.0
+generated: /home/paul_chen/prj_pri/paulshaclaw-worktrees/stage0-tooling-foundation/ref/MANIFEST.md
+
+--- ref/MANIFEST.md (head) ---
+# ref/MANIFEST
+
+- generated_at: 2026-04-20 19:04:29 +0800
+- source: `openspec/specs/stage0/ref-manifest.yaml`
+- policy: `ref/` 僅供閱讀/比對，不作 runtime 載入
+- sync-back gate: `回寫 custom-skills 前，必須先通過對應 stage 測試並保留證據`
+
+| Name | Repo | Path | Pin | Status |
+|---|---|---|---|---|
+| `custom-claw-tools` | `hamanpaul/custom-claw-tools` | `ref/custom-claw-tools` | `8bd0f156606eb078f8979a7a40441ee0e9d96e34` | `cloned` |
+| `custom-skills` | `hamanpaul/custom-skills` | `ref/custom-skills` | `056104aef3ac9b66c3dfe59495de37ada3909d14` | `cloned` |
+| `max` | `hamanpaul/max` | `ref/max` | `9c2204cd0d531c303763f1735c6956117353cc0c` | `cloned` |
+| `serialwrap` | `hamanpaul/serialwrap` | `ref/serialwrap` | `dc57a547ce5357c9d60cd7923e2b515770e98525` | `cloned` |
+| `testpilot` | `hamanpaul/testpilot` | `ref/testpilot` | `7963cff9037effb736ae2ef16660e6ae9867cc63` | `cloned` |
