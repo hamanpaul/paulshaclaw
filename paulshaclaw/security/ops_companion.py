@@ -259,7 +259,7 @@ DEFAULT_APPROVAL_RULES = (
     ),
     ApprovalRule(
         rule_id="package-install",
-        pattern=re.compile(r"\b(?:pip|pip3|npm|pnpm|yarn|apt|apt-get|brew|go)\s+(?:install|get)\b"),
+        pattern=re.compile(r"\b(?:pip|pip3|npm|pnpm|yarn|apt|apt-get|brew|go)\s+(?:install|get|add)\b"),
         risk_level="high",
         reason="package install requires explicit approval before execution",
         required_action="explicit-approval",

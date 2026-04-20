@@ -1,0 +1,31 @@
+FFF
+======================================================================
+FAIL: test_package_install_and_remote_ops_share_high_risk_gate (tests.test_ops_companion_security.ApprovalGateTests.test_package_install_and_remote_ops_share_high_risk_gate) (command='npm add express')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage6-ops-companion-security/tests/test_ops_companion_security.py", line 52, in test_package_install_and_remote_ops_share_high_risk_gate
+    self.assertFalse(decision.allowed)
+AssertionError: True is not false
+
+======================================================================
+FAIL: test_package_install_and_remote_ops_share_high_risk_gate (tests.test_ops_companion_security.ApprovalGateTests.test_package_install_and_remote_ops_share_high_risk_gate) (command='pnpm add express')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage6-ops-companion-security/tests/test_ops_companion_security.py", line 52, in test_package_install_and_remote_ops_share_high_risk_gate
+    self.assertFalse(decision.allowed)
+AssertionError: True is not false
+
+======================================================================
+FAIL: test_package_install_and_remote_ops_share_high_risk_gate (tests.test_ops_companion_security.ApprovalGateTests.test_package_install_and_remote_ops_share_high_risk_gate) (command='yarn add express')
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage6-ops-companion-security/tests/test_ops_companion_security.py", line 52, in test_package_install_and_remote_ops_share_high_risk_gate
+    self.assertFalse(decision.allowed)
+AssertionError: True is not false
+
+----------------------------------------------------------------------
+Ran 1 test in 0.009s
+
+FAILED (failures=3)
+
+[exit_code]=1

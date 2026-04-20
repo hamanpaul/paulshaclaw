@@ -39,6 +39,9 @@ class ApprovalGateTests(unittest.TestCase):
 
         expectations = {
             "pip install safety": "package-install",
+            "npm add express": "package-install",
+            "pnpm add express": "package-install",
+            "yarn add express": "package-install",
             "ssh root@example.org reboot": "remote-operation",
             "deploy production": "deploy-command",
         }

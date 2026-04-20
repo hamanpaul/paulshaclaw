@@ -41,6 +41,7 @@ git --no-pager diff --check
 
 - `superpowers:code-reviewer` 第二輪複審結果：**無 Critical / Important issue，ready**
 - 本輪已依 review 補上 `record_approval_decision(...)` 與 deny/approve 整合測試
+- 備援 reviewer 指出的 `npm add` / `pnpm add` / `yarn add` 漏網已補上並以 `08-red-package-add.txt` / `09-green-package-add.txt` 驗證
 
 ## 未解風險
 

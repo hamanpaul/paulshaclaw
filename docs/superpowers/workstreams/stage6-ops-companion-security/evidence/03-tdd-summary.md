@@ -35,6 +35,17 @@ python3 -m unittest tests.test_ops_companion_security
 - `07-green-audit-integration.txt`：補上 `record_approval_decision(...)` 後，兩個 integration 測試通過
 - `04-unittest-discover.txt`：最終全套 8 個測試通過
 
+## Package-install coverage cycle
+
+### Red
+
+- `08-red-package-add.txt`：`npm add` / `pnpm add` / `yarn add` 尚未被判為高風險套件安裝
+
+### Green
+
+- `09-green-package-add.txt`：補上 `add` 子命令後，package-install 測試通過
+- `04-unittest-discover.txt`：最終全套 8 個測試仍維持綠燈
+
 ## Refactor
 
 - 公開介面統一由 `paulshaclaw/security/__init__.py` 匯出
