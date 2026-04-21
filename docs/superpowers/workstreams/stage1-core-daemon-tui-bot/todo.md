@@ -2,9 +2,9 @@
 
 ## Current Sprint
 
-- [ ] 建立 `core`/`tui`/`bot` 模組邊界清單
-- [ ] 實作最小啟動流程與設定檔
-- [ ] 補 stage1 smoke test case 列表
+- [x] 建立 `core`/`tui`/`bot` 模組邊界清單
+- [x] 實作最小啟動流程與設定檔
+- [x] 補 stage1 smoke test case 列表
 
 ## Blockers
 
@@ -12,9 +12,9 @@
 
 ## Evidence / Links
 
-- [ ] stage1 smoke test 執行記錄
-- [ ] daemon 啟動 log 範例
+- [x] stage1 smoke test 執行記錄
+- [x] daemon 啟動 log 範例
 
 ## Handoff Notes
 
-- [ ] Stage 3 分支只 consume daemon dispatch，不直接改 Stage1 啟動流程
+- [x] Stage 3 分支只 consume daemon dispatch，不直接改 Stage1 啟動流程

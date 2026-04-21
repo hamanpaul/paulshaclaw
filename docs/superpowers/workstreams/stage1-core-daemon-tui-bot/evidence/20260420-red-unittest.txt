@@ -1,0 +1,105 @@
+test_stage1_smoke (unittest.loader._FailedTest.test_stage1_smoke) ... ERROR
+
+======================================================================
+ERROR: test_stage1_smoke (unittest.loader._FailedTest.test_stage1_smoke)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_stage1_smoke
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/tests/test_stage1_smoke.py", line 8, in <module>
+    from paulshaclaw.bot.telegram import TelegramCommandRouter
+ModuleNotFoundError: No module named 'paulshaclaw.bot'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)
+test_load_config_supports_env_fallback (tests.test_stage1_smoke.Stage1SmokeTest.test_load_config_supports_env_fallback) ... ERROR
+
+======================================================================
+ERROR: test_load_config_supports_env_fallback (tests.test_stage1_smoke.Stage1SmokeTest.test_load_config_supports_env_fallback)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/tests/test_stage1_smoke.py", line 88, in test_load_config_supports_env_fallback
+    config = load_config()
+             ^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/config.py", line 70, in load_config
+    with path.open("r", encoding="utf-8") as handle:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/pathlib.py", line 1015, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+IsADirectoryError: [Errno 21] Is a directory: '.'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.002s
+
+FAILED (errors=1)
+test_cli_entry_supports_env_config (tests.test_stage1_smoke.Stage1SmokeTest.test_cli_entry_supports_env_config) ... FAIL
+
+======================================================================
+FAIL: test_cli_entry_supports_env_config (tests.test_stage1_smoke.Stage1SmokeTest.test_cli_entry_supports_env_config)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/tests/test_stage1_smoke.py", line 176, in test_cli_entry_supports_env_config
+    self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+AssertionError: 2 != 0 : usage: daemon.py [-h] --config CONFIG --command COMMAND
+daemon.py: error: the following arguments are required: --config
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.033s
+
+FAILED (failures=1)
+test_telegram_router_surfaces_invalid_command (tests.test_stage1_smoke.Stage1SmokeTest.test_telegram_router_surfaces_invalid_command) ... ERROR
+
+======================================================================
+ERROR: test_telegram_router_surfaces_invalid_command (tests.test_stage1_smoke.Stage1SmokeTest.test_telegram_router_surfaces_invalid_command)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/tests/test_stage1_smoke.py", line 144, in test_telegram_router_surfaces_invalid_command
+    result = router.handle_message(user_id=1001, text="/unknown")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/bot/telegram.py", line 27, in handle_message
+    result = self.daemon.handle_command(text)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/daemon.py", line 70, in handle_command
+    raise ValueError(f"不支援的指令: {command}")
+ValueError: 不支援的指令: /unknown
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (errors=1)
+test_load_config_rejects_missing_required_fields (tests.test_stage1_smoke.Stage1SmokeTest.test_load_config_rejects_missing_required_fields) ... ERROR
+test_cli_entry_returns_clean_error_for_invalid_command (tests.test_stage1_smoke.Stage1SmokeTest.test_cli_entry_returns_clean_error_for_invalid_command) ... FAIL
+
+======================================================================
+ERROR: test_load_config_rejects_missing_required_fields (tests.test_stage1_smoke.Stage1SmokeTest.test_load_config_rejects_missing_required_fields)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/tests/test_stage1_smoke.py", line 125, in test_load_config_rejects_missing_required_fields
+    load_config(config_path=config_path)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/config.py", line 77, in load_config
+    return AppConfig.from_dict(payload)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/config.py", line 43, in from_dict
+    daemon_name=str(payload["daemon_name"]),
+                    ~~~~~~~^^^^^^^^^^^^^^^
+KeyError: 'daemon_name'
+
+======================================================================
+FAIL: test_cli_entry_returns_clean_error_for_invalid_command (tests.test_stage1_smoke.Stage1SmokeTest.test_cli_entry_returns_clean_error_for_invalid_command)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/tests/test_stage1_smoke.py", line 241, in test_cli_entry_returns_clean_error_for_invalid_command
+    self.assertNotIn("Traceback", completed.stderr)
+AssertionError: 'Traceback' unexpectedly found in 'Traceback (most recent call last):\n  File "<frozen runpy>", line 198, in _run_module_as_main\n  File "<frozen runpy>", line 88, in _run_code\n  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/daemon.py", line 86, in <module>\n    raise SystemExit(main())\n                     ^^^^^^\n  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/daemon.py", line 80, in main\n    result = daemon.handle_command(args.command)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage1-core-daemon-tui-bot/paulshaclaw/core/daemon.py", line 70, in handle_command\n    raise ValueError(f"不支援的指令: {command}")\nValueError: 不支援的指令: /unknown\n'
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.076s
+
+FAILED (failures=1, errors=1)
