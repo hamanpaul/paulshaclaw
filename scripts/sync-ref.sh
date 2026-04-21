@@ -72,7 +72,7 @@ manifest_md="$REF_ROOT/MANIFEST.md"
   echo "- generated_at: $(date '+%Y-%m-%d %H:%M:%S %z')"
   echo "- source: \`$MANIFEST_PATH\`"
   echo "- policy: \`ref/\` 僅供閱讀/比對，不作 runtime 載入"
-  echo "- sync-back gate: \`ops-companion 回寫 custom-skills/ops-companion 前，必須先通過 Stage 6 測試並保留證據\`"
+  echo "- sync-back gate: \`回寫 custom-skills 前，必須先通過對應 stage 測試並保留證據\`"
   echo
   echo "| Name | Repo | Path | Pin | Status |"
   echo "|---|---|---|---|---|"
