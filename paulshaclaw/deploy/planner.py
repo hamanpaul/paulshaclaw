@@ -76,7 +76,7 @@ _TEMPLATE_CATALOG: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "core",
-        "core/env/__INSTANCE__.env.tmpl",
+        "core/runtime/__INSTANCE__.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
     ),
     (
