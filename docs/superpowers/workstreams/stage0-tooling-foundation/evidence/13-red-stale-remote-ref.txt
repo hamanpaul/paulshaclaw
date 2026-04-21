@@ -1,0 +1,31 @@
+PASS: tool-matrix refine PR 欄位不得保留 TBD
+PASS: opsx:new prompt 必須要求寫入邊界
+PASS: opsx:new prompt 必須要求證據路徑
+PASS: claude opsx:new 文件必須要求寫入邊界
+PASS: claude opsx:new 文件必須要求證據路徑
+PASS: opsx:ff prompt 必須宣告證據路徑
+PASS: claude opsx:ff 文件必須宣告證據路徑
+PASS: opsx:new prompt 與 claude command 內容必須同步
+PASS: opsx:ff prompt 與 claude command 內容必須同步
+PASS: Stage 0 規範需納入 /opsx:new
+PASS: Stage 0 規範需納入 /opsx:ff
+PASS: Stage 0 規範需要求證據路徑
+PASS: workstream plan Relevant files 必須納入 opsx:new prompt
+PASS: workstream plan Relevant files 必須納入 opsx:ff prompt
+PASS: workstream plan Relevant files 必須納入 claude opsx:new 文件
+PASS: workstream plan Relevant files 必須納入 claude opsx:ff 文件
+PASS: remote branch exists: wt/stage0-tooling-foundation
+PASS: remote branch exists: wt/stage1-core-daemon-tui-bot
+PASS: remote branch exists: wt/stage2-paulsha-memory
+PASS: remote branch exists: wt/stage3-lifecycle-mvp
+PASS: remote branch exists: wt/stage4-persona-contract
+PASS: remote branch exists: wt/stage5-observability-recovery
+PASS: remote branch exists: wt/stage6-ops-companion-security
+PASS: remote branch exists: wt/stage7-deploy-three-plane
+PASS: using-git-worktrees tracks remote branch when local remote ref is absent
+PASS: remote branch content is present after refreshing missing remote ref
+FAIL: using-git-worktrees 應在 remote ref 已 stale 時抓到最新 origin/wt/stale-demo
+PASS: using-git-worktrees 保留既有 local branch 流程
+PASS: using-git-worktrees 保留從 BASE_REF 建新 branch 流程
+
+Stage 0 tooling foundation checks failed: 1

@@ -26,6 +26,10 @@
 
 - `openspec/specs/stage0/ref-manifest.yaml`
 - `openspec/specs/stage0/tool-matrix.md`
+- `.github/prompts/opsx-new.prompt.md`
+- `.github/prompts/opsx-ff.prompt.md`
+- `.claude/commands/opsx/new.md`
+- `.claude/commands/opsx/ff.md`
 - `scripts/sync-ref.sh`
 - `scripts/using-git-worktrees.sh`
 - `config/worktrees/stage-worktrees.tsv`
