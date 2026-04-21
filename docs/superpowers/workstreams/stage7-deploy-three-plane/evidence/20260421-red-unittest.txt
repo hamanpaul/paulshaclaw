@@ -1,0 +1,19 @@
+test_stage7_deploy_three_plane (unittest.loader._FailedTest.test_stage7_deploy_three_plane) ... ERROR
+
+======================================================================
+ERROR: test_stage7_deploy_three_plane (unittest.loader._FailedTest.test_stage7_deploy_three_plane)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_stage7_deploy_three_plane
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage7-deploy-three-plane/tests/test_stage7_deploy_three_plane.py", line 9, in <module>
+    from paulshaclaw.deploy import (
+ModuleNotFoundError: No module named 'paulshaclaw.deploy'
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)

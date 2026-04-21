@@ -1,0 +1,14 @@
+test_install_upgrade_uninstall_plans_have_expected_restore_policy (tests.test_stage7_deploy_three_plane.CommandPlanTests.test_install_upgrade_uninstall_plans_have_expected_restore_policy) ... ok
+test_cli_subcommands_emit_json_plan (tests.test_stage7_deploy_three_plane.DeployCliTests.test_cli_subcommands_emit_json_plan) ... ok
+test_safe_modes_are_accepted (tests.test_stage7_deploy_three_plane.PermissionPolicyTests.test_safe_modes_are_accepted) ... ok
+test_secret_plane_rejects_group_readable_mode (tests.test_stage7_deploy_three_plane.PermissionPolicyTests.test_secret_plane_rejects_group_readable_mode) ... ok
+test_state_plane_rejects_world_writable_mode (tests.test_stage7_deploy_three_plane.PermissionPolicyTests.test_state_plane_rejects_world_writable_mode) ... ok
+test_secret_install_flow_requires_permission_ack (tests.test_stage7_deploy_three_plane.SecretInstallFlowTests.test_secret_install_flow_requires_permission_ack) ... ok
+test_secret_install_flow_returns_checkpointed_summary (tests.test_stage7_deploy_three_plane.SecretInstallFlowTests.test_secret_install_flow_returns_checkpointed_summary) ... ok
+test_rename_rule_strips_tmpl_and_replaces_instance_token (tests.test_stage7_deploy_three_plane.TemplateMappingTests.test_rename_rule_strips_tmpl_and_replaces_instance_token) ... ok
+test_template_assets_cover_three_planes (tests.test_stage7_deploy_three_plane.TemplateMappingTests.test_template_assets_cover_three_planes) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 0.115s
+
+OK
