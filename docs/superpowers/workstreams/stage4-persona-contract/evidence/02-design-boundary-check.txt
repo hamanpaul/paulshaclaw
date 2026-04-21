@@ -1,0 +1,13 @@
+5:同時，`todo.md` 明確指出 blocker：Stage3 必須提供穩定 phase 名稱與 gate 輸出格式。故本設計將 Stage4 對 Stage3 的依賴限定為 consume-only：只讀既有 canonical contract，不反向修改 Stage3 lifecycle/runtime。
+12:- 定義三角色最小 contract（manager/builder/reviewer）與 `allowed_phases` 對應。
+15:- 明確 Stage4 consume Stage3 phase/gate 的依賴邊界。
+19:- 不修改 Stage3 canonical spec 與 Stage3 runtime 行為。
+37:### Decision 3：`allowed_phases` 僅 consume Stage3 正規 phase vocabulary
+39:- **選擇**：Stage4 角色 phase 限制只引用 Stage3 既有 `/research → /ship` 集合與 gate 結果，不擴充或改名 phase。
+40:- **替代方案**：Stage4 自行新增 phase alias 或覆寫 gate 狀態語義。
+41:- **理由**：避免跨 stage 反向耦合，符合「Stage4 consume Stage3」邊界。
+45:- **選擇**：handoff 至少包含 `from_role`、`to_role`、`slice_id`、`phase`、`gate_status`、`artifact_refs`、`summary`、`created_at`。
+53:- **理由**：Stage4 是 contract/gate 層，若不 fail-closed，驗收條款無法成立。
+57:- [風險] Stage3 canonical phase 名稱或 gate report 欄位若後續調整，Stage4 條款可能漂移。  
+58:  [緩解] 在 tasks 納入 cross-check 命令，固定比對 Stage3 spec 的 phase/gate 關鍵字。
+70:- 若 Stage3 契約變更，先提 Stage3 change 更新 canonical spec，再由 Stage4 follow-up consume 新版本；Stage4 不直接反向修改 Stage3。

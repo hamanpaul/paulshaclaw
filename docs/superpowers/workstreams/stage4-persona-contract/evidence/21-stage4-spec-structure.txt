@@ -1,0 +1,12 @@
+9:### Requirement: Persona contract 三角色基線
+13:#### Scenario: 三角色 contract 可通過 schema 驗證
+18:### Requirement: allowed_phases 對齊 Stage3 正規 phase
+22:#### Scenario: allowed_phases 是 Stage3 phase 子集合
+27:### Requirement: Handoff schema 與 Stage3 gate 輸出相容
+31:#### Scenario: handoff message 缺欄或非法 phase/gate 會被拒絕
+36:### Requirement: Guardrail 必須拒絕越界工具與路徑
+40:#### Scenario: 工具或路徑越界會被阻擋並可審計
+45:### Requirement: Stage4 只 consume Stage3，不反向修改 Stage3
+49:#### Scenario: Stage4 規格不宣告反向修改 Stage3
+54:### Requirement: Stage4 提供 shadow-run 驗證與證據歸檔
+58:#### Scenario: shadow-run 驗證結果可追溯
