@@ -1,0 +1,33 @@
+test_git_push_requires_explicit_approval (test_ops_companion_security.ApprovalGateTests.test_git_push_requires_explicit_approval) ... ok
+test_package_install_and_remote_ops_share_high_risk_gate (test_ops_companion_security.ApprovalGateTests.test_package_install_and_remote_ops_share_high_risk_gate) ... ok
+test_ship_command_uses_interactive_approval_flow (test_ops_companion_security.ApprovalGateTests.test_ship_command_uses_interactive_approval_flow) ... ok
+test_append_only_audit_trail_links_actor_and_previous_hash (test_ops_companion_security.AuditTrailTests.test_append_only_audit_trail_links_actor_and_previous_hash) ... ok
+test_approved_high_risk_gate_decision_is_recorded_in_audit_trail (test_ops_companion_security.AuditTrailTests.test_approved_high_risk_gate_decision_is_recorded_in_audit_trail) ... ok
+test_audit_verification_detects_tampering (test_ops_companion_security.AuditTrailTests.test_audit_verification_detects_tampering) ... ok
+test_high_risk_gate_decision_is_recorded_in_audit_trail (test_ops_companion_security.AuditTrailTests.test_high_risk_gate_decision_is_recorded_in_audit_trail) ... ok
+test_redaction_masks_known_secret_shapes_and_tracks_classification (test_ops_companion_security.RedactionRuleTests.test_redaction_masks_known_secret_shapes_and_tracks_classification) ... ok
+test_cli_entry_outputs_json_status (test_stage1_smoke.Stage1SmokeTest.test_cli_entry_outputs_json_status) ... ok
+test_cli_entry_returns_clean_error_for_invalid_command (test_stage1_smoke.Stage1SmokeTest.test_cli_entry_returns_clean_error_for_invalid_command) ... ok
+test_cli_entry_supports_env_config (test_stage1_smoke.Stage1SmokeTest.test_cli_entry_supports_env_config) ... ok
+test_daemon_loads_config_and_returns_status (test_stage1_smoke.Stage1SmokeTest.test_daemon_loads_config_and_returns_status) ... ok
+test_dispatch_command_calls_coordinator (test_stage1_smoke.Stage1SmokeTest.test_dispatch_command_calls_coordinator) ... ok
+test_load_config_rejects_missing_required_fields (test_stage1_smoke.Stage1SmokeTest.test_load_config_rejects_missing_required_fields) ... ok
+test_load_config_supports_env_fallback (test_stage1_smoke.Stage1SmokeTest.test_load_config_supports_env_fallback) ... ok
+test_sample_config_file_loads (test_stage1_smoke.Stage1SmokeTest.test_sample_config_file_loads) ... ok
+test_telegram_router_dispatches_authorized_command (test_stage1_smoke.Stage1SmokeTest.test_telegram_router_dispatches_authorized_command) ... ok
+test_telegram_router_rejects_unauthorized_user (test_stage1_smoke.Stage1SmokeTest.test_telegram_router_rejects_unauthorized_user) ... ok
+test_telegram_router_surfaces_invalid_command (test_stage1_smoke.Stage1SmokeTest.test_telegram_router_surfaces_invalid_command) ... ok
+test_tui_view_lists_panes_and_tasks (test_stage1_smoke.Stage1SmokeTest.test_tui_view_lists_panes_and_tasks) ... ok
+test_event_stream_rebuilds_current_phase_state (test_stage3_lifecycle_mvp.EventReplayTests.test_event_stream_rebuilds_current_phase_state) ... ok
+test_gate_failed_event_blocks_phase (test_stage3_lifecycle_mvp.EventReplayTests.test_gate_failed_event_blocks_phase) ... ok
+test_checksum_is_validated (test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_checksum_is_validated) ... ok
+test_frontmatter_missing_required_field_is_rejected (test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_frontmatter_missing_required_field_is_rejected) ... ok
+test_phase_enum_is_validated (test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_phase_enum_is_validated) ... ok
+test_static_gate_cli_accepts_valid_artifact (test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_static_gate_cli_accepts_valid_artifact) ... ok
+test_golden_slice_full_flow (test_stage3_lifecycle_mvp.GoldenSliceTests.test_golden_slice_full_flow) ... ok
+test_lifecycle_template_has_expected_shape (test_stage3_lifecycle_mvp.LifecycleTemplateTests.test_lifecycle_template_has_expected_shape) ... ok
+
+----------------------------------------------------------------------
+Ran 28 tests in 0.161s
+
+OK
