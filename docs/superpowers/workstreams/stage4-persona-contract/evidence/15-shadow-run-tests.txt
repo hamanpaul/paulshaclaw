@@ -1,0 +1,7 @@
+test_shadow_run_summary_contains_gate_and_guardrail_decisions (tests.test_stage4_persona_contract.ShadowRunTests.test_shadow_run_summary_contains_gate_and_guardrail_decisions) ... ok
+test_user_overlay_load_and_context_build (tests.test_stage4_persona_contract.ShadowRunTests.test_user_overlay_load_and_context_build) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK

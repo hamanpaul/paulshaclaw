@@ -1,0 +1,6 @@
+test_allowed_phases_subset_of_stage3_vocabulary (tests.test_stage4_persona_contract.AllowedPhasesTests.test_allowed_phases_subset_of_stage3_vocabulary) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK

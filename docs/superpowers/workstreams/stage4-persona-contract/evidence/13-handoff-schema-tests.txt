@@ -1,0 +1,7 @@
+test_gate_status_is_required_and_validated (tests.test_stage4_persona_contract.HandoffSchemaTests.test_gate_status_is_required_and_validated) ... ok
+test_stage3_phase_gate_compatibility (tests.test_stage4_persona_contract.HandoffSchemaTests.test_stage3_phase_gate_compatibility) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.000s
+
+OK

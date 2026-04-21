@@ -1,0 +1,21 @@
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:17:### Requirement: Stage4 allowed_phases 僅 consume Stage3 正規 phase
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:19:Stage4 persona 的 `allowed_phases` MUST 僅使用 Stage3 canonical phase vocabulary（`research`、`define`、`plan`、`build`、`verify`、`review`、`ship`）。Stage4 MUST NOT 新增 phase alias、改名 phase 或覆寫 Stage3 gate 狀態語義。
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:21:#### Scenario: allowed_phases 為 Stage3 phase 子集合
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:24:- **THEN** 測試 MUST 驗證任一角色 `allowed_phases` 都是 Stage3 正規 phase 的子集合
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:26:#### Scenario: Stage4 不反向定義 Stage3 phase
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:29:- **THEN** 審查結果 MUST 不出現宣告 Stage4 覆寫 Stage3 phase/gate 語義的條款
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:33:Stage4 SHALL 定義 handoff message 最小 schema，MUST 至少包含 `from_role`、`to_role`、`slice_id`、`phase`、`gate_status`、`artifact_refs`、`summary`、`created_at`。handoff message 的 `phase` 與 `gate_status` MUST 可直接對應 Stage3 輸出。
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:40:#### Scenario: handoff phase/gate 與 Stage3 輸出相容
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:43:- **THEN** 測試 MUST 驗證 handoff message 可直接使用 Stage3 的 phase 名稱與 gate 狀態值
+openspec/changes/stage4-persona-contract/specs/stage4/spec.md:64:Stage4 SHALL 定義 shadow-run 驗證流程，用於不改動 Stage3 lifecycle/runtime 前提下，驗證 persona contract、handoff 與 guardrail 的行為一致性。shadow-run 產出 MUST 可歸檔到 Stage4 workstream evidence 目錄。
+openspec/specs/stage4/spec.md:5:Stage 4 SHALL 定義 persona contract / handoff / guardrail 的最小可驗收契約，並在 consume Stage3 phase/gate 輸出的前提下，提供可追溯的 shadow-run 驗證路徑。
+openspec/specs/stage4/spec.md:18:### Requirement: allowed_phases 對齊 Stage3 正規 phase
+openspec/specs/stage4/spec.md:20:Stage4 的 `allowed_phases` MUST 僅使用 Stage3 canonical phase vocabulary（`research`、`define`、`plan`、`build`、`verify`、`review`、`ship`），且 Stage4 MUST NOT 重新定義 phase 名稱或 gate 狀態語義。
+openspec/specs/stage4/spec.md:22:#### Scenario: allowed_phases 是 Stage3 phase 子集合
+openspec/specs/stage4/spec.md:25:- **THEN** 測試 MUST 驗證各角色 phase 設定未超出 Stage3 正規集合
+openspec/specs/stage4/spec.md:27:### Requirement: Handoff schema 與 Stage3 gate 輸出相容
+openspec/specs/stage4/spec.md:29:Stage4 handoff message schema MUST 至少包含 `from_role`、`to_role`、`slice_id`、`phase`、`gate_status`、`artifact_refs`、`summary`、`created_at`。其中 `phase` 與 `gate_status` MUST 可直接由 Stage3 lifecycle/gate 輸出消費。
+openspec/specs/stage4/spec.md:45:### Requirement: Stage4 只 consume Stage3，不反向修改 Stage3
+openspec/specs/stage4/spec.md:47:Stage4 MUST 只消費 Stage3 既有 phase/gate 契約，不得在 Stage4 規格宣告 Stage3 lifecycle runtime 行為變更。任何 Stage3 phase 或 gate output 變更 MUST 先由 Stage3 change 更新 canonical spec，再由 Stage4 follow-up consume。
+openspec/specs/stage4/spec.md:49:#### Scenario: Stage4 規格不宣告反向修改 Stage3
+openspec/specs/stage4/spec.md:52:- **THEN** Stage4 條款 MUST 只描述消費關係與相容性，不包含對 Stage3 runtime 的反向要求

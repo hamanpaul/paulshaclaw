@@ -2,19 +2,19 @@
 
 ## Current Sprint
 
-- [ ] 建立三角色 contract 初版（manager/builder/reviewer）
-- [ ] 補 user overlay 載入點
-- [ ] 補 shadow-run 驗證流程
+- [x] 建立三角色 contract 初版（manager/builder/reviewer）
+- [x] 補 user overlay 載入點
+- [x] 補 shadow-run 驗證流程
 
 ## Blockers
 
-- [ ] 需 Stage 3 提供穩定 phase 名稱與 gate 輸出格式
+- [x] Stage 3 phase 名稱與 gate 輸出格式已穩定（以 `openspec/specs/stage3/spec.md` 為 consume 來源）
 
 ## Evidence / Links
 
-- [ ] persona 驗證測試記錄
-- [ ] guardrail 拒絕案例截圖/輸出
+- [x] persona 驗證測試記錄（`evidence/11-persona-schema-tests.txt`、`evidence/12-allowed-phases-tests.txt`、`evidence/13-handoff-schema-tests.txt`）
+- [x] guardrail 拒絕案例輸出（`evidence/14-guardrail-tests.txt`、`evidence/15-shadow-run-tests.txt`）
 
 ## Handoff Notes
 
-- [ ] Stage 5 觀測需讀取 persona 事件，不改 persona contract
+- [x] Stage 5 觀測需讀取 persona 事件，不改 persona contract
