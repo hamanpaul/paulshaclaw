@@ -10,7 +10,7 @@
 2. 保留 `decayed/reactivation` 規則與測試證據。
 3. 證據落地於 `docs/superpowers/workstreams/stage2-paulsha-memory/evidence/`。
 4. `review.md` 無阻斷性結論，且 archive 已更新。
-5. 不在 Stage 2 自行擴充 Stage 3 frontmatter schema。
+5. 不在 Stage 2 自行擴充 Stage 3 frontmatter schema（必填欄位 `slice_id / artifact_kind / supersedes / checksum` 由 Stage 3 擁有）。
 
 ## 邊界
 

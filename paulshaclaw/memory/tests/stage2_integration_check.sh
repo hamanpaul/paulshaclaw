@@ -41,6 +41,14 @@ require_text \
   "Stage 3 frontmatter schema"
 
 require_text \
+  "validate Stage 3 frontmatter field names named explicitly" \
+  "$ROOT_DIR/openspec/specs/stage2/scope.md" \
+  "slice_id" \
+  "artifact_kind" \
+  "supersedes" \
+  "checksum"
+
+require_text \
   "validate evidence template" \
   "$ROOT_DIR/docs/superpowers/workstreams/stage2-paulsha-memory/evidence/stage2-integration-template.md" \
   "測試命令" \
