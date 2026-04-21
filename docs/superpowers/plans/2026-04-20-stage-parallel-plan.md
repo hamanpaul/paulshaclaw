@@ -43,7 +43,56 @@
 - `/opsx:new <workstream>`：建立單一功能的 plan/task/todo 骨架與分支對照。
 - `/opsx:ff <workstream>`：做 fleet-friendly 切分檢查（寫入邊界、依賴、測試 gate），再進入實作。
 
-## 6. Worktree 與分支配置
+## 6. 串聯收斂（Serial Convergence）
+
+> 本節反映截至 2026-04-20 各 worktree 的實際進度，記錄 Stage 3 共享合約凍結後的收斂策略。
+
+### 6.1 現況快照
+
+| Worktree | Branch | 進度摘要 |
+|---|---|---|
+| `stage1-core-daemon-tui-bot` | `wt/stage1-core-daemon-tui-bot` | daemon `/status`、`/dispatch`、config seam、coordinator seam 已實作，smoke test 通過 |
+| `stage2-paulsha-memory` | `wt/stage2-paulsha-memory` | `inbox → work-centric → knowledge` 路由、importer/classifier/replay、janitor 邊界、decayed/reactivation 事件已有 spec 和 routing 文件 |
+| `stage6-ops-companion-security` | `wt/stage6-ops-companion-security` | approval gate（阻擋 `/ship`）、append-only audit entry（含 `previous_hash/entry_hash`）、Stage 7 消費介面已有 spec |
+| `stage3-lifecycle-mvp` | `wt/stage3-lifecycle-mvp` | 尚為 placeholder；依賴 Stage 1/2 merge 後才能啟動 runtime 實作 |
+| `stage4/5/7` | main placeholder | 依賴 Stage 3 合約；合約已凍結於 `openspec/specs/stage3/README.md` |
+
+### 6.2 收斂順序
+
+```
+Stage 0 (已鋪設骨架，main)
+    │
+    ├─► Stage 1 merge → main   ← 解除 Stage 3/5/6/7 阻塞
+    │
+    ├─► Stage 2 merge → main   ← 解除 Stage 3 importer 通知阻塞
+    │
+    ├─► Stage 6 merge → main   ← 可獨立 merge（硬依賴 Stage 0/1）；
+    │                            audit trail runtime 整合仍需等 Stage 3 events.jsonl 落地
+    │
+    └─► Stage 3 worktree 啟動 runtime 實作
+              │
+              └─► Stage 4 persona loader 啟動（依賴 Stage 3 events.jsonl）
+                       │
+                       └─► Stage 5 觀測/failover 啟動（依賴 gate report + events）
+                                │
+                                └─► Stage 7 deploy 啟動（lifecycle template 路徑已定）
+```
+
+### 6.3 Stage 3 共享合約凍結聲明
+
+**`openspec/specs/stage3/README.md`** 已於本 PR 凍結以下共享合約（詳見該文件）：
+
+- 七個正規 phase 名稱（`research/define/plan/build/verify/review/ship`）
+- Stage 1 daemon 最小介面：`/status` + `/dispatch` 的 JSON 回傳欄位、config seam、coordinator seam
+- Stage 2 memory 最小介面：`inbox → work-centric → knowledge` 路由、importer/classifier/replay/janitor 邊界、decayed/reactivation 事件種類
+- Artifact frontmatter 必填欄位（含 `slice_id / artifact_kind / supersedes / checksum`）
+- `lifecycle.yaml` 最小 shape（含 `current_slice / current_phase / gates`）
+- Gate report shape 及十種核心事件種類
+- Stage 6 audit 所需 `meta` 欄位
+
+後續 Stage 3/4/5/6/7 worktree 的 runtime 實作應以此合約為輸入，不得重新定義其中的介面。
+
+## 7. Worktree 與分支配置
 
 | Workstream | Branch | Worktree Path |
 |---|---|---|
