@@ -1,0 +1,10 @@
+test_checksum_is_validated (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_checksum_is_validated) ... ok
+test_frontmatter_missing_required_field_is_rejected (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_frontmatter_missing_required_field_is_rejected) ... ok
+test_phase_enum_is_validated (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_phase_enum_is_validated) ... ok
+test_static_gate_cli_accepts_valid_artifact (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_static_gate_cli_accepts_valid_artifact) ... ok
+test_lifecycle_template_has_expected_shape (tests.test_stage3_lifecycle_mvp.LifecycleTemplateTests.test_lifecycle_template_has_expected_shape) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.037s
+
+OK

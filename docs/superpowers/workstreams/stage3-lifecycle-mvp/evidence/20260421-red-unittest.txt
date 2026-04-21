@@ -1,0 +1,20 @@
+E
+======================================================================
+ERROR: test_stage3_lifecycle_mvp (unittest.loader._FailedTest.test_stage3_lifecycle_mvp)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_stage3_lifecycle_mvp
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/unittest/loader.py", line 137, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage3-lifecycle-mvp/tests/test_stage3_lifecycle_mvp.py", line 11, in <module>
+    from paulshaclaw.lifecycle import events, gate, schema, template
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage3-lifecycle-mvp/paulshaclaw/lifecycle/__init__.py", line 3, in <module>
+    from . import events, gate, schema, template
+ImportError: cannot import name 'events' from partially initialized module 'paulshaclaw.lifecycle' (most likely due to a circular import) (/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage3-lifecycle-mvp/paulshaclaw/lifecycle/__init__.py)
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)

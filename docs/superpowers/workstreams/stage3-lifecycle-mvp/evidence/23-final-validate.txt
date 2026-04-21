@@ -1,0 +1,1 @@
+Change 'stage3-lifecycle-mvp' is valid
