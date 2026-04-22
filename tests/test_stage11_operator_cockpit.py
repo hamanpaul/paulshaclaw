@@ -8,7 +8,9 @@ import unittest
 # unavailable and run when a dev venv provides textual.
 try:
     from textual.pilot import Pilot
-    HAS_TEXTUAL = True
+    from textual.app import App as _TextualApp
+    # Pilot is useful, but we need App.run_test to exist for our test harness
+    HAS_TEXTUAL = hasattr(_TextualApp, "run_test")
 except Exception:  # ModuleNotFoundError or other import-time issues
     Pilot = None  # type: ignore
     HAS_TEXTUAL = False
@@ -79,6 +81,7 @@ class FakeLayoutActionService(LayoutActionService):
         self.focused.append(pane_id)
 
 
+@unittest.skipUnless(HAS_TEXTUAL, "requires textual with run_test support")
 class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_enter_swaps_selected_candidate_and_focuses_new_active_pane(self) -> None:
         panes = (
