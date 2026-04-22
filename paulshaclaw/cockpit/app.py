@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
@@ -59,11 +61,19 @@ class CockpitApp(App[None]):
         Binding("c", "focus_cockpit", "Cockpit"),
     ]
 
-    def __init__(self, *, state: CockpitState, jobs_by_pane: dict[str, tuple[JobSummary, ...]], actions: LayoutActionService) -> None:
+    def __init__(
+        self,
+        *,
+        state: CockpitState,
+        jobs_by_pane: dict[str, tuple[JobSummary, ...]],
+        actions: LayoutActionService,
+        pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
+    ) -> None:
         super().__init__()
         self.state = state
         self.jobs_by_pane = jobs_by_pane
         self.actions = actions
+        self.pane_loader = pane_loader
 
     @classmethod
     def from_snapshot(
@@ -73,11 +83,13 @@ class CockpitApp(App[None]):
         cockpit_pane_id: str,
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
+        pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
     ) -> "CockpitApp":
         return cls(
             state=CockpitState.from_panes(panes, cockpit_pane_id=cockpit_pane_id),
             jobs_by_pane=jobs_by_pane,
             actions=actions,
+            pane_loader=pane_loader,
         )
 
     def compose(self) -> ComposeResult:
@@ -119,6 +131,7 @@ class CockpitApp(App[None]):
             active_pane_id=active_pane.pane_id,
         )
         self.actions.focus_pane(selected_pane.pane_id)
+        self._reconcile_state()
 
     def action_focus_cockpit(self) -> None:
         self.actions.return_to_cockpit(self.state.cockpit_pane_id)
@@ -145,6 +158,15 @@ class CockpitApp(App[None]):
             self.action_swap_selected()
         elif key == "c":
             self.action_focus_cockpit()
+
+    def _reconcile_state(self) -> None:
+        if self.pane_loader is None:
+            return
+        self.state = self.state.refresh(self.pane_loader(cockpit_pane_id=self.state.cockpit_pane_id))
+        try:
+            self._refresh_widgets()
+        except Exception:
+            pass
 
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane

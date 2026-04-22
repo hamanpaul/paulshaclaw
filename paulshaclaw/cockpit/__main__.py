@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
         cockpit_pane_id=args.cockpit_pane,
         jobs_by_pane=jobs_by_pane,
         actions=LayoutActionService(),
+        pane_loader=tmux_client.list_panes,
     )
     app.run()
     return 0
