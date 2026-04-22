@@ -1,7 +1,7 @@
 # hamanpaul Project Policy — Design (spec-1)
 
-- Date: 2026-04-21（init）／2026-04-22（rev-1：補 CLI help 同步 R-16）
-- Status: draft（待使用者核可後進入 writing-plans）
+- Date: 2026-04-21（init）／2026-04-22（rev-1：補 CLI help 同步 R-16）／2026-04-22（rev-2：本地 baseline 實作完成並對齊文件）
+- Status: implemented locally（`~/prj_pri/paul-project-conventions`，待 upstream push / PR；release 與跨 repo 擴散另行處理）
 - Owner: @hamanpaul
 - Audience profile: B（me + collaborators / AI agent），保留往 C（對外公開）演進的彈性
 - Applies to: 所有 `https://github.com/hamanpaul/*` repo；工作專案（含 Broadcom 等）排除
@@ -16,6 +16,34 @@ paulshaclaw Stage 0–7 baseline 已全部 landed，但缺乏跨專案的文件 
 - 文件與 code 強制同步更新
 
 此 spec 只定義 **policy 本身與其擴散機制**；paulshaclaw 作為第一個參考實作的具體 user docs / deploy runbook 內容屬於 spec-2（另行 brainstorming）。
+
+## 0.1 2026-04-22 本地實作快照
+
+截至 2026-04-22，`spec-1` 的 **conventions baseline** 已在本機 repo
+`~/prj_pri/paul-project-conventions` 完成第一輪落地，實作 branch 為
+`feature/policy-rules-foundation`，最新收斂 commit 為 `2b29740`
+（README 版本一致性修正）。
+
+本輪已完成：
+
+- `policy_check` CLI、config loader、PR context、report、rule registry
+- R-01 ~ R-16 規則、fixtures、pytest 測試與 self dog-food
+- reusable workflow、composite action、helper scripts
+- zh-TW 使用者文件（README / CHANGELOG）
+- 四份 agent convention files（`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.github/copilot-instructions.md`）
+
+本輪明確**未處理**：
+
+- GitHub repo 建立 / remote 初始化
+- push / PR / merge
+- 正式 release、tag 與 `VERSION` 升版
+- `hamanpaul/.github` 與 `paul-project-template` 的實際擴散
+
+因此，本 spec 目前狀態是：
+
+- **設計已驗證可實作**
+- **本地 baseline 已完成**
+- **對外整併與 release 流程仍待後續 change / plan**
 
 ## 1. Scope 與 3-repo 架構
 
