@@ -1,6 +1,6 @@
 # hamanpaul Project Policy — Design (spec-1)
 
-- Date: 2026-04-21
+- Date: 2026-04-21（init）／2026-04-22（rev-1：補 CLI help 同步 R-16）
 - Status: draft（待使用者核可後進入 writing-plans）
 - Owner: @hamanpaul
 - Audience profile: B（me + collaborators / AI agent），保留往 C（對外公開）演進的彈性
@@ -83,6 +83,17 @@ policy_version: 1.0.0
 code_paths:                    # R-09 判斷 code 變動的 glob；若省略則用 profile 預設
   - "paulshaclaw/**/*.py"
   - "scripts/**"
+cli:                           # R-16 CLI/headless help 同步；若省略或空則 skip
+  - command: "python -m paulshaclaw"
+    help_args: ["--help"]
+    install_cmd: "pip install -e ."
+    reflected_in: "README.md"
+    marker: "paulshaclaw-main"
+  - command: "python -m paulshaclaw.janitor"
+    help_args: ["--help"]
+    install_cmd: "pip install -e ."
+    reflected_in: "docs/usage.md"
+    marker: "paulshaclaw-janitor"
 ```
 
 `code_paths` 預設（profile 提供）：
@@ -282,6 +293,7 @@ jobs:
 | R-13 | Agent convention files 存在 | 缺 `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` / `.github/copilot-instructions.md` | `policy-exempt:agent-files` |
 | R-14 | Agent files policy 版本一致 | 內容 `policy_version` 與 `.paul-project.yml` 不符 | — |
 | R-15 | Caller workflow 用 tag / SHA 鎖定 | `uses:` 指向 branch ref（`@main`、`@master`、`@develop` 等）或無 ref；允許 tag 與 40-char SHA，包含浮動 major tag 如 `@v1` | — |
+| R-16 | CLI / headless command 的 `--help` 與 docs 同步 | `.paul-project.yml` 宣告的每個 `cli` 項目，實跑 help 輸出與 `reflected_in` 對應 marker 區塊不一致 | `policy-exempt:cli-help` |
 
 豁免 label 白名單即上表所有 `policy-exempt:*` 值；gate 只認這些，其他一律視同未豁免。
 
@@ -356,10 +368,68 @@ jobs:
 <!-- 必填理由 -->
 ```
 
-### 4.5 豁免治理
+### 4.6 CLI / headless help 同步細節（R-16）
+
+Repo 有可執行命令時，其 `--help` 輸出**必須**與 README / docs 內被 marker 包住的區塊字元一致。這是擋「改了 CLI flag 忘記改 docs」的主要機制。
+
+#### 宣告
+
+`.paul-project.yml` 的 `cli:` 欄位列舉要同步的命令；若缺省或空陣列，R-16 自動 pass（非 CLI 專案不受影響）。每項：
+
+| key | 說明 |
+|---|---|
+| `command` | 要執行的命令（含 subcommand），不含 help args |
+| `help_args` | 取 help 的 args 陣列，通常 `["--help"]`；部分 CLI 用 `["-h"]` 或 `["help"]` |
+| `install_cmd` | CI 取得可執行狀態的指令；可省略（此時假設 `command` 已在 PATH） |
+| `reflected_in` | 期望同步到的 docs 檔案（相對 repo root） |
+| `marker` | marker 名稱，同一檔可有多個不同 marker |
+
+#### Marker 格式
+
+docs 中以 HTML 註解界定 managed 區塊：
+
+```markdown
+## Usage
+
+<!-- BEGIN: cli-help marker="paulshaclaw-main" -->
+<pre>
+(自動產生：`python -m paulshaclaw --help` 的實際輸出)
+</pre>
+<!-- END: cli-help marker="paulshaclaw-main" -->
+```
+
+- BEGIN / END 必配對、marker 必相同，否則 R-16 立即 fail（marker 錯亂）
+- 區塊內容由 helper 重新產生；人工編輯區塊內容會被視為「應同步未同步」
+- 區塊外的說明文字（例：註解 flag 用途、給範例）不受管控
+
+#### CI 行為
+
+1. Gate workflow 讀 `.paul-project.yml.cli`
+2. 對每項：
+   - 若有 `install_cmd`，執行之（失敗 → fail R-16 並註明「安裝失敗」）
+   - 執行 `command help_args`，抓 stdout + stderr
+   - 讀 `reflected_in` 檔，抽出 `marker` 對應區塊內容
+   - 做字元級 diff；不一致則 fail R-16 並在 summary 輸出 diff
+3. 全部一致才放行
+
+#### 本地 helper
+
+Conventions 提供 `scripts/update-cli-help.sh`：
+- 讀 `.paul-project.yml.cli`，實跑每個 command 更新對應 marker 區塊
+- dev 在本地跑，自動回寫 docs
+- CI **不** auto-fix（避免 PR 在沒有 dev 意識下被改）
+
+#### 限制與 out-of-scope
+
+- 不處理 `man page`、長格式 API 說明、config 檔 schema、環境變數列表 — 這些未來可擴為 R-17/R-18
+- `command` 的 exit code 非 0 時：若 `--help` 屬於該 CLI 的正常退碼（有些 CLI 0、有些 2），宣告 `exit_ok: [0, 2]` 允許（預設 `[0]`）
+- 多語系 help 輸出（例如 LC_ALL 影響）：helper 與 CI 皆固定 `LC_ALL=C`，避免跨機器 diff
+
+### 4.7 豁免治理
 
 - 每次 `policy-exempt:*` 使用由 audit 收集（未來升級路徑啟用）
 - 高豁免率視為規則需調整的訊號，不是鼓勵濫用豁免
+- R-16 的豁免僅建議用於「CLI 已廢棄、docs 也會一併移除」等過渡情境；長期豁免 = 規則失效
 
 ## 5. Bootstrap、migration、policy 本身的測試與演進
 
@@ -381,7 +451,19 @@ paul-project-template/
 └── .gitignore                         (最小通用集)
 ```
 
-Template **不含**：LICENSE（B 階段略過）、CODE_OF_CONDUCT / SECURITY（由 `hamanpaul/.github` 繼承）、具體語言的 build config。
+Template **不含**：LICENSE（B 階段略過）、CODE_OF_CONDUCT / SECURITY（由 `hamanpaul/.github` 繼承）、具體語言的 build config、CLI（視專案而定；`.paul-project.yml.cli` 預設為空）。
+
+Template 的 `README.md` 在 `## Usage` 段落內預放一組空 marker 作為示範：
+
+```markdown
+## Usage
+
+<!-- BEGIN: cli-help marker="main" -->
+<!-- (尚未設定 CLI；移除此區塊或填 `.paul-project.yml.cli` 後由 scripts/update-cli-help.sh 填入) -->
+<!-- END: cli-help marker="main" -->
+```
+
+Conventions 亦提供 `scripts/update-cli-help.sh`，dev 本地跑即回寫。
 
 ### 5.2 建立新 repo 的標準動作
 
@@ -432,10 +514,16 @@ paul-project-conventions/
     └── policy-check.yml               (dog-food：conventions 自己也跑 policy-check)
 ```
 
-每個 rule `R-01 ~ R-15` 必有：
+每個 rule `R-01 ~ R-16` 必有：
 - 至少一個違規 fixture（gate 必擋）
 - 至少一個合規 fixture（gate 必放行）
 - 至少一個豁免 fixture（帶 label 時 gate 必放行；僅對有豁免 label 的 rule）
+
+R-16 特別 fixture：
+- `cli-help-mismatch/`：CLI 輸出與 marker 區塊不一致
+- `cli-help-missing-marker/`：`reflected_in` 檔缺 BEGIN/END marker
+- `cli-help-exempt/`：帶 `policy-exempt:cli-help` label，即便不一致也放行
+- `cli-empty/`：`.paul-project.yml` 無 `cli:` 欄位，R-16 自動 pass
 
 ### 5.5 Policy 版號與下游 repo 的鎖定關係
 
@@ -491,10 +579,11 @@ spec-1 落地後必須滿足：
 
 1. `hamanpaul/.github`、`hamanpaul/paul-project-conventions`、`hamanpaul/paul-project-template` 三個 repo 建立完成並 public-ish（private 可，但能被 Actions 存取）
 2. conventions 自身 `policy-check` 綠燈（self-dog-food）
-3. 從 template 建出新 test-repo，policy-check 首次即綠燈
-4. 故意違規的 fixture repo 可被 gate 擋下（每個 rule 至少一例）
+3. 從 template 建出新 test-repo，policy-check 首次即綠燈（`cli:` 空也不擋）
+4. 故意違規的 fixture repo 可被 gate 擋下（每個 rule R-01~R-16 至少一例）
 5. Memory entry 已寫入 `~/.claude/.../memory/`
-6. paulshaclaw 作為 spec-2 第一個參考實作，走完 §5.3 migration 8 步
+6. paulshaclaw 作為 spec-2 第一個參考實作，走完 §5.3 migration 8 步，並透過 R-16 同步至少一個 CLI 的 `--help`
+7. `scripts/update-cli-help.sh` 能在本地端正確回寫 marker 區塊
 
 ## 7. 風險與緩解
 
@@ -505,6 +594,8 @@ spec-1 落地後必須滿足：
 | conventions 自身 breaking change | 下游全炸 | 嚴守 §5.6 演進節奏；6 個月 v-1 維護 |
 | 既有 repo migration 成本 | 拖延採用 | 只要求新案；既有案自挑時機 |
 | GitHub Actions 配額 | reusable workflow 每 repo 都跑 | 公開 repo 免費；私有 repo 用量可控 |
+| R-16 install_cmd 在 CI 失敗 | 即便 CLI 與 docs 一致也 fail | install_cmd 可選；若省略則直跑 command，不假設安裝步驟 |
+| CLI help 輸出含時間戳 / 機器相關字串 | R-16 flaky | 固定 `LC_ALL=C`；CLI 作者應避免 help 輸出隨環境變動，如必要可用 `policy-exempt:cli-help` 過渡 |
 
 ## 8. 後續（spec-2 與之後）
 
