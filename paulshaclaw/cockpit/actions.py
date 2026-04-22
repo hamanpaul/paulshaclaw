@@ -22,3 +22,6 @@ class LayoutActionService:
             capture_output=True,
             text=True,
         )
+
+    def return_to_cockpit(self, cockpit_pane_id: str) -> None:
+        self.focus_pane(cockpit_pane_id)

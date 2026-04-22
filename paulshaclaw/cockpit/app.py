@@ -121,7 +121,7 @@ class CockpitApp(App[None]):
         self.actions.focus_pane(selected_pane.pane_id)
 
     def action_focus_cockpit(self) -> None:
-        self.actions.focus_pane(self.state.cockpit_pane_id)
+        self.actions.return_to_cockpit(self.state.cockpit_pane_id)
 
     def on_key(self, event: object) -> None:
         # Pilot key events are delivered as objects with either `key` or
