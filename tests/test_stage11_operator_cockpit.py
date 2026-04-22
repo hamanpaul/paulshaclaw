@@ -1,6 +1,8 @@
 import subprocess
+import shutil
 import sys
 import unittest
+from pathlib import Path
 
 # textual is an optional dev/test dependency. Guard imports so the repository's
 # baseline tests (python -m unittest discover) can run under system Python
@@ -34,6 +36,7 @@ class Stage11CliTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         self.assertIn("Stage 11 operator cockpit", completed.stdout)
         self.assertIn("--cockpit-pane", completed.stdout)
+        self.assertIn("--coordinator-jobs-dir", completed.stdout)
 
 
 class Stage11StateTests(unittest.TestCase):
@@ -67,6 +70,41 @@ class Stage11StateTests(unittest.TestCase):
 
         self.assertEqual([pane.pane_id for pane in state.active_section], ["%4"])
         self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%1", "%2"])
+
+    def test_state_marks_active_slot_lost_when_no_pane_matches_anchor(self) -> None:
+        panes = (
+            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
+            PaneRecord("%1", "agent1", "node", 0, 40, 80, 20, False, ()),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0")
+        shifted = (
+            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
+            PaneRecord("%1", "agent1", "node", 80, 40, 80, 20, False, ()),
+        )
+
+        degraded = state.refresh(shifted)
+
+        self.assertEqual(degraded.degraded_reason, "active-slot-lost")
+        self.assertEqual(degraded.active_section, ())
+
+
+class Stage11ArtifactTests(unittest.TestCase):
+    def test_artifact_adapter_returns_empty_when_no_pane_hint_exists(self) -> None:
+        jobs_dir = Path("tests/.stage11-artifacts")
+        if jobs_dir.exists():
+            shutil.rmtree(jobs_dir)
+        jobs_dir.mkdir(parents=True)
+        self.addCleanup(lambda: shutil.rmtree(jobs_dir, ignore_errors=True))
+        (jobs_dir / "job-1.json").write_text(
+            '{"job_id": "job-1", "phase": "build", "scope": "slice-1", "trace_id": "trace-1"}',
+            encoding="utf-8",
+        )
+
+        from paulshaclaw.cockpit.artifacts import ArtifactAdapter
+
+        jobs_by_pane = ArtifactAdapter(coordinator_jobs_dir=jobs_dir).load_jobs_by_pane()
+
+        self.assertEqual(jobs_by_pane, {})
 
 
 class FakeLayoutActionService(LayoutActionService):

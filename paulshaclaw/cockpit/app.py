@@ -161,11 +161,25 @@ class CockpitApp(App[None]):
 
         selected = self.state.selected_pane
         if selected is None:
-            detail_text = "No candidate panes"
+            detail_text = "\n".join(
+                [
+                    "No candidate panes",
+                    f"state: {self.state.degraded_reason or 'ok'}",
+                ]
+            )
         else:
             jobs = self.jobs_by_pane.get(selected.pane_id, ())
+            if jobs:
+                job_lines = [f"{job.source}:{job.status}:{job.trace_id or '-'}" for job in jobs]
+            else:
+                job_lines = ["job-state: unmapped"]
             detail_text = "\n".join(
-                [f"{selected.pane_id} {selected.title}", *selected.preview, *(job.status for job in jobs)]
+                [
+                    f"{selected.pane_id} {selected.title}",
+                    *selected.preview,
+                    *job_lines,
+                    f"state: {self.state.degraded_reason or 'ok'}",
+                ]
             )
         self.query_one("#pane-detail", Static).update(detail_text)
         all_jobs = [job for items in self.jobs_by_pane.values() for job in items]

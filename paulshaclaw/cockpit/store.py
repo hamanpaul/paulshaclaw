@@ -68,3 +68,25 @@ class CockpitState:
             selected_index=next_index,
             degraded_reason=self.degraded_reason,
         )
+
+    def refresh(self, panes: tuple[PaneRecord, ...]) -> "CockpitState":
+        active_exists = any(
+            pane.pane_id != self.cockpit_pane_id and pane.anchor == self.slot_anchor for pane in panes
+        )
+        candidate_count = len(
+            tuple(
+                pane for pane in panes if pane.pane_id != self.cockpit_pane_id and pane.anchor != self.slot_anchor
+            )
+        )
+        next_index = self.selected_index
+        if candidate_count == 0:
+            next_index = 0
+        elif next_index >= candidate_count:
+            next_index = candidate_count - 1
+        return CockpitState(
+            cockpit_pane_id=self.cockpit_pane_id,
+            slot_anchor=self.slot_anchor,
+            panes=panes,
+            selected_index=next_index,
+            degraded_reason=None if active_exists else "active-slot-lost",
+        )
