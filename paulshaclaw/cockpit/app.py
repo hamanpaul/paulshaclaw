@@ -93,6 +93,13 @@ class CockpitApp(App[None]):
 
     def on_mount(self) -> None:
         self._refresh_widgets()
+        # Ensure a focusable widget is focused so Pilot key presses reach the app
+        try:
+            work_list = self.query_one("#work-list", ListView)
+            work_list.focus()
+        except Exception:
+            # fallback stubs may not support focus; ignore
+            pass
 
     def action_move_up(self) -> None:
         self.state = self.state.move_selection(-1)
@@ -115,6 +122,22 @@ class CockpitApp(App[None]):
 
     def action_focus_cockpit(self) -> None:
         self.actions.focus_pane(self.state.cockpit_pane_id)
+
+    def on_key(self, event: object) -> None:
+        """Capture pilot key events and dispatch to actions for tests.
+
+        Textual's Pilot sends key objects; handle common attributes conservatively so
+        the method works with both real Textual and the fallback stubs.
+        """
+        try:
+            key = getattr(event, "key", None) or getattr(event, "character", None)
+            if key == "enter" or key == "\r":
+                self.action_swap_selected()
+            elif key == "c":
+                self.action_focus_cockpit()
+        except Exception:
+            # Best-effort; fallback stubs may not provide expected attributes.
+            pass
 
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane
