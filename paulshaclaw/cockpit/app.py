@@ -124,20 +124,27 @@ class CockpitApp(App[None]):
         self.actions.focus_pane(self.state.cockpit_pane_id)
 
     def on_key(self, event: object) -> None:
-        """Capture pilot key events and dispatch to actions for tests.
-
-        Textual's Pilot sends key objects; handle common attributes conservatively so
-        the method works with both real Textual and the fallback stubs.
-        """
+        # Pilot key events are delivered as objects with either `key` or
+        # `character` attributes depending on Textual version. Handle only
+        # those explicit attributes and dispatch the small set of keys we
+        # need for the tests. This keeps the compatibility path narrow and
+        # avoids swallowing unrelated errors.
         try:
-            key = getattr(event, "key", None) or getattr(event, "character", None)
-            if key == "enter" or key == "\r":
-                self.action_swap_selected()
-            elif key == "c":
-                self.action_focus_cockpit()
-        except Exception:
-            # Best-effort; fallback stubs may not provide expected attributes.
-            pass
+            if hasattr(event, "key"):
+                key = event.key
+            elif hasattr(event, "character"):
+                key = event.character
+            else:
+                return
+        except AttributeError:
+            # If event is a strange object without expected attributes,
+            # don't attempt to handle it.
+            return
+
+        if key == "enter" or key == "\r":
+            self.action_swap_selected()
+        elif key == "c":
+            self.action_focus_cockpit()
 
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane
