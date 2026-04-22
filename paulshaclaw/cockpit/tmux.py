@@ -33,15 +33,22 @@ def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
         else:
             # malformed line, skip
             continue
+        try:
+            left_value = int(left)
+            top_value = int(top)
+            width_value = int(width)
+            height_value = int(height)
+        except ValueError:
+            continue
         panes.append(
             PaneRecord(
                 pane_id=pane_id,
                 title=title,
                 command=command,
-                left=int(left),
-                top=int(top),
-                width=int(width),
-                height=int(height),
+                left=left_value,
+                top=top_value,
+                width=width_value,
+                height=height_value,
                 active=active == "1",
                 preview=(),
             )
@@ -57,12 +64,15 @@ class TmuxClient:
         return ["-t", self.session_name] if self.session_name else []
 
     def list_panes(self, *, cockpit_pane_id: str) -> tuple[PaneRecord, ...]:
-        completed = subprocess.run(
-            ["tmux", "list-panes", *self._target(), "-F", LIST_PANES_FORMAT],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            completed = subprocess.run(
+                ["tmux", "list-panes", *self._target(), "-F", LIST_PANES_FORMAT],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return ()
         panes = parse_list_panes(completed.stdout)
         enriched: list[PaneRecord] = []
         for pane in panes:
@@ -70,7 +80,7 @@ class TmuxClient:
             if pane.pane_id != cockpit_pane_id:
                 try:
                     preview = self.capture_preview(pane.pane_id)
-                except subprocess.CalledProcessError:
+                except (subprocess.CalledProcessError, FileNotFoundError):
                     preview = ()
             enriched.append(
                 PaneRecord(

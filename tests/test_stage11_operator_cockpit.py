@@ -2,7 +2,9 @@ import subprocess
 import shutil
 import sys
 import unittest
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 # textual is an optional dev/test dependency. Guard imports so the repository's
 # baseline tests (python -m unittest discover) can run under system Python
@@ -18,10 +20,11 @@ except Exception:  # ModuleNotFoundError or other import-time issues
     HAS_TEXTUAL = False
 
 from paulshaclaw.cockpit.actions import LayoutActionService
+from paulshaclaw.cockpit import __main__ as cockpit_main
 from paulshaclaw.cockpit.app import CockpitApp
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
-from paulshaclaw.cockpit.tmux import parse_list_panes
+from paulshaclaw.cockpit.tmux import TmuxClient, parse_list_panes
 
 
 class Stage11CliTests(unittest.TestCase):
@@ -38,6 +41,14 @@ class Stage11CliTests(unittest.TestCase):
         self.assertIn("--cockpit-pane", completed.stdout)
         self.assertIn("--coordinator-jobs-dir", completed.stdout)
 
+    def test_main_exits_with_error_when_cockpit_pane_is_missing(self) -> None:
+        stderr = StringIO()
+        with patch.object(TmuxClient, "list_panes", return_value=()), patch("sys.stderr", stderr):
+            exit_code = cockpit_main.main(["--cockpit-pane", "%404"])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("cockpit pane not found: %404", stderr.getvalue())
+
 
 class Stage11StateTests(unittest.TestCase):
     def test_parse_list_panes_extracts_geometry(self) -> None:
@@ -47,6 +58,21 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(panes[0].pane_id, "%0")
         self.assertEqual(panes[1].left, 120)
         self.assertEqual(panes[1].width, 120)
+
+    def test_parse_list_panes_skips_malformed_numeric_fields(self) -> None:
+        raw = "%0\tcockpit\tpython\t0\t0\t120\t40\n%4\tssh\tbash\tnan\t0\t120\t40\n"
+        panes = parse_list_panes(raw)
+
+        self.assertEqual([pane.pane_id for pane in panes], ["%0"])
+
+    def test_tmux_client_returns_empty_when_tmux_list_panes_fails(self) -> None:
+        client = TmuxClient()
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run_mock:
+            run_mock.side_effect = subprocess.CalledProcessError(1, ["tmux", "list-panes"])
+
+            panes = client.list_panes(cockpit_pane_id="%0")
+
+        self.assertEqual(panes, ())
 
     def test_choose_startup_slot_excludes_cockpit_even_when_same_size(self) -> None:
         panes = (

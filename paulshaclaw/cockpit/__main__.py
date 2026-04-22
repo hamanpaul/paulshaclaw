@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from .actions import LayoutActionService
@@ -29,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     jobs_by_pane = ArtifactAdapter(coordinator_jobs_dir=args.coordinator_jobs_dir).load_jobs_by_pane()
     if args.once:
         return 0
+    if not any(pane.pane_id == args.cockpit_pane for pane in panes):
+        print(f"cockpit pane not found: {args.cockpit_pane}", file=sys.stderr)
+        return 1
     app = CockpitApp.from_snapshot(
         panes=panes,
         cockpit_pane_id=args.cockpit_pane,
