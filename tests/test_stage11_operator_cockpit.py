@@ -2,7 +2,16 @@ import subprocess
 import sys
 import unittest
 
-from textual.pilot import Pilot
+# textual is an optional dev/test dependency. Guard imports so the repository's
+# baseline tests (python -m unittest discover) can run under system Python
+# without textual installed. The UI tests will be skipped when textual is
+# unavailable and run when a dev venv provides textual.
+try:
+    from textual.pilot import Pilot
+    HAS_TEXTUAL = True
+except Exception:  # ModuleNotFoundError or other import-time issues
+    Pilot = None  # type: ignore
+    HAS_TEXTUAL = False
 
 from paulshaclaw.cockpit.actions import LayoutActionService
 from paulshaclaw.cockpit.app import CockpitApp
