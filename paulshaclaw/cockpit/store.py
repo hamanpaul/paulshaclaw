@@ -42,3 +42,29 @@ class CockpitState:
         return tuple(
             pane for pane in self.panes if pane.pane_id != self.cockpit_pane_id and pane.anchor != self.slot_anchor
         )
+
+    @property
+    def active_pane(self) -> PaneRecord | None:
+        for pane in self.active_section:
+            return pane
+        return None
+
+    @property
+    def selected_pane(self) -> PaneRecord | None:
+        if not self.candidate_section:
+            return None
+        clamped = min(self.selected_index, len(self.candidate_section) - 1)
+        return self.candidate_section[clamped]
+
+    def move_selection(self, delta: int) -> "CockpitState":
+        if not self.candidate_section:
+            return self
+        count = len(self.candidate_section)
+        next_index = (self.selected_index + delta) % count
+        return CockpitState(
+            cockpit_pane_id=self.cockpit_pane_id,
+            slot_anchor=self.slot_anchor,
+            panes=self.panes,
+            selected_index=next_index,
+            degraded_reason=self.degraded_reason,
+        )
