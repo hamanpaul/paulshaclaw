@@ -1,7 +1,7 @@
 # hamanpaul Project Policy — Design (spec-1)
 
 - Date: 2026-04-21（init）／2026-04-22（rev-1：補 CLI help 同步 R-16）／2026-04-22（rev-2：本地 baseline 實作完成並對齊文件）
-- Status: implemented locally（`~/prj_pri/paul-project-conventions`，待 upstream push / PR；release 與跨 repo 擴散另行處理）
+- Status: implemented locally（`~/prj_pri/paulsha-conventions`，待 upstream push / PR；release 與跨 repo 擴散另行處理）
 - Owner: @hamanpaul
 - Audience profile: B（me + collaborators / AI agent），保留往 C（對外公開）演進的彈性
 - Applies to: 所有 `https://github.com/hamanpaul/*` repo；工作專案（含 Broadcom 等）排除
@@ -20,7 +20,7 @@ paulshaclaw Stage 0–7 baseline 已全部 landed，但缺乏跨專案的文件 
 ## 0.1 2026-04-22 本地實作快照
 
 截至 2026-04-22，`spec-1` 的 **conventions baseline** 已在本機 repo
-`~/prj_pri/paul-project-conventions` 完成第一輪落地，實作 branch 為
+`~/prj_pri/paulsha-conventions` 完成第一輪落地，實作 branch 為
 `feature/policy-rules-foundation`，最新收斂 commit 為 `2b29740`
 （README 版本一致性修正）。
 
@@ -50,7 +50,7 @@ paulshaclaw Stage 0–7 baseline 已全部 landed，但缺乏跨專案的文件 
 | Repo | 職責 | 變更頻率 |
 |---|---|---|
 | `hamanpaul/.github` | GitHub 社群預設：PR template / Issue template / SECURITY / CONTRIBUTING；會被所有沒自己一份的 repo 繼承 | 低 |
-| `hamanpaul/paul-project-conventions` | Policy single source of truth：policy 文字、reusable workflows、audit 腳本；自身亦遵循自己的 policy | 中（policy 演進時） |
+| `hamanpaul/paulsha-conventions` | Policy single source of truth：policy 文字、reusable workflows、audit 腳本；自身亦遵循自己的 policy | 中（policy 演進時） |
 | `hamanpaul/paul-project-template` | 新專案骨架；供 `gh repo create --template` 使用 | 極低 |
 
 ### 設計取捨
@@ -62,7 +62,7 @@ paulshaclaw Stage 0–7 baseline 已全部 landed，但缺乏跨專案的文件 
 ### 關係圖
 
 ```
-paul-project-conventions (policy source)
+paulsha-conventions (policy source)
          ↑
          │ uses: / 參照
          │
@@ -72,7 +72,7 @@ paul-project-template (骨架)
          ▼
 任何 hamanpaul/<new-project>
          │
-         │ workflow uses: hamanpaul/paul-project-conventions/...@v*
+         │ workflow uses: hamanpaul/paulsha-conventions/...@v*
          ▼
 CI 在每次 PR 跑 policy-check
 
@@ -264,7 +264,7 @@ main                           永久；保護分支
 
 ### 4.1 Reusable workflow 結構
 
-`hamanpaul/paul-project-conventions/.github/workflows/policy-check.yml`：
+`hamanpaul/paulsha-conventions/.github/workflows/policy-check.yml`：
 
 ```yaml
 name: policy-check
@@ -283,7 +283,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: hamanpaul/paul-project-conventions/.github/actions/policy-check@v1
+      - uses: hamanpaul/paulsha-conventions/.github/actions/policy-check@v1
         with:
           profile: ${{ inputs.policy_profile }}
           version: ${{ inputs.policy_version }}
@@ -296,7 +296,7 @@ jobs:
 on: [pull_request]
 jobs:
   policy:
-    uses: hamanpaul/paul-project-conventions/.github/workflows/policy-check.yml@v1
+    uses: hamanpaul/paulsha-conventions/.github/workflows/policy-check.yml@v1
     with:
       policy_profile: stage-driven
       policy_version: 1.0.0
@@ -330,7 +330,7 @@ jobs:
 四份內容完全一致，由 template 同時產生；由 audit 保證同步。
 
 ```markdown
-<!-- managed-by: hamanpaul/paul-project-conventions@v1.0.0 -->
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.0 -->
 <!-- 若修改此檔，同步更新 CLAUDE.md / AGENTS.md / GEMINI.md / .github/copilot-instructions.md 四份 -->
 
 # Agent Policy Checklist
@@ -506,7 +506,7 @@ $EDITOR .paul-project.yml                                 # 填 profile / versio
 git add .paul-project.yml
 git commit -m "chore: claim policy v1.0.0 with <profile> profile"
 
-curl -sSL https://raw.githubusercontent.com/hamanpaul/paul-project-conventions/v1/scripts/apply-branch-protection.sh | bash
+curl -sSL https://raw.githubusercontent.com/hamanpaul/paulsha-conventions/v1/scripts/apply-branch-protection.sh | bash
 ```
 
 後續走 `feature/<slug>` → `wt/<feature>/<subtask>` → PR。
@@ -529,7 +529,7 @@ Policy 不自動溯及既往；每個 repo 自行 opt-in。入會 8 步：
 ### 5.4 Policy 本身的測試（meta-testing）
 
 ```
-paul-project-conventions/
+paulsha-conventions/
 ├── tests/
 │   ├── fixtures/                      (故意違規 / 合規 / 豁免的迷你 repo 快照)
 │   │   ├── missing-changelog/
@@ -585,7 +585,7 @@ type: reference
 name: hamanpaul project policy
 description: 所有 hamanpaul/* repo 遵循的跨專案 policy
 ---
-- Policy source: https://github.com/hamanpaul/paul-project-conventions
+- Policy source: https://github.com/hamanpaul/paulsha-conventions
 - Template: https://github.com/hamanpaul/paul-project-template
 - 應用範圍: 所有 hamanpaul/* repo；工作專案除外
 - Agent 行為: 進入 hamanpaul/* repo session 時必讀 repo 內 CLAUDE.md checklist
@@ -605,7 +605,7 @@ description: 所有 hamanpaul/* repo 遵循的跨專案 policy
 
 spec-1 落地後必須滿足：
 
-1. `hamanpaul/.github`、`hamanpaul/paul-project-conventions`、`hamanpaul/paul-project-template` 三個 repo 建立完成並 public-ish（private 可，但能被 Actions 存取）
+1. `hamanpaul/.github`、`hamanpaul/paulsha-conventions`、`hamanpaul/paul-project-template` 三個 repo 建立完成並 public-ish（private 可，但能被 Actions 存取）
 2. conventions 自身 `policy-check` 綠燈（self-dog-food）
 3. 從 template 建出新 test-repo，policy-check 首次即綠燈（`cli:` 空也不擋）
 4. 故意違規的 fixture repo 可被 gate 擋下（每個 rule R-01~R-16 至少一例）
