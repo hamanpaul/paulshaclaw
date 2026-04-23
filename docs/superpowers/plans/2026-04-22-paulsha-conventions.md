@@ -1,8 +1,8 @@
-# paul-project-conventions Implementation Plan
+# paulsha-conventions Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 本地建出 `paul-project-conventions` 專案的完整實作：policy-check 引擎（16 條規則）、測試（每條規則 fixture）、composite action、reusable workflow 與三支 helper script；自身通過自己的 policy-check（self dog-food）。不含 GitHub repo 建立與 release（留給 spec-1 Plan 2）。
+**Goal:** 本地建出 `paulsha-conventions` 專案的完整實作：policy-check 引擎（16 條規則）、測試（每條規則 fixture）、composite action、reusable workflow 與三支 helper script；自身通過自己的 policy-check（self dog-food）。不含 GitHub repo 建立與 release（留給 spec-1 Plan 2）。
 
 **Architecture:** Python 3.11+ 寫 rule logic（每條規則獨立 module，遵循 `Rule` protocol），pytest 參數化跑 fixture。GitHub composite action 呼叫 `python -m policy_check`。Reusable workflow 包一層 `workflow_call` 給下游 repo 用。所有 rules 回傳統一 `RuleResult(rule_id, status, message, diff?)`，由 `report.py` 彙整成 GitHub step summary + exit code。
 
@@ -10,12 +10,12 @@
 
 **Reference spec:** `docs/superpowers/specs/2026-04-21-hamanpaul-project-policy-design.md`
 
-**Working directory:** `~/prj_pri/paul-project-conventions/`（本 plan 全程在此）。paulshaclaw repo 只持有 plan 文件本身；實作產物在新的本地 repo。
+**Working directory:** `~/prj_pri/paulsha-conventions/`（本 plan 全程在此）。paulshaclaw repo 只持有 plan 文件本身；實作產物在新的本地 repo。
 
 ## Execution Snapshot（2026-04-22）
 
 本 plan 對應的 **local baseline implementation** 已在
-`~/prj_pri/paul-project-conventions` 落地完成，實作 branch 為
+`~/prj_pri/paulsha-conventions` 落地完成，實作 branch 為
 `feature/policy-rules-foundation`。
 
 ### 已完成成果
@@ -50,18 +50,18 @@
 ## Task 1: 建立本地 repo 骨架
 
 **Files:**
-- Create: `~/prj_pri/paul-project-conventions/.git/` (via `git init`)
-- Create: `~/prj_pri/paul-project-conventions/pyproject.toml`
-- Create: `~/prj_pri/paul-project-conventions/.gitignore`
-- Create: `~/prj_pri/paul-project-conventions/policy_check/__init__.py`
-- Create: `~/prj_pri/paul-project-conventions/tests/__init__.py`
-- Create: `~/prj_pri/paul-project-conventions/VERSION`
+- Create: `~/prj_pri/paulsha-conventions/.git/` (via `git init`)
+- Create: `~/prj_pri/paulsha-conventions/pyproject.toml`
+- Create: `~/prj_pri/paulsha-conventions/.gitignore`
+- Create: `~/prj_pri/paulsha-conventions/policy_check/__init__.py`
+- Create: `~/prj_pri/paulsha-conventions/tests/__init__.py`
+- Create: `~/prj_pri/paulsha-conventions/VERSION`
 
 - [ ] **Step 1: 建目錄並 init git**
 
 ```bash
-mkdir -p ~/prj_pri/paul-project-conventions
-cd ~/prj_pri/paul-project-conventions
+mkdir -p ~/prj_pri/paulsha-conventions
+cd ~/prj_pri/paulsha-conventions
 git init -b main
 ```
 
@@ -123,7 +123,7 @@ pip install -e ".[test]"
 
 ```bash
 git add .
-git commit -m "chore: initialize paul-project-conventions skeleton"
+git commit -m "chore: initialize paulsha-conventions skeleton"
 ```
 
 ---
@@ -490,7 +490,7 @@ git commit -m "feat(core): add CLI entry, PR context collection, rule registry, 
 - [ ] **Step 1: 建 valid-minimal fixture**
 
 ```bash
-cd ~/prj_pri/paul-project-conventions
+cd ~/prj_pri/paulsha-conventions
 mkdir -p tests/fixtures/valid-minimal
 cd tests/fixtures/valid-minimal
 
@@ -524,7 +524,7 @@ cat > CHANGELOG.md <<'EOF'
 EOF
 
 echo "0.0.0" > VERSION
-cd ~/prj_pri/paul-project-conventions
+cd ~/prj_pri/paulsha-conventions
 ```
 
 - [ ] **Step 2: 由 valid-minimal 拷出違規 fixtures**
@@ -534,7 +534,7 @@ cd tests/fixtures
 cp -r valid-minimal missing-readme && rm missing-readme/README.md
 cp -r valid-minimal missing-changelog && rm missing-changelog/CHANGELOG.md
 cp -r valid-minimal missing-version && rm missing-version/VERSION
-cd ~/prj_pri/paul-project-conventions
+cd ~/prj_pri/paulsha-conventions
 ```
 
 - [ ] **Step 3: 寫 R-01（README）的測試**
@@ -1346,7 +1346,7 @@ git commit -m "feat(rules): R-10/R-11/R-12 PR property checks"
 ```bash
 cd tests/fixtures/valid-minimal
 cat > CLAUDE.md <<'EOF'
-<!-- managed-by: hamanpaul/paul-project-conventions@v1.0.0 -->
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.0 -->
 policy_version: 1.0.0
 # Agent checklist stub
 EOF
@@ -1354,7 +1354,7 @@ cp CLAUDE.md AGENTS.md
 cp CLAUDE.md GEMINI.md
 mkdir -p .github
 cp CLAUDE.md .github/copilot-instructions.md
-cd ~/prj_pri/paul-project-conventions
+cd ~/prj_pri/paulsha-conventions
 ```
 
 注意：此變動會連帶影響 Task 4-10 既有 fixture（它們都是 cp valid-minimal）。重新 regenerate：
@@ -1497,7 +1497,7 @@ name: policy-check
 on: [pull_request]
 jobs:
   check:
-    uses: hamanpaul/paul-project-conventions/.github/workflows/reusable-policy-check.yml@v1
+    uses: hamanpaul/paulsha-conventions/.github/workflows/reusable-policy-check.yml@v1
     with:
       policy_profile: flat
       policy_version: 1.0.0
@@ -1778,7 +1778,7 @@ git commit -m "feat(rules): R-16 CLI help sync with docs marker"
 ```yaml
 # .github/actions/policy-check/action.yml
 name: policy-check
-description: Run paul-project-conventions policy checks
+description: Run paulsha-conventions policy checks
 inputs:
   profile:
     required: true
@@ -1799,7 +1799,7 @@ set -euo pipefail
 PROFILE="${1:?profile required}"
 VERSION="${2:?version required}"
 
-python3 -m pip install --quiet "policy-check @ git+https://github.com/hamanpaul/paul-project-conventions@v1"
+python3 -m pip install --quiet "policy-check @ git+https://github.com/hamanpaul/paulsha-conventions@v1"
 python3 -m policy_check --repo "$GITHUB_WORKSPACE"
 ```
 
@@ -2021,16 +2021,16 @@ git commit -m "feat(scripts): update-cli-help / apply-branch-protection / worktr
 ## Task 16: Self dog-food — 讓 conventions 通過自己的 policy
 
 **Files:**
-- Modify: `~/prj_pri/paul-project-conventions/README.md`
-- Modify: `~/prj_pri/paul-project-conventions/CHANGELOG.md`
-- Modify: `~/prj_pri/paul-project-conventions/.paul-project.yml`
-- Create: `~/prj_pri/paul-project-conventions/CLAUDE.md` / `AGENTS.md` / `GEMINI.md`
-- Create: `~/prj_pri/paul-project-conventions/.github/copilot-instructions.md`
+- Modify: `~/prj_pri/paulsha-conventions/README.md`
+- Modify: `~/prj_pri/paulsha-conventions/CHANGELOG.md`
+- Modify: `~/prj_pri/paulsha-conventions/.paul-project.yml`
+- Create: `~/prj_pri/paulsha-conventions/CLAUDE.md` / `AGENTS.md` / `GEMINI.md`
+- Create: `~/prj_pri/paulsha-conventions/.github/copilot-instructions.md`
 
 - [ ] **Step 1: 建 .paul-project.yml（自我宣告）**
 
 ```yaml
-# ~/prj_pri/paul-project-conventions/.paul-project.yml
+# ~/prj_pri/paulsha-conventions/.paul-project.yml
 policy_profile: flat
 policy_version: 1.0.0
 code_paths:
@@ -2042,7 +2042,7 @@ code_paths:
 - [ ] **Step 2: 寫 README（含必備段落）**
 
 ```markdown
-# paul-project-conventions
+# paulsha-conventions
 
 Cross-repo policy for all `hamanpaul/*` GitHub repositories.
 Defines version scheme, branch/PR rules, docs-sync checks, and the
@@ -2057,7 +2057,7 @@ For downstream repos, add this caller workflow:
 on: [pull_request]
 jobs:
   policy:
-    uses: hamanpaul/paul-project-conventions/.github/workflows/reusable-policy-check.yml@v1
+    uses: hamanpaul/paulsha-conventions/.github/workflows/reusable-policy-check.yml@v1
     with:
       policy_profile: flat           # or stage-driven
       policy_version: 1.0.0
@@ -2095,16 +2095,16 @@ the `hamanpaul` project policy 1.0.0 (itself).
 - Helper scripts: update-cli-help, apply-branch-protection, worktree-cleanup
 - Self-test harness with fixture-based rule tests
 
-[Unreleased]: https://github.com/hamanpaul/paul-project-conventions/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/hamanpaul/paul-project-conventions/releases/tag/v1.0.0
+[Unreleased]: https://github.com/hamanpaul/paulsha-conventions/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/hamanpaul/paulsha-conventions/releases/tag/v1.0.0
 ```
 
 - [ ] **Step 4: 建 agent convention files**
 
 ```bash
-cd ~/prj_pri/paul-project-conventions
+cd ~/prj_pri/paulsha-conventions
 cat > CLAUDE.md <<'EOF'
-<!-- managed-by: hamanpaul/paul-project-conventions@v1.0.0 -->
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.0 -->
 <!-- 若修改此檔，同步更新 CLAUDE.md / AGENTS.md / GEMINI.md / .github/copilot-instructions.md 四份 -->
 
 # Agent Policy Checklist
@@ -2140,7 +2140,7 @@ echo "1.0.0" > VERSION
 - [ ] **Step 6: 本地跑 policy-check（dog-food）**
 
 ```bash
-cd ~/prj_pri/paul-project-conventions
+cd ~/prj_pri/paulsha-conventions
 python3 -m policy_check --repo .
 ```
 
@@ -2225,7 +2225,7 @@ Plan 2 將涵蓋：
 
 ---
 
-**Plan 完成並存於** `docs/superpowers/plans/2026-04-22-paul-project-conventions.md`。
+**Plan 完成並存於** `docs/superpowers/plans/2026-04-22-paulsha-conventions.md`。
 
 ### 兩種執行選項
 
