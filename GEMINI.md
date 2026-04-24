@@ -1,9 +1,9 @@
 <!-- managed-by: hamanpaul/paulsha-conventions@v1.0.0 -->
 policy_version: 1.0.0
 
-# Agents Convention（paulshaclaw）
+# Gemini Instructions（paulshaclaw）
 
-本檔供 OpenAI Codex / GitHub Copilot Agent 等工具讀取專案 agent 規範。
+本檔供 Gemini CLI / Gemini Code Assist 讀取專案 agent 規範。
 詳細指令與路由規則見 [`CLAUDE.md`](./CLAUDE.md)。
 
 ## 專案定位
