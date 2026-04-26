@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .config import load_config
 from .scanner import scan_workspaces
+from .service import ProjectMonitorService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,23 +39,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"錯誤: {error}", file=sys.stderr)
         return 1
 
-    if not args.once:
-        # Phase 2 ships only the --once mode; the long-running service runtime
-        # (filesystem watcher + Unix socket) lands in Phase 3.
-        print(
-            "錯誤: 目前僅支援 --once 模式，service runtime 待 Phase 3",
-            file=sys.stderr,
-        )
-        return 1
+    if args.once:
+        try:
+            states = scan_workspaces(config)
+        except (FileNotFoundError, ValueError, OSError) as error:
+            print(f"錯誤: {error}", file=sys.stderr)
+            return 1
 
+        payload = _snapshot_payload(states)
+        print(json.dumps(payload, ensure_ascii=False, default=str))
+        return 0
+
+    service: ProjectMonitorService | None = None
     try:
-        states = scan_workspaces(config)
-    except (FileNotFoundError, ValueError, OSError) as error:
+        service = ProjectMonitorService(config=config)
+        service.run_forever()
+    except KeyboardInterrupt:
+        if service is not None:
+            service.stop()
+        return 0
+    except (FileNotFoundError, ValueError, OSError, RuntimeError) as error:
         print(f"錯誤: {error}", file=sys.stderr)
         return 1
 
-    payload = _snapshot_payload(states)
-    print(json.dumps(payload, ensure_ascii=False, default=str))
     return 0
 
 

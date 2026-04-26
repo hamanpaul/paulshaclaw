@@ -6,7 +6,7 @@
 - [x] 建立 `paulshaclaw/monitor/` package skeleton 與最小 imports — models/config/scanner/parser/__main__ 全部就位
 - [x] 實作 global config loader（`paulshaclaw.yaml` schema + fallback chain）— `--config` flag → `PAULSHACLAW_CONFIG` env → `~/.config/paulshaclaw/paulshaclaw.yaml` → bundled sample
 - [x] Phase 2 Green 完成：26/26 stage9 tests pass、90/90 discover OK（2 skip 為 stage11 預期）
-- [ ] Phase 3：service runtime（filesystem watcher + Unix socket server + subscribe stream）
+- [x] Phase 3：service runtime（filesystem watcher + Unix socket server + subscribe stream）— `service.py` + `server.py` + `watcher.py` + `snapshot.py` 上線，service tests 綠燈（`evidence/20260426-phase3-service-test.txt`）
 - [ ] Phase 4：spec 落到 `openspec/specs/stage9-project-monitor/`、review、archive change 包
 
 ## Blockers
@@ -20,10 +20,10 @@
 - [x] Phase 1 red unittest log（`evidence/20260426-red-unittest.txt`、`evidence/20260426-red-discover.txt`）
 - [x] Phase 2 green unittest log（`evidence/20260426-green-unittest.txt`、`evidence/20260426-green-discover.txt`）
 - [x] Phase 2 `--once` snapshot 樣本（`evidence/20260426-once-snapshot.json` — monitor 對自身 worktree 的 90+ 行 JSON snapshot）
-- [ ] Phase 3 service test log（`evidence/<date>-service-test.txt`）
-- [ ] Phase 4 final discover log（`evidence/<date>-final-unittest-discover.txt`）
+- [x] Phase 3 service test log（`evidence/20260426-phase3-service-test.txt`）
+- [x] 全量 discover log（`evidence/20260426-phase3-final-discover.txt`）
 - [ ] `--once` snapshot 樣本（`evidence/<date>-once-snapshot.json`）
-- [ ] subscribe event stream 樣本（`evidence/<date>-subscribe-events.jsonl`）
+- [x] subscribe event stream 樣本（`evidence/20260426-phase3-subscribe-events.jsonl`）
 - [ ] propose 階段 change 包：`openspec/changes/2026-04-26-stage9-project-monitor/`
 
 ## Handoff Notes
