@@ -1,0 +1,19 @@
+# paulshaclaw — global config sample
+#
+# This is the first paulshaclaw-wide config (Stage 9 introduces it).
+# Real deployments should copy this to ~/.config/paulshaclaw/paulshaclaw.yaml
+# and customise. The loader honours --config flag → PAULSHACLAW_CONFIG env →
+# default path → this sample (read-only fallback).
+
+workspaces:
+  - path: ~/prj_arc
+    name: archive
+  - path: ~/prj_pri
+    name: private
+
+monitor:
+  poll_interval_seconds: 60      # workspace scan cadence
+  watch_debounce_ms: 500         # filesystem event debounce
+  legacy_policy: list-only       # list-only | hide
+  socket_path: ~/.agents/run/project-monitor.sock
+  ignore_dirs: []                # extra patterns; .git/node_modules already implicit

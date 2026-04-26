@@ -3,19 +3,23 @@
 ## Current Sprint
 
 - [x] 寫 Phase 1 TDD red 測試（鎖定 config / classifier / parser / `--once` 契約）— 26 tests, all fail with ImportError baseline (`evidence/20260426-red-unittest.txt`)
-- [ ] 建立 `paulshaclaw/monitor/` package skeleton 與最小 imports
-- [ ] 實作 global config loader（`paulshaclaw.yaml` schema + fallback chain）
+- [x] 建立 `paulshaclaw/monitor/` package skeleton 與最小 imports — models/config/scanner/parser/__main__ 全部就位
+- [x] 實作 global config loader（`paulshaclaw.yaml` schema + fallback chain）— `--config` flag → `PAULSHACLAW_CONFIG` env → `~/.config/paulshaclaw/paulshaclaw.yaml` → bundled sample
+- [x] Phase 2 Green 完成：26/26 stage9 tests pass、90/90 discover OK（2 skip 為 stage11 預期）
+- [ ] Phase 3：service runtime（filesystem watcher + Unix socket server + subscribe stream）
+- [ ] Phase 4：spec 落到 `openspec/specs/stage9-project-monitor/`、review、archive change 包
 
 ## Blockers
 
-- [ ] 確認 paulshaclaw global config 命名（`paulshaclaw.yaml` vs `psc.yaml` vs 其他）— 預設採 `paulshaclaw.yaml`，若操作者偏好 `psc.*` 短寫須在實作前回報
-- [ ] 確認 `~/.agents/run/` 目錄是否需在本 stage 建立（目前 §4 layout 未列 `run/`）— 預設由 monitor 在啟動時 `mkdir -p` 並設 0700
-- [ ] watchdog 加入 `requirements-stage9.txt`（與 stage11 textual pin 風格一致）
+- [x] paulshaclaw global config 命名 → 採 `paulshaclaw.yaml`（操作者 2026-04-26 確認用預設）
+- [x] `~/.agents/run/` 目錄處理 → monitor 啟動時 `mkdir -p` + `chmod 0700`（操作者 2026-04-26 確認用預設）
+- [x] `requirements-stage9.txt` 加入 `watchdog>=3.0.0` 與 `PyYAML>=6.0`
 
 ## Evidence / Links
 
 - [x] Phase 1 red unittest log（`evidence/20260426-red-unittest.txt`、`evidence/20260426-red-discover.txt`）
-- [ ] Phase 2 green unittest log（`evidence/<date>-green-unittest.txt`）
+- [x] Phase 2 green unittest log（`evidence/20260426-green-unittest.txt`、`evidence/20260426-green-discover.txt`）
+- [x] Phase 2 `--once` snapshot 樣本（`evidence/20260426-once-snapshot.json` — monitor 對自身 worktree 的 90+ 行 JSON snapshot）
 - [ ] Phase 3 service test log（`evidence/<date>-service-test.txt`）
 - [ ] Phase 4 final discover log（`evidence/<date>-final-unittest-discover.txt`）
 - [ ] `--once` snapshot 樣本（`evidence/<date>-once-snapshot.json`）
