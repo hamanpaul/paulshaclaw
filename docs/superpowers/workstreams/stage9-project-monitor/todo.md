@@ -2,7 +2,7 @@
 
 ## Current Sprint
 
-- [ ] 寫 Phase 1 TDD red 測試（鎖定 config / classifier / parser / `--once` 契約）
+- [x] 寫 Phase 1 TDD red 測試（鎖定 config / classifier / parser / `--once` 契約）— 26 tests, all fail with ImportError baseline (`evidence/20260426-red-unittest.txt`)
 - [ ] 建立 `paulshaclaw/monitor/` package skeleton 與最小 imports
 - [ ] 實作 global config loader（`paulshaclaw.yaml` schema + fallback chain）
 
@@ -14,7 +14,7 @@
 
 ## Evidence / Links
 
-- [ ] Phase 1 red unittest log（`evidence/<date>-red-unittest.txt`）
+- [x] Phase 1 red unittest log（`evidence/20260426-red-unittest.txt`、`evidence/20260426-red-discover.txt`）
 - [ ] Phase 2 green unittest log（`evidence/<date>-green-unittest.txt`）
 - [ ] Phase 3 service test log（`evidence/<date>-service-test.txt`）
 - [ ] Phase 4 final discover log（`evidence/<date>-final-unittest-discover.txt`）
