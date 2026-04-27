@@ -1,0 +1,31 @@
+test_ignore_dirs_filter_skips_listed_directories (tests.test_stage9_project_monitor.Stage9ClassifierTests.test_ignore_dirs_filter_skips_listed_directories) ... ok
+test_legacy_policy_hide_excludes_legacy_projects (tests.test_stage9_project_monitor.Stage9ClassifierTests.test_legacy_policy_hide_excludes_legacy_projects) ... ok
+test_legacy_policy_list_only_includes_legacy_with_no_state (tests.test_stage9_project_monitor.Stage9ClassifierTests.test_legacy_policy_list_only_includes_legacy_with_no_state) ... ok
+test_project_with_paul_project_yml_is_tracked (tests.test_stage9_project_monitor.Stage9ClassifierTests.test_project_with_paul_project_yml_is_tracked) ... ok
+test_project_with_workstreams_dir_is_tracked (tests.test_stage9_project_monitor.Stage9ClassifierTests.test_project_with_workstreams_dir_is_tracked) ... ok
+test_project_without_either_is_legacy (tests.test_stage9_project_monitor.Stage9ClassifierTests.test_project_without_either_is_legacy) ... ok
+test_missing_workspace_path_does_not_crash (tests.test_stage9_project_monitor.Stage9CliTests.test_missing_workspace_path_does_not_crash) ... ok
+test_module_help_exits_zero (tests.test_stage9_project_monitor.Stage9CliTests.test_module_help_exits_zero) ... ok
+test_once_mode_exits_zero_with_json_snapshot (tests.test_stage9_project_monitor.Stage9CliTests.test_once_mode_exits_zero_with_json_snapshot) ... ok
+test_once_mode_traceback_does_not_leak_to_stderr_on_known_error (tests.test_stage9_project_monitor.Stage9CliTests.test_once_mode_traceback_does_not_leak_to_stderr_on_known_error) ... ok
+test_load_config_applies_documented_defaults (tests.test_stage9_project_monitor.Stage9ConfigTests.test_load_config_applies_documented_defaults) ... ok
+test_load_config_reads_explicit_path (tests.test_stage9_project_monitor.Stage9ConfigTests.test_load_config_reads_explicit_path) ... ok
+test_load_config_rejects_empty_workspaces (tests.test_stage9_project_monitor.Stage9ConfigTests.test_load_config_rejects_empty_workspaces) ... ok
+test_load_config_rejects_invalid_legacy_policy (tests.test_stage9_project_monitor.Stage9ConfigTests.test_load_config_rejects_invalid_legacy_policy) ... ok
+test_load_config_supports_env_fallback (tests.test_stage9_project_monitor.Stage9ConfigTests.test_load_config_supports_env_fallback) ... ok
+test_sample_config_file_loads (tests.test_stage9_project_monitor.Stage9ConfigTests.test_sample_config_file_loads) ... ok
+test_blockers_parsed_from_blockers_section (tests.test_stage9_project_monitor.Stage9ParserTests.test_blockers_parsed_from_blockers_section) ... ok
+test_completed_when_all_current_sprint_items_checked (tests.test_stage9_project_monitor.Stage9ParserTests.test_completed_when_all_current_sprint_items_checked) ... ok
+test_in_progress_when_open_checkbox_in_current_sprint (tests.test_stage9_project_monitor.Stage9ParserTests.test_in_progress_when_open_checkbox_in_current_sprint) ... ok
+test_malformed_todo_marks_stage_as_degraded (tests.test_stage9_project_monitor.Stage9ParserTests.test_malformed_todo_marks_stage_as_degraded) ... ok
+test_next_task_is_second_unchecked (tests.test_stage9_project_monitor.Stage9ParserTests.test_next_task_is_second_unchecked) ... ok
+test_parse_blockers_returns_listed_strings (tests.test_stage9_project_monitor.Stage9ParserTests.test_parse_blockers_returns_listed_strings) ... ok
+test_parse_todo_current_sprint_returns_only_open_items (tests.test_stage9_project_monitor.Stage9ParserTests.test_parse_todo_current_sprint_returns_only_open_items) ... ok
+test_processing_task_is_first_unchecked_in_current_sprint (tests.test_stage9_project_monitor.Stage9ParserTests.test_processing_task_is_first_unchecked_in_current_sprint) ... ok
+test_source_signals_record_inspected_paths (tests.test_stage9_project_monitor.Stage9ParserTests.test_source_signals_record_inspected_paths) ... ok
+test_paulshaclaw_self_snapshot_matches_known_state (tests.test_stage9_project_monitor.Stage9SnapshotTests.test_paulshaclaw_self_snapshot_matches_known_state) ... ok
+
+----------------------------------------------------------------------
+Ran 26 tests in 0.173s
+
+OK
