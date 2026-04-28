@@ -139,42 +139,81 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_choose_startup_slot_excludes_cockpit_even_when_same_size(self) -> None:
         panes = (
-            pane_record("%0", title="cockpit", command="python", width=120, height=40),
-            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
-            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
         )
 
-        anchor = choose_startup_slot(panes, cockpit_pane_id="%0")
+        anchor = choose_startup_slot(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        self.assertEqual(anchor, SlotAnchor(left=120, top=0, width=120, height=40))
+
+    def test_choose_startup_slot_only_considers_cockpit_session(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="huge", left=0, top=0, width=300, height=80),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+        )
+
+        anchor = choose_startup_slot(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
         self.assertEqual(anchor, SlotAnchor(left=120, top=0, width=120, height=40))
 
     def test_state_segments_active_and_candidate_sections(self) -> None:
         panes = (
-            pane_record("%0", title="cockpit", command="python", width=120, height=40),
-            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
-            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
             pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
         )
-        state = CockpitState.from_panes(panes, cockpit_pane_id="%0")
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
         self.assertEqual([pane.pane_id for pane in state.active_section], ["%4"])
         self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%1", "%2"])
 
-    def test_state_marks_active_slot_lost_when_no_pane_matches_anchor(self) -> None:
+    def test_active_section_excludes_other_sessions_with_same_anchor(self) -> None:
         panes = (
-            pane_record("%0", title="cockpit", command="python", width=120, height=40),
-            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="active", left=120, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="collision", left=120, top=0, width=120, height=40),
         )
-        state = CockpitState.from_panes(panes, cockpit_pane_id="%0")
-        shifted = (
-            pane_record("%0", title="cockpit", command="python", width=120, height=40),
-            pane_record("%1", title="agent1", command="node", left=80, top=40, width=80, height=20),
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        self.assertEqual([pane.pane_id for pane in state.active_section], ["%4"])
+        self.assertIn("%9", [pane.pane_id for pane in state.candidate_section])
+
+    def test_candidate_section_sorted_by_session_window_pane(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", window_index="0", left=120, top=0, width=120, height=40),
+            pane_record("%7", session_name="beta", window_index="2", left=0, top=0, width=80, height=20),
+            pane_record("%3", session_name="alpha", window_index="1", left=0, top=0, width=80, height=20),
+            pane_record("%2", session_name="beta", window_index="1", left=0, top=0, width=80, height=20),
         )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
-        degraded = state.refresh(shifted)
+        self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%3", "%2", "%7"])
 
-        self.assertEqual(degraded.degraded_reason, "active-slot-lost")
-        self.assertEqual(degraded.active_section, ())
+    def test_refresh_active_lost_only_when_cockpit_session_pane_gone(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="active", left=120, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="remote", left=120, top=0, width=120, height=40),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        stable = state.refresh((
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="active", left=120, top=0, width=120, height=40),
+        ))
+        self.assertIsNone(stable.degraded_reason)
+
+        lost = state.refresh((
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="collision", left=120, top=0, width=120, height=40),
+        ))
+        self.assertEqual(lost.degraded_reason, "active-slot-lost")
+        self.assertEqual(lost.active_section, ())
 
 
 class Stage11ArtifactTests(unittest.TestCase):
