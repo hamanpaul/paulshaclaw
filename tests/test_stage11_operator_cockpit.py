@@ -127,6 +127,16 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("#{window_index}", command[-1])
         self.assertEqual(panes[0].session_name, "main")
 
+    def test_tmux_client_returns_empty_when_tmux_list_panes_fails(self) -> None:
+        client = TmuxClient()
+        with patch(
+            "paulshaclaw.cockpit.tmux.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, ["tmux", "list-panes", "-a"]),
+        ):
+            panes = client.list_panes(cockpit_pane_id="%0")
+
+        self.assertEqual(panes, ())
+
     def test_choose_startup_slot_excludes_cockpit_even_when_same_size(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", command="python", width=120, height=40),

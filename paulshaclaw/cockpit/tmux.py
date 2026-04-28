@@ -74,8 +74,6 @@ class TmuxClient:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return ()
         panes = parse_list_panes(completed.stdout)
-        if self.session_name:
-            panes = tuple(pane for pane in panes if pane.session_name == self.session_name)
         enriched: list[PaneRecord] = []
         for pane in panes:
             preview = ()
