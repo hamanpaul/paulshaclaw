@@ -35,6 +35,7 @@ class Stage11TmuxE2ETests(unittest.TestCase):
         app = CockpitApp.from_snapshot(
             panes=initial_panes,
             cockpit_pane_id=cockpit_pane_id,
+            cockpit_session_name=session_name,
             jobs_by_pane={},
             actions=LayoutActionService(session_target=session_name),
             pane_loader=client.list_panes,
