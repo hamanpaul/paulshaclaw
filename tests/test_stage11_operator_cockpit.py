@@ -21,10 +21,40 @@ except Exception:  # ModuleNotFoundError or other import-time issues
 
 from paulshaclaw.cockpit.actions import LayoutActionService
 from paulshaclaw.cockpit import __main__ as cockpit_main
-from paulshaclaw.cockpit.app import CockpitApp
+from paulshaclaw.cockpit.app import CockpitApp, pane_display_label
+from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import TmuxClient, parse_list_panes
+
+
+def pane_record(
+    pane_id: str,
+    *,
+    session_name: str = "main",
+    window_index: str = "0",
+    title: str = "pane",
+    command: str = "bash",
+    left: int = 0,
+    top: int = 0,
+    width: int = 80,
+    height: int = 24,
+    active: bool = False,
+    preview: tuple[str, ...] = (),
+) -> PaneRecord:
+    return PaneRecord(
+        pane_id=pane_id,
+        session_name=session_name,
+        window_index=window_index,
+        title=title,
+        command=command,
+        left=left,
+        top=top,
+        width=width,
+        height=height,
+        active=active,
+        preview=preview,
+    )
 
 
 class Stage11CliTests(unittest.TestCase):
@@ -49,69 +79,202 @@ class Stage11CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("cockpit pane not found: %404", stderr.getvalue())
 
+    def test_main_derives_cockpit_session_from_pane_record(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", session_name="main", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%9", session_name="work", title="pytest", command="python", width=80, height=20),
+        )
+        with (
+            patch.object(TmuxClient, "list_panes", return_value=panes),
+            patch("paulshaclaw.cockpit.__main__.ArtifactAdapter") as adapter_class,
+            patch.object(CockpitApp, "from_snapshot", return_value=DummyCockpitApp()) as from_snapshot,
+        ):
+            adapter_class.return_value.load_jobs_by_pane.return_value = {}
+            exit_code = cockpit_main.main(["--cockpit-pane", "%0"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(from_snapshot.call_args.kwargs["cockpit_session_name"], "main")
+
+    def test_main_returns_zero_on_once_flag_without_starting_ui(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", session_name="main", title="ssh", command="bash", left=120, width=120, height=40),
+        )
+        with (
+            patch.object(TmuxClient, "list_panes", return_value=panes),
+            patch("paulshaclaw.cockpit.__main__.ArtifactAdapter") as adapter_class,
+            patch.object(CockpitApp, "from_snapshot") as from_snapshot,
+        ):
+            adapter_class.return_value.load_jobs_by_pane.return_value = {}
+            exit_code = cockpit_main.main(["--cockpit-pane", "%0", "--once"])
+
+        self.assertEqual(exit_code, 0)
+        from_snapshot.assert_not_called()
+
 
 class Stage11StateTests(unittest.TestCase):
     def test_parse_list_panes_extracts_geometry(self) -> None:
-        raw = "%0\tcockpit\tpython\t0\t0\t120\t40\n%4\tssh\tbash\t120\t0\t120\t40\n"
+        raw = "%0\tmain\t0\tcockpit\tpython\t0\t0\t120\t40\n%4\tmain\t1\tssh\tbash\t120\t0\t120\t40\n"
         panes = parse_list_panes(raw)
 
         self.assertEqual(panes[0].pane_id, "%0")
+        self.assertEqual(panes[0].session_name, "main")
+        self.assertEqual(panes[0].window_index, "0")
         self.assertEqual(panes[1].left, 120)
         self.assertEqual(panes[1].width, 120)
 
     def test_parse_list_panes_skips_malformed_numeric_fields(self) -> None:
-        raw = "%0\tcockpit\tpython\t0\t0\t120\t40\n%4\tssh\tbash\tnan\t0\t120\t40\n"
+        raw = "%0\tmain\t0\tcockpit\tpython\t0\t0\t120\t40\n%4\tmain\t1\tssh\tbash\tnan\t0\t120\t40\n"
         panes = parse_list_panes(raw)
 
         self.assertEqual([pane.pane_id for pane in panes], ["%0"])
 
+    def test_parse_list_panes_extracts_session_window(self) -> None:
+        raw = (
+            "%1\tmain\t0\tserver\tbash\t0\t0\t100\t40\t1\n"
+            "%9\twork\t2\tpytest\tpython\t100\t0\t100\t40\t0\n"
+        )
+        panes = parse_list_panes(raw)
+
+        self.assertEqual([(pane.pane_id, pane.session_name, pane.window_index) for pane in panes], [
+            ("%1", "main", "0"),
+            ("%9", "work", "2"),
+        ])
+        self.assertTrue(panes[0].active)
+        self.assertFalse(panes[1].active)
+
+    def test_pane_display_label_includes_session_window(self) -> None:
+        pane = pane_record("%12", session_name="work", window_index="2", title="pytest")
+
+        self.assertEqual(pane_display_label(pane), "work:2 %12 pytest")
+
+    def test_list_panes_uses_dash_a_flag(self) -> None:
+        client = TmuxClient()
+        completed = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="%0\tmain\t0\tcockpit\tpython\t0\t0\t120\t40\t1\n",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed) as run_mock:
+            panes = client.list_panes(cockpit_pane_id="%0")
+
+        command = run_mock.call_args.args[0]
+        self.assertEqual(command[:3], ["tmux", "list-panes", "-a"])
+        self.assertNotIn("-t", command)
+        self.assertIn("#{session_name}", command[-1])
+        self.assertIn("#{window_index}", command[-1])
+        self.assertEqual(panes[0].session_name, "main")
+
     def test_tmux_client_returns_empty_when_tmux_list_panes_fails(self) -> None:
         client = TmuxClient()
-        with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run_mock:
-            run_mock.side_effect = subprocess.CalledProcessError(1, ["tmux", "list-panes"])
-
+        with patch(
+            "paulshaclaw.cockpit.tmux.subprocess.run",
+            side_effect=subprocess.CalledProcessError(1, ["tmux", "list-panes", "-a"]),
+        ):
             panes = client.list_panes(cockpit_pane_id="%0")
 
         self.assertEqual(panes, ())
 
     def test_choose_startup_slot_excludes_cockpit_even_when_same_size(self) -> None:
         panes = (
-            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
-            PaneRecord("%4", "ssh", "bash", 120, 0, 120, 40, False, ()),
-            PaneRecord("%1", "agent1", "node", 0, 40, 80, 20, False, ()),
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
         )
 
-        anchor = choose_startup_slot(panes, cockpit_pane_id="%0")
+        anchor = choose_startup_slot(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        self.assertEqual(anchor, SlotAnchor(left=120, top=0, width=120, height=40))
+
+    def test_choose_startup_slot_only_considers_cockpit_session(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="huge", left=0, top=0, width=300, height=80),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+        )
+
+        anchor = choose_startup_slot(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
         self.assertEqual(anchor, SlotAnchor(left=120, top=0, width=120, height=40))
 
     def test_state_segments_active_and_candidate_sections(self) -> None:
         panes = (
-            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
-            PaneRecord("%4", "ssh", "bash", 120, 0, 120, 40, False, ()),
-            PaneRecord("%1", "agent1", "node", 0, 40, 80, 20, False, ()),
-            PaneRecord("%2", "iperf", "iperf3", 80, 40, 80, 20, False, ()),
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
         )
-        state = CockpitState.from_panes(panes, cockpit_pane_id="%0")
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
         self.assertEqual([pane.pane_id for pane in state.active_section], ["%4"])
         self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%1", "%2"])
 
-    def test_state_marks_active_slot_lost_when_no_pane_matches_anchor(self) -> None:
+    def test_active_section_excludes_other_sessions_with_same_anchor(self) -> None:
         panes = (
-            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
-            PaneRecord("%1", "agent1", "node", 0, 40, 80, 20, False, ()),
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="active", left=120, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="collision", left=120, top=0, width=120, height=40),
         )
-        state = CockpitState.from_panes(panes, cockpit_pane_id="%0")
-        shifted = (
-            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
-            PaneRecord("%1", "agent1", "node", 80, 40, 80, 20, False, ()),
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        self.assertEqual([pane.pane_id for pane in state.active_section], ["%4"])
+        self.assertIn("%9", [pane.pane_id for pane in state.candidate_section])
+
+    def test_candidate_section_sorted_by_session_window_pane(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", window_index="0", left=120, top=0, width=120, height=40),
+            pane_record("%7", session_name="beta", window_index="2", left=0, top=0, width=80, height=20),
+            pane_record("%3", session_name="alpha", window_index="1", left=0, top=0, width=80, height=20),
+            pane_record("%2", session_name="beta", window_index="1", left=0, top=0, width=80, height=20),
         )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
-        degraded = state.refresh(shifted)
+        self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%3", "%2", "%7"])
 
-        self.assertEqual(degraded.degraded_reason, "active-slot-lost")
-        self.assertEqual(degraded.active_section, ())
+    def test_candidate_section_sorts_window_index_numerically(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", window_index="0", left=120, top=0, width=120, height=40),
+            pane_record("%10", session_name="alpha", window_index="10", left=0, top=0, width=80, height=20),
+            pane_record("%2", session_name="alpha", window_index="2", left=0, top=0, width=80, height=20),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        ids = [pane.pane_id for pane in state.candidate_section]
+        self.assertLess(ids.index("%2"), ids.index("%10"))
+
+    def test_refresh_active_lost_only_when_cockpit_session_pane_gone(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="active", left=120, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="remote", left=120, top=0, width=120, height=40),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        stable = state.refresh((
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="active", left=120, top=0, width=120, height=40),
+        ))
+        self.assertIsNone(stable.degraded_reason)
+
+        lost = state.refresh((
+            pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%9", session_name="work", title="collision", left=120, top=0, width=120, height=40),
+        ))
+        self.assertEqual(lost.degraded_reason, "active-slot-lost")
+        self.assertEqual(lost.active_section, ())
+
+    def test_help_modal_lists_all_bindings(self) -> None:
+        help_text = HelpModal.render_help_text(CockpitApp.BINDINGS)
+
+        self.assertIn("up: ↑/↓ 選擇", help_text)
+        self.assertIn("down: ↑/↓ 選擇", help_text)
+        self.assertIn("enter: Enter 把選中的 pane 換到我面前", help_text)
+        self.assertIn("c: c 回 cockpit", help_text)
+        self.assertIn("question_mark: ? 顯示說明", help_text)
+        self.assertIn("all local tmux sessions", help_text)
 
 
 class Stage11ArtifactTests(unittest.TestCase):
@@ -145,19 +308,25 @@ class FakeLayoutActionService(LayoutActionService):
         self.focused.append(pane_id)
 
 
+class DummyCockpitApp:
+    def run(self) -> None:
+        return None
+
+
 @unittest.skipUnless(HAS_TEXTUAL, "requires textual with run_test support")
 class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_enter_swaps_selected_candidate_and_focuses_new_active_pane(self) -> None:
         panes = (
-            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
-            PaneRecord("%4", "ssh", "bash", 120, 0, 120, 40, False, ("active",)),
-            PaneRecord("%1", "agent1", "node", 0, 40, 80, 20, False, ("job 1",)),
-            PaneRecord("%2", "iperf", "iperf3", 80, 40, 80, 20, False, ("traffic",)),
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40, preview=("active",)),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20, preview=("job 1",)),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20, preview=("traffic",)),
         )
         actions = FakeLayoutActionService()
         app = CockpitApp.from_snapshot(
             panes=panes,
             cockpit_pane_id="%0",
+            cockpit_session_name="main",
             jobs_by_pane={"%1": (JobSummary("registry", "running", "trace-1", "%1", "job-1"),)},
             actions=actions,
         )
@@ -170,14 +339,57 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_c_key_returns_focus_to_cockpit_pane(self) -> None:
         panes = (
-            PaneRecord("%0", "cockpit", "python", 0, 0, 120, 40, False, ()),
-            PaneRecord("%4", "ssh", "bash", 120, 0, 120, 40, False, ()),
-            PaneRecord("%1", "agent1", "node", 0, 40, 80, 20, False, ()),
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
         )
         actions = FakeLayoutActionService()
-        app = CockpitApp.from_snapshot(panes=panes, cockpit_pane_id="%0", jobs_by_pane={}, actions=actions)
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+        )
 
         async with app.run_test() as pilot:
             await pilot.press("c")
 
         self.assertEqual(actions.focused[-1], "%0")
+
+    async def test_question_mark_opens_help_modal(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
+        )
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("?")
+            self.assertIsInstance(app.screen, HelpModal)
+
+    async def test_help_modal_dismisses_on_escape(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
+        )
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("?")
+            await pilot.press("escape")
+            self.assertNotIsInstance(app.screen, HelpModal)

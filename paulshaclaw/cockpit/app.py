@@ -48,17 +48,23 @@ except Exception:  # pragma: no cover - fallback when textual not installed
             pass
 
 from .actions import LayoutActionService
+from .help import HelpModal
 from .models import JobSummary, PaneRecord
 from .store import CockpitState
+
+
+def pane_display_label(pane: PaneRecord) -> str:
+    return f"{pane.session_name}:{pane.window_index} {pane.pane_id} {pane.title}"
 
 
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Stage 11 Cockpit"
     BINDINGS = [
-        Binding("up", "move_up", "Up"),
-        Binding("down", "move_down", "Down"),
-        Binding("enter", "swap_selected", "Swap"),
-        Binding("c", "focus_cockpit", "Cockpit"),
+        Binding("up", "move_up", "↑/↓ 選擇"),
+        Binding("down", "move_down", "↑/↓ 選擇"),
+        Binding("enter", "swap_selected", "Enter 把選中的 pane 換到我面前"),
+        Binding("c", "focus_cockpit", "c 回 cockpit"),
+        Binding("question_mark", "show_help", "? 顯示說明"),
     ]
 
     def __init__(
@@ -81,12 +87,17 @@ class CockpitApp(App[None]):
         *,
         panes: tuple[PaneRecord, ...],
         cockpit_pane_id: str,
+        cockpit_session_name: str,
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
         pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
     ) -> "CockpitApp":
         return cls(
-            state=CockpitState.from_panes(panes, cockpit_pane_id=cockpit_pane_id),
+            state=CockpitState.from_panes(
+                panes,
+                cockpit_pane_id=cockpit_pane_id,
+                cockpit_session_name=cockpit_session_name,
+            ),
             jobs_by_pane=jobs_by_pane,
             actions=actions,
             pane_loader=pane_loader,
@@ -136,6 +147,9 @@ class CockpitApp(App[None]):
     def action_focus_cockpit(self) -> None:
         self.actions.return_to_cockpit(self.state.cockpit_pane_id)
 
+    def action_show_help(self) -> None:
+        self.push_screen(HelpModal(self.BINDINGS))
+
     def on_key(self, event: object) -> None:
         # Pilot key events are delivered as objects with either `key` or
         # `character` attributes depending on Textual version. Handle only
@@ -158,6 +172,8 @@ class CockpitApp(App[None]):
             self.action_swap_selected()
         elif key == "c":
             self.action_focus_cockpit()
+        elif key == "?" or key == "question_mark":
+            self.action_show_help()
 
     def _reconcile_state(self) -> None:
         if self.pane_loader is None:
@@ -170,16 +186,20 @@ class CockpitApp(App[None]):
 
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane
-        active_text = "<missing>" if active is None else f"ACTIVE {active.pane_id} {active.title} {active.command}"
+        active_text = (
+            "<missing>"
+            if active is None
+            else f"ACTIVE {pane_display_label(active)} {active.command}"
+        )
         self.query_one("#active-slot", Static).update(active_text)
 
         work_list = self.query_one("#work-list", ListView)
         work_list.clear()
         if active is not None:
-            work_list.append(ListItem(Static(f"[ACTIVE] {active.pane_id} {active.title}")))
+            work_list.append(ListItem(Static(f"[ACTIVE] {pane_display_label(active)}")))
         for pane in self.state.candidate_section:
             prefix = ">" if self.state.selected_pane and pane.pane_id == self.state.selected_pane.pane_id else " "
-            work_list.append(ListItem(Static(f"{prefix} {pane.pane_id} {pane.title}")))
+            work_list.append(ListItem(Static(f"{prefix} {pane_display_label(pane)}")))
 
         selected = self.state.selected_pane
         if selected is None:
