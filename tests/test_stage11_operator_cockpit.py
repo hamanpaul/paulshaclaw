@@ -95,6 +95,22 @@ class Stage11CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(from_snapshot.call_args.kwargs["cockpit_session_name"], "main")
 
+    def test_main_returns_zero_on_once_flag_without_starting_ui(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", session_name="main", title="ssh", command="bash", left=120, width=120, height=40),
+        )
+        with (
+            patch.object(TmuxClient, "list_panes", return_value=panes),
+            patch("paulshaclaw.cockpit.__main__.ArtifactAdapter") as adapter_class,
+            patch.object(CockpitApp, "from_snapshot") as from_snapshot,
+        ):
+            adapter_class.return_value.load_jobs_by_pane.return_value = {}
+            exit_code = cockpit_main.main(["--cockpit-pane", "%0", "--once"])
+
+        self.assertEqual(exit_code, 0)
+        from_snapshot.assert_not_called()
+
 
 class Stage11StateTests(unittest.TestCase):
     def test_parse_list_panes_extracts_geometry(self) -> None:
