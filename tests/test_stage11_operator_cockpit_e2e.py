@@ -30,7 +30,7 @@ class Stage11TmuxE2ETests(unittest.TestCase):
         self._tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-h", "-t", cockpit_pane_id, "bash")
         self._tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-v", "-t", cockpit_pane_id, "bash")
 
-        client = TmuxClient(session_name=session_name)
+        client = TmuxClient()
         initial_panes = client.list_panes(cockpit_pane_id=cockpit_pane_id)
         app = CockpitApp.from_snapshot(
             panes=initial_panes,

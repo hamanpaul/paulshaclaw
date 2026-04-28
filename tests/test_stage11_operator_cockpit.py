@@ -194,6 +194,18 @@ class Stage11StateTests(unittest.TestCase):
 
         self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%3", "%2", "%7"])
 
+    def test_candidate_section_sorts_window_index_numerically(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", window_index="0", left=120, top=0, width=120, height=40),
+            pane_record("%10", session_name="alpha", window_index="10", left=0, top=0, width=80, height=20),
+            pane_record("%2", session_name="alpha", window_index="2", left=0, top=0, width=80, height=20),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        ids = [pane.pane_id for pane in state.candidate_section]
+        self.assertLess(ids.index("%2"), ids.index("%10"))
+
     def test_refresh_active_lost_only_when_cockpit_session_pane_gone(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", left=0, top=0, width=120, height=40),

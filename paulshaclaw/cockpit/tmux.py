@@ -60,9 +60,6 @@ def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
 
 
 class TmuxClient:
-    def __init__(self, session_name: str | None = None) -> None:
-        self.session_name = session_name
-
     def list_panes(self, *, cockpit_pane_id: str) -> tuple[PaneRecord, ...]:
         try:
             completed = subprocess.run(
