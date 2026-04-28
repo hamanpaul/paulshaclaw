@@ -55,6 +55,7 @@ class Stage11FakeMultiSessionE2ETests(unittest.TestCase):
         )
 
         self.assertIn("%12", [pane.pane_id for pane in app.state.candidate_section])
+        self.assertNotIn("%12", [pane.pane_id for pane in app.state.active_section])
 
 
 @unittest.skipUnless(shutil.which("tmux"), "requires tmux")
@@ -65,7 +66,7 @@ class Stage11TmuxE2ETests(unittest.TestCase):
         *,
         session_name: str,
         cockpit_pane_id: str,
-    ):
+    ) -> tuple[PaneRecord, ...]:
         return tuple(
             pane
             for pane in client.list_panes(cockpit_pane_id=cockpit_pane_id)
