@@ -21,7 +21,7 @@ except Exception:  # ModuleNotFoundError or other import-time issues
 
 from paulshaclaw.cockpit.actions import LayoutActionService
 from paulshaclaw.cockpit import __main__ as cockpit_main
-from paulshaclaw.cockpit.app import CockpitApp
+from paulshaclaw.cockpit.app import CockpitApp, pane_display_label
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import TmuxClient, parse_list_panes
@@ -78,6 +78,23 @@ class Stage11CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertIn("cockpit pane not found: %404", stderr.getvalue())
 
+    def test_main_derives_cockpit_session_from_pane_record(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", session_name="main", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%9", session_name="work", title="pytest", command="python", width=80, height=20),
+        )
+        with (
+            patch.object(TmuxClient, "list_panes", return_value=panes),
+            patch("paulshaclaw.cockpit.__main__.ArtifactAdapter") as adapter_class,
+            patch.object(CockpitApp, "from_snapshot", return_value=DummyCockpitApp()) as from_snapshot,
+        ):
+            adapter_class.return_value.load_jobs_by_pane.return_value = {}
+            exit_code = cockpit_main.main(["--cockpit-pane", "%0"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(from_snapshot.call_args.kwargs["cockpit_session_name"], "main")
+
 
 class Stage11StateTests(unittest.TestCase):
     def test_parse_list_panes_extracts_geometry(self) -> None:
@@ -109,6 +126,11 @@ class Stage11StateTests(unittest.TestCase):
         ])
         self.assertTrue(panes[0].active)
         self.assertFalse(panes[1].active)
+
+    def test_pane_display_label_includes_session_window(self) -> None:
+        pane = pane_record("%12", session_name="work", window_index="2", title="pytest")
+
+        self.assertEqual(pane_display_label(pane), "work:2 %12 pytest")
 
     def test_list_panes_uses_dash_a_flag(self) -> None:
         client = TmuxClient()
@@ -259,6 +281,11 @@ class FakeLayoutActionService(LayoutActionService):
         self.focused.append(pane_id)
 
 
+class DummyCockpitApp:
+    def run(self) -> None:
+        return None
+
+
 @unittest.skipUnless(HAS_TEXTUAL, "requires textual with run_test support")
 class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_enter_swaps_selected_candidate_and_focuses_new_active_pane(self) -> None:
@@ -272,6 +299,7 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
         app = CockpitApp.from_snapshot(
             panes=panes,
             cockpit_pane_id="%0",
+            cockpit_session_name="main",
             jobs_by_pane={"%1": (JobSummary("registry", "running", "trace-1", "%1", "job-1"),)},
             actions=actions,
         )
@@ -289,7 +317,13 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
             pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
         )
         actions = FakeLayoutActionService()
-        app = CockpitApp.from_snapshot(panes=panes, cockpit_pane_id="%0", jobs_by_pane={}, actions=actions)
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+        )
 
         async with app.run_test() as pilot:
             await pilot.press("c")

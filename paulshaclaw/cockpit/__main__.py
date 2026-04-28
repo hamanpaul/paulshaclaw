@@ -28,14 +28,16 @@ def main(argv: list[str] | None = None) -> int:
     tmux_client = TmuxClient()
     panes = tmux_client.list_panes(cockpit_pane_id=args.cockpit_pane)
     jobs_by_pane = ArtifactAdapter(coordinator_jobs_dir=args.coordinator_jobs_dir).load_jobs_by_pane()
-    if args.once:
-        return 0
-    if not any(pane.pane_id == args.cockpit_pane for pane in panes):
+    cockpit_pane = next((pane for pane in panes if pane.pane_id == args.cockpit_pane), None)
+    if cockpit_pane is None:
         print(f"cockpit pane not found: {args.cockpit_pane}", file=sys.stderr)
         return 1
+    if args.once:
+        return 0
     app = CockpitApp.from_snapshot(
         panes=panes,
         cockpit_pane_id=args.cockpit_pane,
+        cockpit_session_name=cockpit_pane.session_name,
         jobs_by_pane=jobs_by_pane,
         actions=LayoutActionService(),
         pane_loader=tmux_client.list_panes,

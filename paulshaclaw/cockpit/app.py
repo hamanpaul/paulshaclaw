@@ -52,6 +52,10 @@ from .models import JobSummary, PaneRecord
 from .store import CockpitState
 
 
+def pane_display_label(pane: PaneRecord) -> str:
+    return f"{pane.session_name}:{pane.window_index} {pane.pane_id} {pane.title}"
+
+
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Stage 11 Cockpit"
     BINDINGS = [
@@ -81,12 +85,17 @@ class CockpitApp(App[None]):
         *,
         panes: tuple[PaneRecord, ...],
         cockpit_pane_id: str,
+        cockpit_session_name: str,
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
         pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
     ) -> "CockpitApp":
         return cls(
-            state=CockpitState.from_panes(panes, cockpit_pane_id=cockpit_pane_id),
+            state=CockpitState.from_panes(
+                panes,
+                cockpit_pane_id=cockpit_pane_id,
+                cockpit_session_name=cockpit_session_name,
+            ),
             jobs_by_pane=jobs_by_pane,
             actions=actions,
             pane_loader=pane_loader,
@@ -170,16 +179,20 @@ class CockpitApp(App[None]):
 
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane
-        active_text = "<missing>" if active is None else f"ACTIVE {active.pane_id} {active.title} {active.command}"
+        active_text = (
+            "<missing>"
+            if active is None
+            else f"ACTIVE {pane_display_label(active)} {active.command}"
+        )
         self.query_one("#active-slot", Static).update(active_text)
 
         work_list = self.query_one("#work-list", ListView)
         work_list.clear()
         if active is not None:
-            work_list.append(ListItem(Static(f"[ACTIVE] {active.pane_id} {active.title}")))
+            work_list.append(ListItem(Static(f"[ACTIVE] {pane_display_label(active)}")))
         for pane in self.state.candidate_section:
             prefix = ">" if self.state.selected_pane and pane.pane_id == self.state.selected_pane.pane_id else " "
-            work_list.append(ListItem(Static(f"{prefix} {pane.pane_id} {pane.title}")))
+            work_list.append(ListItem(Static(f"{prefix} {pane_display_label(pane)}")))
 
         selected = self.state.selected_pane
         if selected is None:
