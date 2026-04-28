@@ -14,6 +14,8 @@ class SlotAnchor:
 @dataclass(frozen=True)
 class PaneRecord:
     pane_id: str
+    session_name: str
+    window_index: str
     title: str
     command: str
     left: int
