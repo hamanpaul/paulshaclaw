@@ -22,6 +22,7 @@ except Exception:  # ModuleNotFoundError or other import-time issues
 from paulshaclaw.cockpit.actions import LayoutActionService
 from paulshaclaw.cockpit import __main__ as cockpit_main
 from paulshaclaw.cockpit.app import CockpitApp, pane_display_label
+from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import TmuxClient, parse_list_panes
@@ -265,6 +266,16 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(lost.degraded_reason, "active-slot-lost")
         self.assertEqual(lost.active_section, ())
 
+    def test_help_modal_lists_all_bindings(self) -> None:
+        help_text = HelpModal.render_help_text(CockpitApp.BINDINGS)
+
+        self.assertIn("up: ↑/↓ 選擇", help_text)
+        self.assertIn("down: ↑/↓ 選擇", help_text)
+        self.assertIn("enter: Enter 把選中的 pane 換到我面前", help_text)
+        self.assertIn("c: c 回 cockpit", help_text)
+        self.assertIn("question_mark: ? 顯示說明", help_text)
+        self.assertIn("all local tmux sessions", help_text)
+
 
 class Stage11ArtifactTests(unittest.TestCase):
     def test_artifact_adapter_returns_empty_when_no_pane_hint_exists(self) -> None:
@@ -345,3 +356,40 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("c")
 
         self.assertEqual(actions.focused[-1], "%0")
+
+    async def test_question_mark_opens_help_modal(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
+        )
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("?")
+            self.assertIsInstance(app.screen, HelpModal)
+
+    async def test_help_modal_dismisses_on_escape(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", left=0, top=40, width=80, height=20),
+        )
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("?")
+            await pilot.press("escape")
+            self.assertNotIsInstance(app.screen, HelpModal)

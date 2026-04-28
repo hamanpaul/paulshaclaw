@@ -48,6 +48,7 @@ except Exception:  # pragma: no cover - fallback when textual not installed
             pass
 
 from .actions import LayoutActionService
+from .help import HelpModal
 from .models import JobSummary, PaneRecord
 from .store import CockpitState
 
@@ -59,10 +60,11 @@ def pane_display_label(pane: PaneRecord) -> str:
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Stage 11 Cockpit"
     BINDINGS = [
-        Binding("up", "move_up", "Up"),
-        Binding("down", "move_down", "Down"),
-        Binding("enter", "swap_selected", "Swap"),
-        Binding("c", "focus_cockpit", "Cockpit"),
+        Binding("up", "move_up", "↑/↓ 選擇"),
+        Binding("down", "move_down", "↑/↓ 選擇"),
+        Binding("enter", "swap_selected", "Enter 把選中的 pane 換到我面前"),
+        Binding("c", "focus_cockpit", "c 回 cockpit"),
+        Binding("question_mark", "show_help", "? 顯示說明"),
     ]
 
     def __init__(
@@ -145,6 +147,9 @@ class CockpitApp(App[None]):
     def action_focus_cockpit(self) -> None:
         self.actions.return_to_cockpit(self.state.cockpit_pane_id)
 
+    def action_show_help(self) -> None:
+        self.push_screen(HelpModal(self.BINDINGS))
+
     def on_key(self, event: object) -> None:
         # Pilot key events are delivered as objects with either `key` or
         # `character` attributes depending on Textual version. Handle only
@@ -167,6 +172,8 @@ class CockpitApp(App[None]):
             self.action_swap_selected()
         elif key == "c":
             self.action_focus_cockpit()
+        elif key == "?" or key == "question_mark":
+            self.action_show_help()
 
     def _reconcile_state(self) -> None:
         if self.pane_loader is None:
