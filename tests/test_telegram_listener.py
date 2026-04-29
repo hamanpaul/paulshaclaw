@@ -5,7 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from urllib.request import Request
+from unittest import mock
 
+from paulshaclaw.bot import listener as listener_module
 from paulshaclaw.bot.listener import (
     BotSettings,
     TelegramApiClient,
@@ -100,7 +102,8 @@ class TelegramApiClientTests(unittest.TestCase):
 
         client.get_updates(offset=10, timeout=30)
 
-        self.assertEqual(opener.requests[0]["timeout"], 30)
+        self.assertGreater(opener.requests[0]["timeout"], 30)
+        self.assertEqual(opener.requests[0]["timeout"], 35.0)
 
     def test_send_message_posts_chat_id_and_text(self) -> None:
         opener = FakeOpener([{"ok": True, "result": {"message_id": 7}}])
@@ -250,6 +253,26 @@ class TelegramListenerTests(unittest.TestCase):
 
         self.assertEqual(sleeps, [1.0])
 
+    def test_run_forever_caps_backoff_at_thirty_seconds(self) -> None:
+        class FlakyClient(RecordingClient):
+            def __init__(self) -> None:
+                super().__init__([])
+                self.calls = 0
+
+            def get_updates(self, *, offset: int | None = None, timeout: int = 30) -> list[dict[str, object]]:
+                self.get_updates_calls.append({"offset": offset, "timeout": timeout})
+                self.calls += 1
+                if self.calls <= 7:
+                    raise TelegramApiError(f"boom-{self.calls}")
+                raise KeyboardInterrupt
+
+        sleeps: list[float] = []
+        listener = TelegramListener(client=FlakyClient(), router=FakeRouter({"ok": True, "message": "ok"}), sleep=sleeps.append)
+
+        listener.run_forever()
+
+        self.assertEqual(sleeps, [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0])
+
 
 class ListenerBuildTests(unittest.TestCase):
     def test_build_listener_uses_unavailable_coordinator(self) -> None:
@@ -280,6 +303,55 @@ class ListenerBuildTests(unittest.TestCase):
 
             self.assertFalse(response["ok"])
             self.assertIn("coordinator backend 未設定", response["message"])
+
+
+class ListenerMainTests(unittest.TestCase):
+    def test_main_success_runs_listener(self) -> None:
+        fake_listener = mock.Mock()
+
+        with (
+            mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")) as load_settings,
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()) as api_client,
+            mock.patch("paulshaclaw.bot.listener.validate_bot_identity") as validate_identity,
+            mock.patch("paulshaclaw.bot.listener.build_listener", return_value=fake_listener) as build_listener_mock,
+        ):
+            exit_code = listener_module.main([])
+
+        self.assertEqual(exit_code, 0)
+        load_settings.assert_called_once_with()
+        api_client.assert_called_once_with("fake-token")
+        validate_identity.assert_called_once()
+        build_listener_mock.assert_called_once()
+        fake_listener.run_forever.assert_called_once_with()
+
+    def test_main_returns_one_when_token_missing(self) -> None:
+        with mock.patch("paulshaclaw.bot.listener.load_bot_settings", side_effect=ValueError("PSC_TELEGRAM_BOT_TOKEN 未設定")):
+            exit_code = listener_module.main([])
+
+        self.assertEqual(exit_code, 1)
+
+    def test_main_returns_one_when_config_is_bad(self) -> None:
+        fake_listener = mock.Mock()
+
+        with (
+            mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+            mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+            mock.patch("paulshaclaw.bot.listener.build_listener", side_effect=FileNotFoundError("bad config")),
+        ):
+            exit_code = listener_module.main([])
+
+        self.assertEqual(exit_code, 1)
+
+    def test_main_returns_one_on_telegram_api_error(self) -> None:
+        with (
+            mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+            mock.patch("paulshaclaw.bot.listener.validate_bot_identity", side_effect=TelegramApiError("bad bot")),
+        ):
+            exit_code = listener_module.main([])
+
+        self.assertEqual(exit_code, 1)
 
 
 if __name__ == "__main__":

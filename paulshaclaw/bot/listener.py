@@ -53,7 +53,7 @@ class TelegramApiClient:
         payload: dict[str, object] = {"timeout": timeout}
         if offset is not None:
             payload["offset"] = offset
-        result = self._post("getUpdates", payload, timeout=float(timeout))
+        result = self._post("getUpdates", payload, timeout=float(timeout) + 5.0)
         if not isinstance(result, list):
             raise TelegramApiError("Telegram getUpdates returned non-list result")
         updates: list[dict[str, object]] = []
