@@ -30,7 +30,12 @@ from paulshaclaw.cost.models import (
     ProviderSnapshot,
     UsageWindow,
 )
-from paulshaclaw.cost.providers import collect_all, collect_codex, collect_copilot
+from paulshaclaw.cost.providers import (
+    _read_local_observed_total,
+    collect_all,
+    collect_codex,
+    collect_copilot,
+)
 
 
 class Stage8ModelFormatterTests(unittest.TestCase):
@@ -380,7 +385,43 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIn("month=", request_url)
         self.assertEqual(request_headers["Authorization"], "Bearer secret-token")
 
-    def test_collect_copilot_runtime_local_fallback_only_marks_active_account(self) -> None:
+    def test_collect_copilot_fetches_runtime_enterprise_usage_without_injected_fetcher(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: paulc-arc
+                      label: arc
+                      kind: company
+                      monthly_allowance: 300
+                      enterprise: acme-ent
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        with (
+            patch("paulshaclaw.cost.providers._get_github_token", return_value="secret-token") as token_mock,
+            patch(
+                "paulshaclaw.cost.providers._fetch_json",
+                return_value={"usageItems": [{"netQuantity": 127}]},
+            ) as fetch_mock,
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.accounts[0].used_requests, 127)
+        self.assertEqual(provider.accounts[0].source, "github_enterprise_billing")
+        token_mock.assert_called_once_with("paulc-arc")
+        request_url = fetch_mock.call_args.args[0]
+        self.assertIn("/enterprises/acme-ent/settings/billing/premium_request/usage", request_url)
+        self.assertIn("user=paulc-arc", request_url)
+
+    def test_collect_copilot_runtime_does_not_use_unattributed_local_history(self) -> None:
         path = self.write_config(
             """
             workspaces:
@@ -394,11 +435,6 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                       label: haman
                       kind: personal
                       monthly_allowance: 1500
-                    - id: paulc-arc
-                      label: arc
-                      kind: company
-                      monthly_allowance: 300
-                      org: acme
             """
         )
         cfg = load_cost_config(config_path=path)
@@ -408,18 +444,35 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers._collect_local_observed_usage",
                 return_value={"hamanpaul": 12},
-            ),
+            ) as local_mock,
         ):
             provider = collect_copilot(cfg)
 
-        self.assertEqual(provider.source_status, "stale")
-        self.assertEqual(
-            [(account.account_id, account.source, account.used_requests) for account in provider.accounts],
-            [
-                ("hamanpaul", "local_observed", 12),
-                ("paulc-arc", "unknown", None),
-            ],
-        )
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.accounts[0].source, "unknown")
+        self.assertIsNone(provider.accounts[0].used_requests)
+        local_mock.assert_not_called()
+
+    def test_read_local_observed_total_parses_real_shutdown_event_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
+            root.mkdir(parents=True)
+            (root / "events.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps({"type": "session.start", "data": {"context": {"cwd": "/tmp/ws"}}}),
+                        json.dumps({"type": "session.shutdown", "data": {"totalPremiumRequests": 5}}),
+                        json.dumps({"type": "session.shutdown", "data": {"totalPremiumRequests": 7}}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
+                total = _read_local_observed_total()
+
+        self.assertEqual(total, 12)
 
     def test_collect_copilot_keeps_fresh_status_when_other_accounts_are_unknown(self) -> None:
         path = self.write_config(

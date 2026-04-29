@@ -115,7 +115,7 @@ def _build_usage_url(account: CopilotAccountConfig) -> tuple[str, str]:
 
     if account.kind == "company" and account.enterprise:
         params["user"] = account.account_id
-        path = f"/enterprises/{account.enterprise}/settings/billing/usage/premium_requests"
+        path = f"/enterprises/{account.enterprise}/settings/billing/premium_request/usage"
         source = "github_enterprise_billing"
     elif account.kind == "company" and account.org:
         params["user"] = account.account_id
@@ -178,13 +178,12 @@ def _read_local_observed_total() -> int:
                         continue
                     if not isinstance(payload, dict):
                         continue
-                    data = payload.get("session.shutdown")
+                    if payload.get("type") != "session.shutdown":
+                        continue
+                    data = payload.get("data")
                     if not isinstance(data, dict):
                         continue
-                    nested = data.get("data")
-                    if not isinstance(nested, dict):
-                        continue
-                    value = nested.get("totalPremiumRequests")
+                    value = data.get("totalPremiumRequests")
                     try:
                         total += int(value)
                     except (TypeError, ValueError):
@@ -257,11 +256,6 @@ def collect_copilot(
                 )
                 has_fresh = True
                 continue
-
-        if fetcher is None and resolved_local_observed is None:
-            resolved_local_observed = _collect_local_observed_usage(
-                {configured.account_id for configured in config.copilot_accounts}
-            )
 
         if resolved_local_observed is not None and account.account_id in resolved_local_observed:
             accounts.append(
