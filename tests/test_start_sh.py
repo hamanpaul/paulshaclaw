@@ -50,14 +50,8 @@ FAKE_PYTHON = textwrap.dedent(
 
         if module == "paulshaclaw.cockpit":
             Path(os.environ["FAKE_COCKPIT_STARTED"]).write_text("started", encoding="utf-8")
+            Path(os.environ["FAKE_COCKPIT_PIDFILE"]).write_text(str(os.getpid()), encoding="utf-8")
             if os.environ.get("FAKE_COCKPIT_MODE") == "exit":
-                self_wait_for = Path(os.environ["FAKE_MONITOR_PIDFILE"]), Path(
-                    os.environ["FAKE_TELEGRAM_PIDFILE"]
-                )
-                for path in self_wait_for:
-                    deadline = time.monotonic() + 5.0
-                    while time.monotonic() < deadline and not path.exists():
-                        time.sleep(0.02)
                 return 0
             signal.pause()
             return 0
@@ -96,6 +90,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             fake_scripts = repo_root / "scripts"
             monitor_pidfile = tmpdir_path / "monitor.pid"
             telegram_pidfile = tmpdir_path / "telegram.pid"
+            cockpit_pidfile = tmpdir_path / "cockpit.pid"
             cockpit_started = tmpdir_path / "cockpit.started"
 
             fake_bin.mkdir(parents=True)
@@ -119,6 +114,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["TMUX_PANE"] = "%0"
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_TELEGRAM_PIDFILE"] = str(telegram_pidfile)
+            env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
             if cockpit_mode is not None:
                 env["FAKE_COCKPIT_MODE"] = cockpit_mode
@@ -135,22 +131,32 @@ class StartScriptLifecycleTests(unittest.TestCase):
             try:
                 self._wait_for_file(monitor_pidfile)
                 self._wait_for_file(telegram_pidfile)
+                self._wait_for_file(cockpit_pidfile)
                 self._wait_for_file(cockpit_started)
                 monitor_pid = int(monitor_pidfile.read_text(encoding="utf-8").strip())
                 telegram_pid = int(telegram_pidfile.read_text(encoding="utf-8").strip())
+                cockpit_pid = int(cockpit_pidfile.read_text(encoding="utf-8").strip())
 
                 if signal_to_wrapper is None:
                     proc.wait(timeout=10)
                 else:
-                    os.kill(proc.pid, signal_to_wrapper)
+                    if signal_to_wrapper == signal.SIGINT:
+                        os.killpg(os.getpgid(cockpit_pid), signal_to_wrapper)
+                    else:
+                        os.kill(proc.pid, signal_to_wrapper)
                     proc.wait(timeout=10)
 
-                self.assertIn(proc.returncode, (0, 130, 143))
+                expected_returncode = 0 if cockpit_mode == "exit" else (
+                    130 if signal_to_wrapper == signal.SIGINT else 143 if signal_to_wrapper == signal.SIGTERM else proc.returncode
+                )
+                self.assertEqual(proc.returncode, expected_returncode)
 
                 with self.assertRaises(ProcessLookupError):
                     os.kill(monitor_pid, 0)
                 with self.assertRaises(ProcessLookupError):
                     os.kill(telegram_pid, 0)
+                with self.assertRaises(ProcessLookupError):
+                    os.kill(cockpit_pid, 0)
 
             finally:
                 if proc.poll() is None:

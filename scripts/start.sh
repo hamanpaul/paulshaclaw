@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+set -m
 
 REPO=/home/paul_chen/prj_pri/paulshaclaw
 PY=$REPO/.venv/bin/python
@@ -13,22 +14,32 @@ cleanup() {
   CLEANED_UP=1
   trap - EXIT INT TERM
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${COCKPIT_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${COCKPIT_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       wait "$pid" 2>/dev/null || true
     fi
   done
 }
 
+cleanup_term() {
+  cleanup
+  exit 143
+}
+
+cleanup_int() {
+  cleanup
+  exit 130
+}
+
 trap cleanup EXIT
-trap 'cleanup; exit 130' INT
-trap 'cleanup; exit 143' TERM
+trap cleanup_int INT
+trap cleanup_term TERM
 
 # Stage 9: project-monitor (background)
 "$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
@@ -40,7 +51,15 @@ echo "monitor pid=$MONITOR_PID"
 TELEGRAM_PID=$!
 echo "telegram pid=$TELEGRAM_PID"
 
-# Stage 11: cockpit TUI (wrapper-managed wait, requires tmux)
+# Stage 11: cockpit TUI (background wait, requires tmux)
 "$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" &
 COCKPIT_PID=$!
-wait "$COCKPIT_PID"
+while kill -0 "$COCKPIT_PID" 2>/dev/null; do
+  sleep 0.1 || true
+done
+if wait "$COCKPIT_PID"; then
+  exit 0
+else
+  cockpit_status=$?
+  exit "$cockpit_status"
+fi
