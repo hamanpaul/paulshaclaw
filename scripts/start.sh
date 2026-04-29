@@ -41,6 +41,35 @@ trap cleanup EXIT
 trap cleanup_int INT
 trap cleanup_term TERM
 
+apply_stage8_footer() {
+  if [[ -z "${TMUX:-}" ]]; then
+    return 0
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local footer_cmd
+  local existing_right
+  footer_cmd="#(${PY} -m paulshaclaw.cost.status)"
+  existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
+
+  tmux set-option status-interval 30
+  case "${existing_right}" in
+    *"paulshaclaw.cost.status"*)
+      return 0
+      ;;
+    "")
+      tmux set-option status-right "${footer_cmd}"
+      ;;
+    *)
+      tmux set-option status-right "${existing_right} ${footer_cmd}"
+      ;;
+  esac
+}
+
+apply_stage8_footer
+
 # Stage 9: project-monitor (background)
 "$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
 MONITOR_PID=$!

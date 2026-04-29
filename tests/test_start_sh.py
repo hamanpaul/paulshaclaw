@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import signal
 import subprocess
@@ -56,6 +57,10 @@ FAKE_PYTHON = textwrap.dedent(
             signal.pause()
             return 0
 
+        if module == "paulshaclaw.cost.status":
+            print("cdx 5h:$12.34 wk:$56.78")
+            return 0
+
         if module == "paulshaclaw.cockpit":
             Path(os.environ["FAKE_COCKPIT_STARTED"]).write_text("started", encoding="utf-8")
             Path(os.environ["FAKE_COCKPIT_PIDFILE"]).write_text(str(os.getpid()), encoding="utf-8")
@@ -76,6 +81,36 @@ FAKE_PYTHON = textwrap.dedent(
 
         print(f"unexpected argv: {sys.argv!r}", file=sys.stderr)
         return 2
+
+
+    if __name__ == "__main__":
+        raise SystemExit(main())
+    """
+)
+
+FAKE_TMUX = textwrap.dedent(
+    """\
+    #!/usr/bin/env python3
+    from __future__ import annotations
+
+    import json
+    import os
+    import sys
+    from pathlib import Path
+
+
+    def main() -> int:
+        log_path = Path(os.environ["FAKE_TMUX_LOG"])
+        with log_path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(sys.argv[1:]) + "\\n")
+
+        if sys.argv[1:] == ["show-option", "-qv", "status-right"]:
+            value = os.environ.get("FAKE_TMUX_STATUS_RIGHT", "")
+            if value:
+                print(value)
+            return 0
+
+        return 0
 
 
     if __name__ == "__main__":
@@ -288,3 +323,93 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 return
             time.sleep(0.05)
         self.fail(f"timed out waiting for {needle!r} in {path}")
+
+
+class StartScriptStage8FooterTests(unittest.TestCase):
+    def test_fake_python_accepts_stage8_status_cli(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            fake_python = tmpdir_path / "python"
+            fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            completed = subprocess.run(
+                [str(fake_python), "-m", "paulshaclaw.cost.status"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0)
+            self.assertEqual(completed.stdout.strip(), "cdx 5h:$12.34 wk:$56.78")
+            self.assertEqual(completed.stderr, "")
+
+    def test_start_script_applies_stage8_footer_inside_tmux(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            repo_root = tmpdir_path / "repo"
+            home_dir = tmpdir_path / "home"
+            fake_bin = repo_root / ".venv" / "bin"
+            fake_scripts = repo_root / "scripts"
+            tmux_log = tmpdir_path / "tmux.log"
+            monitor_pidfile = tmpdir_path / "monitor.pid"
+            cockpit_pidfile = tmpdir_path / "cockpit.pid"
+            cockpit_started = tmpdir_path / "cockpit.started"
+
+            fake_bin.mkdir(parents=True)
+            fake_scripts.mkdir(parents=True)
+            home_dir.mkdir(parents=True)
+
+            fake_python = fake_bin / "python"
+            fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            fake_tmux = fake_bin / "tmux"
+            fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
+            fake_tmux.chmod(0o755)
+
+            start_sh = fake_scripts / "start.sh"
+            start_sh.write_text(
+                START_SH.read_text(encoding="utf-8").replace(
+                    "REPO=/home/paul_chen/prj_pri/paulshaclaw",
+                    f"REPO={repo_root}",
+                ),
+                encoding="utf-8",
+            )
+            start_sh.chmod(0o755)
+
+            env = dict(os.environ)
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            env["TMUX_PANE"] = "%0"
+            env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
+            env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
+            env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            env["FAKE_COCKPIT_MODE"] = "exit"
+            env["FAKE_TMUX_LOG"] = str(tmux_log)
+            env["FAKE_TMUX_STATUS_RIGHT"] = "#[fg=green]existing"
+
+            completed = subprocess.run(
+                ["bash", str(start_sh)],
+                cwd=repo_root,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertTrue(tmux_log.exists(), "tmux should be invoked inside tmux")
+            calls = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
+            self.assertIn(["show-option", "-qv", "status-right"], calls)
+            self.assertIn(["set-option", "status-interval", "30"], calls)
+            self.assertNotIn(["set-option", "-g", "status-interval", "30"], calls)
+
+            status_right_calls = [call for call in calls if call[:2] == ["set-option", "status-right"]]
+            self.assertEqual(len(status_right_calls), 1)
+            status_right = status_right_calls[0][2]
+            self.assertIn("#[fg=green]existing", status_right)
+            self.assertIn("paulshaclaw.cost.status", status_right)
+            self.assertNotIn("set-option -g", "\n".join(" ".join(call) for call in calls))
+            self.assertFalse((home_dir / ".tmux.conf").exists())
