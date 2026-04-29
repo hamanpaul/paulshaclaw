@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
-from paulshaclaw.core.config import load_config
+from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
 
 
@@ -255,6 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             client=client,
             poll_timeout=args.poll_timeout,
         )
+        print("Telegram listener ready", flush=True)
         listener.run_forever()
     except (ValueError, FileNotFoundError, TelegramApiError) as error:
         print(f"錯誤: {error}", file=sys.stderr)
