@@ -106,6 +106,8 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 "REPO=/home/paul_chen/prj_pri/paulshaclaw",
                 f"REPO={repo_root}",
             )
+            self.assertNotIn("set -m", start_sh_text)
+            self.assertNotIn("while kill -0", start_sh_text)
             start_sh.write_text(start_sh_text, encoding="utf-8")
             start_sh.chmod(0o755)
 
@@ -141,7 +143,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     proc.wait(timeout=10)
                 else:
                     if signal_to_wrapper == signal.SIGINT:
-                        os.killpg(os.getpgid(cockpit_pid), signal_to_wrapper)
+                        os.killpg(os.getpgid(proc.pid), signal_to_wrapper)
                     else:
                         os.kill(proc.pid, signal_to_wrapper)
                     proc.wait(timeout=10)

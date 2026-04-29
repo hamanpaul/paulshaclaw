@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-set -m
 
 REPO=/home/paul_chen/prj_pri/paulshaclaw
 PY=$REPO/.venv/bin/python
@@ -51,12 +50,9 @@ echo "monitor pid=$MONITOR_PID"
 TELEGRAM_PID=$!
 echo "telegram pid=$TELEGRAM_PID"
 
-# Stage 11: cockpit TUI (background wait, requires tmux)
+# Stage 11: cockpit TUI (foreground status path, requires tmux)
 "$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" &
 COCKPIT_PID=$!
-while kill -0 "$COCKPIT_PID" 2>/dev/null; do
-  sleep 0.1 || true
-done
 if wait "$COCKPIT_PID"; then
   exit 0
 else
