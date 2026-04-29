@@ -52,6 +52,13 @@ FAKE_PYTHON = textwrap.dedent(
             Path(os.environ["FAKE_COCKPIT_STARTED"]).write_text("started", encoding="utf-8")
             Path(os.environ["FAKE_COCKPIT_PIDFILE"]).write_text(str(os.getpid()), encoding="utf-8")
             if os.environ.get("FAKE_COCKPIT_MODE") == "exit":
+                for pidfile_name in ("FAKE_MONITOR_PIDFILE", "FAKE_TELEGRAM_PIDFILE"):
+                    pidfile = Path(os.environ[pidfile_name])
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline:
+                        if pidfile.exists() and pidfile.read_text(encoding="utf-8").strip():
+                            break
+                        time.sleep(0.02)
                 return 0
             signal.pause()
             return 0
@@ -131,13 +138,10 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 text=True,
             )
             try:
-                self._wait_for_file(monitor_pidfile)
-                self._wait_for_file(telegram_pidfile)
-                self._wait_for_file(cockpit_pidfile)
+                monitor_pid = self._wait_for_pidfile_int(monitor_pidfile)
+                telegram_pid = self._wait_for_pidfile_int(telegram_pidfile)
+                cockpit_pid = self._wait_for_pidfile_int(cockpit_pidfile)
                 self._wait_for_file(cockpit_started)
-                monitor_pid = int(monitor_pidfile.read_text(encoding="utf-8").strip())
-                telegram_pid = int(telegram_pidfile.read_text(encoding="utf-8").strip())
-                cockpit_pid = int(cockpit_pidfile.read_text(encoding="utf-8").strip())
 
                 if signal_to_wrapper is None:
                     proc.wait(timeout=10)
@@ -166,13 +170,21 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     proc.wait(timeout=10)
                 if monitor_pidfile.exists():
                     try:
-                        os.kill(int(monitor_pidfile.read_text(encoding="utf-8").strip()), signal.SIGKILL)
+                        monitor_pid_text = monitor_pidfile.read_text(encoding="utf-8").strip()
+                        if monitor_pid_text:
+                            os.kill(int(monitor_pid_text), signal.SIGKILL)
                     except ProcessLookupError:
+                        pass
+                    except ValueError:
                         pass
                 if telegram_pidfile.exists():
                     try:
-                        os.kill(int(telegram_pidfile.read_text(encoding="utf-8").strip()), signal.SIGKILL)
+                        telegram_pid_text = telegram_pidfile.read_text(encoding="utf-8").strip()
+                        if telegram_pid_text:
+                            os.kill(int(telegram_pid_text), signal.SIGKILL)
                     except ProcessLookupError:
+                        pass
+                    except ValueError:
                         pass
 
     def _wait_for_file(self, path: Path, timeout: float = 5.0) -> None:
@@ -182,3 +194,13 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 return
             time.sleep(0.05)
         self.fail(f"timed out waiting for {path}")
+
+    def _wait_for_pidfile_int(self, path: Path, timeout: float = 5.0) -> int:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if path.exists():
+                text = path.read_text(encoding="utf-8").strip()
+                if text:
+                    return int(text)
+            time.sleep(0.05)
+        self.fail(f"timed out waiting for non-empty pid in {path}")
