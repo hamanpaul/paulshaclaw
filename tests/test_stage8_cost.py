@@ -21,6 +21,7 @@ from paulshaclaw.cost.cache import (
     build_snapshot,
     load_snapshot_payload,
 )
+from paulshaclaw.cost import config as cost_config_module
 from paulshaclaw.cost.config import CostConfig, load_cost_config
 from paulshaclaw.cost.formatter import classify_usage, format_footer
 from paulshaclaw.cost.models import (
@@ -220,6 +221,16 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(cfg.critical_percent, 90)
         self.assertEqual(cfg.copilot_accounts, ())
 
+    def test_cost_config_uses_builtin_defaults_when_runtime_config_missing(self) -> None:
+        with (
+            patch.object(cost_config_module, "DEFAULT_CONFIG_PATH", Path("missing-cost-config.yaml")),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            cfg = load_cost_config()
+
+        self.assertEqual(cfg.timezone, "Asia/Taipei")
+        self.assertEqual(cfg.copilot_accounts, ())
+
     def test_copilot_accounts_are_config_driven(self) -> None:
         path = self.write_config(
             """
@@ -328,6 +339,87 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "stale")
         self.assertEqual(provider.accounts[0].source, "local_observed")
         self.assertEqual(provider.accounts[0].used_requests, 12)
+
+    def test_collect_copilot_fetches_runtime_personal_usage_without_injected_fetcher(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: hamanpaul
+                      label: haman
+                      kind: personal
+                      monthly_allowance: 1500
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        with (
+            patch("paulshaclaw.cost.providers._get_github_token", return_value="secret-token") as token_mock,
+            patch(
+                "paulshaclaw.cost.providers._fetch_json",
+                return_value={"usageItems": [{"grossQuantity": 724}]},
+            ) as fetch_mock,
+            patch("paulshaclaw.cost.providers._collect_local_observed_usage", return_value={}) as local_mock,
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.accounts[0].used_requests, 724)
+        self.assertEqual(provider.accounts[0].source, "github_user_billing")
+        token_mock.assert_called_once_with("hamanpaul")
+        local_mock.assert_not_called()
+        request_url = fetch_mock.call_args.args[0]
+        request_headers = fetch_mock.call_args.args[1]
+        self.assertIn("/users/hamanpaul/settings/billing/premium_request/usage", request_url)
+        self.assertIn("year=", request_url)
+        self.assertIn("month=", request_url)
+        self.assertEqual(request_headers["Authorization"], "Bearer secret-token")
+
+    def test_collect_copilot_runtime_local_fallback_only_marks_active_account(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: hamanpaul
+                      label: haman
+                      kind: personal
+                      monthly_allowance: 1500
+                    - id: paulc-arc
+                      label: arc
+                      kind: company
+                      monthly_allowance: 300
+                      org: acme
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch(
+                "paulshaclaw.cost.providers._collect_local_observed_usage",
+                return_value={"hamanpaul": 12},
+            ),
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(
+            [(account.account_id, account.source, account.used_requests) for account in provider.accounts],
+            [
+                ("hamanpaul", "local_observed", 12),
+                ("paulc-arc", "unknown", None),
+            ],
+        )
 
     def test_collect_copilot_keeps_fresh_status_when_other_accounts_are_unknown(self) -> None:
         path = self.write_config(
@@ -709,6 +801,38 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue().strip(), "cdx 5h:-- wk:--  cc 5h:-- wk:--")
         self.assertIn("stage8 cost status degraded: cache unavailable", stderr.getvalue())
 
+    def test_status_main_preserves_previous_snapshot_when_refresh_fails(self) -> None:
+        config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
+        previous_snapshot = self._snapshot(source_status="fresh")
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = previous_snapshot
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=True)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+        stderr = StringIO()
+
+        def render(snapshot, *, use_tmux_style):
+            self.assertEqual(snapshot.cache_status, "stale")
+            self.assertEqual(snapshot.providers["cdx"].source_status, "stale")
+            return "reused-stale-footer"
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "build_current_snapshot", side_effect=RuntimeError("refresh failed")),
+            patch.object(cost_status_cli, "format_footer", side_effect=render),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "reused-stale-footer")
+        self.assertIn("stage8 cost status degraded: refresh failed", stderr.getvalue())
+
     def test_status_main_uses_fresh_cache_without_rebuild(self) -> None:
         config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
         snapshot = self._snapshot()
@@ -760,7 +884,10 @@ class Stage8CliTests(unittest.TestCase):
         lock_cm.__enter__.assert_called_once_with()
         cache.read_stale.assert_called_once_with()
         build_current_snapshot.assert_not_called()
-        format_footer.assert_called_once_with(stale_snapshot, use_tmux_style=False)
+        rendered_snapshot = format_footer.call_args.args[0]
+        self.assertEqual(rendered_snapshot.cache_status, "stale")
+        self.assertEqual(rendered_snapshot.providers["cdx"].source_status, "stale")
+        format_footer.assert_called_once()
 
     def test_status_main_rebuilds_when_lock_unavailable_and_no_stale_cache(self) -> None:
         config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)

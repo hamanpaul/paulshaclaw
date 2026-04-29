@@ -2,8 +2,8 @@
 #
 # This is the first paulshaclaw-wide config (Stage 9 introduces it).
 # Real deployments should copy this to ~/.config/paulshaclaw/paulshaclaw.yaml
-# and customise. The loader honours --config flag → PAULSHACLAW_CONFIG env →
-# default path → this sample (read-only fallback).
+# and customise. Stage 8 cost runtime only honours --config →
+# PAULSHACLAW_CONFIG env → default path; this sample is documentation only.
 
 workspaces:
   - path: ~/prj_arc

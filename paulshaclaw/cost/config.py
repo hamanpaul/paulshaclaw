@@ -33,7 +33,7 @@ class CostConfig:
     log_path: Path = field(default_factory=lambda: Path("~/.agents/log/cost.log").expanduser())
 
 
-def _resolve_config_source(config_path: Path | None) -> Path:
+def _resolve_config_source(config_path: Path | None) -> Path | None:
     if config_path is not None:
         return Path(config_path)
     env_value = os.environ.get(ENV_CONFIG_VAR)
@@ -42,21 +42,13 @@ def _resolve_config_source(config_path: Path | None) -> Path:
     default = DEFAULT_CONFIG_PATH.expanduser()
     if default.exists():
         return default
-    sample = (
-        Path(__file__).resolve().parents[2]
-        / "paulshaclaw"
-        / "config"
-        / "paulshaclaw.sample.yaml"
-    )
-    if sample.exists():
-        return sample
-    raise FileNotFoundError(
-        f"找不到設定檔：請設置 --config、{ENV_CONFIG_VAR} 或 {DEFAULT_CONFIG_PATH}"
-    )
+    return None
 
 
 def _load_payload(config_path: Path | None) -> dict[str, Any]:
     resolved = _resolve_config_source(config_path)
+    if resolved is None:
+        return {}
     if not resolved.exists():
         raise FileNotFoundError(f"設定檔不存在：{resolved}")
     try:
