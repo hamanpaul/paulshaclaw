@@ -16,7 +16,7 @@ from paulshaclaw.cost.models import (
     ProviderSnapshot,
     UsageWindow,
 )
-from paulshaclaw.cost.providers import collect_codex, collect_copilot
+from paulshaclaw.cost.providers import collect_all, collect_codex, collect_copilot
 
 
 class Stage8ModelFormatterTests(unittest.TestCase):
@@ -235,6 +235,28 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(cfg.copilot_accounts[0].account_id, "company-user")
         self.assertEqual(cfg.copilot_accounts[0].org, "acme")
 
+    def test_copilot_account_defaults_label_and_kind(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: default-user
+                      monthly_allowance: 1500
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertEqual(len(cfg.copilot_accounts), 1)
+        self.assertEqual(cfg.copilot_accounts[0].account_id, "default-user")
+        self.assertEqual(cfg.copilot_accounts[0].label, "default-user")
+        self.assertEqual(cfg.copilot_accounts[0].kind, "personal")
+
     def test_collect_copilot_uses_injected_fetcher_before_local_fallback(self) -> None:
         path = self.write_config(
             """
@@ -293,6 +315,73 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "stale")
         self.assertEqual(provider.accounts[0].source, "local_observed")
         self.assertEqual(provider.accounts[0].used_requests, 12)
+
+    def test_collect_copilot_keeps_fresh_status_when_other_accounts_are_unknown(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: fresh-user
+                      label: fresh
+                    - id: unknown-user
+                      label: unknown
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        def fetcher(account):
+            if account.account_id == "fresh-user":
+                return 724, "github_user_billing"
+            raise RuntimeError("network unavailable")
+
+        provider = collect_copilot(cfg, fetcher=fetcher)
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.accounts[0].source, "github_user_billing")
+        self.assertEqual(provider.accounts[1].source, "unknown")
+
+    def test_collect_copilot_keeps_stale_status_when_other_accounts_are_unknown(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: local-user
+                      label: local
+                    - id: unknown-user
+                      label: unknown
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        def fetcher(account):
+            raise RuntimeError("network unavailable")
+
+        provider = collect_copilot(
+            cfg,
+            fetcher=fetcher,
+            local_observed={"local-user": 12},
+        )
+
+        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(provider.accounts[0].source, "local_observed")
+        self.assertEqual(provider.accounts[1].source, "unknown")
+
+    def test_collect_all_omits_copilot_when_no_accounts_are_configured(self) -> None:
+        cfg = CostConfig()
+
+        providers = collect_all(cfg)
+
+        self.assertEqual(set(providers), {"cdx", "cc"})
 
     def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
         provider = collect_codex()

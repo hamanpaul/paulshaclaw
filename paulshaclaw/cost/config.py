@@ -87,12 +87,10 @@ def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
         if not isinstance(entry, dict):
             raise ValueError(f"config.cost.providers.copilot.accounts[{index}] 必須是 mapping")
         account_id = entry.get("id")
-        label = entry.get("label")
-        kind = entry.get("kind")
         if not account_id:
             raise ValueError(f"config.cost.providers.copilot.accounts[{index}].id 缺失")
-        if not label:
-            raise ValueError(f"config.cost.providers.copilot.accounts[{index}].label 缺失")
+        label = entry.get("label", account_id)
+        kind = entry.get("kind", "personal")
         if kind not in {"personal", "company"}:
             raise ValueError(
                 "config.cost.providers.copilot.accounts"

@@ -45,7 +45,8 @@ def collect_copilot(
         return ProviderSnapshot(source_status="unknown", accounts=())
 
     accounts: list[CopilotAccountUsage] = []
-    source_status = "fresh"
+    has_fresh = False
+    has_stale = False
 
     for account in config.copilot_accounts:
         if fetcher is not None:
@@ -61,6 +62,7 @@ def collect_copilot(
                         source=str(source),
                     )
                 )
+                has_fresh = True
                 continue
             except Exception:
                 pass
@@ -76,15 +78,17 @@ def collect_copilot(
                     source="local_observed",
                 )
             )
-            if source_status == "fresh":
-                source_status = "stale"
+            has_stale = True
             continue
 
         accounts.append(_unknown_account(account))
-        source_status = "unknown"
 
-    if source_status == "fresh" and any(account.source == "local_observed" for account in accounts):
+    if has_fresh:
+        source_status = "fresh"
+    elif has_stale:
         source_status = "stale"
+    else:
+        source_status = "unknown"
 
     return ProviderSnapshot(source_status=source_status, accounts=tuple(accounts))
 
