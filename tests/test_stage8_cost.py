@@ -109,6 +109,60 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cdx~", format_footer(snapshot, use_tmux_style=False))
 
+    def test_footer_uses_tmux_style_by_default(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cdx": ProviderSnapshot(
+                    source_status="fresh",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=18,
+                            reset_at=datetime(2026, 4, 29, 15, 21, tzinfo=ZoneInfo("Asia/Taipei")),
+                            display_reset="15:21",
+                        ),
+                        "weekly": UsageWindow(
+                            used_percent=91,
+                            reset_at=datetime(2026, 5, 2, 10, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+                            display_reset="3d",
+                        ),
+                    },
+                ),
+                "cc": ProviderSnapshot(source_status="unknown", windows={}),
+                "cpt": ProviderSnapshot(
+                    source_status="fresh",
+                    accounts=(
+                        CopilotAccountUsage("hamanpaul", "haman", "personal", 1200, 1500, "github_user_billing"),
+                    ),
+                ),
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("#[fg=green]18%(15:21)#[default]", footer)
+        self.assertIn("#[fg=red]91%(3d)#[default]", footer)
+        self.assertIn("#[fg=colour245]--#[default]", footer)
+        self.assertIn("#[fg=yellow]haman:1200#[default]", footer)
+
+    def test_footer_omits_empty_copilot_provider(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cdx": ProviderSnapshot(source_status="fresh", windows={}),
+                "cpt": ProviderSnapshot(source_status="fresh", accounts=()),
+            },
+        )
+
+        footer = format_footer(snapshot, use_tmux_style=False)
+
+        self.assertNotIn("cpt", footer)
+        self.assertEqual(footer, "cdx 5h:-- wk:--")
+
     def test_threshold_boundaries(self) -> None:
         self.assertEqual(classify_usage(69), "low")
         self.assertEqual(classify_usage(70), "warning")

@@ -61,7 +61,7 @@ def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_sty
     return " ".join(parts)
 
 
-def format_footer(snapshot: CostSnapshot, use_tmux_style: bool) -> str:
+def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str:
     segments: list[str] = []
     for name in ("cdx", "cc"):
         provider = snapshot.providers.get(name)
@@ -69,7 +69,7 @@ def format_footer(snapshot: CostSnapshot, use_tmux_style: bool) -> str:
             segments.append(_format_window_provider(name, provider, use_tmux_style))
 
     provider = snapshot.providers.get("cpt")
-    if provider is not None:
+    if provider is not None and provider.accounts:
         segments.append(_format_copilot_provider("cpt", provider, use_tmux_style))
 
     return "  ".join(segments)
