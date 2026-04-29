@@ -17,9 +17,9 @@
 
 ## 4. Deploy Templates And Docs
 
-- [ ] 4.1 Extend Stage 7 deploy tests to require Telegram systemd, runtime env, and secret env template assets.
-- [ ] 4.2 Add Telegram deploy templates and update `paulshaclaw.deploy` template catalog.
-- [ ] 4.3 Update recovery documentation with the actual Telegram service name, log path, token/config checks, and `/dispatch` guard behavior.
+- [x] 4.1 Extend Stage 7 deploy tests to require Telegram systemd, runtime env, and secret env template assets.
+- [x] 4.2 Add Telegram deploy templates and update `paulshaclaw.deploy` template catalog.
+- [x] 4.3 Update recovery documentation with the actual Telegram service name, log path, token/config checks, and `/dispatch` guard behavior.
 
 ## 5. Verification
 

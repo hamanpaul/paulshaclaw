@@ -19,8 +19,20 @@ class TemplateMappingTests(unittest.TestCase):
     def test_template_assets_cover_three_planes(self) -> None:
         assets = list_template_assets()
 
-        self.assertGreaterEqual(len(assets), 4)
+        self.assertEqual(len(assets), 7)
         self.assertEqual({asset.plane for asset in assets}, {"core", "state", "secret"})
+        self.assertEqual(
+            {
+                "core/systemd/__INSTANCE__.service.tmpl",
+                "core/systemd/__INSTANCE__-telegram.service.tmpl",
+                "core/runtime/__INSTANCE__.env.tmpl",
+                "core/runtime/__INSTANCE__-telegram.env.tmpl",
+                "state/config/__INSTANCE__.state.json.tmpl",
+                "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
+                "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
+            },
+            {asset.template_relpath for asset in assets},
+        )
         for asset in assets:
             self.assertTrue(asset.template_path.exists(), msg=str(asset.template_path))
             self.assertTrue(asset.target_path.endswith(asset.expected_suffix))

@@ -105,17 +105,23 @@
 ### 復原步驟
 
 1. 先收集三個服務狀態：
-   - `systemctl --user status paulshaclaw-daemon.service`
-   - `systemctl --user status paulshaclaw-bot.service`
-   - `systemctl --user status paulshaclaw-janitor.service`
-2. 依序停止 bot listener、janitor、daemon，避免重啟期間重複 ingest。
-3. 清理過時 pid/socket，保留 raw log 尾端證據。
-4. 依序啟動 daemon -> bot listener -> janitor。
-5. 驗證：
-   - `/status` 成功
-   - `tmux ls` 成功
-   - queue backlog 回落或至少不再增加
-6. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
+    - `systemctl --user status paulshaclaw-daemon.service`
+    - `systemctl --user status paulshaclaw-telegram.service`
+    - `systemctl --user status paulshaclaw-janitor.service`
+2. 先確認 Telegram listener 的環境與設定：
+    - `PSC_TELEGRAM_BOT_TOKEN` 已在 `__INSTANCE__.telegram.secret.env` 提供
+    - 若有設定，`PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID` 與實際 bot 身分一致
+    - Stage 1 設定可由 `--config <path>` 或 `PSC_STAGE1_CONFIG` 提供，且檔案可讀
+3. 依序停止 Telegram listener、janitor、daemon，避免重啟期間重複 ingest。
+4. 清理過時 pid/socket，保留 raw log 尾端證據。
+5. 依序啟動 daemon -> Telegram listener -> janitor。
+6. 驗證：
+    - `/status` 成功
+    - `tmux ls` 成功
+    - `~/.agents/log/telegram.log` 持續寫入且沒有 token 相關錯誤
+    - `/dispatch` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
+    - queue backlog 回落或至少不再增加
+7. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
 
 ## Playbook: memory pipeline 阻塞
 

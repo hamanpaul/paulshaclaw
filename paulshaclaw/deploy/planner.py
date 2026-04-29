@@ -76,7 +76,17 @@ _TEMPLATE_CATALOG: tuple[tuple[str, str, str], ...] = (
     ),
     (
         "core",
+        "core/systemd/__INSTANCE__-telegram.service.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    (
+        "core",
         "core/runtime/__INSTANCE__.env.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    (
+        "core",
+        "core/runtime/__INSTANCE__-telegram.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
     ),
     (
@@ -87,6 +97,11 @@ _TEMPLATE_CATALOG: tuple[tuple[str, str, str], ...] = (
     (
         "secret",
         "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    (
+        "secret",
+        "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
     ),
 )
