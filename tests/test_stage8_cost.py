@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -574,3 +576,68 @@ class Stage8CacheTests(unittest.TestCase):
         snapshot = load_snapshot_payload(payload)
 
         self.assertEqual(snapshot.providers["cc"].note, "ghp_xxx")
+
+
+class Stage8CliTests(unittest.TestCase):
+    def test_once_cli_prints_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Path(tmpdir) / "paulshaclaw.yaml"
+            config.write_text(
+                textwrap.dedent(
+                    """
+                    workspaces:
+                      - path: /tmp/ws
+                        name: ws
+                    cost:
+                      cache_dir: {cache_dir}
+                    """
+                ).format(cache_dir=str(Path(tmpdir) / "cache")),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [sys.executable, "-m", "paulshaclaw.cost", "--once", "--config", str(config)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertIn("providers", payload)
+
+    def test_status_cli_prints_one_line(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = Path(tmpdir) / "paulshaclaw.yaml"
+            config.write_text(
+                textwrap.dedent(
+                    """
+                    workspaces:
+                      - path: /tmp/ws
+                        name: ws
+                    cost:
+                      cache_dir: {cache_dir}
+                      providers:
+                        copilot:
+                          accounts:
+                            - id: hamanpaul
+                              label: haman
+                              kind: personal
+                              monthly_allowance: 1500
+                    """
+                ).format(cache_dir=str(Path(tmpdir) / "cache")),
+                encoding="utf-8",
+            )
+
+            completed = subprocess.run(
+                [sys.executable, "-m", "paulshaclaw.cost.status", "--config", str(config)],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(len(completed.stdout.splitlines()), 1)
+            self.assertIn("cdx", completed.stdout)
