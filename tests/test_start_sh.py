@@ -142,7 +142,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 if signal_to_wrapper is None:
                     proc.wait(timeout=10)
                 else:
-                    os.killpg(os.getpgid(proc.pid), signal_to_wrapper)
+                    os.kill(proc.pid, signal_to_wrapper)
                     proc.wait(timeout=10)
 
                 self.assertIn(proc.returncode, (0, 130, 143))

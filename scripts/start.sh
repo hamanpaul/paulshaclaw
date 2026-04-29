@@ -40,5 +40,7 @@ echo "monitor pid=$MONITOR_PID"
 TELEGRAM_PID=$!
 echo "telegram pid=$TELEGRAM_PID"
 
-# Stage 11: cockpit TUI (foreground, requires tmux)
-"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}"
+# Stage 11: cockpit TUI (wrapper-managed wait, requires tmux)
+"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" &
+COCKPIT_PID=$!
+wait "$COCKPIT_PID"
