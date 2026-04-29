@@ -113,9 +113,10 @@
    - secret env：`~/.config/paulshaclaw/paulshaclaw.telegram.secret.env`
    - Stage 1 config：`~/.agents/state/config/paulshaclaw.state.json`
 3. runtime env 內應包含：
-   - `PSC_STAGE1_CONFIG=%h/.agents/state/config/paulshaclaw.state.json`
    - `PSC_INSTANCE=paulshaclaw`
    - `PSC_PLANE=core`
+4. Telegram systemd unit 內應直接設定：
+   - `Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/paulshaclaw.state.json`
 4. secret env 內應包含：
    - `PSC_TELEGRAM_BOT_TOKEN`（非空）
    - `PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID`（可空，但若設定必須和 `getMe` 結果一致）

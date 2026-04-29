@@ -38,12 +38,31 @@ class TemplateMappingTests(unittest.TestCase):
             self.assertTrue(asset.template_path.exists(), msg=str(asset.template_path))
             self.assertTrue(asset.target_path.endswith(asset.expected_suffix))
 
+        telegram_unit = next(
+            asset for asset in assets if asset.template_relpath == "core/systemd/__INSTANCE__-telegram.service.tmpl"
+        )
+        telegram_unit_text = telegram_unit.template_path.read_text(encoding="utf-8")
+        self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env", telegram_unit_text)
+        self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env", telegram_unit_text)
+        self.assertIn("EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env", telegram_unit_text)
+        self.assertIn("ExecStart=/usr/bin/env python3 -m paulshaclaw.bot.listener", telegram_unit_text)
+        self.assertIn("Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_unit_text)
+
         telegram_runtime = next(
             asset for asset in assets if asset.template_relpath == "core/runtime/__INSTANCE__-telegram.env.tmpl"
         )
         telegram_runtime_text = telegram_runtime.template_path.read_text(encoding="utf-8")
-        self.assertIn("PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_runtime_text)
-        self.assertNotIn("PSC_TELEGRAM_POLL_TIMEOUT", telegram_runtime_text)
+        self.assertIn("PSC_INSTANCE=__INSTANCE__", telegram_runtime_text)
+        self.assertIn("PSC_PLANE=core", telegram_runtime_text)
+        self.assertNotIn("PSC_STAGE1_CONFIG", telegram_runtime_text)
+
+        telegram_secret = next(
+            asset for asset in assets if asset.template_relpath == "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl"
+        )
+        telegram_secret_text = telegram_secret.template_path.read_text(encoding="utf-8")
+        self.assertIn("PSC_TELEGRAM_BOT_TOKEN=", telegram_secret_text)
+        self.assertIn("PSC_TELEGRAM_EXPECTED_USERNAME=", telegram_secret_text)
+        self.assertIn("PSC_TELEGRAM_EXPECTED_BOT_ID=", telegram_secret_text)
 
     def test_rename_rule_strips_tmpl_and_replaces_instance_token(self) -> None:
         target = resolve_template_target(
