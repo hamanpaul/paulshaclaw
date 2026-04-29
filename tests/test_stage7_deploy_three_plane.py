@@ -38,6 +38,13 @@ class TemplateMappingTests(unittest.TestCase):
             self.assertTrue(asset.template_path.exists(), msg=str(asset.template_path))
             self.assertTrue(asset.target_path.endswith(asset.expected_suffix))
 
+        telegram_runtime = next(
+            asset for asset in assets if asset.template_relpath == "core/runtime/__INSTANCE__-telegram.env.tmpl"
+        )
+        telegram_runtime_text = telegram_runtime.template_path.read_text(encoding="utf-8")
+        self.assertIn("PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_runtime_text)
+        self.assertNotIn("PSC_TELEGRAM_POLL_TIMEOUT", telegram_runtime_text)
+
     def test_rename_rule_strips_tmpl_and_replaces_instance_token(self) -> None:
         target = resolve_template_target(
             "core/systemd/__INSTANCE__.service.tmpl",
