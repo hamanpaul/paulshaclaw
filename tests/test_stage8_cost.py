@@ -376,12 +376,75 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.accounts[0].source, "local_observed")
         self.assertEqual(provider.accounts[1].source, "unknown")
 
+    def test_collect_copilot_prefers_fresh_over_stale_and_unknown(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: fresh-user
+                      label: fresh
+                    - id: local-user
+                      label: local
+                    - id: unknown-user
+                      label: unknown
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        def fetcher(account):
+            if account.account_id == "fresh-user":
+                return 724, "github_user_billing"
+            raise RuntimeError("network unavailable")
+
+        provider = collect_copilot(
+            cfg,
+            fetcher=fetcher,
+            local_observed={"local-user": 12},
+        )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(
+            [account.source for account in provider.accounts],
+            ["github_user_billing", "local_observed", "unknown"],
+        )
+
     def test_collect_all_omits_copilot_when_no_accounts_are_configured(self) -> None:
         cfg = CostConfig()
 
         providers = collect_all(cfg)
 
         self.assertEqual(set(providers), {"cdx", "cc"})
+
+    def test_collect_all_includes_copilot_when_accounts_are_configured(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                load_cost_config(
+                    config_path=self.write_config(
+                        """
+                        workspaces:
+                          - path: /tmp/ws
+                            name: ws
+                        cost:
+                          providers:
+                            copilot:
+                              accounts:
+                                - id: fresh-user
+                                  label: fresh
+                        """
+                    )
+                ).copilot_accounts[0],
+            )
+        )
+
+        providers = collect_all(cfg)
+
+        self.assertEqual(set(providers), {"cdx", "cc", "cpt"})
+        self.assertEqual(providers["cpt"].accounts[0].account_id, "fresh-user")
 
     def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
         provider = collect_codex()
