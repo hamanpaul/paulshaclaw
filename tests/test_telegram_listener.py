@@ -15,6 +15,7 @@ from paulshaclaw.bot.listener import (
     TelegramListener,
     build_listener,
     load_bot_settings,
+    load_config,
     validate_bot_identity,
 )
 
@@ -317,6 +318,29 @@ class TelegramListenerTests(unittest.TestCase):
 
 
 class ListenerBuildTests(unittest.TestCase):
+    def test_build_dispatch_guard_daemon_installs_unavailable_coordinator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path=str(config_path))
+            daemon = listener_module.build_dispatch_guard_daemon(config)
+
+            self.assertIsInstance(daemon.coordinator, listener_module.UnavailableCoordinator)
+
     def test_build_listener_uses_unavailable_coordinator(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
@@ -345,6 +369,47 @@ class ListenerBuildTests(unittest.TestCase):
 
             self.assertFalse(response["ok"])
             self.assertIn("coordinator backend 未設定", response["message"])
+
+    def test_dispatch_through_listener_returns_coordinator_not_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            listener = build_listener(
+                config_path=str(config_path),
+                settings=BotSettings(token="fake-token"),
+                client=RecordingClient([]),
+            )
+            client = listener.client
+            assert isinstance(client, RecordingClient)
+
+            listener.process_update(
+                {
+                    "update_id": 1,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/dispatch task-1",
+                    },
+                }
+            )
+
+            self.assertEqual(len(client.sent_messages), 1)
+            self.assertIn("coordinator backend 未設定", client.sent_messages[0]["text"])
+            self.assertNotIn("local-", client.sent_messages[0]["text"])
 
 
 class ListenerMainTests(unittest.TestCase):

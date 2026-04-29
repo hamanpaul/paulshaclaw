@@ -142,6 +142,10 @@ class UnavailableCoordinator:
         raise ValueError("coordinator backend 未設定")
 
 
+def build_dispatch_guard_daemon(config: AppConfig) -> PaulShiaBroDaemon:
+    return PaulShiaBroDaemon(config=config, coordinator=UnavailableCoordinator())
+
+
 class TelegramListener:
     def __init__(
         self,
@@ -222,7 +226,7 @@ def build_listener(
     poll_timeout: int = 30,
 ) -> TelegramListener:
     config = load_config(config_path=config_path)
-    daemon = PaulShiaBroDaemon(config=config, coordinator=UnavailableCoordinator())
+    daemon = build_dispatch_guard_daemon(config)
     router = TelegramCommandRouter(daemon=daemon)
     return TelegramListener(
         client=client or TelegramApiClient(settings.token),

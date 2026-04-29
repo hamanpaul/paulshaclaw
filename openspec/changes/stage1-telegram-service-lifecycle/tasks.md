@@ -7,8 +7,8 @@
 
 ## 2. Dispatch Guard
 
-- [ ] 2.1 Add tests proving integrated Telegram startup does not report `/dispatch` success through `LocalCoordinator`.
-- [ ] 2.2 Implement the production-safe coordinator-not-configured path for Telegram listener startup while preserving explicit fake coordinator injection in unit tests.
+- [x] 2.1 Add tests proving integrated Telegram startup does not report `/dispatch` success through `LocalCoordinator`.
+- [x] 2.2 Implement the production-safe coordinator-not-configured path for Telegram listener startup while preserving explicit fake coordinator injection in unit tests.
 
 ## 3. Local Startup Lifecycle
 
