@@ -12,8 +12,8 @@
 
 ## 3. Local Startup Lifecycle
 
-- [ ] 3.1 Extend `tests/test_start_sh.py` to expect monitor, Telegram listener, and cockpit startup.
-- [ ] 3.2 Update `scripts/start.sh` to track monitor and Telegram listener PIDs, write Telegram logs to `~/.agents/log/telegram.log`, and terminate background services on cockpit exit, Ctrl+C, or TERM.
+- [x] 3.1 Extend `tests/test_start_sh.py` to expect monitor, Telegram listener, and cockpit startup.
+- [x] 3.2 Update `scripts/start.sh` to track monitor and Telegram listener PIDs, write Telegram logs to `~/.agents/log/telegram.log`, and terminate background services on cockpit exit, Ctrl+C, or TERM.
 
 ## 4. Deploy Templates And Docs
 
