@@ -117,25 +117,25 @@
    - `PSC_PLANE=core`
 4. Telegram systemd unit 內應直接設定：
    - `Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/paulshaclaw.state.json`
-4. secret env 內應包含：
-   - `PSC_TELEGRAM_BOT_TOKEN`（非空）
-   - `PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID`（可空，但若設定必須和 `getMe` 結果一致）
-5. 若是 local `scripts/start.sh` 場景，先確認 `~/.agents/log/telegram.log` 正常寫入。
-6. 若是 deployed systemd 場景，使用 journald 觀察：
-   - `journalctl --user -u paulshaclaw-telegram.service -f`
-   - `journalctl --user -u paulshaclaw.service -f`
-7. 依序重啟：
-   - `systemctl --user restart paulshaclaw.service`
-   - `systemctl --user restart paulshaclaw-telegram.service`
-   - `systemctl --user restart paulshaclaw-janitor.service`
-8. 驗證：
-   - `systemctl --user status paulshaclaw.service`
-   - `systemctl --user status paulshaclaw-telegram.service`
-   - `~/.agents/log/telegram.log` 或 `journalctl --user -u paulshaclaw-telegram.service` 中沒有 token/config 錯誤
-   - `PSC_STAGE1_CONFIG` 指向的 `~/.agents/state/config/paulshaclaw.state.json` 可讀
-   - `/dispatch sample-task` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
-   - `/status` 仍可回應
-9. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
+5. secret env 內應包含：
+    - `PSC_TELEGRAM_BOT_TOKEN`（非空）
+    - `PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID`（可空，但若設定必須和 `getMe` 結果一致）
+6. 若是 local `scripts/start.sh` 場景，先確認 `~/.agents/log/telegram.log` 正常寫入。
+7. 若是 deployed systemd 場景，使用 journald 觀察：
+    - `journalctl --user -u paulshaclaw-telegram.service -f`
+    - `journalctl --user -u paulshaclaw.service -f`
+8. 依序重啟：
+    - `systemctl --user restart paulshaclaw.service`
+    - `systemctl --user restart paulshaclaw-telegram.service`
+    - `systemctl --user restart paulshaclaw-janitor.service`
+9. 驗證：
+    - `systemctl --user status paulshaclaw.service`
+    - `systemctl --user status paulshaclaw-telegram.service`
+    - `~/.agents/log/telegram.log` 或 `journalctl --user -u paulshaclaw-telegram.service` 中沒有 token/config 錯誤
+    - `PSC_STAGE1_CONFIG` 指向的 `~/.agents/state/config/paulshaclaw.state.json` 可讀
+    - `/dispatch sample-task` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
+    - `/status` 仍可回應
+10. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
 
 ## Playbook: memory pipeline 阻塞
 
