@@ -1342,7 +1342,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             )
 
             log = tmux_log.read_text(encoding="utf-8")
-            self.assertIn("set-option status-interval 30", log)
+            self.assertIn("set-option status-interval", log)
             self.assertIn("set-option status-right", log)
             self.assertIn("existing-right", log)
             self.assertIn("paulshaclaw.cost.status", log)
@@ -1379,7 +1379,7 @@ apply_stage8_footer() {
   footer_cmd="#(${PY} -m paulshaclaw.cost.status)"
   existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
 
-  tmux set-option status-interval 30
+  tmux set-option status-interval <tmux_refresh_seconds|default 30>
   case "${existing_right}" in
     *"paulshaclaw.cost.status"*)
       return 0
@@ -1471,7 +1471,7 @@ python3 -m paulshaclaw.cost --once
 python3 -m paulshaclaw.cost.status --plain
 ```
 
-`scripts/start.sh` applies the Stage 8 footer to the current tmux session with `status-interval 30`. Copilot accounts are read from config; account labels and request allowances are not hardcoded.
+`scripts/start.sh` applies the Stage 8 footer to the current tmux session with the configured `status-interval` from `tmux_refresh_seconds` (default `30`). Copilot accounts are read from config; account labels and request allowances are not hardcoded.
 ````
 
 - [ ] **Step 3: Run focused tests**

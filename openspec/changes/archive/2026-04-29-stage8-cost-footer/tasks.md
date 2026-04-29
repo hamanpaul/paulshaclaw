@@ -21,7 +21,7 @@
 
 - [x] 4.1 Implement `python -m paulshaclaw.cost --once` JSON snapshot output.
 - [x] 4.2 Implement `python -m paulshaclaw.cost.status` one-line tmux footer output that exits 0 for degraded display cases.
-- [x] 4.3 Update `scripts/start.sh` to apply session-local Stage 8 `status-right` and `status-interval 30` before launching Stage 11 cockpit, while preserving existing `status-right`.
+- [x] 4.3 Update `scripts/start.sh` to apply session-local Stage 8 `status-right` and the configured `status-interval` from `tmux_refresh_seconds` (default `30`) before launching Stage 11 cockpit, while preserving existing `status-right`.
 
 ## 5. Tests and validation
 

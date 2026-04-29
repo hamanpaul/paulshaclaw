@@ -45,7 +45,7 @@ Provider failures degrade only that provider. Missing credentials, malformed pro
 
 ### Decision 5: Session-local tmux integration
 
-`scripts/start.sh` applies `status-interval 30` and appends the Stage 8 command to the current session's `status-right`. It must preserve any existing `status-right` value and must not use global `-g`, because Stage 8 is part of the paulshaclaw session rather than a machine-wide tmux plugin.
+`scripts/start.sh` applies the configured `status-interval` from `tmux_refresh_seconds` (default `30`) and appends the Stage 8 command to the current session's `status-right`. It must preserve any existing `status-right` value and must not use global `-g`, because Stage 8 is part of the paulshaclaw session rather than a machine-wide tmux plugin.
 
 ## Risks / Trade-offs
 

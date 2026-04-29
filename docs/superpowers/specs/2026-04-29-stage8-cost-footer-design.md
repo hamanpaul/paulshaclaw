@@ -40,8 +40,8 @@ GitHub 文件也標示 Copilot billing 會在 2026-06-01 從 request-based billi
 | 議題 | 決策 | 理由 |
 |---|---|---|
 | 架構 | Snapshot CLI + footer formatter | 可測、可被 Stage 11 reuse，又比常駐 service 輕 |
-| tmux 整合 | `scripts/start.sh` 套用 session-local `status-right` / `status-interval 30` | 跟現有 Stage 9/11 啟動模型一致，不碰全域設定 |
-| refresh 節奏 | tmux 30 秒刷新；snapshot cache TTL 120 秒 | 降低 provider 查詢與檔案掃描成本 |
+| tmux 整合 | `scripts/start.sh` 套用 session-local `status-right` / `status-interval`（依 `tmux_refresh_seconds`，預設 30） | 跟現有 Stage 9/11 啟動模型一致，不碰全域設定 |
+| refresh 節奏 | tmux 依 `tmux_refresh_seconds` 刷新（預設 30 秒）；snapshot cache TTL 120 秒 | 降低 provider 查詢與檔案掃描成本 |
 | footer 密度 | Balanced 單行 | provider 名稱清楚，仍適合狀態列 |
 | provider 縮寫 | `cdx` = Codex, `cc` = Claude Code, `cpt` = GitHub Copilot | 短、穩定、易掃描 |
 | Copilot account | Config-driven 0/1/N accounts | 上線環境可能不是 `hamanpaul` / `paulc-arc` |
@@ -213,7 +213,7 @@ Rules:
 `scripts/start.sh` should apply Stage 8 before launching Stage 11 cockpit:
 
 ```text
-tmux set-option status-interval 30
+tmux set-option status-interval <tmux_refresh_seconds|default 30>
 tmux set-option status-right "<existing-right> #(python -m paulshaclaw.cost.status)"
 ```
 
@@ -291,7 +291,7 @@ For Copilot, percent is computed as `used_requests / monthly_allowance * 100`, b
 
 ### 9.4 Tmux/start tests
 
-- `scripts/start.sh` applies `status-interval 30`.
+- `scripts/start.sh` applies the configured `status-interval` (default `30`).
 - `scripts/start.sh` appends Stage 8 footer to session-local `status-right`.
 - Existing `status-right` is preserved.
 - No test writes or requires `~/.tmux.conf`.
