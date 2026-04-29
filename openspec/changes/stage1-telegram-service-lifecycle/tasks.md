@@ -23,5 +23,6 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run focused tests for Stage 1 Telegram listener, start script lifecycle, and Stage 7 deploy templates.
-- [ ] 5.2 Run the broader unittest discovery suite where the environment supports it, and record any environment-only failures separately.
+- [x] 5.1 Run focused tests for Stage 1 Telegram listener, start script lifecycle, and Stage 7 deploy templates.
+- [x] 5.2 Run the broader unittest discovery suite where the environment supports it, and record any environment-only failures separately.
+  - Environment-only failure during `python -m unittest discover -s tests -v`: `test_stage9_project_monitor.Stage9SnapshotTests.test_paulshaclaw_self_snapshot_matches_known_state` expects a worktree name containing `paulshaclaw` or `stage9-project-monitor` under the current `.worktrees` workspace root. In this environment the visible worktrees are `stage1-telegram-service-lifecycle` and `stage11-multi-session`, so the assertion fails independently of the Telegram lifecycle changes.

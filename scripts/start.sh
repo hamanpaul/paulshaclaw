@@ -45,10 +45,20 @@ trap cleanup_term TERM
 MONITOR_PID=$!
 echo "monitor pid=$MONITOR_PID"
 
-# Telegram listener (background)
-"$PY" -m paulshaclaw.bot.listener >> ~/.agents/log/telegram.log 2>&1 &
-TELEGRAM_PID=$!
-echo "telegram pid=$TELEGRAM_PID"
+# Telegram listener (background when config is present)
+if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" && -n "${PSC_STAGE1_CONFIG:-}" && -r "${PSC_STAGE1_CONFIG}" ]]; then
+  "$PY" -m paulshaclaw.bot.listener >> ~/.agents/log/telegram.log 2>&1 &
+  TELEGRAM_PID=$!
+  sleep 0.1
+  if ! kill -0 "$TELEGRAM_PID" 2>/dev/null; then
+    wait "$TELEGRAM_PID" 2>/dev/null || true
+    echo "telegram listener exited immediately" >&2
+    exit 1
+  fi
+  echo "telegram pid=$TELEGRAM_PID"
+else
+  echo "telegram skipped: missing PSC_TELEGRAM_BOT_TOKEN or PSC_STAGE1_CONFIG"
+fi
 
 # Stage 11: cockpit TUI (foreground status path, requires tmux)
 "$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" &

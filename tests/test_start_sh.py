@@ -53,7 +53,10 @@ FAKE_PYTHON = textwrap.dedent(
             Path(os.environ["FAKE_COCKPIT_PIDFILE"]).write_text(str(os.getpid()), encoding="utf-8")
             if os.environ.get("FAKE_COCKPIT_MODE") == "exit":
                 for pidfile_name in ("FAKE_MONITOR_PIDFILE", "FAKE_TELEGRAM_PIDFILE"):
-                    pidfile = Path(os.environ[pidfile_name])
+                    pidfile_path = os.environ.get(pidfile_name)
+                    if not pidfile_path:
+                        continue
+                    pidfile = Path(pidfile_path)
                     deadline = time.monotonic() + 5.0
                     while time.monotonic() < deadline:
                         if pidfile.exists() and pidfile.read_text(encoding="utf-8").strip():
@@ -74,20 +77,25 @@ FAKE_PYTHON = textwrap.dedent(
 
 
 class StartScriptLifecycleTests(unittest.TestCase):
+    def test_monitor_and_cockpit_start_without_telegram_inputs(self) -> None:
+        self._run_lifecycle_test(cockpit_mode="exit", telegram_enabled=False, capture_output=True)
+
     def test_monitor_is_terminated_when_cockpit_receives_sigint(self) -> None:
-        self._run_lifecycle_test(signal_to_wrapper=signal.SIGINT)
+        self._run_lifecycle_test(signal_to_wrapper=signal.SIGINT, telegram_enabled=True)
 
     def test_monitor_is_terminated_when_cockpit_exits_on_its_own(self) -> None:
-        self._run_lifecycle_test(cockpit_mode="exit")
+        self._run_lifecycle_test(cockpit_mode="exit", telegram_enabled=True)
 
     def test_monitor_is_terminated_when_wrapper_receives_sigterm(self) -> None:
-        self._run_lifecycle_test(signal_to_wrapper=signal.SIGTERM)
+        self._run_lifecycle_test(signal_to_wrapper=signal.SIGTERM, telegram_enabled=True)
 
     def _run_lifecycle_test(
         self,
         *,
         cockpit_mode: str | None = None,
         signal_to_wrapper: signal.Signals | None = None,
+        telegram_enabled: bool = True,
+        capture_output: bool = False,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
@@ -99,6 +107,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             telegram_pidfile = tmpdir_path / "telegram.pid"
             cockpit_pidfile = tmpdir_path / "cockpit.pid"
             cockpit_started = tmpdir_path / "cockpit.started"
+            stage1_config = tmpdir_path / "stage1.json"
 
             fake_bin.mkdir(parents=True)
             fake_scripts.mkdir(parents=True)
@@ -122,26 +131,35 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["HOME"] = str(home_dir)
             env["TMUX_PANE"] = "%0"
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
-            env["FAKE_TELEGRAM_PIDFILE"] = str(telegram_pidfile)
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            if telegram_enabled:
+                stage1_config.write_text("{}", encoding="utf-8")
+                env["PSC_TELEGRAM_BOT_TOKEN"] = "fake-token"
+                env["PSC_STAGE1_CONFIG"] = str(stage1_config)
+                env["FAKE_TELEGRAM_PIDFILE"] = str(telegram_pidfile)
             if cockpit_mode is not None:
                 env["FAKE_COCKPIT_MODE"] = cockpit_mode
 
+            stdout = subprocess.PIPE if capture_output else subprocess.DEVNULL
+            stderr = subprocess.STDOUT if capture_output else subprocess.DEVNULL
             proc = subprocess.Popen(
                 ["bash", str(start_sh)],
                 cwd=repo_root,
                 env=env,
                 start_new_session=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=stdout,
+                stderr=stderr,
                 text=True,
             )
             try:
                 monitor_pid = self._wait_for_pidfile_int(monitor_pidfile)
-                telegram_pid = self._wait_for_pidfile_int(telegram_pidfile)
                 cockpit_pid = self._wait_for_pidfile_int(cockpit_pidfile)
                 self._wait_for_file(cockpit_started)
+                if telegram_enabled:
+                    telegram_pid = self._wait_for_pidfile_int(telegram_pidfile)
+                else:
+                    self._wait_for_missing_file(telegram_pidfile)
 
                 if signal_to_wrapper is None:
                     proc.wait(timeout=10)
@@ -159,10 +177,16 @@ class StartScriptLifecycleTests(unittest.TestCase):
 
                 with self.assertRaises(ProcessLookupError):
                     os.kill(monitor_pid, 0)
-                with self.assertRaises(ProcessLookupError):
-                    os.kill(telegram_pid, 0)
+                if telegram_enabled:
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(telegram_pid, 0)
                 with self.assertRaises(ProcessLookupError):
                     os.kill(cockpit_pid, 0)
+
+                if capture_output:
+                    output = proc.communicate(timeout=10)[0]
+                    self.assertIn("telegram skipped", output)
+                    self.assertNotIn("telegram pid=", output)
 
             finally:
                 if proc.poll() is None:
@@ -204,3 +228,10 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     return int(text)
             time.sleep(0.05)
         self.fail(f"timed out waiting for non-empty pid in {path}")
+
+    def _wait_for_missing_file(self, path: Path, timeout: float = 1.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if path.exists():
+                self.fail(f"unexpected file appeared: {path}")
+            time.sleep(0.05)
