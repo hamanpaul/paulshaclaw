@@ -94,6 +94,14 @@ class TelegramApiClientTests(unittest.TestCase):
         self.assertEqual(opener.requests[0]["url"], "https://api.telegram.org/botfake-token/getUpdates")
         self.assertEqual(json.loads(opener.requests[0]["data"].decode("utf-8")), {"offset": 10, "timeout": 7})
 
+    def test_get_updates_uses_poll_timeout_for_http_timeout(self) -> None:
+        opener = FakeOpener([{"ok": True, "result": [{"update_id": 11}]}])
+        client = TelegramApiClient("fake-token", opener=opener)
+
+        client.get_updates(offset=10, timeout=30)
+
+        self.assertEqual(opener.requests[0]["timeout"], 30)
+
     def test_send_message_posts_chat_id_and_text(self) -> None:
         opener = FakeOpener([{"ok": True, "result": {"message_id": 7}}])
         client = TelegramApiClient("fake-token", opener=opener)

@@ -53,7 +53,7 @@ class TelegramApiClient:
         payload: dict[str, object] = {"timeout": timeout}
         if offset is not None:
             payload["offset"] = offset
-        result = self._post("getUpdates", payload)
+        result = self._post("getUpdates", payload, timeout=float(timeout))
         if not isinstance(result, list):
             raise TelegramApiError("Telegram getUpdates returned non-list result")
         updates: list[dict[str, object]] = []
@@ -65,7 +65,7 @@ class TelegramApiClient:
     def send_message(self, *, chat_id: int, text: str) -> None:
         self._post("sendMessage", {"chat_id": chat_id, "text": text})
 
-    def _post(self, method: str, payload: Mapping[str, object]) -> object:
+    def _post(self, method: str, payload: Mapping[str, object], *, timeout: float | None = None) -> object:
         body = json.dumps(dict(payload)).encode("utf-8")
         request = urllib.request.Request(
             f"{self.api_base}/bot{self.token}/{method}",
@@ -74,7 +74,7 @@ class TelegramApiClient:
             method="POST",
         )
         try:
-            with self.opener(request, self.timeout) as response:
+            with self.opener(request, self.timeout if timeout is None else timeout) as response:
                 raw = response.read()
         except urllib.error.URLError as error:
             raise TelegramApiError(f"Telegram API request failed: {error.reason}") from error
