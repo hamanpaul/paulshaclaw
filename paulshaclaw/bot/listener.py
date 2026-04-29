@@ -8,6 +8,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
@@ -255,6 +256,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             client=client,
             poll_timeout=args.poll_timeout,
         )
+        ready_file = os.environ.get("PSC_TELEGRAM_READY_FILE", "").strip()
+        if ready_file:
+            Path(ready_file).write_text("ready\n", encoding="utf-8")
         print("Telegram listener ready", flush=True)
         listener.run_forever()
     except (ValueError, FileNotFoundError, TelegramApiError) as error:

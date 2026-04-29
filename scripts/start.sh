@@ -6,6 +6,8 @@ PY=$REPO/.venv/bin/python
 
 mkdir -p ~/.agents/log
 TELEGRAM_LOG=$HOME/.agents/log/telegram.log
+TELEGRAM_READY_FILE=$HOME/.agents/run/telegram.ready
+TELEGRAM_STARTUP_TIMEOUT=${PSC_TELEGRAM_STARTUP_TIMEOUT:-40}
 
 cleanup() {
   if [[ "${CLEANED_UP:-0}" -eq 1 ]]; then
@@ -46,18 +48,32 @@ trap cleanup_term TERM
 MONITOR_PID=$!
 echo "monitor pid=$MONITOR_PID"
 
+if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+  wait "$MONITOR_PID" 2>/dev/null || true
+  echo "monitor exited before startup" >&2
+  exit 1
+fi
+
 # Telegram listener (background when config is present)
 if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" && -n "${PSC_STAGE1_CONFIG:-}" && -r "${PSC_STAGE1_CONFIG}" ]]; then
+  mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
+  : > "$TELEGRAM_READY_FILE"
+  export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
   "$PY" -m paulshaclaw.bot.listener >> "$TELEGRAM_LOG" 2>&1 &
   TELEGRAM_PID=$!
-  telegram_ready_deadline=$((SECONDS + 10))
+  telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
   while true; do
-    if grep -q "Telegram listener ready" "$TELEGRAM_LOG" 2>/dev/null; then
+    if [[ -s "$TELEGRAM_READY_FILE" ]]; then
       break
     fi
     if ! kill -0 "$TELEGRAM_PID" 2>/dev/null; then
       wait "$TELEGRAM_PID" 2>/dev/null || true
       echo "telegram listener exited before ready" >&2
+      exit 1
+    fi
+    if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+      wait "$MONITOR_PID" 2>/dev/null || true
+      echo "monitor exited before telegram ready" >&2
       exit 1
     fi
     if (( SECONDS >= telegram_ready_deadline )); then
@@ -71,9 +87,20 @@ if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" && -n "${PSC_STAGE1_CONFIG:-}" && -r "${P
     echo "telegram listener exited after ready" >&2
     exit 1
   fi
+  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+    wait "$MONITOR_PID" 2>/dev/null || true
+    echo "monitor exited before cockpit start" >&2
+    exit 1
+  fi
   echo "telegram pid=$TELEGRAM_PID"
 else
   echo "telegram skipped: missing PSC_TELEGRAM_BOT_TOKEN or PSC_STAGE1_CONFIG"
+fi
+
+if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+  wait "$MONITOR_PID" 2>/dev/null || true
+  echo "monitor exited before cockpit start" >&2
+  exit 1
 fi
 
 # Stage 11: cockpit TUI (foreground status path, requires tmux)
