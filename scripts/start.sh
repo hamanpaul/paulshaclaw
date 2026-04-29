@@ -7,6 +7,12 @@ PY=$REPO/.venv/bin/python
 mkdir -p ~/.agents/log
 
 cleanup() {
+  if [[ "${CLEANED_UP:-0}" -eq 1 ]]; then
+    return
+  fi
+  CLEANED_UP=1
+  trap - EXIT INT TERM
+
   for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       kill -TERM "$pid" 2>/dev/null || true

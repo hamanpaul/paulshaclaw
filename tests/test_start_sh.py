@@ -22,6 +22,7 @@ FAKE_PYTHON = textwrap.dedent(
     import os
     import signal
     import sys
+    import time
     from pathlib import Path
 
 
@@ -49,6 +50,15 @@ FAKE_PYTHON = textwrap.dedent(
 
         if module == "paulshaclaw.cockpit":
             Path(os.environ["FAKE_COCKPIT_STARTED"]).write_text("started", encoding="utf-8")
+            if os.environ.get("FAKE_COCKPIT_MODE") == "exit":
+                self_wait_for = Path(os.environ["FAKE_MONITOR_PIDFILE"]), Path(
+                    os.environ["FAKE_TELEGRAM_PIDFILE"]
+                )
+                for path in self_wait_for:
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline and not path.exists():
+                        time.sleep(0.02)
+                return 0
             signal.pause()
             return 0
 
@@ -64,6 +74,20 @@ FAKE_PYTHON = textwrap.dedent(
 
 class StartScriptLifecycleTests(unittest.TestCase):
     def test_monitor_is_terminated_when_cockpit_receives_sigint(self) -> None:
+        self._run_lifecycle_test(signal_to_wrapper=signal.SIGINT)
+
+    def test_monitor_is_terminated_when_cockpit_exits_on_its_own(self) -> None:
+        self._run_lifecycle_test(cockpit_mode="exit")
+
+    def test_monitor_is_terminated_when_wrapper_receives_sigterm(self) -> None:
+        self._run_lifecycle_test(signal_to_wrapper=signal.SIGTERM)
+
+    def _run_lifecycle_test(
+        self,
+        *,
+        cockpit_mode: str | None = None,
+        signal_to_wrapper: signal.Signals | None = None,
+    ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             repo_root = tmpdir_path / "repo"
@@ -96,6 +120,8 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_TELEGRAM_PIDFILE"] = str(telegram_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            if cockpit_mode is not None:
+                env["FAKE_COCKPIT_MODE"] = cockpit_mode
 
             proc = subprocess.Popen(
                 ["bash", str(start_sh)],
@@ -113,13 +139,19 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 monitor_pid = int(monitor_pidfile.read_text(encoding="utf-8").strip())
                 telegram_pid = int(telegram_pidfile.read_text(encoding="utf-8").strip())
 
-                os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-                proc.wait(timeout=10)
+                if signal_to_wrapper is None:
+                    proc.wait(timeout=10)
+                else:
+                    os.killpg(os.getpgid(proc.pid), signal_to_wrapper)
+                    proc.wait(timeout=10)
+
+                self.assertIn(proc.returncode, (0, 130, 143))
 
                 with self.assertRaises(ProcessLookupError):
                     os.kill(monitor_pid, 0)
                 with self.assertRaises(ProcessLookupError):
                     os.kill(telegram_pid, 0)
+
             finally:
                 if proc.poll() is None:
                     proc.kill()
