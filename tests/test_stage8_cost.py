@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import subprocess
 import sys
@@ -7,9 +8,14 @@ import tempfile
 import textwrap
 import unittest
 from datetime import datetime, timedelta
+from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
+from paulshaclaw.cost import __main__ as cost_cli
+from paulshaclaw.cost import status as cost_status_cli
 from paulshaclaw.cost.cache import (
     SnapshotCache,
     build_snapshot,
@@ -579,6 +585,14 @@ class Stage8CacheTests(unittest.TestCase):
 
 
 class Stage8CliTests(unittest.TestCase):
+    def _snapshot(self, *, source_status: str = "fresh") -> CostSnapshot:
+        return CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={"cdx": ProviderSnapshot(source_status=source_status, windows={})},
+        )
+
     def test_once_cli_prints_json(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config = Path(tmpdir) / "paulshaclaw.yaml"
@@ -641,3 +655,142 @@ class Stage8CliTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(len(completed.stdout.splitlines()), 1)
             self.assertIn("cdx", completed.stdout)
+
+    def test_main_requires_once(self) -> None:
+        stderr = StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = cost_cli.main([])
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("錯誤: Stage 8 cost CLI requires --once", stderr.getvalue())
+
+    def test_once_cli_reports_missing_config_error(self) -> None:
+        missing = Path("missing-stage8-config.yaml")
+
+        completed = subprocess.run(
+            [sys.executable, "-m", "paulshaclaw.cost", "--once", "--config", str(missing)],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(completed.stdout, "")
+        self.assertIn("錯誤: 設定檔不存在", completed.stderr)
+        self.assertIn(str(missing), completed.stderr)
+
+    def test_main_reports_value_and_os_errors(self) -> None:
+        for error in (ValueError("bad config"), OSError("disk full")):
+            with self.subTest(error=type(error).__name__):
+                stderr = StringIO()
+                with (
+                    patch.object(cost_cli, "build_current_snapshot", side_effect=error),
+                    contextlib.redirect_stderr(stderr),
+                ):
+                    exit_code = cost_cli.main(["--once"])
+
+                self.assertEqual(exit_code, 1)
+                self.assertIn(f"錯誤: {error}", stderr.getvalue())
+
+    def test_status_main_prints_fallback_when_degraded(self) -> None:
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", side_effect=OSError("cache unavailable")),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = cost_status_cli.main([])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "cdx 5h:-- wk:--  cc 5h:-- wk:--")
+        self.assertIn("stage8 cost status degraded: cache unavailable", stderr.getvalue())
+
+    def test_status_main_uses_fresh_cache_without_rebuild(self) -> None:
+        config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
+        snapshot = self._snapshot()
+        cache = Mock()
+        cache.read_if_fresh.return_value = snapshot
+        cache.lock.return_value = Mock()
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", return_value="fresh-footer") as format_footer,
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "fresh-footer")
+        cache.read_if_fresh.assert_called_once_with()
+        cache.lock.assert_not_called()
+        build_current_snapshot.assert_not_called()
+        format_footer.assert_called_once_with(snapshot, use_tmux_style=False)
+
+    def test_status_main_uses_stale_cache_when_lock_unavailable(self) -> None:
+        config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
+        stale_snapshot = self._snapshot(source_status="stale")
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = stale_snapshot
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=False)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", return_value="stale-footer") as format_footer,
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "stale-footer")
+        cache.lock.assert_called_once_with()
+        lock_cm.__enter__.assert_called_once_with()
+        cache.read_stale.assert_called_once_with()
+        build_current_snapshot.assert_not_called()
+        format_footer.assert_called_once_with(stale_snapshot, use_tmux_style=False)
+
+    def test_status_main_rebuilds_when_lock_unavailable_and_no_stale_cache(self) -> None:
+        config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
+        rebuilt_snapshot = self._snapshot()
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=False)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(
+                cost_status_cli,
+                "build_current_snapshot",
+                return_value=rebuilt_snapshot,
+            ) as build_current_snapshot,
+            patch.object(cost_status_cli, "format_footer", return_value="rebuilt-footer") as format_footer,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain", "--config", "custom.yaml"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "rebuilt-footer")
+        cache.lock.assert_called_once_with()
+        lock_cm.__enter__.assert_called_once_with()
+        cache.read_stale.assert_called_once_with()
+        build_current_snapshot.assert_called_once_with(Path("custom.yaml"))
+        format_footer.assert_called_once_with(rebuilt_snapshot, use_tmux_style=False)
