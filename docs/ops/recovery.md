@@ -105,8 +105,8 @@
 ### 復原步驟
 
 1. 先收集三個服務狀態：
-    - `systemctl --user status paulshaclaw-daemon.service`
-    - `systemctl --user status paulshaclaw-telegram.service`
+    - `systemctl --user status <instance>.service`
+    - `systemctl --user status <instance>-telegram.service`
     - `systemctl --user status paulshaclaw-janitor.service`
 2. 先確認 Telegram listener 的環境與設定：
     - `PSC_TELEGRAM_BOT_TOKEN` 已在 `__INSTANCE__.telegram.secret.env` 提供
@@ -118,7 +118,8 @@
 6. 驗證：
     - `/status` 成功
     - `tmux ls` 成功
-    - `~/.agents/log/telegram.log` 持續寫入且沒有 token 相關錯誤
+    - local `scripts/start.sh` 路徑下，`~/.agents/log/telegram.log` 持續寫入且沒有 token 相關錯誤
+    - deployed systemd 路徑下，使用 `journalctl --user -u <instance>-telegram.service` 檢查 Telegram listener 日誌與 token/config 錯誤
     - `/dispatch` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
     - queue backlog 回落或至少不再增加
 7. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。

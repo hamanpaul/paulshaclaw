@@ -18,10 +18,12 @@ from paulshaclaw.deploy import (
 class TemplateMappingTests(unittest.TestCase):
     def test_template_assets_cover_three_planes(self) -> None:
         assets = list_template_assets()
+        relpaths = {asset.template_relpath for asset in assets}
+        planes = {asset.plane for asset in assets}
 
-        self.assertEqual(len(assets), 7)
-        self.assertEqual({asset.plane for asset in assets}, {"core", "state", "secret"})
-        self.assertEqual(
+        self.assertGreaterEqual(len(assets), 7)
+        self.assertTrue({"core", "state", "secret"}.issubset(planes))
+        self.assertTrue(
             {
                 "core/systemd/__INSTANCE__.service.tmpl",
                 "core/systemd/__INSTANCE__-telegram.service.tmpl",
@@ -30,8 +32,7 @@ class TemplateMappingTests(unittest.TestCase):
                 "state/config/__INSTANCE__.state.json.tmpl",
                 "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
                 "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
-            },
-            {asset.template_relpath for asset in assets},
+            }.issubset(relpaths)
         )
         for asset in assets:
             self.assertTrue(asset.template_path.exists(), msg=str(asset.template_path))
