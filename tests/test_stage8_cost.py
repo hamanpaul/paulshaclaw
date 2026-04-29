@@ -4,10 +4,15 @@ import json
 import tempfile
 import textwrap
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from paulshaclaw.cost.cache import (
+    SnapshotCache,
+    build_snapshot,
+    load_snapshot_payload,
+)
 from paulshaclaw.cost.config import CostConfig, load_cost_config
 from paulshaclaw.cost.formatter import classify_usage, format_footer
 from paulshaclaw.cost.models import (
@@ -451,3 +456,62 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.windows, {})
+
+
+class Stage8CacheTests(unittest.TestCase):
+    def test_fresh_cache_is_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = SnapshotCache(Path(tmpdir), ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+            cache.write(snapshot)
+
+            loaded = cache.read_if_fresh()
+
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.timezone, "Asia/Taipei")
+
+    def test_stale_cache_returns_none_for_fresh_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = SnapshotCache(Path(tmpdir), ttl_seconds=0)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+            cache.write(snapshot)
+
+            self.assertIsNone(cache.read_if_fresh())
+
+    def test_lock_busy_reads_old_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = SnapshotCache(Path(tmpdir), ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="stale", windows={})},
+            )
+            cache.write(snapshot)
+            cache.lock_path.write_text("busy", encoding="utf-8")
+
+            loaded = cache.read_stale()
+
+            self.assertIsNotNone(loaded)
+            self.assertEqual(loaded.providers["cdx"].source_status, "stale")
+
+    def test_load_snapshot_payload_rejects_token_like_values(self) -> None:
+        payload = {
+            "generated_at": "2026-04-29T15:00:00+08:00",
+            "timezone": "Asia/Taipei",
+            "cache_status": "fresh",
+            "providers": {
+                "cc": {
+                    "source_status": "unknown",
+                    "note": "missing credentials",
+                }
+            },
+        }
+
+        snapshot = load_snapshot_payload(payload)
+
+        self.assertEqual(snapshot.providers["cc"].note, "missing credentials")
