@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import textwrap
 import unittest
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from paulshaclaw.cost.config import CostConfig, load_cost_config
 from paulshaclaw.cost.formatter import classify_usage, format_footer
 from paulshaclaw.cost.models import (
     CopilotAccountUsage,
@@ -12,6 +16,7 @@ from paulshaclaw.cost.models import (
     ProviderSnapshot,
     UsageWindow,
 )
+from paulshaclaw.cost.providers import collect_codex, collect_copilot
 
 
 class Stage8ModelFormatterTests(unittest.TestCase):
@@ -169,3 +174,128 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertEqual(classify_usage(89), "warning")
         self.assertEqual(classify_usage(90), "critical")
         self.assertEqual(classify_usage(None), "neutral")
+
+
+class Stage8ConfigProviderTests(unittest.TestCase):
+    def write_config(self, body: str) -> Path:
+        handle = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
+        try:
+            handle.write(textwrap.dedent(body))
+            handle.flush()
+        finally:
+            handle.close()
+        path = Path(handle.name)
+        self.addCleanup(path.unlink, missing_ok=True)
+        return path
+
+    def test_cost_config_defaults(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertIsInstance(cfg, CostConfig)
+        self.assertEqual(cfg.timezone, "Asia/Taipei")
+        self.assertEqual(cfg.cache_ttl_seconds, 120)
+        self.assertEqual(cfg.tmux_refresh_seconds, 30)
+        self.assertEqual(cfg.warning_percent, 70)
+        self.assertEqual(cfg.critical_percent, 90)
+        self.assertEqual(cfg.copilot_accounts, ())
+
+    def test_copilot_accounts_are_config_driven(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: company-user
+                      label: work
+                      kind: company
+                      monthly_allowance: 300
+                      org: acme
+                    - id: personal-user
+                      label: me
+                      kind: personal
+                      monthly_allowance: 1500
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertEqual([account.label for account in cfg.copilot_accounts], ["work", "me"])
+        self.assertEqual(cfg.copilot_accounts[0].account_id, "company-user")
+        self.assertEqual(cfg.copilot_accounts[0].org, "acme")
+
+    def test_collect_copilot_uses_injected_fetcher_before_local_fallback(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: hamanpaul
+                      label: haman
+                      kind: personal
+                      monthly_allowance: 1500
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        def fetcher(account):
+            return 724, "github_user_billing"
+
+        provider = collect_copilot(cfg, fetcher=fetcher)
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.accounts[0].label, "haman")
+        self.assertEqual(provider.accounts[0].used_requests, 724)
+        self.assertEqual(provider.accounts[0].source, "github_user_billing")
+
+    def test_collect_copilot_marks_local_observed_fallback(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: local-user
+                      label: local
+                      kind: personal
+                      monthly_allowance: 100
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        def fetcher(account):
+            raise RuntimeError("network unavailable")
+
+        provider = collect_copilot(
+            cfg,
+            fetcher=fetcher,
+            local_observed={"local-user": 12},
+        )
+
+        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(provider.accounts[0].source, "local_observed")
+        self.assertEqual(provider.accounts[0].used_requests, 12)
+
+    def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
+        provider = collect_codex()
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
