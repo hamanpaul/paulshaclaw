@@ -12,9 +12,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot, UsageWindow
 
 _DEFAULT_TIMEZONE = "Asia/Taipei"
-_TOKEN_HINTS = ("token", "secret", "bearer ", "ghp_", "github_pat_")
-
-
 def _resolve_timezone(timezone: Any) -> tuple[str, ZoneInfo]:
     if not isinstance(timezone, str) or not timezone:
         return _DEFAULT_TIMEZONE, ZoneInfo(_DEFAULT_TIMEZONE)
@@ -114,18 +111,6 @@ def _load_account(raw: Any) -> CopilotAccountUsage | None:
     )
 
 
-def _safe_note(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    note = value.strip()
-    if not note:
-        return None
-    lowered = note.lower()
-    if any(hint in lowered for hint in _TOKEN_HINTS):
-        return None
-    return note
-
-
 def _load_provider(raw: Any) -> ProviderSnapshot:
     if not isinstance(raw, dict):
         return ProviderSnapshot(source_status="unknown", windows={})
@@ -153,7 +138,7 @@ def _load_provider(raw: Any) -> ProviderSnapshot:
         source_status=source_status,
         windows=windows,
         accounts=tuple(accounts),
-        note=_safe_note(raw.get("note")),
+        note=raw.get("note") if isinstance(raw.get("note"), str) else None,
     )
 
 

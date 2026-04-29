@@ -558,7 +558,7 @@ class Stage8CacheTests(unittest.TestCase):
 
         self.assertEqual(snapshot.providers["cc"].note, "missing credentials")
 
-    def test_load_snapshot_payload_drops_token_like_note(self) -> None:
+    def test_load_snapshot_payload_preserves_string_note_without_filtering(self) -> None:
         payload = {
             "generated_at": "2026-04-29T15:00:00+08:00",
             "timezone": "Asia/Taipei",
@@ -573,4 +573,4 @@ class Stage8CacheTests(unittest.TestCase):
 
         snapshot = load_snapshot_payload(payload)
 
-        self.assertIsNone(snapshot.providers["cc"].note)
+        self.assertEqual(snapshot.providers["cc"].note, "ghp_xxx")
