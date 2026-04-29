@@ -194,7 +194,7 @@ class TelegramListenerTests(unittest.TestCase):
 
         self.assertEqual(client.sent_messages, [{"chat_id": 1002, "text": "未授權使用者"}])
 
-    def test_non_text_messages_get_plain_reply(self) -> None:
+    def test_non_text_messages_are_ignored(self) -> None:
         client = RecordingClient([])
         router = FakeRouter({"ok": True, "message": "ignored"})
         listener = TelegramListener(client=client, router=router)
@@ -210,7 +210,25 @@ class TelegramListenerTests(unittest.TestCase):
         )
 
         self.assertEqual(router.calls, [])
-        self.assertEqual(client.sent_messages, [{"chat_id": 1003, "text": "目前只支援文字命令"}])
+        self.assertEqual(client.sent_messages, [])
+
+    def test_unauthorized_non_text_updates_do_not_reply(self) -> None:
+        client = RecordingClient([])
+        router = FakeRouter({"ok": False, "message": "未授權使用者"})
+        listener = TelegramListener(client=client, router=router)
+
+        listener.process_update(
+            {
+                "update_id": 4,
+                "message": {
+                    "chat": {"id": 1004},
+                    "from": {"id": 99},
+                },
+            }
+        )
+
+        self.assertEqual(router.calls, [])
+        self.assertEqual(client.sent_messages, [])
 
     def test_run_once_advances_offset_after_each_update(self) -> None:
         client = RecordingClient(
@@ -346,7 +364,24 @@ class ListenerMainTests(unittest.TestCase):
         api_client.assert_called_once_with("fake-token")
         validate_identity.assert_called_once()
         build_listener_mock.assert_called_once()
+        self.assertEqual(build_listener_mock.call_args.kwargs["config_path"], None)
+        self.assertEqual(build_listener_mock.call_args.kwargs["poll_timeout"], 30)
         fake_listener.run_forever.assert_called_once_with()
+
+    def test_main_passes_config_and_poll_timeout_to_listener_builder(self) -> None:
+        fake_listener = mock.Mock()
+
+        with (
+            mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+            mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+            mock.patch("paulshaclaw.bot.listener.build_listener", return_value=fake_listener) as build_listener_mock,
+        ):
+            exit_code = listener_module.main(["--config", "/fake/config.json", "--poll-timeout", "15"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(build_listener_mock.call_args.kwargs["config_path"], "/fake/config.json")
+        self.assertEqual(build_listener_mock.call_args.kwargs["poll_timeout"], 15)
 
     def test_main_returns_one_when_token_missing(self) -> None:
         with mock.patch("paulshaclaw.bot.listener.load_bot_settings", side_effect=ValueError("PSC_TELEGRAM_BOT_TOKEN 未設定")):

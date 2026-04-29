@@ -196,7 +196,6 @@ class TelegramListener:
 
         text = message.get("text")
         if not isinstance(text, str):
-            self._safe_send(chat_id=chat_id, text="目前只支援文字命令")
             return
 
         result = self.router.handle_message(user_id=user_id, text=text)
