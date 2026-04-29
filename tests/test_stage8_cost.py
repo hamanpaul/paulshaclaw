@@ -459,6 +459,15 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
 
 class Stage8CacheTests(unittest.TestCase):
+    def test_invalid_timezone_falls_back_to_taipei(self) -> None:
+        snapshot = build_snapshot(
+            timezone=None,
+            providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+        )
+
+        self.assertEqual(snapshot.timezone, "Asia/Taipei")
+        self.assertEqual(snapshot.generated_at.tzinfo, ZoneInfo("Asia/Taipei"))
+
     def test_fresh_cache_is_reused(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             cache = SnapshotCache(Path(tmpdir), ttl_seconds=120)
@@ -499,7 +508,40 @@ class Stage8CacheTests(unittest.TestCase):
             self.assertIsNotNone(loaded)
             self.assertEqual(loaded.providers["cdx"].source_status, "stale")
 
-    def test_load_snapshot_payload_rejects_token_like_values(self) -> None:
+    def test_lock_yields_true_and_removes_file_after_release(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = SnapshotCache(Path(tmpdir), ttl_seconds=120)
+
+            with cache.lock() as acquired:
+                self.assertTrue(acquired)
+                self.assertTrue(cache.lock_path.exists())
+
+            self.assertFalse(cache.lock_path.exists())
+
+    def test_lock_contention_yields_false(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = SnapshotCache(Path(tmpdir), ttl_seconds=120)
+            cache.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            cache.lock_path.write_text("busy", encoding="utf-8")
+
+            with cache.lock() as acquired:
+                self.assertFalse(acquired)
+
+    def test_cache_write_uses_pretty_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache = SnapshotCache(Path(tmpdir), ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+
+            cache.write(snapshot)
+
+            content = cache.snapshot_path.read_text(encoding="utf-8")
+            self.assertIn('\n  "generated_at"', content)
+            self.assertTrue(content.endswith("\n"))
+
+    def test_load_snapshot_payload_keeps_benign_note(self) -> None:
         payload = {
             "generated_at": "2026-04-29T15:00:00+08:00",
             "timezone": "Asia/Taipei",
@@ -515,3 +557,20 @@ class Stage8CacheTests(unittest.TestCase):
         snapshot = load_snapshot_payload(payload)
 
         self.assertEqual(snapshot.providers["cc"].note, "missing credentials")
+
+    def test_load_snapshot_payload_drops_token_like_note(self) -> None:
+        payload = {
+            "generated_at": "2026-04-29T15:00:00+08:00",
+            "timezone": "Asia/Taipei",
+            "cache_status": "fresh",
+            "providers": {
+                "cc": {
+                    "source_status": "unknown",
+                    "note": "ghp_xxx",
+                }
+            },
+        }
+
+        snapshot = load_snapshot_payload(payload)
+
+        self.assertIsNone(snapshot.providers["cc"].note)

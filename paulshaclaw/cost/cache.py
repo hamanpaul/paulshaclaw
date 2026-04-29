@@ -15,10 +15,12 @@ _DEFAULT_TIMEZONE = "Asia/Taipei"
 _TOKEN_HINTS = ("token", "secret", "bearer ", "ghp_", "github_pat_")
 
 
-def _resolve_timezone(timezone: str) -> tuple[str, ZoneInfo]:
+def _resolve_timezone(timezone: Any) -> tuple[str, ZoneInfo]:
+    if not isinstance(timezone, str) or not timezone:
+        return _DEFAULT_TIMEZONE, ZoneInfo(_DEFAULT_TIMEZONE)
     try:
         return timezone, ZoneInfo(timezone)
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, TypeError, ValueError):
         return _DEFAULT_TIMEZONE, ZoneInfo(_DEFAULT_TIMEZONE)
 
 
@@ -212,10 +214,14 @@ class SnapshotCache:
 
     def write(self, snapshot: CostSnapshot) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        self.snapshot_path.write_text(
-            json.dumps(snapshot.to_jsonable(), ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        payload = json.dumps(snapshot.to_jsonable(), ensure_ascii=False, indent=2) + "\n"
+        temp_path = self.cache_dir / f"{self.snapshot_path.name}.{os.getpid()}.tmp"
+        try:
+            temp_path.write_text(payload, encoding="utf-8")
+            os.replace(temp_path, self.snapshot_path)
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
 
     @contextmanager
     def lock(self) -> Iterator[bool]:
