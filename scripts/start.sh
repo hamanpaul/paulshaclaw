@@ -55,7 +55,22 @@ if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
 fi
 
 # Telegram listener (background when config is present)
-if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" && -n "${PSC_STAGE1_CONFIG:-}" && -r "${PSC_STAGE1_CONFIG}" ]]; then
+telegram_token_present=0
+telegram_config_present=0
+telegram_config_readable=0
+if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" ]]; then
+  telegram_token_present=1
+fi
+if [[ -n "${PSC_STAGE1_CONFIG:-}" ]]; then
+  telegram_config_present=1
+  if [[ -r "${PSC_STAGE1_CONFIG}" ]]; then
+    telegram_config_readable=1
+  fi
+fi
+
+if [[ "$telegram_token_present" -eq 0 && "$telegram_config_present" -eq 0 ]]; then
+  echo "telegram skipped: missing PSC_TELEGRAM_BOT_TOKEN or PSC_STAGE1_CONFIG"
+elif [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
@@ -87,6 +102,19 @@ if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" && -n "${PSC_STAGE1_CONFIG:-}" && -r "${P
     echo "telegram listener exited after ready" >&2
     exit 1
   fi
+  telegram_ready_stabilize_deadline=$((SECONDS + 1))
+  while true; do
+    telegram_state=$(ps -o stat= -p "$TELEGRAM_PID" 2>/dev/null | tr -d '[:space:]')
+    if [[ -z "$telegram_state" || "$telegram_state" == *Z* ]]; then
+      wait "$TELEGRAM_PID" 2>/dev/null || true
+      echo "telegram listener not healthy after ready" >&2
+      exit 1
+    fi
+    if (( SECONDS >= telegram_ready_stabilize_deadline )); then
+      break
+    fi
+    sleep 0.05
+  done
   if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
     wait "$MONITOR_PID" 2>/dev/null || true
     echo "monitor exited before cockpit start" >&2
@@ -94,7 +122,12 @@ if [[ -n "${PSC_TELEGRAM_BOT_TOKEN:-}" && -n "${PSC_STAGE1_CONFIG:-}" && -r "${P
   fi
   echo "telegram pid=$TELEGRAM_PID"
 else
-  echo "telegram skipped: missing PSC_TELEGRAM_BOT_TOKEN or PSC_STAGE1_CONFIG"
+  if [[ "$telegram_token_present" -eq 0 && "$telegram_config_present" -eq 0 ]]; then
+    :
+  else
+    echo "telegram startup requires both PSC_TELEGRAM_BOT_TOKEN and readable PSC_STAGE1_CONFIG" >&2
+    exit 1
+  fi
 fi
 
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then

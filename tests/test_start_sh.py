@@ -56,6 +56,9 @@ FAKE_PYTHON = textwrap.dedent(
             readyfile = Path(readyfile_path)
             time.sleep(float(os.environ.get("FAKE_TELEGRAM_READY_DELAY", "0.2")))
             readyfile.write_text("ready", encoding="utf-8")
+            if mode == "ready-then-die":
+                time.sleep(0.2)
+                return 1
             signal.pause()
             return 0
 
@@ -94,6 +97,39 @@ class StartScriptLifecycleTests(unittest.TestCase):
     def test_monitor_cockpit_and_telegram_ready_when_inputs_present(self) -> None:
         self._run_lifecycle_test(signal_to_wrapper=signal.SIGTERM, telegram_enabled=True, telegram_mode="ready")
 
+    def test_token_only_fails_closed(self) -> None:
+        self._run_lifecycle_test(
+            telegram_enabled=True,
+            telegram_token="fake-token",
+            telegram_config_state="missing",
+            expect_monitor_started=False,
+            expect_cockpit_started=False,
+            expect_returncode=1,
+            capture_output=True,
+        )
+
+    def test_config_only_fails_closed(self) -> None:
+        self._run_lifecycle_test(
+            telegram_enabled=True,
+            telegram_token=None,
+            telegram_config_state="present",
+            expect_monitor_started=False,
+            expect_cockpit_started=False,
+            expect_returncode=1,
+            capture_output=True,
+        )
+
+    def test_unreadable_config_fails_closed(self) -> None:
+        self._run_lifecycle_test(
+            telegram_enabled=True,
+            telegram_token="fake-token",
+            telegram_config_state="unreadable",
+            expect_monitor_started=False,
+            expect_cockpit_started=False,
+            expect_returncode=1,
+            capture_output=True,
+        )
+
     def test_stale_telegram_log_does_not_fake_readiness(self) -> None:
         self._run_lifecycle_test(
             signal_to_wrapper=signal.SIGTERM,
@@ -101,6 +137,15 @@ class StartScriptLifecycleTests(unittest.TestCase):
             telegram_mode="slow-ready",
             telegram_ready_delay=0.4,
             preseed_telegram_log="Telegram listener ready\n",
+        )
+
+    def test_ready_then_die_fails_closed(self) -> None:
+        self._run_lifecycle_test(
+            telegram_enabled=True,
+            telegram_mode="ready-then-die",
+            expect_cockpit_started=False,
+            expect_returncode=1,
+            capture_output=True,
         )
 
     def test_telegram_init_failure_prevents_success(self) -> None:
@@ -136,14 +181,18 @@ class StartScriptLifecycleTests(unittest.TestCase):
         cockpit_mode: str | None = None,
         signal_to_wrapper: signal.Signals | None = None,
         telegram_enabled: bool = True,
+        telegram_token: str | None = "fake-token",
+        telegram_config_state: str = "present",
         telegram_mode: str = "ready",
         telegram_ready_delay: float = 0.2,
         monitor_mode: str = "running",
+        expect_monitor_started: bool = True,
         expect_cockpit_started: bool = True,
         expect_returncode: int | None = None,
         capture_output: bool = False,
         preseed_telegram_log: str | None = None,
     ) -> None:
+        telegram_should_start = telegram_enabled and telegram_token is not None and telegram_config_state == "present"
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)
             repo_root = tmpdir_path / "repo"
@@ -184,9 +233,19 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
             if telegram_enabled:
-                stage1_config.write_text("{}", encoding="utf-8")
-                env["PSC_TELEGRAM_BOT_TOKEN"] = "fake-token"
-                env["PSC_STAGE1_CONFIG"] = str(stage1_config)
+                if telegram_config_state == "present":
+                    stage1_config.write_text("{}", encoding="utf-8")
+                    env["PSC_STAGE1_CONFIG"] = str(stage1_config)
+                elif telegram_config_state == "unreadable":
+                    stage1_config.write_text("{}", encoding="utf-8")
+                    stage1_config.chmod(0)
+                    env["PSC_STAGE1_CONFIG"] = str(stage1_config)
+                elif telegram_config_state == "missing":
+                    pass
+                else:
+                    raise AssertionError(f"unknown telegram_config_state: {telegram_config_state}")
+                if telegram_token is not None:
+                    env["PSC_TELEGRAM_BOT_TOKEN"] = telegram_token
                 env["FAKE_TELEGRAM_PIDFILE"] = str(telegram_pidfile)
                 env["FAKE_TELEGRAM_READYFILE"] = str(telegram_readyfile)
                 env["FAKE_TELEGRAM_MODE"] = telegram_mode
@@ -210,20 +269,24 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 text=True,
             )
             try:
-                monitor_pid = self._wait_for_pidfile_int(monitor_pidfile)
+                if expect_monitor_started:
+                    monitor_pid = self._wait_for_pidfile_int(monitor_pidfile)
                 if expect_cockpit_started:
                     cockpit_pid = self._wait_for_pidfile_int(cockpit_pidfile)
                     self._wait_for_file(cockpit_started)
                 else:
                     self._wait_for_missing_file(cockpit_started)
                 if telegram_enabled:
-                    telegram_pid = self._wait_for_pidfile_int(telegram_pidfile)
-                    if telegram_mode == "init-fail":
-                        self._wait_for_empty_file(telegram_readyfile)
+                    if not telegram_should_start:
+                        self._wait_for_missing_file(telegram_pidfile)
                     else:
-                        self._wait_for_file(telegram_readyfile)
-                        if expect_cockpit_started:
-                            self.assertLessEqual(telegram_readyfile.stat().st_mtime_ns, cockpit_started.stat().st_mtime_ns)
+                        telegram_pid = self._wait_for_pidfile_int(telegram_pidfile)
+                        if telegram_mode == "init-fail":
+                            self._wait_for_empty_file(telegram_readyfile)
+                        else:
+                            self._wait_for_file(telegram_readyfile)
+                            if expect_cockpit_started:
+                                self.assertLessEqual(telegram_readyfile.stat().st_mtime_ns, cockpit_started.stat().st_mtime_ns)
                 else:
                     self._wait_for_missing_file(telegram_pidfile)
 
@@ -244,9 +307,10 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     )
                     self.assertEqual(proc.returncode, expected_returncode)
 
-                with self.assertRaises(ProcessLookupError):
-                    os.kill(monitor_pid, 0)
-                if telegram_enabled:
+                if expect_monitor_started:
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(monitor_pid, 0)
+                if telegram_should_start:
                     with self.assertRaises(ProcessLookupError):
                         os.kill(telegram_pid, 0)
                 if expect_cockpit_started:
@@ -258,7 +322,9 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     if not telegram_enabled:
                         self.assertIn("telegram skipped", output)
                         self.assertNotIn("telegram pid=", output)
-                    if telegram_enabled and telegram_mode == "init-fail":
+                    if telegram_enabled and not telegram_should_start:
+                        self.assertIn("telegram startup requires both", output)
+                    if telegram_should_start and telegram_mode == "init-fail":
                         self.assertIn("telegram listener exited before ready", output)
                     if monitor_mode == "exit":
                         self.assertIn("monitor exited before cockpit start", output)
