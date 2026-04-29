@@ -45,6 +45,18 @@ class TemplateMappingTests(unittest.TestCase):
         )
 
         self.assertEqual(target, "core/systemd/demo-agent.service")
+        self.assertEqual(
+            resolve_template_target("core/systemd/__INSTANCE__-telegram.service.tmpl", instance_name="demo-agent"),
+            "core/systemd/demo-agent-telegram.service",
+        )
+        self.assertEqual(
+            resolve_template_target("core/runtime/__INSTANCE__-telegram.env.tmpl", instance_name="demo-agent"),
+            "core/runtime/demo-agent-telegram.env",
+        )
+        self.assertEqual(
+            resolve_template_target("secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl", instance_name="demo-agent"),
+            "secret/bootstrap/demo-agent.telegram.secret.env",
+        )
 
 
 class PermissionPolicyTests(unittest.TestCase):

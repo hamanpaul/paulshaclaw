@@ -94,35 +94,45 @@
    - 再跑一次 `/status`
 6. 將 before / after 輸出寫入 Stage5 evidence。
 
-## Playbook: full runtime restart
+## Playbook: Telegram runtime restart
 
 ### 觸發條件
 
-- daemon、bot listener、janitor placeholder 任一持續 crash loop。
+- `paulshaclaw.service`、`paulshaclaw-telegram.service` 或 janitor placeholder 任一持續 crash loop。
 - `restart_count_10m` 進入 critical。
 - `error_burst_5m` 持續升高且單點重啟無效。
 
 ### 復原步驟
 
 1. 先收集三個服務狀態：
-    - `systemctl --user status <instance>.service`
-    - `systemctl --user status <instance>-telegram.service`
-    - `systemctl --user status paulshaclaw-janitor.service`
+   - `systemctl --user status paulshaclaw.service`
+   - `systemctl --user status paulshaclaw-telegram.service`
+   - `systemctl --user status paulshaclaw-janitor.service`
 2. 先確認 Telegram listener 的環境與設定：
-    - `PSC_TELEGRAM_BOT_TOKEN` 已在 `__INSTANCE__.telegram.secret.env` 提供
-    - 若有設定，`PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID` 與實際 bot 身分一致
-    - Stage 1 設定可由 `--config <path>` 或 `PSC_STAGE1_CONFIG` 提供，且檔案可讀
-3. 依序停止 Telegram listener、janitor、daemon，避免重啟期間重複 ingest。
-4. 清理過時 pid/socket，保留 raw log 尾端證據。
-5. 依序啟動 daemon -> Telegram listener -> janitor。
-6. 驗證：
-    - `/status` 成功
-    - `tmux ls` 成功
-    - local `scripts/start.sh` 路徑下，`~/.agents/log/telegram.log` 持續寫入且沒有 token 相關錯誤
-    - deployed systemd 路徑下，使用 `journalctl --user -u <instance>-telegram.service` 檢查 Telegram listener 日誌與 token/config 錯誤
-    - `/dispatch` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
+   - `PSC_TELEGRAM_BOT_TOKEN` 已在 `~/.config/paulshaclaw/paulshaclaw.telegram.secret.env` 提供
+   - 若有設定，`PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID` 與實際 bot 身分一致
+   - Stage 1 設定由 `--config <path>` 或 `PSC_STAGE1_CONFIG` 提供，且設定檔可讀
+3. 若是 local `scripts/start.sh` 場景，先確認 `~/.agents/log/telegram.log` 正常寫入。
+4. 若是 deployed systemd 場景，使用 journald 觀察：
+   - `journalctl --user -u paulshaclaw-telegram.service -f`
+   - `journalctl --user -u paulshaclaw.service -f`
+5. 依序停止 Telegram listener、janitor、daemon，避免重啟期間重複 ingest。
+6. 清理過時 pid/socket，保留 raw log 尾端證據。
+7. 依序啟動 daemon -> Telegram listener -> janitor：
+   - `systemctl --user restart paulshaclaw.service`
+   - `systemctl --user restart paulshaclaw-telegram.service`
+   - `systemctl --user restart paulshaclaw-janitor.service`
+8. 驗證：
+   - `/status` 成功
+   - `tmux ls` 成功
+   - local `scripts/start.sh` 路徑下，`~/.agents/log/telegram.log` 持續寫入且沒有 token 相關錯誤
+   - deployed systemd 路徑下，`journalctl --user -u paulshaclaw-telegram.service` 中沒有 token/config 錯誤
+   - `PSC_TELEGRAM_BOT_TOKEN` 存在且非空
+   - `PSC_STAGE1_CONFIG` 指向可讀設定檔，或 `--config` 明確提供設定檔
+   - 若有設定 `PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID`，啟動時會先做 bot 身分比對
+   - `/dispatch sample-task` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
     - queue backlog 回落或至少不再增加
-7. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
+9. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
 
 ## Playbook: memory pipeline 阻塞
 
