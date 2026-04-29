@@ -942,9 +942,8 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(rendered_snapshot.providers["cdx"].source_status, "stale")
         format_footer.assert_called_once()
 
-    def test_status_main_rebuilds_when_lock_unavailable_and_no_stale_cache(self) -> None:
+    def test_status_main_degrades_when_lock_unavailable_and_no_stale_cache(self) -> None:
         config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
-        rebuilt_snapshot = self._snapshot()
         cache = Mock()
         cache.read_if_fresh.return_value = None
         cache.read_stale.return_value = None
@@ -957,20 +956,19 @@ class Stage8CliTests(unittest.TestCase):
         with (
             patch.object(cost_status_cli, "load_cost_config", return_value=config),
             patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
-            patch.object(
-                cost_status_cli,
-                "build_current_snapshot",
-                return_value=rebuilt_snapshot,
-            ) as build_current_snapshot,
-            patch.object(cost_status_cli, "format_footer", return_value="rebuilt-footer") as format_footer,
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            patch.object(cost_status_cli, "format_footer", return_value="degraded-footer") as format_footer,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = cost_status_cli.main(["--plain", "--config", "custom.yaml"])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "rebuilt-footer")
+        self.assertEqual(stdout.getvalue().strip(), "degraded-footer")
         cache.lock.assert_called_once_with()
         lock_cm.__enter__.assert_called_once_with()
         cache.read_stale.assert_called_once_with()
-        build_current_snapshot.assert_called_once_with(Path("custom.yaml"))
-        format_footer.assert_called_once_with(rebuilt_snapshot, use_tmux_style=False)
+        build_current_snapshot.assert_not_called()
+        rendered_snapshot = format_footer.call_args.args[0]
+        self.assertEqual(rendered_snapshot.cache_status, "stale")
+        self.assertEqual(rendered_snapshot.providers["cdx"].source_status, "unknown")
+        self.assertEqual(rendered_snapshot.providers["cc"].source_status, "unknown")

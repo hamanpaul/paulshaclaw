@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from .__main__ import build_current_snapshot
-from .cache import SnapshotCache
+from .cache import SnapshotCache, build_snapshot
 from .config import load_cost_config
 from .formatter import format_footer
 from .models import CostSnapshot, ProviderSnapshot
@@ -41,6 +41,17 @@ def _mark_snapshot_stale(snapshot: CostSnapshot) -> CostSnapshot:
     )
 
 
+def _build_degraded_snapshot(timezone: str) -> CostSnapshot:
+    return build_snapshot(
+        timezone=timezone,
+        cache_status="stale",
+        providers={
+            "cdx": ProviderSnapshot(source_status="unknown", windows={}),
+            "cc": ProviderSnapshot(source_status="unknown", windows={}),
+        },
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config_path = Path(args.config) if args.config else None
@@ -65,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                     snapshot = (
                         _mark_snapshot_stale(previous_snapshot)
                         if previous_snapshot is not None
-                        else None
+                        else _build_degraded_snapshot(getattr(config, "timezone", "Asia/Taipei"))
                     )
         if snapshot is None:
             snapshot = build_current_snapshot(config_path)

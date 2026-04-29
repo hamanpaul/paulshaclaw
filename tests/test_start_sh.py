@@ -35,6 +35,12 @@ FAKE_PYTHON = textwrap.dedent(
 
     def main() -> int:
         module = _module_name(sys.argv)
+        if len(sys.argv) >= 3 and sys.argv[1] == "-c":
+            if os.environ.get("FAKE_TMUX_REFRESH_ERROR") == "1":
+                return 1
+            print(os.environ.get("FAKE_TMUX_REFRESH_SECONDS", "30"))
+            return 0
+
         if module == "paulshaclaw.monitor":
             pidfile = Path(os.environ["FAKE_MONITOR_PIDFILE"])
             pidfile.write_text(str(os.getpid()), encoding="utf-8")
@@ -389,6 +395,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env["FAKE_COCKPIT_MODE"] = "exit"
             env["FAKE_TMUX_LOG"] = str(tmux_log)
             env["FAKE_TMUX_STATUS_RIGHT"] = "#[fg=green]existing"
+            env["FAKE_TMUX_REFRESH_SECONDS"] = "45"
 
             completed = subprocess.run(
                 ["bash", str(start_sh)],
@@ -403,8 +410,8 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             self.assertTrue(tmux_log.exists(), "tmux should be invoked inside tmux")
             calls = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
             self.assertIn(["show-option", "-qv", "status-right"], calls)
-            self.assertIn(["set-option", "status-interval", "30"], calls)
-            self.assertNotIn(["set-option", "-g", "status-interval", "30"], calls)
+            self.assertIn(["set-option", "status-interval", "45"], calls)
+            self.assertNotIn(["set-option", "-g", "status-interval", "45"], calls)
 
             status_right_calls = [call for call in calls if call[:2] == ["set-option", "status-right"]]
             self.assertEqual(len(status_right_calls), 1)
@@ -413,3 +420,63 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             self.assertIn("paulshaclaw.cost.status", status_right)
             self.assertNotIn("set-option -g", "\n".join(" ".join(call) for call in calls))
             self.assertFalse((home_dir / ".tmux.conf").exists())
+
+    def test_start_script_falls_back_to_default_tmux_interval_when_config_load_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            repo_root = tmpdir_path / "repo"
+            home_dir = tmpdir_path / "home"
+            fake_bin = repo_root / ".venv" / "bin"
+            fake_scripts = repo_root / "scripts"
+            tmux_log = tmpdir_path / "tmux.log"
+            monitor_pidfile = tmpdir_path / "monitor.pid"
+            cockpit_pidfile = tmpdir_path / "cockpit.pid"
+            cockpit_started = tmpdir_path / "cockpit.started"
+
+            fake_bin.mkdir(parents=True)
+            fake_scripts.mkdir(parents=True)
+            home_dir.mkdir(parents=True)
+
+            fake_python = fake_bin / "python"
+            fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            fake_tmux = fake_bin / "tmux"
+            fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
+            fake_tmux.chmod(0o755)
+
+            start_sh = fake_scripts / "start.sh"
+            start_sh.write_text(
+                START_SH.read_text(encoding="utf-8").replace(
+                    "REPO=/home/paul_chen/prj_pri/paulshaclaw",
+                    f"REPO={repo_root}",
+                ),
+                encoding="utf-8",
+            )
+            start_sh.chmod(0o755)
+
+            env = dict(os.environ)
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            env["TMUX_PANE"] = "%0"
+            env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
+            env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
+            env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            env["FAKE_COCKPIT_MODE"] = "exit"
+            env["FAKE_TMUX_LOG"] = str(tmux_log)
+            env["FAKE_TMUX_STATUS_RIGHT"] = ""
+            env["FAKE_TMUX_REFRESH_ERROR"] = "1"
+
+            completed = subprocess.run(
+                ["bash", str(start_sh)],
+                cwd=repo_root,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            calls = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
+            self.assertIn(["set-option", "status-interval", "30"], calls)

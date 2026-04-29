@@ -7,6 +7,18 @@ PY=$REPO/.venv/bin/python
 mkdir -p ~/.agents/log
 TELEGRAM_LOG=$HOME/.agents/log/telegram.log
 
+load_stage8_tmux_refresh_seconds() {
+  "${PY}" -c '
+from pathlib import Path
+import os
+from paulshaclaw.cost.config import load_cost_config
+
+config_path = os.environ.get("PAULSHACLAW_CONFIG")
+config = load_cost_config(config_path=Path(config_path) if config_path else None)
+print(config.tmux_refresh_seconds)
+' 2>/dev/null || printf '30\n'
+}
+
 cleanup() {
   if [[ "${CLEANED_UP:-0}" -eq 1 ]]; then
     return
@@ -51,10 +63,15 @@ apply_stage8_footer() {
 
   local footer_cmd
   local existing_right
+  local refresh_seconds
   footer_cmd="#(${PY} -m paulshaclaw.cost.status)"
   existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
+  refresh_seconds="$(load_stage8_tmux_refresh_seconds | tr -d '\r' | tail -n 1)"
+  if [[ ! "${refresh_seconds}" =~ ^[0-9]+$ ]]; then
+    refresh_seconds=30
+  fi
 
-  tmux set-option status-interval 30
+  tmux set-option status-interval "${refresh_seconds}"
   case "${existing_right}" in
     *"paulshaclaw.cost.status"*)
       return 0
