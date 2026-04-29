@@ -17,3 +17,23 @@ monitor:
   legacy_policy: list-only       # list-only | hide
   socket_path: ~/.agents/run/project-monitor.sock
   ignore_dirs: []                # extra patterns; .git/node_modules already implicit
+
+cost:
+  timezone: Asia/Taipei
+  cache_ttl_seconds: 120
+  tmux_refresh_seconds: 30
+  colors:
+    warning_percent: 70
+    critical_percent: 90
+  providers:
+    copilot:
+      accounts:
+        - id: hamanpaul
+          label: haman
+          kind: personal
+          monthly_allowance: 1500
+        - id: paulc-arc
+          label: arc
+          kind: company
+          monthly_allowance: 300
+          org: example-org
