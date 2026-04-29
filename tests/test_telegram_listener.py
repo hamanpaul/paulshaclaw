@@ -233,6 +233,30 @@ class TelegramListenerTests(unittest.TestCase):
         self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
         self.assertEqual(listener.offset, 12)
 
+    def test_run_once_does_not_advance_offset_when_processing_raises(self) -> None:
+        class RaisingRouter:
+            def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+                raise ValueError("boom")
+
+        client = RecordingClient(
+            [
+                {
+                    "update_id": 11,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/status",
+                    },
+                }
+            ]
+        )
+        listener = TelegramListener(client=client, router=RaisingRouter())
+
+        with self.assertRaisesRegex(ValueError, "boom"):
+            listener.run_once()
+
+        self.assertIsNone(listener.offset)
+
     def test_run_forever_backs_off_after_polling_error(self) -> None:
         class FlakyClient(RecordingClient):
             def __init__(self) -> None:

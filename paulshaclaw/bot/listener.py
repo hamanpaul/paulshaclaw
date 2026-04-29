@@ -162,11 +162,9 @@ class TelegramListener:
         updates = self.client.get_updates(offset=self.offset, timeout=self.poll_timeout)
         for update in updates:
             next_offset = self._next_offset(update)
-            try:
-                self.process_update(update)
-            finally:
-                if next_offset is not None:
-                    self.offset = next_offset
+            self.process_update(update)
+            if next_offset is not None:
+                self.offset = next_offset
 
     def run_forever(self) -> None:
         backoff = 1.0
