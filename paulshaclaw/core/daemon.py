@@ -38,7 +38,7 @@ class PaulShiaBroDaemon:
         try:
             result = subprocess.run(
                 ["tmux", "list-panes", "-a", "-F",
-                 "#{session_name}:#{window_index} #{pane_id} #{pane_current_command}"],
+                 "#{session_name}:#{window_index} #{pane_id} #{pane_title}"],
                 check=True, capture_output=True, text=True,
             )
             return result.stdout.strip() or "(no panes)"
