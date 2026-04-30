@@ -75,7 +75,7 @@ class TelegramApiClient:
             method="POST",
         )
         try:
-            with self.opener(request, self.timeout if timeout is None else timeout) as response:
+            with self.opener(request, timeout=self.timeout if timeout is None else timeout) as response:
                 raw = response.read()
         except urllib.error.URLError as error:
             raise TelegramApiError(f"Telegram API request failed: {error.reason}") from error
