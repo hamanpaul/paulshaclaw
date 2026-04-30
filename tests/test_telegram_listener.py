@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import json
 import tempfile
 import unittest
@@ -432,6 +433,22 @@ class ListenerMainTests(unittest.TestCase):
         self.assertEqual(build_listener_mock.call_args.kwargs["config_path"], None)
         self.assertEqual(build_listener_mock.call_args.kwargs["poll_timeout"], 30)
         fake_listener.run_forever.assert_called_once_with()
+
+    def test_main_writes_ready_file_before_run_forever(self) -> None:
+        fake_listener = mock.Mock()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            ready_file = Path(tmpdir) / "telegram.ready"
+            with (
+                mock.patch.dict(os.environ, {"PSC_TELEGRAM_READY_FILE": str(ready_file)}, clear=False),
+                mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
+                mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+                mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+                mock.patch("paulshaclaw.bot.listener.build_listener", return_value=fake_listener),
+            ):
+                exit_code = listener_module.main([])
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(ready_file.read_text(encoding="utf-8"), "ready\n")
+            fake_listener.run_forever.assert_called_once_with()
 
     def test_main_passes_config_and_poll_timeout_to_listener_builder(self) -> None:
         fake_listener = mock.Mock()
