@@ -216,10 +216,8 @@ class StartScriptLifecycleTests(unittest.TestCase):
             fake_python.chmod(0o755)
 
             start_sh = fake_scripts / "start.sh"
-            start_sh_text = START_SH.read_text(encoding="utf-8").replace(
-                "REPO=/home/paul_chen/prj_pri/paulshaclaw",
-                f"REPO={repo_root}",
-            )
+            start_sh_text = START_SH.read_text(encoding="utf-8")
+            self.assertIn('BASH_SOURCE[0]', start_sh_text)
             self.assertNotIn("set -m", start_sh_text)
             self.assertNotIn("while kill -0", start_sh_text)
             start_sh.write_text(start_sh_text, encoding="utf-8")
@@ -269,6 +267,8 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 text=True,
             )
             try:
+                if not expect_monitor_started:
+                    self._wait_for_missing_file(monitor_pidfile)
                 if expect_monitor_started:
                     monitor_pid = self._wait_for_pidfile_int(monitor_pidfile)
                 if expect_cockpit_started:
@@ -328,6 +328,8 @@ class StartScriptLifecycleTests(unittest.TestCase):
                         self.assertIn("telegram listener exited before ready", output)
                     if monitor_mode == "exit":
                         self.assertIn("monitor exited before cockpit start", output)
+                    if not expect_monitor_started:
+                        self.assertNotIn("monitor pid=", output)
 
             finally:
                 if proc.poll() is None:

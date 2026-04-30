@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO=/home/paul_chen/prj_pri/paulshaclaw
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$script_dir/.." && pwd)"
 PY=$REPO/.venv/bin/python
 
 mkdir -p ~/.agents/log
@@ -43,17 +44,6 @@ trap cleanup EXIT
 trap cleanup_int INT
 trap cleanup_term TERM
 
-# Stage 9: project-monitor (background)
-"$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
-MONITOR_PID=$!
-echo "monitor pid=$MONITOR_PID"
-
-if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-  wait "$MONITOR_PID" 2>/dev/null || true
-  echo "monitor exited before startup" >&2
-  exit 1
-fi
-
 # Telegram listener (background when config is present)
 telegram_token_present=0
 telegram_config_present=0
@@ -71,6 +61,24 @@ fi
 if [[ "$telegram_token_present" -eq 0 && "$telegram_config_present" -eq 0 ]]; then
   echo "telegram skipped: missing PSC_TELEGRAM_BOT_TOKEN or PSC_STAGE1_CONFIG"
 elif [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
+  :
+else
+  echo "telegram startup requires both PSC_TELEGRAM_BOT_TOKEN and readable PSC_STAGE1_CONFIG" >&2
+  exit 1
+fi
+
+# Stage 9: project-monitor (background)
+"$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
+MONITOR_PID=$!
+echo "monitor pid=$MONITOR_PID"
+
+if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+  wait "$MONITOR_PID" 2>/dev/null || true
+  echo "monitor exited before startup" >&2
+  exit 1
+fi
+
+if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
@@ -121,13 +129,6 @@ elif [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "
     exit 1
   fi
   echo "telegram pid=$TELEGRAM_PID"
-else
-  if [[ "$telegram_token_present" -eq 0 && "$telegram_config_present" -eq 0 ]]; then
-    :
-  else
-    echo "telegram startup requires both PSC_TELEGRAM_BOT_TOKEN and readable PSC_STAGE1_CONFIG" >&2
-    exit 1
-  fi
 fi
 
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then

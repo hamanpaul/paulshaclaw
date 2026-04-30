@@ -56,6 +56,10 @@ class TemplateMappingTests(unittest.TestCase):
         self.assertIn("PSC_PLANE=core", telegram_runtime_text)
         self.assertNotIn("PSC_STAGE1_CONFIG", telegram_runtime_text)
 
+        core_unit = next(asset for asset in assets if asset.template_relpath == "core/systemd/__INSTANCE__.service.tmpl")
+        core_unit_text = core_unit.template_path.read_text(encoding="utf-8")
+        self.assertIn("WantedBy=default.target", core_unit_text)
+
         telegram_secret = next(
             asset for asset in assets if asset.template_relpath == "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl"
         )
