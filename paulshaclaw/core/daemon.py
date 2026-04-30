@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Protocol
@@ -33,6 +34,29 @@ class PaulShiaBroDaemon:
         self.config = config
         self.coordinator = coordinator or LocalCoordinator()
 
+    def _list_panes_text(self) -> str:
+        try:
+            result = subprocess.run(
+                ["tmux", "list-panes", "-a", "-F",
+                 "#{session_name}:#{window_index} #{pane_id} #{pane_current_command}"],
+                check=True, capture_output=True, text=True,
+            )
+            return result.stdout.strip() or "(no panes)"
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return "(tmux unavailable)"
+
+    def _send_to_pane(self, pane_id: str, message: str) -> dict[str, object]:
+        try:
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane_id, message, "Enter"],
+                check=True, capture_output=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise ValueError(f"tmux send-keys failed: {exc.stderr.decode().strip()}") from exc
+        except FileNotFoundError as exc:
+            raise ValueError("tmux not found") from exc
+        return {"ok": True, "pane_id": pane_id, "sent": message}
+
     def status_snapshot(self) -> dict[str, object]:
         return {
             "ok": True,
@@ -40,6 +64,7 @@ class PaulShiaBroDaemon:
             "project": self.config.default_project,
             "pane_count": len(self.config.pane_assignments),
             "allowed_user_count": len(self.config.allowed_user_ids),
+            "panes": self._list_panes_text(),
         }
 
     def dispatch(self, task_id: str) -> dict[str, object]:
@@ -63,10 +88,18 @@ class PaulShiaBroDaemon:
             return self.status_snapshot()
 
         if normalized.startswith("/dispatch "):
-            task_id = normalized.split(maxsplit=1)[1].strip()
-            if not task_id:
+            rest = normalized.split(maxsplit=1)[1].strip()
+            tokens = rest.split()
+            pane_idx = next((i for i, t in enumerate(tokens) if t.startswith("%")), None)
+            if pane_idx is not None:
+                pane_id = tokens[pane_idx]
+                message = " ".join(tokens[pane_idx + 1:])
+                if not message:
+                    raise ValueError(f"/dispatch {pane_id} 需要訊息內容")
+                return self._send_to_pane(pane_id, message)
+            if not rest:
                 raise ValueError("/dispatch 需要 task_id")
-            return self.dispatch(task_id)
+            return self.dispatch(rest)
 
         raise ValueError(f"不支援的指令: {command}")
 

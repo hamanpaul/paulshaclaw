@@ -4,12 +4,17 @@ from paulshaclaw.core.daemon import PaulShiaBroDaemon
 
 
 def _format_message(result: dict[str, object]) -> str:
+    if "sent" in result:
+        return f"已送出 -> {result['pane_id']}\n{result['sent']}"
     if "daemon" in result:
-        return (
-            f"{result['daemon']} 狀態\n"
-            f"project={result['project']}\n"
-            f"panes={result['pane_count']}"
-        )
+        lines = [
+            f"{result['daemon']} 狀態",
+            f"project={result['project']}",
+            "",
+            "Panes:",
+            str(result.get("panes", "(unavailable)")),
+        ]
+        return "\n".join(lines)
     return f"已派工 {result['job_id']} -> {result['scope']}"
 
 
