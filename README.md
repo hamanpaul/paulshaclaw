@@ -30,6 +30,18 @@ python3 -m policy_check --repo /path/to/paulshaclaw
 
 ## Usage
 
+### Stage 8 cost footer
+
+```bash
+# Emit one JSON snapshot for debugging
+python3 -m paulshaclaw.cost --once
+
+# Render the tmux footer line
+python3 -m paulshaclaw.cost.status --plain
+```
+
+`scripts/start.sh` applies the Stage 8 footer to the current tmux session with the configured `status-interval` from `tmux_refresh_seconds` (default `30`). Copilot accounts are read from real config; account labels and request allowances are not hardcoded. If no runtime config file exists, Stage 8 falls back to built-in defaults with zero Copilot accounts.
+
 ### 查閱設計文件
 
 ```bash
