@@ -9,6 +9,18 @@ TELEGRAM_LOG=$HOME/.agents/log/telegram.log
 TELEGRAM_READY_FILE=$HOME/.agents/run/telegram.ready
 TELEGRAM_STARTUP_TIMEOUT=${PSC_TELEGRAM_STARTUP_TIMEOUT:-40}
 
+load_stage8_tmux_refresh_seconds() {
+  "${PY}" -c '
+from pathlib import Path
+import os
+from paulshaclaw.cost.config import load_cost_config
+
+config_path = os.environ.get("PAULSHACLAW_CONFIG")
+config = load_cost_config(config_path=Path(config_path) if config_path else None)
+print(config.tmux_refresh_seconds)
+' 2>/dev/null || printf '30\n'
+}
+
 cleanup() {
   if [[ "${CLEANED_UP:-0}" -eq 1 ]]; then
     return
@@ -42,6 +54,40 @@ cleanup_int() {
 trap cleanup EXIT
 trap cleanup_int INT
 trap cleanup_term TERM
+
+apply_stage8_footer() {
+  if [[ -z "${TMUX:-}" ]]; then
+    return 0
+  fi
+  if ! command -v tmux >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local footer_cmd
+  local existing_right
+  local refresh_seconds
+  footer_cmd="#(${PY} -m paulshaclaw.cost.status)"
+  existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
+  refresh_seconds="$(load_stage8_tmux_refresh_seconds | tr -d '\r' | tail -n 1)"
+  if [[ ! "${refresh_seconds}" =~ ^[0-9]+$ ]]; then
+    refresh_seconds=30
+  fi
+
+  tmux set-option status-interval "${refresh_seconds}"
+  case "${existing_right}" in
+    *"paulshaclaw.cost.status"*)
+      return 0
+      ;;
+    "")
+      tmux set-option status-right "${footer_cmd}"
+      ;;
+    *)
+      tmux set-option status-right "${existing_right} ${footer_cmd}"
+      ;;
+  esac
+}
+
+apply_stage8_footer
 
 # Stage 9: project-monitor (background)
 "$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
