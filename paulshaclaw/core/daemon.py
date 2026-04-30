@@ -48,7 +48,11 @@ class PaulShiaBroDaemon:
     def _send_to_pane(self, pane_id: str, message: str) -> dict[str, object]:
         try:
             subprocess.run(
-                ["tmux", "send-keys", "-t", pane_id, message, "Enter"],
+                ["tmux", "send-keys", "-t", pane_id, "-l", message],
+                check=True, capture_output=True,
+            )
+            subprocess.run(
+                ["tmux", "send-keys", "-t", pane_id, "Enter"],
                 check=True, capture_output=True,
             )
         except subprocess.CalledProcessError as exc:
