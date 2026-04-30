@@ -184,8 +184,16 @@ if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   exit 1
 fi
 
-# Stage 11: cockpit TUI (foreground status path, requires tmux)
-"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" &
+# Stage 11: cockpit TUI (background with real stdin so Textual gets a TTY)
+# Background processes default to /dev/null stdin; Textual raises
+# ParseError("end of file reached") immediately. Probe /dev/tty in a subshell
+# (avoids "No such device or address" when there is no controlling terminal,
+# e.g. in CI or the test harness). Use /dev/null as fallback.
+_cockpit_stdin=/dev/null
+if (exec </dev/tty) 2>/dev/null; then
+  _cockpit_stdin=/dev/tty
+fi
+"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" < "$_cockpit_stdin" &
 COCKPIT_PID=$!
 if wait "$COCKPIT_PID"; then
   exit 0

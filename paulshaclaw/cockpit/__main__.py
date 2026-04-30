@@ -42,7 +42,14 @@ def main(argv: list[str] | None = None) -> int:
         actions=LayoutActionService(),
         pane_loader=tmux_client.list_panes,
     )
-    app.run()
+    try:
+        app.run()
+    except Exception as exc:
+        # Textual raises ParseError("end of file reached") when stdin closes
+        # (e.g. tmux pane resize or terminal close). Treat EOF as clean exit.
+        if "end of file" in str(exc).lower():
+            return 0
+        raise
     return 0
 
 
