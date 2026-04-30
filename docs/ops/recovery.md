@@ -94,28 +94,48 @@
    - 再跑一次 `/status`
 6. 將 before / after 輸出寫入 Stage5 evidence。
 
-## Playbook: full runtime restart
+## Playbook: Telegram runtime restart
 
 ### 觸發條件
 
-- daemon、bot listener、janitor placeholder 任一持續 crash loop。
+- `paulshaclaw.service`、`paulshaclaw-telegram.service` 或 `paulshaclaw-janitor.service` 任一持續 crash loop。
 - `restart_count_10m` 進入 critical。
 - `error_burst_5m` 持續升高且單點重啟無效。
 
 ### 復原步驟
 
 1. 先收集三個服務狀態：
-   - `systemctl --user status paulshaclaw-daemon.service`
-   - `systemctl --user status paulshaclaw-bot.service`
+   - `systemctl --user status paulshaclaw.service`
+   - `systemctl --user status paulshaclaw-telegram.service`
    - `systemctl --user status paulshaclaw-janitor.service`
-2. 依序停止 bot listener、janitor、daemon，避免重啟期間重複 ingest。
-3. 清理過時 pid/socket，保留 raw log 尾端證據。
-4. 依序啟動 daemon -> bot listener -> janitor。
-5. 驗證：
-   - `/status` 成功
-   - `tmux ls` 成功
-   - queue backlog 回落或至少不再增加
-6. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
+2. 先確認 Telegram listener 的三個檔案與環境：
+   - runtime env：`~/.agents/core/runtime/paulshaclaw-telegram.env`
+   - secret env：`~/.config/paulshaclaw/paulshaclaw.telegram.secret.env`
+   - Stage 1 config：`~/.agents/state/config/paulshaclaw.state.json`
+3. runtime env 內應包含：
+   - `PSC_INSTANCE=paulshaclaw`
+   - `PSC_PLANE=core`
+4. Telegram systemd unit 內應直接設定：
+   - `Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/paulshaclaw.state.json`
+5. secret env 內應包含：
+    - `PSC_TELEGRAM_BOT_TOKEN`（非空）
+    - `PSC_TELEGRAM_EXPECTED_USERNAME` / `PSC_TELEGRAM_EXPECTED_BOT_ID`（可空，但若設定必須和 `getMe` 結果一致）
+6. 若是 local `scripts/start.sh` 場景，先確認 `~/.agents/log/telegram.log` 正常寫入。
+7. 若是 deployed systemd 場景，使用 journald 觀察：
+    - `journalctl --user -u paulshaclaw-telegram.service -f`
+    - `journalctl --user -u paulshaclaw.service -f`
+8. 依序重啟：
+    - `systemctl --user restart paulshaclaw.service`
+    - `systemctl --user restart paulshaclaw-telegram.service`
+    - `systemctl --user restart paulshaclaw-janitor.service`
+9. 驗證：
+    - `systemctl --user status paulshaclaw.service`
+    - `systemctl --user status paulshaclaw-telegram.service`
+    - `~/.agents/log/telegram.log` 或 `journalctl --user -u paulshaclaw-telegram.service` 中沒有 token/config 錯誤
+    - `PSC_STAGE1_CONFIG` 指向的 `~/.agents/state/config/paulshaclaw.state.json` 可讀
+    - `/dispatch sample-task` 若尚未接上真實 coordinator，會 fail closed 並回傳 `coordinator backend 未設定`
+    - `/status` 仍可回應
+10. 若仍失敗，升級為人工介入並附上 `stage5.error.v1` 紀錄。
 
 ## Playbook: memory pipeline 阻塞
 

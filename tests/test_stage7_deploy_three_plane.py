@@ -18,12 +18,55 @@ from paulshaclaw.deploy import (
 class TemplateMappingTests(unittest.TestCase):
     def test_template_assets_cover_three_planes(self) -> None:
         assets = list_template_assets()
+        relpaths = {asset.template_relpath for asset in assets}
+        planes = {asset.plane for asset in assets}
 
-        self.assertGreaterEqual(len(assets), 4)
-        self.assertEqual({asset.plane for asset in assets}, {"core", "state", "secret"})
+        self.assertGreaterEqual(len(assets), 7)
+        self.assertTrue({"core", "state", "secret"}.issubset(planes))
+        self.assertTrue(
+            {
+                "core/systemd/__INSTANCE__.service.tmpl",
+                "core/systemd/__INSTANCE__-telegram.service.tmpl",
+                "core/runtime/__INSTANCE__.env.tmpl",
+                "core/runtime/__INSTANCE__-telegram.env.tmpl",
+                "state/config/__INSTANCE__.state.json.tmpl",
+                "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
+                "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
+            }.issubset(relpaths)
+        )
         for asset in assets:
             self.assertTrue(asset.template_path.exists(), msg=str(asset.template_path))
             self.assertTrue(asset.target_path.endswith(asset.expected_suffix))
+
+        telegram_unit = next(
+            asset for asset in assets if asset.template_relpath == "core/systemd/__INSTANCE__-telegram.service.tmpl"
+        )
+        telegram_unit_text = telegram_unit.template_path.read_text(encoding="utf-8")
+        self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env", telegram_unit_text)
+        self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env", telegram_unit_text)
+        self.assertIn("EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env", telegram_unit_text)
+        self.assertIn("ExecStart=/usr/bin/env python3 -m paulshaclaw.bot.listener", telegram_unit_text)
+        self.assertIn("Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_unit_text)
+
+        telegram_runtime = next(
+            asset for asset in assets if asset.template_relpath == "core/runtime/__INSTANCE__-telegram.env.tmpl"
+        )
+        telegram_runtime_text = telegram_runtime.template_path.read_text(encoding="utf-8")
+        self.assertIn("PSC_INSTANCE=__INSTANCE__", telegram_runtime_text)
+        self.assertIn("PSC_PLANE=core", telegram_runtime_text)
+        self.assertNotIn("PSC_STAGE1_CONFIG", telegram_runtime_text)
+
+        core_unit = next(asset for asset in assets if asset.template_relpath == "core/systemd/__INSTANCE__.service.tmpl")
+        core_unit_text = core_unit.template_path.read_text(encoding="utf-8")
+        self.assertIn("WantedBy=default.target", core_unit_text)
+
+        telegram_secret = next(
+            asset for asset in assets if asset.template_relpath == "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl"
+        )
+        telegram_secret_text = telegram_secret.template_path.read_text(encoding="utf-8")
+        self.assertIn("PSC_TELEGRAM_BOT_TOKEN=", telegram_secret_text)
+        self.assertIn("PSC_TELEGRAM_EXPECTED_USERNAME=", telegram_secret_text)
+        self.assertIn("PSC_TELEGRAM_EXPECTED_BOT_ID=", telegram_secret_text)
 
     def test_rename_rule_strips_tmpl_and_replaces_instance_token(self) -> None:
         target = resolve_template_target(
@@ -32,6 +75,18 @@ class TemplateMappingTests(unittest.TestCase):
         )
 
         self.assertEqual(target, "core/systemd/demo-agent.service")
+        self.assertEqual(
+            resolve_template_target("core/systemd/__INSTANCE__-telegram.service.tmpl", instance_name="demo-agent"),
+            "core/systemd/demo-agent-telegram.service",
+        )
+        self.assertEqual(
+            resolve_template_target("core/runtime/__INSTANCE__-telegram.env.tmpl", instance_name="demo-agent"),
+            "core/runtime/demo-agent-telegram.env",
+        )
+        self.assertEqual(
+            resolve_template_target("secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl", instance_name="demo-agent"),
+            "secret/bootstrap/demo-agent.telegram.secret.env",
+        )
 
 
 class PermissionPolicyTests(unittest.TestCase):
