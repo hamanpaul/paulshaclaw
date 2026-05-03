@@ -79,8 +79,15 @@ apply_stage8_footer() {
 
   tmux set-option status-interval "${refresh_seconds}"
   case "${existing_right}" in
-    *"paulshaclaw.cost.status"*)
+    "${footer_cmd}"*)
+      # 完全匹配當前 footer_cmd，無需更新
       return 0
+      ;;
+    *"paulshaclaw.cost.status"*)
+      # 舊版本（路徑不同），用 sed 替換成新的
+      local updated_right
+      updated_right="$(printf '%s' "${existing_right}" | sed "s|#([^)]*paulshaclaw\.cost\.status[^)]*)|${footer_cmd}|g")"
+      tmux set-option status-right "${updated_right}"
       ;;
     "")
       tmux set-option status-right "${footer_cmd}"
