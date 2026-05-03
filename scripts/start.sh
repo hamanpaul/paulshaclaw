@@ -70,7 +70,7 @@ apply_stage8_footer() {
   local footer_cmd
   local existing_right
   local refresh_seconds
-  footer_cmd="#(${PY} -m paulshaclaw.cost.status)"
+  footer_cmd="#(PYTHONPATH=${REPO} ${PY} -m paulshaclaw.cost.status)"
   existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
   refresh_seconds="$(load_stage8_tmux_refresh_seconds | tr -d '\r' | tail -n 1)"
   if [[ ! "${refresh_seconds}" =~ ^[0-9]+$ ]]; then
