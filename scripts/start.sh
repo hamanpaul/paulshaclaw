@@ -180,8 +180,7 @@ fi
 
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   wait "$MONITOR_PID" 2>/dev/null || true
-  echo "monitor exited before cockpit start" >&2
-  exit 1
+  echo "monitor exited before cockpit start (continuing)" >&2
 fi
 
 # Stage 11: cockpit TUI (background with real stdin so Textual gets a TTY)
