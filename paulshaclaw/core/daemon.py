@@ -105,7 +105,7 @@ class PaulShiaBroDaemon:
 
     def _handle_help_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
         if len(args) > 1:
-            raise ValueError("help 只接受一個參數")
+            raise ValueError("/help 最多接受一個 command")
         text = self.command_registry.render_help(args[0] if args else None)
         return {"ok": True, "kind": "help", "text": text}
 

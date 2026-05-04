@@ -15,6 +15,7 @@ class CommandDispatcher:
     def __init__(
         self,
         registry: CommandRegistry,
+        *,
         python_handlers: dict[str, PythonHandler],
         shell_executor: ShellExecutor | None = None,
     ) -> None:
@@ -49,16 +50,14 @@ class CommandDispatcher:
 
         if command.func_call.type == "shell":
             timeout = command.func_call.timeout_seconds or self.registry.default_timeout_seconds
-            if timeout is None:
-                timeout = 0
-            argv = expand_shell_argv(list(command.func_call.argv), args)
+            argv = expand_shell_argv(command.func_call.argv, args)
             stdout = self.shell_executor(argv, timeout)
             return {"ok": True, "kind": "shell", "stdout": stdout}
 
         raise ValueError(f"不支援的指令: {normalized}")
 
 
-def expand_shell_argv(argv: list[str], args: list[str]) -> list[str]:
+def expand_shell_argv(argv: tuple[str, ...], args: list[str]) -> list[str]:
     expanded: list[str] = []
     for token in argv:
         replaced = token.replace("{args}", " ".join(args))
@@ -87,4 +86,4 @@ def default_shell_executor(argv: list[str], timeout: int) -> str:
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
         raise ValueError(stderr or f"shell command failed: exit {exc.returncode}") from exc
-    return completed.stdout
+    return completed.stdout.strip()
