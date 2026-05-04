@@ -13,16 +13,16 @@ Clock = Callable[[], datetime]
 
 def default_tmate_executor(argv: list[str], timeout: int) -> str:
     try:
-        result = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(argv, check=True, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError as exc:
         raise ValueError("tmate not found") from exc
     except subprocess.TimeoutExpired as exc:
-        raise ValueError("tmate command timed out") from exc
+        raise ValueError(f"tmate command timed out after {timeout}s") from exc
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        raise ValueError(stderr or f"tmate command failed with exit code {exc.returncode}") from exc
 
     stdout = (result.stdout or "").strip()
-    stderr = (result.stderr or "").strip()
-    if result.returncode != 0:
-        raise ValueError(stderr or stdout or f"tmate command failed with exit code {result.returncode}")
     return stdout
 
 
@@ -51,7 +51,7 @@ class TmateManager:
     def status(self) -> dict[str, object]:
         if not self._has_session():
             self._clear_state()
-            return {"state": "stopped", "running": False}
+            return self._public_result({"state": "stopped", "running": False})
 
         attached_clients = self._attached_clients()
         result = self._link_result(attached_clients)
@@ -89,12 +89,12 @@ class TmateManager:
         if self._has_session():
             self._run("kill-session", "-t", self.session_name)
         self._clear_state()
-        return {"state": "stopped", "running": False}
+        return self._public_result({"state": "stopped", "running": False})
 
     def cleanup_idle(self) -> dict[str, object]:
         if not self._has_session():
             self._clear_state()
-            return {"state": "stopped", "running": False}
+            return self._public_result({"state": "stopped", "running": False})
 
         attached_clients = self._attached_clients()
         state = self._load_state()
@@ -126,9 +126,7 @@ class TmateManager:
 
         last_no_client = self._parse_datetime(last_no_client_at)
         if self.now() - last_no_client >= timedelta(seconds=self.timeout_seconds):
-            self._run("kill-session", "-t", self.session_name)
-            self._clear_state()
-            return {"state": "stopped", "running": False}
+            return self.stop()
 
         result = self._link_result(attached_clients)
         result["attached_clients"] = attached_clients
@@ -145,25 +143,19 @@ class TmateManager:
             message = str(exc)
             if message in {"tmate not found", "tmate command timed out"}:
                 raise
-            return {
-                "state": "pending",
-                "running": False,
-            }
+            return self._public_result({"state": "pending", "running": True})
 
         if not all((ssh, web, ssh_ro, web_ro)):
-            return {
-                "state": "pending",
-                "running": False,
-            }
+            return self._public_result({"state": "pending", "running": True})
 
-        return {
+        return self._public_result({
             "state": "running",
             "running": True,
             "ssh": ssh,
             "web": web,
             "ssh_ro": ssh_ro,
             "web_ro": web_ro,
-        }
+        })
 
     def _has_session(self) -> bool:
         try:
@@ -215,6 +207,9 @@ class TmateManager:
 
     def _now_iso(self) -> str:
         return self.now().isoformat()
+
+    def _public_result(self, payload: dict[str, object]) -> dict[str, object]:
+        return {"ok": True, "kind": "tmate", **payload}
 
     def _parse_datetime(self, value: object) -> datetime:
         if not isinstance(value, str) or not value:

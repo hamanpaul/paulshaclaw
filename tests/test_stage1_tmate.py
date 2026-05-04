@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import unittest
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from paulshaclaw.core.tmate import TmateManager
+from paulshaclaw.core.tmate import default_tmate_executor
 
 
 class FakeExecutor:
@@ -55,7 +58,7 @@ class Stage1TmateTests(unittest.TestCase):
         executor.queue(["tmate", "-S", str(self.root / "run" / "paulshaclaw-tmate.sock"), "has-session", "-t", "paulshaclaw"], ValueError("session absent"))
         manager = self.make_manager(executor, datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc))
 
-        self.assertEqual(manager.status(), {"state": "stopped", "running": False})
+        self.assertEqual(manager.status(), {"ok": True, "kind": "tmate", "state": "stopped", "running": False})
         self.assertFalse(manager.state_path.exists())
 
     def test_start_creates_session_links_and_state_file(self) -> None:
@@ -74,12 +77,19 @@ class Stage1TmateTests(unittest.TestCase):
 
         result = manager.start()
 
-        self.assertEqual(result["state"], "running")
+        self.assertEqual(result, {
+            "ok": True,
+            "kind": "tmate",
+            "state": "running",
+            "running": True,
+            "ssh": "ssh rw",
+            "web": "web rw",
+            "ssh_ro": "ssh ro",
+            "web_ro": "web ro",
+            "attached_clients": 1,
+            "timeout_seconds": 3600,
+        })
         self.assertTrue(result["running"])
-        self.assertEqual(result["ssh"], "ssh rw")
-        self.assertEqual(result["web"], "web rw")
-        self.assertEqual(result["ssh_ro"], "ssh ro")
-        self.assertEqual(result["web_ro"], "web ro")
         self.assertTrue(manager.state_path.exists())
         state = json.loads(manager.state_path.read_text())
         self.assertEqual(state["session_name"], "paulshaclaw")
@@ -97,8 +107,50 @@ class Stage1TmateTests(unittest.TestCase):
         manager.state_path.parent.mkdir(parents=True, exist_ok=True)
         manager.state_path.write_text(json.dumps({"session_name": "paulshaclaw"}))
 
-        self.assertEqual(manager.stop(), {"state": "stopped", "running": False})
+        self.assertEqual(manager.stop(), {"ok": True, "kind": "tmate", "state": "stopped", "running": False})
         self.assertFalse(manager.state_path.exists())
+
+    def test_cleanup_idle_records_first_zero_client_as_running(self) -> None:
+        started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+        now = started + timedelta(seconds=10)
+        executor = FakeExecutor()
+        socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "0")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh}"], "ssh rw")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_web}"], "web rw")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh_ro}"], "ssh ro")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_web_ro}"], "web ro")
+        manager = self.make_manager(executor, now)
+        manager.state_path.parent.mkdir(parents=True, exist_ok=True)
+        manager.state_path.write_text(
+            json.dumps(
+                {
+                    "socket_path": socket,
+                    "session_name": "paulshaclaw",
+                    "started_at": started.isoformat(),
+                    "last_no_client_at": None,
+                    "timeout_seconds": 3600,
+                }
+            )
+        )
+
+        result = manager.cleanup_idle()
+
+        self.assertEqual(result, {
+            "ok": True,
+            "kind": "tmate",
+            "state": "running",
+            "running": True,
+            "ssh": "ssh rw",
+            "web": "web rw",
+            "ssh_ro": "ssh ro",
+            "web_ro": "web ro",
+            "attached_clients": 0,
+            "timeout_seconds": 3600,
+        })
+        state = json.loads(manager.state_path.read_text())
+        self.assertEqual(state["last_no_client_at"], now.isoformat())
 
     def test_cleanup_idle_stops_after_timeout_without_clients(self) -> None:
         started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
@@ -107,6 +159,7 @@ class Stage1TmateTests(unittest.TestCase):
         socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
         executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
         executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "0")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
         executor.queue(["tmate", "-S", socket, "kill-session", "-t", "paulshaclaw"], "")
         manager = self.make_manager(executor, idle)
         manager.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -122,7 +175,7 @@ class Stage1TmateTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(manager.cleanup_idle(), {"state": "stopped", "running": False})
+        self.assertEqual(manager.cleanup_idle(), {"ok": True, "kind": "tmate", "state": "stopped", "running": False})
         self.assertFalse(manager.state_path.exists())
 
     def test_cleanup_idle_clears_idle_marker_when_client_returns(self) -> None:
@@ -156,6 +209,32 @@ class Stage1TmateTests(unittest.TestCase):
         self.assertTrue(result["running"])
         state = json.loads(manager.state_path.read_text())
         self.assertIsNone(state["last_no_client_at"])
+
+    def test_default_tmate_executor_uses_check_and_strips_output(self) -> None:
+        mock_result = Mock(stdout=" hello\n", stderr="", returncode=0)
+        with patch("subprocess.run", return_value=mock_result) as run_mock:
+            self.assertEqual(default_tmate_executor(["tmate", "status"], 7), "hello")
+        run_mock.assert_called_once_with(["tmate", "status"], check=True, capture_output=True, text=True, timeout=7)
+
+    def test_default_tmate_executor_error_messages_are_clean(self) -> None:
+        with patch(
+            "subprocess.run",
+            side_effect=FileNotFoundError(),
+        ):
+            with self.assertRaisesRegex(ValueError, "^tmate not found$"):
+                default_tmate_executor(["tmate"], 3)
+
+        with patch(
+            "subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd=["tmate"], timeout=5),
+        ):
+            with self.assertRaisesRegex(ValueError, "^tmate command timed out after 5s$"):
+                default_tmate_executor(["tmate"], 5)
+
+        exc = subprocess.CalledProcessError(2, ["tmate"], stderr="boom\n")
+        with patch("subprocess.run", side_effect=exc):
+            with self.assertRaisesRegex(ValueError, "^boom$"):
+                default_tmate_executor(["tmate"], 3)
 
 
 if __name__ == "__main__":
