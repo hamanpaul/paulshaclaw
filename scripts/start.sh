@@ -5,7 +5,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
 PY=$REPO/.venv/bin/python
 
-# Load Telegram secrets and state config from well-known paths when not already set.
+# Load Telegram secrets and state config from well-known paths when not already
+# set. Only fill in defaults if the files actually exist, so missing-config
+# scenarios still fall through to the standard skip path.
 _default_secret_env="$HOME/.config/paulshaclaw/paulshaclaw.telegram.secret.env"
 _default_state_config="$HOME/.config/paulshaclaw/paulshaclaw.state.json"
 if [[ -z "${PSC_TELEGRAM_BOT_TOKEN:-}" && -r "$_default_secret_env" ]]; then
@@ -14,7 +16,9 @@ if [[ -z "${PSC_TELEGRAM_BOT_TOKEN:-}" && -r "$_default_secret_env" ]]; then
   source "$_default_secret_env"
   set +o allexport
 fi
-export PSC_STAGE1_CONFIG="${PSC_STAGE1_CONFIG:-$_default_state_config}"
+if [[ -z "${PSC_STAGE1_CONFIG:-}" && -r "$_default_state_config" ]]; then
+  export PSC_STAGE1_CONFIG="$_default_state_config"
+fi
 unset _default_secret_env _default_state_config
 
 mkdir -p ~/.agents/log
