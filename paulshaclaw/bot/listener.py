@@ -163,6 +163,13 @@ class TelegramListener:
         self.offset: int | None = None
         self.max_backoff = 30.0
 
+    def drain_pending(self) -> None:
+        updates = self.client.get_updates(offset=self.offset, timeout=0)
+        for update in updates:
+            next_offset = self._next_offset(update)
+            if next_offset is not None:
+                self.offset = next_offset
+
     def run_once(self) -> None:
         updates = self.client.get_updates(offset=self.offset, timeout=self.poll_timeout)
         for update in updates:
@@ -256,6 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             client=client,
             poll_timeout=args.poll_timeout,
         )
+        listener.drain_pending()
         ready_file = os.environ.get("PSC_TELEGRAM_READY_FILE", "").strip()
         if ready_file:
             Path(ready_file).write_text("ready\n", encoding="utf-8")
