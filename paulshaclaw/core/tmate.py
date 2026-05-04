@@ -102,10 +102,7 @@ class TmateManager:
         if attached_clients > 0:
             if state.get("last_no_client_at") is not None:
                 self._write_state(self._state_with_last_no_client(state, None))
-            result = self._link_result(attached_clients)
-            result["attached_clients"] = attached_clients
-            result["timeout_seconds"] = self.timeout_seconds
-            return result
+            return self._running_result(attached_clients)
 
         last_no_client_at = state.get("last_no_client_at")
         if last_no_client_at is None:
@@ -119,10 +116,7 @@ class TmateManager:
                 }
             )
             self._write_state(state)
-            result = self._link_result(attached_clients)
-            result["attached_clients"] = attached_clients
-            result["timeout_seconds"] = self.timeout_seconds
-            return result
+            return self._running_result(attached_clients)
 
         last_no_client = self._parse_datetime(last_no_client_at)
         if self.now() - last_no_client >= timedelta(seconds=self.timeout_seconds):
@@ -210,6 +204,16 @@ class TmateManager:
 
     def _public_result(self, payload: dict[str, object]) -> dict[str, object]:
         return {"ok": True, "kind": "tmate", **payload}
+
+    def _running_result(self, attached_clients: int) -> dict[str, object]:
+        return self._public_result(
+            {
+                "state": "running",
+                "running": True,
+                "attached_clients": attached_clients,
+                "timeout_seconds": self.timeout_seconds,
+            }
+        )
 
     def _parse_datetime(self, value: object) -> datetime:
         if not isinstance(value, str) or not value:

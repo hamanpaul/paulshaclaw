@@ -110,17 +110,13 @@ class Stage1TmateTests(unittest.TestCase):
         self.assertEqual(manager.stop(), {"ok": True, "kind": "tmate", "state": "stopped", "running": False})
         self.assertFalse(manager.state_path.exists())
 
-    def test_cleanup_idle_records_first_zero_client_as_running(self) -> None:
+    def test_cleanup_idle_records_first_zero_client_as_running_without_links(self) -> None:
         started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
         now = started + timedelta(seconds=10)
         executor = FakeExecutor()
         socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
         executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
         executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "0")
-        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh}"], "ssh rw")
-        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_web}"], "web rw")
-        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh_ro}"], "ssh ro")
-        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_web_ro}"], "web ro")
         manager = self.make_manager(executor, now)
         manager.state_path.parent.mkdir(parents=True, exist_ok=True)
         manager.state_path.write_text(
@@ -142,15 +138,45 @@ class Stage1TmateTests(unittest.TestCase):
             "kind": "tmate",
             "state": "running",
             "running": True,
-            "ssh": "ssh rw",
-            "web": "web rw",
-            "ssh_ro": "ssh ro",
-            "web_ro": "web ro",
             "attached_clients": 0,
             "timeout_seconds": 3600,
         })
         state = json.loads(manager.state_path.read_text())
         self.assertEqual(state["last_no_client_at"], now.isoformat())
+
+    def test_cleanup_idle_keeps_running_when_clients_attached_without_links(self) -> None:
+        started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+        now = started + timedelta(seconds=10)
+        executor = FakeExecutor()
+        socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "1")
+        manager = self.make_manager(executor, now)
+        manager.state_path.parent.mkdir(parents=True, exist_ok=True)
+        manager.state_path.write_text(
+            json.dumps(
+                {
+                    "socket_path": socket,
+                    "session_name": "paulshaclaw",
+                    "started_at": started.isoformat(),
+                    "last_no_client_at": started.isoformat(),
+                    "timeout_seconds": 3600,
+                }
+            )
+        )
+
+        result = manager.cleanup_idle()
+
+        self.assertEqual(result, {
+            "ok": True,
+            "kind": "tmate",
+            "state": "running",
+            "running": True,
+            "attached_clients": 1,
+            "timeout_seconds": 3600,
+        })
+        state = json.loads(manager.state_path.read_text())
+        self.assertIsNone(state["last_no_client_at"])
 
     def test_cleanup_idle_stops_after_timeout_without_clients(self) -> None:
         started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
