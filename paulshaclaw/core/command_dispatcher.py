@@ -31,7 +31,7 @@ class CommandDispatcher:
         try:
             parts = shlex.split(normalized)
         except ValueError as exc:
-            raise ValueError(f"不支援的指令: {normalized}") from exc
+            raise ValueError(f"不支援的指令: {command_text}") from exc
         if not parts:
             raise ValueError("不支援的指令: ")
 
@@ -39,13 +39,13 @@ class CommandDispatcher:
         try:
             command = self.registry.get(command_name)
         except CommandRegistryError as exc:
-            raise ValueError(f"不支援的指令: {normalized}") from exc
+            raise ValueError(f"不支援的指令: {command_text}") from exc
 
         if command.func_call.type == "python":
             handler_name = command.func_call.target or command.name.lstrip("/")
             handler = self.python_handlers.get(handler_name)
             if handler is None:
-                raise ValueError(f"不支援的指令: {normalized}")
+                raise ValueError(f"不支援的指令: {command_text}")
             return handler(args, command)
 
         if command.func_call.type == "shell":
@@ -54,7 +54,7 @@ class CommandDispatcher:
             stdout = self.shell_executor(argv, timeout)
             return {"ok": True, "kind": "shell", "stdout": stdout}
 
-        raise ValueError(f"不支援的指令: {normalized}")
+        raise ValueError(f"不支援的指令: {command_text}")
 
 
 def expand_shell_argv(argv: tuple[str, ...], args: list[str]) -> list[str]:
