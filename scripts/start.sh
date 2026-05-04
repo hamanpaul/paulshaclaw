@@ -4,6 +4,9 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
 PY=$REPO/.venv/bin/python
+if [[ ! -x "$PY" ]]; then
+  PY=$(command -v python3) || { echo "python3 not found" >&2; exit 1; }
+fi
 
 # Load Telegram secrets and state config from well-known paths when not already
 # set. Only fill in defaults if the files actually exist, so missing-config
@@ -83,7 +86,7 @@ apply_stage8_footer() {
   local footer_cmd
   local existing_right
   local refresh_seconds
-  footer_cmd="#(${PY} -m paulshaclaw.cost.status)"
+  footer_cmd="#(PYTHONPATH=${REPO} ${PY} -m paulshaclaw.cost.status)"
   existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
   refresh_seconds="$(load_stage8_tmux_refresh_seconds | tr -d '\r' | tail -n 1)"
   if [[ ! "${refresh_seconds}" =~ ^[0-9]+$ ]]; then
@@ -92,8 +95,21 @@ apply_stage8_footer() {
 
   tmux set-option status-interval "${refresh_seconds}"
   case "${existing_right}" in
-    *"paulshaclaw.cost.status"*)
+    "${footer_cmd}"*)
+      # 完全匹配當前 footer_cmd，無需更新
       return 0
+      ;;
+    *"paulshaclaw.cost.status"*)
+      # 舊版本（路徑不同）：用 bash regex 切片替換，
+      # 避免 sed 對 footer_cmd 內含的 / & 等特殊字元踩雷。
+      local pattern updated_right
+      pattern='^(.*)#\([^)]*paulshaclaw\.cost\.status[^)]*\)(.*)$'
+      if [[ "${existing_right}" =~ $pattern ]]; then
+        updated_right="${BASH_REMATCH[1]}${footer_cmd}${BASH_REMATCH[2]}"
+      else
+        updated_right="${footer_cmd}"
+      fi
+      tmux set-option status-right "${updated_right}"
       ;;
     "")
       tmux set-option status-right "${footer_cmd}"
@@ -157,11 +173,6 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
       echo "telegram listener exited before ready" >&2
       exit 1
     fi
-    if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-      wait "$MONITOR_PID" 2>/dev/null || true
-      echo "monitor exited before telegram ready" >&2
-      exit 1
-    fi
     if (( SECONDS >= telegram_ready_deadline )); then
       echo "telegram listener readiness timeout" >&2
       exit 1
@@ -186,18 +197,12 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
     fi
     sleep 0.05
   done
-  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-    wait "$MONITOR_PID" 2>/dev/null || true
-    echo "monitor exited before cockpit start" >&2
-    exit 1
-  fi
   echo "telegram pid=$TELEGRAM_PID"
 fi
 
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   wait "$MONITOR_PID" 2>/dev/null || true
-  echo "monitor exited before cockpit start" >&2
-  exit 1
+  echo "monitor exited before cockpit start (continuing)" >&2
 fi
 
 # Stage 11: cockpit TUI (background with real stdin so Textual gets a TTY)
