@@ -14,6 +14,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import AppConfig, load_config
+from paulshaclaw.core.command_registry import CommandRegistry, load_default_command_registry
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,19 @@ class TelegramApiClient:
 
     def send_message(self, *, chat_id: int, text: str) -> None:
         self._post("sendMessage", {"chat_id": chat_id, "text": text})
+
+    def set_my_commands(self, commands: list[dict[str, str]]) -> None:
+        self._post("setMyCommands", {"commands": commands})
+
+    def get_my_commands(self) -> list[dict[str, object]]:
+        result = self._post("getMyCommands", {})
+        if not isinstance(result, list):
+            raise TelegramApiError("Telegram getMyCommands returned non-list result")
+        commands: list[dict[str, object]] = []
+        for item in result:
+            if isinstance(item, dict):
+                commands.append(item)
+        return commands
 
     def _post(self, method: str, payload: Mapping[str, object], *, timeout: float | None = None) -> object:
         body = json.dumps(dict(payload)).encode("utf-8")
@@ -145,8 +159,15 @@ class UnavailableCoordinator:
         raise ValueError("coordinator backend 未設定")
 
 
-def build_dispatch_guard_daemon(config: AppConfig) -> PaulShiaBroDaemon:
-    return PaulShiaBroDaemon(config=config, coordinator=UnavailableCoordinator())
+def build_dispatch_guard_daemon(
+    config: AppConfig,
+    command_registry: CommandRegistry | None = None,
+) -> PaulShiaBroDaemon:
+    return PaulShiaBroDaemon(
+        config=config,
+        coordinator=UnavailableCoordinator(),
+        command_registry=command_registry,
+    )
 
 
 class TelegramListener:
@@ -237,9 +258,11 @@ def build_listener(
     settings: BotSettings,
     client: TelegramApiClient | None = None,
     poll_timeout: int = 30,
+    command_registry: CommandRegistry | None = None,
 ) -> TelegramListener:
     config = load_config(config_path=config_path)
-    daemon = build_dispatch_guard_daemon(config)
+    resolved_registry = command_registry or load_default_command_registry()
+    daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
     router = TelegramCommandRouter(daemon=daemon)
     return TelegramListener(
         client=client or TelegramApiClient(settings.token),
@@ -268,11 +291,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_bot_settings()
         client = TelegramApiClient(settings.token)
         validate_bot_identity(client, settings)
+        command_registry = load_default_command_registry()
+        client.set_my_commands(command_registry.telegram_commands())
         listener = build_listener(
             config_path=args.config,
             settings=settings,
             client=client,
             poll_timeout=args.poll_timeout,
+            command_registry=command_registry,
         )
         listener.drain_pending()
         ready_file = os.environ.get("PSC_TELEGRAM_READY_FILE", "").strip()
