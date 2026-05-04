@@ -117,6 +117,17 @@ class TelegramApiClientTests(unittest.TestCase):
         self.assertEqual(opener.requests[0]["url"], "https://api.telegram.org/botfake-token/sendMessage")
         self.assertEqual(body, {"chat_id": 1001, "text": "PaulShiaBro 狀態"})
 
+    def test_set_my_commands_posts_commands_payload(self) -> None:
+        opener = FakeOpener([{"ok": True, "result": True}])
+        client = TelegramApiClient("fake-token", opener=opener)
+        commands = [{"command": "tmate", "description": "管理 tmate remote access"}]
+
+        client.set_my_commands(commands)
+
+        body = json.loads(opener.requests[0]["data"].decode("utf-8"))
+        self.assertEqual(opener.requests[0]["url"], "https://api.telegram.org/botfake-token/setMyCommands")
+        self.assertEqual(body, {"commands": commands})
+
     def test_api_error_raises_without_exposing_token(self) -> None:
         opener = FakeOpener([{"ok": False, "description": "Bad Request"}])
         client = TelegramApiClient("secret-token", opener=opener)
@@ -253,6 +264,20 @@ class TelegramListenerTests(unittest.TestCase):
         self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
         self.assertEqual(listener.offset, 12)
 
+    def test_run_once_calls_cleanup_even_without_updates(self) -> None:
+        client = RecordingClient([])
+        cleanup_calls: list[str] = []
+        listener = TelegramListener(
+            client=client,
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            cleanup=lambda: cleanup_calls.append("cleanup"),
+        )
+
+        listener.run_once()
+
+        self.assertEqual(cleanup_calls, ["cleanup"])
+        self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
+
     def test_run_once_does_not_advance_offset_when_processing_raises(self) -> None:
         class RaisingRouter:
             def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
@@ -316,6 +341,29 @@ class TelegramListenerTests(unittest.TestCase):
         listener.run_forever()
 
         self.assertEqual(sleeps, [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0])
+
+    def test_safe_send_redacts_tmate_links_in_logs(self) -> None:
+        client = RecordingClient([])
+        listener = TelegramListener(client=client, router=FakeRouter({"ok": True, "message": "ok"}))
+        message = "\n".join(
+            [
+                "tmate: running",
+                "ssh: ssh session@example.com",
+                "web: https://tmate.io/t/session",
+                "ssh_ro: ssh readonly@example.com",
+                "web_ro: https://tmate.io/t/readonly",
+            ]
+        )
+
+        with self.assertLogs(listener_module.logger, level="INFO") as captured:
+            listener._safe_send(chat_id=1001, text=message)
+
+        self.assertEqual(client.sent_messages, [{"chat_id": 1001, "text": message}])
+        joined = "\n".join(captured.output)
+        self.assertIn("[REDACTED:TMATE_SSH]", joined)
+        self.assertIn("[REDACTED:TMATE_WEB]", joined)
+        self.assertNotIn("session@example.com", joined)
+        self.assertNotIn("https://tmate.io/t/session", joined)
 
 
 class ListenerBuildTests(unittest.TestCase):
@@ -414,37 +462,70 @@ class ListenerBuildTests(unittest.TestCase):
 
 
 class ListenerMainTests(unittest.TestCase):
-    def test_main_success_runs_listener(self) -> None:
+    def test_main_success_syncs_commands_before_listener_runs(self) -> None:
         fake_listener = mock.Mock()
+        fake_client = mock.Mock()
+        fake_client.set_my_commands.return_value = None
+        fake_commands = [{"command": "tmate", "description": "管理 tmate remote access"}]
+        parent = mock.Mock()
+        parent.attach_mock(fake_client, "client")
+        parent.attach_mock(fake_listener, "listener")
 
         with (
             mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")) as load_settings,
-            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()) as api_client,
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=fake_client) as api_client,
             mock.patch("paulshaclaw.bot.listener.validate_bot_identity") as validate_identity,
             mock.patch("paulshaclaw.bot.listener.build_listener", return_value=fake_listener) as build_listener_mock,
+            mock.patch("paulshaclaw.bot.listener.load_default_command_registry") as load_registry,
         ):
+            load_registry.return_value.telegram_commands.return_value = fake_commands
             exit_code = listener_module.main([])
 
         self.assertEqual(exit_code, 0)
         load_settings.assert_called_once_with()
         api_client.assert_called_once_with("fake-token")
         validate_identity.assert_called_once()
+        fake_client.set_my_commands.assert_called_once_with(fake_commands)
         build_listener_mock.assert_called_once()
         self.assertEqual(build_listener_mock.call_args.kwargs["config_path"], None)
         self.assertEqual(build_listener_mock.call_args.kwargs["poll_timeout"], 30)
+        self.assertEqual(build_listener_mock.call_args.kwargs["command_registry"], load_registry.return_value)
+        self.assertLess(
+            parent.mock_calls.index(mock.call.client.set_my_commands(fake_commands)),
+            parent.mock_calls.index(mock.call.listener.run_forever()),
+        )
         fake_listener.run_forever.assert_called_once_with()
+
+    def test_main_returns_one_when_command_menu_sync_fails(self) -> None:
+        fake_client = mock.Mock()
+        fake_client.set_my_commands.side_effect = TelegramApiError("menu sync failed")
+
+        with (
+            mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=fake_client),
+            mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+            mock.patch("paulshaclaw.bot.listener.load_default_command_registry") as load_registry,
+        ):
+            load_registry.return_value.telegram_commands.return_value = []
+            exit_code = listener_module.main([])
+
+        self.assertEqual(exit_code, 1)
 
     def test_main_writes_ready_file_before_run_forever(self) -> None:
         fake_listener = mock.Mock()
+        fake_client = mock.Mock()
+        fake_client.set_my_commands.return_value = None
         with tempfile.TemporaryDirectory() as tmpdir:
             ready_file = Path(tmpdir) / "telegram.ready"
             with (
                 mock.patch.dict(os.environ, {"PSC_TELEGRAM_READY_FILE": str(ready_file)}, clear=False),
                 mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
-                mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+                mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=fake_client),
                 mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+                mock.patch("paulshaclaw.bot.listener.load_default_command_registry") as load_registry,
                 mock.patch("paulshaclaw.bot.listener.build_listener", return_value=fake_listener),
             ):
+                load_registry.return_value.telegram_commands.return_value = []
                 exit_code = listener_module.main([])
             self.assertEqual(exit_code, 0)
             self.assertEqual(ready_file.read_text(encoding="utf-8"), "ready\n")
@@ -452,13 +533,17 @@ class ListenerMainTests(unittest.TestCase):
 
     def test_main_passes_config_and_poll_timeout_to_listener_builder(self) -> None:
         fake_listener = mock.Mock()
+        fake_client = mock.Mock()
+        fake_client.set_my_commands.return_value = None
 
         with (
             mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
-            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=fake_client),
             mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+            mock.patch("paulshaclaw.bot.listener.load_default_command_registry") as load_registry,
             mock.patch("paulshaclaw.bot.listener.build_listener", return_value=fake_listener) as build_listener_mock,
         ):
+            load_registry.return_value.telegram_commands.return_value = []
             exit_code = listener_module.main(["--config", "/fake/config.json", "--poll-timeout", "15"])
 
         self.assertEqual(exit_code, 0)
@@ -472,22 +557,27 @@ class ListenerMainTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
 
     def test_main_returns_one_when_config_is_bad(self) -> None:
-        fake_listener = mock.Mock()
+        fake_client = mock.Mock()
+        fake_client.set_my_commands.return_value = None
 
         with (
             mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
-            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=fake_client),
             mock.patch("paulshaclaw.bot.listener.validate_bot_identity"),
+            mock.patch("paulshaclaw.bot.listener.load_default_command_registry") as load_registry,
             mock.patch("paulshaclaw.bot.listener.build_listener", side_effect=FileNotFoundError("bad config")),
         ):
+            load_registry.return_value.telegram_commands.return_value = []
             exit_code = listener_module.main([])
 
         self.assertEqual(exit_code, 1)
 
     def test_main_returns_one_on_telegram_api_error(self) -> None:
+        fake_client = mock.Mock()
+        fake_client.set_my_commands.return_value = None
         with (
             mock.patch("paulshaclaw.bot.listener.load_bot_settings", return_value=BotSettings(token="fake-token")),
-            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=object()),
+            mock.patch("paulshaclaw.bot.listener.TelegramApiClient", return_value=fake_client),
             mock.patch("paulshaclaw.bot.listener.validate_bot_identity", side_effect=TelegramApiError("bad bot")),
         ):
             exit_code = listener_module.main([])

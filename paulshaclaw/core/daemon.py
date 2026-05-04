@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from paulshaclaw.core.config import AppConfig, load_config
+from paulshaclaw.core.command_dispatcher import CommandDispatcher
+from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry
+from paulshaclaw.core.tmate import TmateManager
 
 
 class CoordinatorClient(Protocol):
@@ -30,9 +33,27 @@ class LocalCoordinator:
 
 
 class PaulShiaBroDaemon:
-    def __init__(self, config: AppConfig, coordinator: CoordinatorClient | None = None) -> None:
+    def __init__(
+        self,
+        config: AppConfig,
+        coordinator: CoordinatorClient | None = None,
+        command_registry: CommandRegistry | None = None,
+        tmate_manager: TmateManager | None = None,
+    ) -> None:
         self.config = config
         self.coordinator = coordinator or LocalCoordinator()
+        self.command_registry = command_registry or load_default_command_registry()
+        tmate_timeout = self.command_registry.get("/tmate").func_call.timeout_seconds or 3600
+        self.tmate_manager = tmate_manager or TmateManager(timeout_seconds=tmate_timeout)
+        self.command_dispatcher = CommandDispatcher(
+            registry=self.command_registry,
+            python_handlers={
+                "help": self._handle_help_command,
+                "status": self._handle_status_command,
+                "dispatch": self._handle_dispatch_command,
+                "tmate": self._handle_tmate_command,
+            },
+        )
 
     def _list_panes_text(self) -> str:
         try:
@@ -86,26 +107,47 @@ class PaulShiaBroDaemon:
             "scope": job["scope"],
         }
 
+    def _handle_help_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
+        if len(args) > 1:
+            raise ValueError("/help 最多接受一個 command")
+        text = self.command_registry.render_help(args[0] if args else None)
+        return {"ok": True, "kind": "help", "text": text}
+
+    def _handle_status_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
+        if args:
+            raise ValueError("/status 不接受參數")
+        return self.status_snapshot()
+
+    def _handle_dispatch_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
+        if not args:
+            raise ValueError("/dispatch 需要 task_id")
+        pane_idx = next((i for i, token in enumerate(args) if token.startswith("%")), None)
+        if pane_idx is not None:
+            pane_id = args[pane_idx]
+            message = " ".join(args[pane_idx + 1:]).strip()
+            if not message:
+                raise ValueError(f"/dispatch {pane_id} 需要訊息內容")
+            return self._send_to_pane(pane_id, message)
+        return self.dispatch(" ".join(args))
+
+    def _handle_tmate_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
+        if len(args) > 1:
+            raise ValueError("/tmate 只接受 status/start/stop")
+
+        action = args[0] if args else "status"
+        if action == "status":
+            return self.tmate_manager.status()
+        if action == "start":
+            return self.tmate_manager.start()
+        if action == "stop":
+            return self.tmate_manager.stop()
+        raise ValueError("/tmate 只接受 status/start/stop")
+
     def handle_command(self, command: str) -> dict[str, object]:
-        normalized = command.strip()
-        if normalized == "/status":
-            return self.status_snapshot()
+        return self.command_dispatcher.execute(command)
 
-        if normalized.startswith("/dispatch "):
-            rest = normalized.split(maxsplit=1)[1].strip()
-            tokens = rest.split()
-            pane_idx = next((i for i, t in enumerate(tokens) if t.startswith("%")), None)
-            if pane_idx is not None:
-                pane_id = tokens[pane_idx]
-                message = " ".join(tokens[pane_idx + 1:])
-                if not message:
-                    raise ValueError(f"/dispatch {pane_id} 需要訊息內容")
-                return self._send_to_pane(pane_id, message)
-            if not rest:
-                raise ValueError("/dispatch 需要 task_id")
-            return self.dispatch(rest)
-
-        raise ValueError(f"不支援的指令: {command}")
+    def cleanup_idle_resources(self) -> None:
+        self.tmate_manager.cleanup_idle()
 
 
 def main(argv: list[str] | None = None) -> int:

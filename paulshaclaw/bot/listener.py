@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -14,11 +15,30 @@ from typing import Any, Callable, Mapping, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import AppConfig, load_config
+from paulshaclaw.core.command_registry import CommandRegistry, load_default_command_registry
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
+from paulshaclaw.security.ops_companion import DEFAULT_REDACTION_RULES, RedactionEngine, RedactionRule
 
 logger = logging.getLogger(__name__)
 
 OpenUrl = Callable[[urllib.request.Request, float], Any]
+OUTBOUND_LOG_REDACTOR = RedactionEngine(
+    DEFAULT_REDACTION_RULES
+    + (
+        RedactionRule(
+            rule_id="tmate-ssh-line",
+            pattern=re.compile(r"(?m)\b(ssh(?:_ro)?\s*:\s*)([^\n]+)"),
+            replacement=lambda match: f"{match.group(1)}[REDACTED:TMATE_SSH]",
+            classifications=("remote-access",),
+        ),
+        RedactionRule(
+            rule_id="tmate-web-line",
+            pattern=re.compile(r"(?m)\b(web(?:_ro)?\s*:\s*)([^\n]+)"),
+            replacement=lambda match: f"{match.group(1)}[REDACTED:TMATE_WEB]",
+            classifications=("remote-access",),
+        ),
+    )
+)
 
 
 class TelegramApiError(RuntimeError):
@@ -67,6 +87,19 @@ class TelegramApiClient:
 
     def send_message(self, *, chat_id: int, text: str) -> None:
         self._post("sendMessage", {"chat_id": chat_id, "text": text})
+
+    def set_my_commands(self, commands: list[dict[str, str]]) -> None:
+        self._post("setMyCommands", {"commands": commands})
+
+    def get_my_commands(self) -> list[dict[str, object]]:
+        result = self._post("getMyCommands", {})
+        if not isinstance(result, list):
+            raise TelegramApiError("Telegram getMyCommands returned non-list result")
+        commands: list[dict[str, object]] = []
+        for item in result:
+            if isinstance(item, dict):
+                commands.append(item)
+        return commands
 
     def _post(self, method: str, payload: Mapping[str, object], *, timeout: float | None = None) -> object:
         body = json.dumps(dict(payload)).encode("utf-8")
@@ -145,8 +178,15 @@ class UnavailableCoordinator:
         raise ValueError("coordinator backend 未設定")
 
 
-def build_dispatch_guard_daemon(config: AppConfig) -> PaulShiaBroDaemon:
-    return PaulShiaBroDaemon(config=config, coordinator=UnavailableCoordinator())
+def build_dispatch_guard_daemon(
+    config: AppConfig,
+    command_registry: CommandRegistry | None = None,
+) -> PaulShiaBroDaemon:
+    return PaulShiaBroDaemon(
+        config=config,
+        coordinator=UnavailableCoordinator(),
+        command_registry=command_registry,
+    )
 
 
 class TelegramListener:
@@ -157,11 +197,13 @@ class TelegramListener:
         router: TelegramCommandRouter,
         poll_timeout: int = 30,
         sleep: Callable[[float], None] = time.sleep,
+        cleanup: Callable[[], None] | None = None,
     ) -> None:
         self.client = client
         self.router = router
         self.poll_timeout = poll_timeout
         self.sleep = sleep
+        self.cleanup = cleanup or (lambda: None)
         self.offset: int | None = None
         self.max_backoff = 30.0
 
@@ -173,6 +215,7 @@ class TelegramListener:
                 self.offset = next_offset
 
     def run_once(self) -> None:
+        self.cleanup()
         updates = self.client.get_updates(offset=self.offset, timeout=self.poll_timeout)
         for update in updates:
             next_offset = self._next_offset(update)
@@ -218,7 +261,7 @@ class TelegramListener:
         self._safe_send(chat_id=chat_id, text=reply)
 
     def _safe_send(self, *, chat_id: int, text: str) -> None:
-        logger.info("OUT chat=%d text=%r", chat_id, text)
+        logger.info("OUT chat=%d text=%r", chat_id, OUTBOUND_LOG_REDACTOR.redact(text).text)
         try:
             self.client.send_message(chat_id=chat_id, text=text)
         except TelegramApiError as error:
@@ -237,14 +280,17 @@ def build_listener(
     settings: BotSettings,
     client: TelegramApiClient | None = None,
     poll_timeout: int = 30,
+    command_registry: CommandRegistry | None = None,
 ) -> TelegramListener:
     config = load_config(config_path=config_path)
-    daemon = build_dispatch_guard_daemon(config)
+    resolved_registry = command_registry or load_default_command_registry()
+    daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
     router = TelegramCommandRouter(daemon=daemon)
     return TelegramListener(
         client=client or TelegramApiClient(settings.token),
         router=router,
         poll_timeout=poll_timeout,
+        cleanup=daemon.cleanup_idle_resources,
     )
 
 
@@ -268,11 +314,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         settings = load_bot_settings()
         client = TelegramApiClient(settings.token)
         validate_bot_identity(client, settings)
+        command_registry = load_default_command_registry()
+        client.set_my_commands(command_registry.telegram_commands())
         listener = build_listener(
             config_path=args.config,
             settings=settings,
             client=client,
             poll_timeout=args.poll_timeout,
+            command_registry=command_registry,
         )
         listener.drain_pending()
         ready_file = os.environ.get("PSC_TELEGRAM_READY_FILE", "").strip()
