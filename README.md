@@ -87,6 +87,10 @@ python3 -m paulshaclaw.cost.status --plain
 
 `scripts/start.sh` applies the Stage 8 footer to the current tmux session with the configured `status-interval` from `tmux_refresh_seconds` (default `30`). Copilot accounts are read from real config; account labels and request allowances are not hardcoded. If no runtime config file exists, Stage 8 falls back to built-in defaults with zero Copilot accounts.
 
+> **footer 用量資料來源備註**
+> - `cdx`（Codex）與 `cc`（Claude Code）目前僅顯示 stub 數值；尚未串接真實 API 用量。
+> - `cpt`（Copilot）需在 `paulshaclaw.yaml` 提供帳號設定才會出現；缺設定時不顯示。
+
 ### 查閱設計文件
 
 ```bash

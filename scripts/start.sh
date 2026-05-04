@@ -84,9 +84,15 @@ apply_stage8_footer() {
       return 0
       ;;
     *"paulshaclaw.cost.status"*)
-      # 舊版本（路徑不同），用 sed 替換成新的
-      local updated_right
-      updated_right="$(printf '%s' "${existing_right}" | sed "s|#([^)]*paulshaclaw\.cost\.status[^)]*)|${footer_cmd}|g")"
+      # 舊版本（路徑不同）：用 bash regex 切片替換，
+      # 避免 sed 對 footer_cmd 內含的 / & 等特殊字元踩雷。
+      local pattern updated_right
+      pattern='^(.*)#\([^)]*paulshaclaw\.cost\.status[^)]*\)(.*)$'
+      if [[ "${existing_right}" =~ $pattern ]]; then
+        updated_right="${BASH_REMATCH[1]}${footer_cmd}${BASH_REMATCH[2]}"
+      else
+        updated_right="${footer_cmd}"
+      fi
       tmux set-option status-right "${updated_right}"
       ;;
     "")
@@ -151,11 +157,6 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
       echo "telegram listener exited before ready" >&2
       exit 1
     fi
-    if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-      wait "$MONITOR_PID" 2>/dev/null || true
-      echo "monitor exited before telegram ready" >&2
-      exit 1
-    fi
     if (( SECONDS >= telegram_ready_deadline )); then
       echo "telegram listener readiness timeout" >&2
       exit 1
@@ -180,11 +181,6 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
     fi
     sleep 0.05
   done
-  if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-    wait "$MONITOR_PID" 2>/dev/null || true
-    echo "monitor exited before cockpit start" >&2
-    exit 1
-  fi
   echo "telegram pid=$TELEGRAM_PID"
 fi
 

@@ -197,13 +197,17 @@ class StartScriptLifecycleTests(unittest.TestCase):
             expect_returncode=1,
         )
 
-    def test_monitor_immediate_exit_prevents_cockpit_start(self) -> None:
+    def test_monitor_exit_warns_but_starts_cockpit(self) -> None:
+        # 隱患 1: telegram block 內監控 monitor 死亡的兩處檢查已改為 warn-only。
+        # 當 monitor 在 telegram readiness wait 之中或之後退出時，cockpit 仍應啟動，
+        # 由 L191 的統一 warn 路徑提示 monitor 已終止。
         self._run_lifecycle_test(
             telegram_enabled=True,
             telegram_mode="ready",
             monitor_mode="exit",
-            expect_cockpit_started=False,
-            expect_returncode=1,
+            cockpit_mode="exit",
+            expect_cockpit_started=True,
+            expect_returncode=0,
             capture_output=True,
         )
 
