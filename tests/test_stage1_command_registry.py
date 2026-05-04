@@ -23,6 +23,8 @@ class CommandRegistryTests(unittest.TestCase):
                 {"command": "tmate", "description": "管理 tmate remote access"},
             ],
         )
+        self.assertTrue(all(command.telegram_menu.enabled for command in registry.commands))
+        self.assertEqual(registry.get("/tmate").func_call.timeout_seconds, 3600)
 
     def test_duplicate_command_names_raise(self) -> None:
         with self.assertRaisesRegex(CommandRegistryError, "duplicate command"):
