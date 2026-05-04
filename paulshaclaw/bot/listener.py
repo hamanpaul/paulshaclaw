@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
 import time
@@ -15,6 +16,7 @@ from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
 
+logger = logging.getLogger(__name__)
 
 OpenUrl = Callable[[urllib.request.Request, float], Any]
 
@@ -210,14 +212,17 @@ class TelegramListener:
         if not isinstance(text, str):
             return
 
+        logger.info("IN  user=%d chat=%d text=%r", user_id, chat_id, text)
         result = self.router.handle_message(user_id=user_id, text=text)
-        self._safe_send(chat_id=chat_id, text=str(result["message"]))
+        reply = str(result["message"])
+        self._safe_send(chat_id=chat_id, text=reply)
 
     def _safe_send(self, *, chat_id: int, text: str) -> None:
+        logger.info("OUT chat=%d text=%r", chat_id, text)
         try:
             self.client.send_message(chat_id=chat_id, text=text)
         except TelegramApiError as error:
-            print(f"Telegram sendMessage error: {error}", file=sys.stderr)
+            logger.error("SEND_ERROR chat=%d error=%s", chat_id, error)
 
     def _next_offset(self, update: Mapping[str, object]) -> int | None:
         update_id = update.get("update_id")
@@ -251,6 +256,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    logging.basicConfig(
+        stream=sys.stdout,
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
