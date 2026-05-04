@@ -6,6 +6,19 @@ from paulshaclaw.core.daemon import PaulShiaBroDaemon
 def _format_message(result: dict[str, object]) -> str:
     if result.get("kind") == "help":
         return str(result["text"])
+    if result.get("kind") == "tmate":
+        state = str(result.get("state", "unknown"))
+        if state == "running" and all(result.get(key) for key in ("ssh", "web", "ssh_ro", "web_ro")):
+            return "\n".join(
+                [
+                    "tmate: running",
+                    f"ssh: {result['ssh']}",
+                    f"web: {result['web']}",
+                    f"ssh_ro: {result['ssh_ro']}",
+                    f"web_ro: {result['web_ro']}",
+                ]
+            )
+        return f"tmate: {state}"
     if "sent" in result:
         return f"已送出 -> {result['pane_id']}\n{result['sent']}"
     if "daemon" in result:

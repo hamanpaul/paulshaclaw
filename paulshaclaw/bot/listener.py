@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -16,10 +17,28 @@ from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_registry import CommandRegistry, load_default_command_registry
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
+from paulshaclaw.security.ops_companion import DEFAULT_REDACTION_RULES, RedactionEngine, RedactionRule
 
 logger = logging.getLogger(__name__)
 
 OpenUrl = Callable[[urllib.request.Request, float], Any]
+OUTBOUND_LOG_REDACTOR = RedactionEngine(
+    DEFAULT_REDACTION_RULES
+    + (
+        RedactionRule(
+            rule_id="tmate-ssh-line",
+            pattern=re.compile(r"(?m)\b(ssh(?:_ro)?\s*:\s*)([^\n]+)"),
+            replacement=lambda match: f"{match.group(1)}[REDACTED:TMATE_SSH]",
+            classifications=("remote-access",),
+        ),
+        RedactionRule(
+            rule_id="tmate-web-line",
+            pattern=re.compile(r"(?m)\b(web(?:_ro)?\s*:\s*)([^\n]+)"),
+            replacement=lambda match: f"{match.group(1)}[REDACTED:TMATE_WEB]",
+            classifications=("remote-access",),
+        ),
+    )
+)
 
 
 class TelegramApiError(RuntimeError):
@@ -178,11 +197,13 @@ class TelegramListener:
         router: TelegramCommandRouter,
         poll_timeout: int = 30,
         sleep: Callable[[float], None] = time.sleep,
+        cleanup: Callable[[], None] | None = None,
     ) -> None:
         self.client = client
         self.router = router
         self.poll_timeout = poll_timeout
         self.sleep = sleep
+        self.cleanup = cleanup or (lambda: None)
         self.offset: int | None = None
         self.max_backoff = 30.0
 
@@ -194,6 +215,7 @@ class TelegramListener:
                 self.offset = next_offset
 
     def run_once(self) -> None:
+        self.cleanup()
         updates = self.client.get_updates(offset=self.offset, timeout=self.poll_timeout)
         for update in updates:
             next_offset = self._next_offset(update)
@@ -239,7 +261,7 @@ class TelegramListener:
         self._safe_send(chat_id=chat_id, text=reply)
 
     def _safe_send(self, *, chat_id: int, text: str) -> None:
-        logger.info("OUT chat=%d text=%r", chat_id, text)
+        logger.info("OUT chat=%d text=%r", chat_id, OUTBOUND_LOG_REDACTOR.redact(text).text)
         try:
             self.client.send_message(chat_id=chat_id, text=text)
         except TelegramApiError as error:
@@ -268,6 +290,7 @@ def build_listener(
         client=client or TelegramApiClient(settings.token),
         router=router,
         poll_timeout=poll_timeout,
+        cleanup=daemon.cleanup_idle_resources,
     )
 
 

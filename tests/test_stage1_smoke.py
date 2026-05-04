@@ -31,6 +31,27 @@ class FakeCoordinator:
         }
 
 
+class FakeTmateManager:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def status(self) -> dict[str, object]:
+        self.calls.append("status")
+        return {"ok": True, "kind": "tmate", "state": "stopped", "running": False}
+
+    def start(self) -> dict[str, object]:
+        self.calls.append("start")
+        return {"ok": True, "kind": "tmate", "state": "running", "running": True}
+
+    def stop(self) -> dict[str, object]:
+        self.calls.append("stop")
+        return {"ok": True, "kind": "tmate", "state": "stopped", "running": False}
+
+    def cleanup_idle(self) -> dict[str, object]:
+        self.calls.append("cleanup_idle")
+        return {"ok": True, "kind": "tmate", "state": "stopped", "running": False}
+
+
 def write_config_file() -> Path:
     config = {
         "daemon_name": "PaulShiaBro",
@@ -199,6 +220,22 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertIn("/tmate [status|start|stop]", result["message"])
         self.assertIn("/dispatch <task_id>|<pane_id> <message>", result["message"])
+
+    def test_tmate_bare_command_returns_status(self) -> None:
+        config_path = self.make_config_path()
+        tmate_manager = FakeTmateManager()
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            tmate_manager=tmate_manager,
+        )
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/tmate")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(tmate_manager.calls, ["status"])
+        self.assertIn("tmate: stopped", result["message"])
 
     def test_cli_entry_outputs_json_status(self) -> None:
         config_path = self.make_config_path()

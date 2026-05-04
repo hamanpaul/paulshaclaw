@@ -10,6 +10,7 @@ from typing import Protocol
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_dispatcher import CommandDispatcher
 from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry
+from paulshaclaw.core.tmate import TmateManager
 
 
 class CoordinatorClient(Protocol):
@@ -37,10 +38,13 @@ class PaulShiaBroDaemon:
         config: AppConfig,
         coordinator: CoordinatorClient | None = None,
         command_registry: CommandRegistry | None = None,
+        tmate_manager: TmateManager | None = None,
     ) -> None:
         self.config = config
         self.coordinator = coordinator or LocalCoordinator()
         self.command_registry = command_registry or load_default_command_registry()
+        tmate_timeout = self.command_registry.get("/tmate").func_call.timeout_seconds or 3600
+        self.tmate_manager = tmate_manager or TmateManager(timeout_seconds=tmate_timeout)
         self.command_dispatcher = CommandDispatcher(
             registry=self.command_registry,
             python_handlers={
@@ -127,10 +131,23 @@ class PaulShiaBroDaemon:
         return self.dispatch(" ".join(args))
 
     def _handle_tmate_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
-        raise ValueError("tmate backend 未設定")
+        if len(args) > 1:
+            raise ValueError("/tmate 只接受 status/start/stop")
+
+        action = args[0] if args else "status"
+        if action == "status":
+            return self.tmate_manager.status()
+        if action == "start":
+            return self.tmate_manager.start()
+        if action == "stop":
+            return self.tmate_manager.stop()
+        raise ValueError("/tmate 只接受 status/start/stop")
 
     def handle_command(self, command: str) -> dict[str, object]:
         return self.command_dispatcher.execute(command)
+
+    def cleanup_idle_resources(self) -> None:
+        self.tmate_manager.cleanup_idle()
 
 
 def main(argv: list[str] | None = None) -> int:

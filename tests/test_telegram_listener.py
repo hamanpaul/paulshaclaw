@@ -264,6 +264,20 @@ class TelegramListenerTests(unittest.TestCase):
         self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
         self.assertEqual(listener.offset, 12)
 
+    def test_run_once_calls_cleanup_even_without_updates(self) -> None:
+        client = RecordingClient([])
+        cleanup_calls: list[str] = []
+        listener = TelegramListener(
+            client=client,
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            cleanup=lambda: cleanup_calls.append("cleanup"),
+        )
+
+        listener.run_once()
+
+        self.assertEqual(cleanup_calls, ["cleanup"])
+        self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
+
     def test_run_once_does_not_advance_offset_when_processing_raises(self) -> None:
         class RaisingRouter:
             def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
@@ -327,6 +341,29 @@ class TelegramListenerTests(unittest.TestCase):
         listener.run_forever()
 
         self.assertEqual(sleeps, [1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0])
+
+    def test_safe_send_redacts_tmate_links_in_logs(self) -> None:
+        client = RecordingClient([])
+        listener = TelegramListener(client=client, router=FakeRouter({"ok": True, "message": "ok"}))
+        message = "\n".join(
+            [
+                "tmate: running",
+                "ssh: ssh session@example.com",
+                "web: https://tmate.io/t/session",
+                "ssh_ro: ssh readonly@example.com",
+                "web_ro: https://tmate.io/t/readonly",
+            ]
+        )
+
+        with self.assertLogs(listener_module.logger, level="INFO") as captured:
+            listener._safe_send(chat_id=1001, text=message)
+
+        self.assertEqual(client.sent_messages, [{"chat_id": 1001, "text": message}])
+        joined = "\n".join(captured.output)
+        self.assertIn("[REDACTED:TMATE_SSH]", joined)
+        self.assertIn("[REDACTED:TMATE_WEB]", joined)
+        self.assertNotIn("session@example.com", joined)
+        self.assertNotIn("https://tmate.io/t/session", joined)
 
 
 class ListenerBuildTests(unittest.TestCase):
