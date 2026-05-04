@@ -189,6 +189,17 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertIn("job-1", result["message"])
         self.assertEqual(result["result"]["scope"], "stage1-smoke")
 
+    def test_help_command_lists_runtime_commands(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/help")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("/tmate [status|start|stop]", result["message"])
+        self.assertIn("/dispatch <task_id>|<pane_id> <message>", result["message"])
+
     def test_cli_entry_outputs_json_status(self) -> None:
         config_path = self.make_config_path()
 

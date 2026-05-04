@@ -46,6 +46,10 @@ class CommandRegistry:
     defaults_timeout_seconds: int | None
     commands: tuple[CommandSpec, ...]
 
+    @property
+    def default_timeout_seconds(self) -> int | None:
+        return self.defaults_timeout_seconds
+
     def get(self, name: str) -> CommandSpec:
         normalized = _normalize_command_name(name)
         for command in self.commands:
