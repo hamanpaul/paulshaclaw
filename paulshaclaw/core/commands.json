@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "defaults": {
+    "timeout_seconds": 30
+  },
+  "commands": [
+    {
+      "name": "/help",
+      "usage": "/help [command]",
+      "summary": "列出可用命令，或顯示單一命令用法",
+      "telegram_menu": {
+        "command": "help",
+        "description": "列出可用命令"
+      },
+      "func_call": {
+        "type": "python",
+        "target": "help"
+      }
+    },
+    {
+      "name": "/status",
+      "usage": "/status",
+      "summary": "顯示 PaulShiaBro runtime 狀態",
+      "telegram_menu": {
+        "command": "status",
+        "description": "顯示 runtime 狀態"
+      },
+      "func_call": {
+        "type": "python",
+        "target": "status"
+      }
+    },
+    {
+      "name": "/dispatch",
+      "usage": "/dispatch <task_id>|<pane_id> <message>",
+      "summary": "派工到 coordinator，或送訊息到 tmux pane",
+      "telegram_menu": {
+        "command": "dispatch",
+        "description": "派工或送訊息到 pane"
+      },
+      "func_call": {
+        "type": "python",
+        "target": "dispatch"
+      }
+    },
+    {
+      "name": "/tmate",
+      "usage": "/tmate [status|start|stop]",
+      "summary": "管理 tmate remote access session",
+      "telegram_menu": {
+        "command": "tmate",
+        "description": "管理 tmate remote access"
+      },
+      "func_call": {
+        "type": "python",
+        "target": "tmate"
+      },
+      "timeout_seconds": 3600
+    }
+  ]
+}
