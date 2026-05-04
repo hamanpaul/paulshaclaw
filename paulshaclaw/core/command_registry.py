@@ -37,7 +37,6 @@ class CommandSpec:
     summary: str
     telegram_menu: TelegramMenu
     func_call: FuncCall
-    timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -122,10 +121,6 @@ def parse_command_registry(payload: Mapping[str, Any]) -> CommandRegistry:
 
         telegram_menu = _parse_telegram_menu(raw_command.get("telegram_menu"), prefix=f"commands[{index}].telegram_menu")
         func_call = _parse_func_call(raw_command.get("func_call"), prefix=f"commands[{index}].func_call")
-        timeout_seconds = _optional_positive_int(raw_command.get("timeout_seconds"), f"commands[{index}].timeout_seconds")
-        if timeout_seconds is None:
-            timeout_seconds = defaults_timeout_seconds
-
         commands.append(
             CommandSpec(
                 name=name,
@@ -133,7 +128,6 @@ def parse_command_registry(payload: Mapping[str, Any]) -> CommandRegistry:
                 summary=summary,
                 telegram_menu=telegram_menu,
                 func_call=func_call,
-                timeout_seconds=timeout_seconds,
             )
         )
 
