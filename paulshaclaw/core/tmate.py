@@ -100,8 +100,16 @@ class TmateManager:
         state = self._load_state()
 
         if attached_clients > 0:
-            if state.get("last_no_client_at") is not None:
-                self._write_state(self._state_with_last_no_client(state, None))
+            state = self._state_with_last_no_client(state, None)
+            state.update(
+                {
+                    "socket_path": str(self.socket_path),
+                    "session_name": self.session_name,
+                    "started_at": state.get("started_at", self._now_iso()),
+                    "timeout_seconds": self.timeout_seconds,
+                }
+            )
+            self._write_state(state)
             return self._running_result(attached_clients)
 
         last_no_client_at = state.get("last_no_client_at")
@@ -135,7 +143,7 @@ class TmateManager:
             web_ro = self._display("#{tmate_web_ro}")
         except ValueError as exc:
             message = str(exc)
-            if message in {"tmate not found", "tmate command timed out"}:
+            if message == "tmate not found" or message.startswith("tmate command timed out"):
                 raise
             return self._public_result({"state": "pending", "running": True})
 
@@ -156,7 +164,7 @@ class TmateManager:
             self._run("has-session", "-t", self.session_name)
         except ValueError as exc:
             message = str(exc)
-            if message in {"tmate not found", "tmate command timed out"}:
+            if message == "tmate not found" or message.startswith("tmate command timed out"):
                 raise
             return False
         return True

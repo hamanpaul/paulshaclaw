@@ -178,6 +178,31 @@ class Stage1TmateTests(unittest.TestCase):
         state = json.loads(manager.state_path.read_text())
         self.assertIsNone(state["last_no_client_at"])
 
+    def test_cleanup_idle_attached_clients_creates_state_without_prior_file(self) -> None:
+        started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+        now = started + timedelta(seconds=10)
+        executor = FakeExecutor()
+        socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "1")
+        manager = self.make_manager(executor, now)
+
+        result = manager.cleanup_idle()
+
+        self.assertEqual(result, {
+            "ok": True,
+            "kind": "tmate",
+            "state": "running",
+            "running": True,
+            "attached_clients": 1,
+            "timeout_seconds": 3600,
+        })
+        state = json.loads(manager.state_path.read_text())
+        self.assertEqual(state["socket_path"], socket)
+        self.assertEqual(state["session_name"], "paulshaclaw")
+        self.assertEqual(state["timeout_seconds"], 3600)
+        self.assertIsNone(state["last_no_client_at"])
+
     def test_cleanup_idle_stops_after_timeout_without_clients(self) -> None:
         started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
         idle = started + timedelta(seconds=3600)
@@ -203,6 +228,26 @@ class Stage1TmateTests(unittest.TestCase):
 
         self.assertEqual(manager.cleanup_idle(), {"ok": True, "kind": "tmate", "state": "stopped", "running": False})
         self.assertFalse(manager.state_path.exists())
+
+    def test_status_propagates_timeout_from_session_lookup(self) -> None:
+        executor = FakeExecutor()
+        socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], ValueError("tmate command timed out after 10s"))
+        manager = self.make_manager(executor, datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc))
+
+        with self.assertRaisesRegex(ValueError, "^tmate command timed out after 10s$"):
+            manager.status()
+
+    def test_status_propagates_timeout_from_link_lookup(self) -> None:
+        executor = FakeExecutor()
+        socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "1")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh}"], ValueError("tmate command timed out after 10s"))
+        manager = self.make_manager(executor, datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc))
+
+        with self.assertRaisesRegex(ValueError, "^tmate command timed out after 10s$"):
+            manager.status()
 
     def test_cleanup_idle_clears_idle_marker_when_client_returns(self) -> None:
         started = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
