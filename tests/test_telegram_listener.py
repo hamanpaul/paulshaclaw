@@ -137,6 +137,17 @@ class TelegramApiClientTests(unittest.TestCase):
 
         self.assertNotIn("secret-token", str(raised.exception))
 
+    def test_timeout_error_is_wrapped_as_telegram_api_error(self) -> None:
+        def timeout_opener(request: Request, timeout: float) -> FakeResponse:
+            raise TimeoutError("read operation timed out")
+
+        client = TelegramApiClient("secret-token", opener=timeout_opener)
+
+        with self.assertRaisesRegex(TelegramApiError, "read operation timed out") as raised:
+            client.get_updates(timeout=1)
+
+        self.assertNotIn("secret-token", str(raised.exception))
+
 
 class BotSettingsTests(unittest.TestCase):
     def test_load_bot_settings_requires_token(self) -> None:
