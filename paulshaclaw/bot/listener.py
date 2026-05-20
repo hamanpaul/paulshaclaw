@@ -11,7 +11,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.chat.backend import create_chat_backend
@@ -44,6 +44,10 @@ OUTBOUND_LOG_REDACTOR = RedactionEngine(
 
 class TelegramApiError(RuntimeError):
     """Raised when Telegram Bot API rejects a request or returns invalid data."""
+
+
+class ChatBindingRecorder(Protocol):
+    def remember(self, *, user_id: int, chat_id: int) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -198,12 +202,14 @@ class TelegramListener:
         *,
         client: TelegramApiClient,
         router: TelegramCommandRouter,
+        bindings: ChatBindingRecorder | None = None,
         poll_timeout: int = 30,
         sleep: Callable[[float], None] = time.sleep,
         cleanup: Callable[[], None] | None = None,
     ) -> None:
         self.client = client
         self.router = router
+        self.bindings = bindings
         self.poll_timeout = poll_timeout
         self.sleep = sleep
         self.cleanup = cleanup or (lambda: None)
@@ -254,6 +260,16 @@ class TelegramListener:
         if not isinstance(chat_id, int) or not isinstance(user_id, int):
             return
 
+        if (
+            self.bindings is not None
+            and _should_record_private_binding(chat=chat, chat_id=chat_id, user_id=user_id)
+            and _is_authorized_binding_user(router=self.router, user_id=user_id)
+        ):
+            try:
+                self.bindings.remember(user_id=user_id, chat_id=chat_id)
+            except (OSError, ValueError) as error:
+                logger.error("BINDING_SAVE_ERROR user=%d chat=%d error=%s", user_id, chat_id, error)
+
         text = message.get("text")
         if not isinstance(text, str):
             return
@@ -285,13 +301,17 @@ def build_listener(
     poll_timeout: int = 30,
     command_registry: CommandRegistry | None = None,
 ) -> TelegramListener:
+    from paulshaclaw.bot.reply import DEFAULT_BINDINGS_PATH, TelegramChatBindingStore
+
     config = load_config(config_path=config_path)
     resolved_registry = command_registry or load_default_command_registry()
     daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
     router = TelegramCommandRouter(daemon=daemon, chat_backend=create_chat_backend())
+    bindings_path = os.environ.get("PSC_TELEGRAM_BINDINGS_PATH", "").strip() or str(DEFAULT_BINDINGS_PATH)
     return TelegramListener(
         client=client or TelegramApiClient(settings.token),
         router=router,
+        bindings=TelegramChatBindingStore(bindings_path),
         poll_timeout=poll_timeout,
         cleanup=daemon.cleanup_idle_resources,
     )
@@ -336,6 +356,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"錯誤: {error}", file=sys.stderr)
         return 1
     return 0
+
+
+def _should_record_private_binding(*, chat: Mapping[str, object], chat_id: int, user_id: int) -> bool:
+    chat_type = chat.get("type")
+    if isinstance(chat_type, str):
+        return chat_type == "private"
+    return chat_id > 0 and chat_id == user_id
+
+
+def _is_authorized_binding_user(*, router: object, user_id: int) -> bool:
+    daemon = getattr(router, "daemon", None)
+    config = getattr(daemon, "config", None)
+    allowed_user_ids = getattr(config, "allowed_user_ids", None)
+    if isinstance(allowed_user_ids, tuple):
+        return user_id in allowed_user_ids
+    return True
 
 
 if __name__ == "__main__":
