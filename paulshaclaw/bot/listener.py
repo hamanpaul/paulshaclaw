@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
+from paulshaclaw.chat.backend import create_chat_backend
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_registry import CommandRegistry, load_default_command_registry
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
@@ -287,7 +288,7 @@ def build_listener(
     config = load_config(config_path=config_path)
     resolved_registry = command_registry or load_default_command_registry()
     daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
-    router = TelegramCommandRouter(daemon=daemon)
+    router = TelegramCommandRouter(daemon=daemon, chat_backend=create_chat_backend())
     return TelegramListener(
         client=client or TelegramApiClient(settings.token),
         router=router,
