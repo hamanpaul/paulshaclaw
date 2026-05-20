@@ -106,6 +106,15 @@ class Stage1ChatBackendTest(unittest.TestCase):
         self.assertEqual(reply, "chat backend 回應格式錯誤")
         self.assertNotIn("dummy-secret", reply)
 
+    def test_invalid_utf8_failure_is_short_and_secret_safe(self) -> None:
+        opener = FakeOpener(FakeResponse(200, b"\xff\xfe"))
+        backend = create_chat_backend(env=self.make_env(), opener=opener)
+
+        reply = backend.reply(user_id=1001, text="你好")
+
+        self.assertEqual(reply, "chat backend 回應格式錯誤")
+        self.assertNotIn("dummy-secret", reply)
+
     def test_non_success_response_failure_is_short_and_secret_safe(self) -> None:
         opener = FakeOpener(FakeResponse(503, b'{"error":"dummy-secret full request payload"}'))
         backend = create_chat_backend(env=self.make_env(), opener=opener)

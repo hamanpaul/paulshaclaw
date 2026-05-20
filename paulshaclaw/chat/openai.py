@@ -28,7 +28,7 @@ class OpenAICompatibleChatBackend:
             return "chat backend 逾時"
         except (urllib.error.URLError, OSError):
             return "chat backend 請求失敗"
-        except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+        except (UnicodeDecodeError, json.JSONDecodeError, KeyError, IndexError, TypeError):
             return "chat backend 回應格式錯誤"
 
     def _build_request(self, text: str) -> urllib.request.Request:
