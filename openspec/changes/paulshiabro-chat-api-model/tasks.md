@@ -5,8 +5,8 @@
 
 ## 2. Telegram Chat Routing
 
-- [ ] 2.1 Add failing Telegram router/listener tests proving authorized non-slash text uses chat backend, slash commands keep using daemon commands, and unauthorized users cannot chat.
-- [ ] 2.2 Update `TelegramCommandRouter` and listener construction to inject the chat backend while preserving existing command behavior and production dispatch guard behavior.
+- [x] 2.1 Add failing Telegram router/listener tests proving authorized non-slash text uses chat backend, slash commands keep using daemon commands, and unauthorized users cannot chat.
+- [x] 2.2 Update `TelegramCommandRouter` and listener construction to inject the chat backend while preserving existing command behavior and production dispatch guard behavior.
 
 ## 3. Provider Placeholder Configuration
 

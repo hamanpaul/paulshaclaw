@@ -63,6 +63,16 @@ class FakeRouter:
         return self.response
 
 
+class FakeChatBackend:
+    def __init__(self, reply: str = "chat reply") -> None:
+        self.reply_text = reply
+        self.calls: list[dict[str, object]] = []
+
+    def reply(self, user_id: int, text: str) -> str:
+        self.calls.append({"user_id": user_id, "text": text})
+        return self.reply_text
+
+
 class RecordingClient:
     def __init__(self, updates: list[dict[str, object]]) -> None:
         self.updates = list(updates)
@@ -470,6 +480,43 @@ class ListenerBuildTests(unittest.TestCase):
             self.assertEqual(len(client.sent_messages), 1)
             self.assertIn("coordinator backend 未設定", client.sent_messages[0]["text"])
             self.assertNotIn("local-", client.sent_messages[0]["text"])
+
+    def test_build_listener_wires_chat_backend_and_keeps_dispatch_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            chat_backend = FakeChatBackend("chat ok")
+
+            with mock.patch("paulshaclaw.bot.listener.create_chat_backend", return_value=chat_backend) as factory:
+                listener = build_listener(
+                    config_path=str(config_path),
+                    settings=BotSettings(token="fake-token"),
+                    client=RecordingClient([]),
+                )
+
+            factory.assert_called_once_with()
+            chat_response = listener.router.handle_message(user_id=7, text="請說明目前進度")
+            dispatch_response = listener.router.handle_message(user_id=7, text="/dispatch task-1")
+
+            self.assertTrue(chat_response["ok"])
+            self.assertEqual(chat_response["message"], "chat ok")
+            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
+            self.assertFalse(dispatch_response["ok"])
+            self.assertIn("coordinator backend 未設定", dispatch_response["message"])
+            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
 
 
 class ListenerMainTests(unittest.TestCase):
