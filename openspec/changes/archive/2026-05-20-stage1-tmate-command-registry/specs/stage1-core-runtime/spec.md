@@ -58,7 +58,7 @@ The Telegram listener SHALL derive Bot API command-menu entries from registry co
 
 ### Requirement: Tmate command lifecycle
 
-The Stage 1 daemon SHALL expose `/tmate`, `/tmate status`, `/tmate start`, and `/tmate stop` through the registry dispatcher. Bare `/tmate` MUST behave as `/tmate status`. `/tmate start` MUST create or reuse one managed tmate session, return read-write and read-only SSH/Web links when links are ready, and store runtime state under `~/.agents/` rather than the repository. `/tmate stop` MUST kill the managed session and clear managed state. `/tmate status` MUST report whether the managed session is stopped, pending, or running.
+The Stage 1 daemon SHALL expose `/tmate`, `/tmate status`, `/tmate start`, and `/tmate stop` through the registry dispatcher. Bare `/tmate` MUST behave as `/tmate status`. `/tmate start` MUST create or reuse one managed tmate session, return read-write and read-only SSH/Web links when links are ready, and store runtime state under `~/.agents/` rather than the repository. Managed tmate subprocesses MUST clear inherited `TMUX` from the child environment so `/tmate start` works even when PaulShiaBro itself is running inside tmux. `/tmate stop` MUST kill the managed session and clear managed state. `/tmate status` MUST report whether the managed session is stopped, pending, or running.
 
 #### Scenario: Bare tmate returns status
 
@@ -69,6 +69,11 @@ The Stage 1 daemon SHALL expose `/tmate`, `/tmate status`, `/tmate start`, and `
 
 - **WHEN** an authorized user sends `/tmate start` and tmate reports ready SSH/Web link formats
 - **THEN** the reply MUST include read-write SSH, read-write Web, read-only SSH, and read-only Web links for the managed session
+
+#### Scenario: Start ignores parent tmux nesting state
+
+- **WHEN** PaulShiaBro is running inside tmux and an authorized user sends `/tmate start`
+- **THEN** the managed tmate executor MUST clear inherited `TMUX` before spawning `tmate`, avoiding nested-session startup failure
 
 #### Scenario: Stop clears managed session
 
