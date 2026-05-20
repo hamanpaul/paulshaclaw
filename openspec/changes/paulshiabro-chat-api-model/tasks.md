@@ -1,7 +1,7 @@
 ## 1. Chat Backend
 
-- [ ] 1.1 Add failing offline tests for OpenAI-compatible provider env parsing, request payload construction, response extraction, and sanitized failures.
-- [ ] 1.2 Implement the `paulshaclaw.chat` module with a `ChatBackend` protocol, OpenAI-compatible client, env-backed factory, timeout handling, and secret-safe errors.
+- [x] 1.1 Add failing offline tests for OpenAI-compatible provider env parsing, request payload construction, response extraction, and sanitized failures.
+- [x] 1.2 Implement the `paulshaclaw.chat` module with a `ChatBackend` protocol, OpenAI-compatible client, env-backed factory, timeout handling, and secret-safe errors.
 
 ## 2. Telegram Chat Routing
 
