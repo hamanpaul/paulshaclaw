@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import unittest
@@ -285,7 +286,12 @@ class Stage1TmateTests(unittest.TestCase):
         mock_result = Mock(stdout=" hello\n", stderr="", returncode=0)
         with patch("subprocess.run", return_value=mock_result) as run_mock:
             self.assertEqual(default_tmate_executor(["tmate", "status"], 7), "hello")
-        run_mock.assert_called_once_with(["tmate", "status"], check=True, capture_output=True, text=True, timeout=7)
+        self.assertEqual(run_mock.call_args.args[0], ["tmate", "status"])
+        self.assertTrue(run_mock.call_args.kwargs["check"])
+        self.assertTrue(run_mock.call_args.kwargs["capture_output"])
+        self.assertTrue(run_mock.call_args.kwargs["text"])
+        self.assertEqual(run_mock.call_args.kwargs["timeout"], 7)
+        self.assertNotIn("TMUX", run_mock.call_args.kwargs["env"])
 
     def test_default_tmate_executor_error_messages_are_clean(self) -> None:
         with patch(
@@ -306,6 +312,22 @@ class Stage1TmateTests(unittest.TestCase):
         with patch("subprocess.run", side_effect=exc):
             with self.assertRaisesRegex(ValueError, "^boom$"):
                 default_tmate_executor(["tmate"], 3)
+
+    def test_default_tmate_executor_unsets_tmux_for_child_process(self) -> None:
+        mock_result = Mock(stdout="ok\n", stderr="", returncode=0)
+        original_tmux = os.environ.get("TMUX")
+        os.environ["TMUX"] = "/tmp/tmux-nested,1,0"
+        try:
+            with patch("subprocess.run", return_value=mock_result) as run_mock:
+                self.assertEqual(default_tmate_executor(["tmate", "new-session"], 7), "ok")
+        finally:
+            if original_tmux is None:
+                os.environ.pop("TMUX", None)
+            else:
+                os.environ["TMUX"] = original_tmux
+
+        child_env = run_mock.call_args.kwargs["env"]
+        self.assertNotIn("TMUX", child_env)
 
 
 if __name__ == "__main__":

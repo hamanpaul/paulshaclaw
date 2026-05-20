@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -12,8 +13,10 @@ Clock = Callable[[], datetime]
 
 
 def default_tmate_executor(argv: list[str], timeout: int) -> str:
+    env = dict(os.environ)
+    env.pop("TMUX", None)
     try:
-        result = subprocess.run(argv, check=True, capture_output=True, text=True, timeout=timeout)
+        result = subprocess.run(argv, check=True, capture_output=True, text=True, timeout=timeout, env=env)
     except FileNotFoundError as exc:
         raise ValueError("tmate not found") from exc
     except subprocess.TimeoutExpired as exc:

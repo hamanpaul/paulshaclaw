@@ -1,0 +1,29 @@
+## 1. Command Registry Foundation
+
+- [x] 1.1 Add `paulshaclaw/core/commands.json` with `/help`, `/status`, `/dispatch`, and `/tmate` metadata.
+- [x] 1.2 Add registry loader and validation for command uniqueness, Telegram menu constraints, Python targets, shell argv, placeholders, and timeouts.
+- [x] 1.3 Add registry-backed dispatcher with explicit Python handler map and safe shell argv execution.
+- [x] 1.4 Route existing `/status` and `/dispatch` behavior through the dispatcher without changing their public response contracts.
+
+## 2. Help And Telegram Menu
+
+- [x] 2.1 Implement `/help` list and single-command output generated from `commands.json`.
+- [x] 2.2 Add Telegram API client support for `setMyCommands` and `getMyCommands`.
+- [x] 2.3 Sync Telegram command menu from registry after `getMe` and before `getUpdates`.
+- [x] 2.4 Fail listener startup when registry validation or `setMyCommands` fails.
+
+## 3. Tmate Runtime
+
+- [x] 3.1 Add managed tmate state model under `~/.agents/run/` and `~/.agents/state/`.
+- [x] 3.2 Implement fixed-argv tmate executor for start, status, link readout, attached-client count, and stop.
+- [x] 3.3 Implement `/tmate`, `/tmate status`, `/tmate start`, and `/tmate stop` handlers.
+- [x] 3.4 Implement 3600-second no-client idle timeout cleanup from command handling and Telegram polling.
+- [x] 3.5 Redact tmate links and token-like values from normal Telegram listener logs.
+
+## 4. Tests And Verification
+
+- [x] 4.1 Add offline unit tests for registry validation, help generation, dispatcher routing, and shell argv execution.
+- [x] 4.2 Add offline listener tests for `setMyCommands` startup order and startup failure handling.
+- [x] 4.3 Add offline tmate tests with fake executor output for lifecycle and idle cleanup.
+- [x] 4.4 Update Stage 1 smoke tests to cover `/help` and registry-backed `/status` and `/dispatch`.
+- [x] 4.5 Run targeted Stage 1 tests and full repository unittest discovery.
