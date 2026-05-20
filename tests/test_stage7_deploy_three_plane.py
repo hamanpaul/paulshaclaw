@@ -67,6 +67,9 @@ class TemplateMappingTests(unittest.TestCase):
         self.assertIn("PSC_TELEGRAM_BOT_TOKEN=", telegram_secret_text)
         self.assertIn("PSC_TELEGRAM_EXPECTED_USERNAME=", telegram_secret_text)
         self.assertIn("PSC_TELEGRAM_EXPECTED_BOT_ID=", telegram_secret_text)
+        self.assertIn("OPENAI_BASE_URL=http://192.168.199.199:8000/v1", telegram_secret_text)
+        self.assertIn("OPENAI_API_KEY=dummy", telegram_secret_text)
+        self.assertIn("OPENAI_MODEL=gemma4-31b-mtp", telegram_secret_text)
 
     def test_rename_rule_strips_tmpl_and_replaces_instance_token(self) -> None:
         target = resolve_template_target(
