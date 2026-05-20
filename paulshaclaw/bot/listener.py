@@ -93,11 +93,22 @@ class TelegramApiClient:
     def send_message(self, *, chat_id: int, text: str) -> None:
         self._post("sendMessage", {"chat_id": chat_id, "text": text})
 
-    def set_my_commands(self, commands: list[dict[str, str]]) -> None:
-        self._post("setMyCommands", {"commands": commands})
+    def set_my_commands(
+        self,
+        commands: list[dict[str, str]],
+        *,
+        scope: Mapping[str, object] | None = None,
+    ) -> None:
+        payload: dict[str, object] = {"commands": commands}
+        if scope is not None:
+            payload["scope"] = dict(scope)
+        self._post("setMyCommands", payload)
 
-    def get_my_commands(self) -> list[dict[str, object]]:
-        result = self._post("getMyCommands", {})
+    def get_my_commands(self, *, scope: Mapping[str, object] | None = None) -> list[dict[str, object]]:
+        payload: dict[str, object] = {}
+        if scope is not None:
+            payload["scope"] = dict(scope)
+        result = self._post("getMyCommands", payload)
         if not isinstance(result, list):
             raise TelegramApiError("Telegram getMyCommands returned non-list result")
         commands: list[dict[str, object]] = []
@@ -105,6 +116,26 @@ class TelegramApiClient:
             if isinstance(item, dict):
                 commands.append(item)
         return commands
+
+    def set_chat_menu_button(
+        self,
+        *,
+        menu_button: Mapping[str, object],
+        chat_id: int | None = None,
+    ) -> None:
+        payload: dict[str, object] = {"menu_button": dict(menu_button)}
+        if chat_id is not None:
+            payload["chat_id"] = chat_id
+        self._post("setChatMenuButton", payload)
+
+    def get_chat_menu_button(self, *, chat_id: int | None = None) -> dict[str, object]:
+        payload: dict[str, object] = {}
+        if chat_id is not None:
+            payload["chat_id"] = chat_id
+        result = self._post("getChatMenuButton", payload)
+        if not isinstance(result, dict):
+            raise TelegramApiError("Telegram getChatMenuButton returned non-object result")
+        return result
 
     def _post(self, method: str, payload: Mapping[str, object], *, timeout: float | None = None) -> object:
         body = json.dumps(dict(payload)).encode("utf-8")
@@ -203,6 +234,8 @@ class TelegramListener:
         client: TelegramApiClient,
         router: TelegramCommandRouter,
         bindings: ChatBindingRecorder | None = None,
+        command_menu: Sequence[Mapping[str, str]] | None = None,
+        private_chat_ids: Sequence[int] | None = None,
         poll_timeout: int = 30,
         sleep: Callable[[float], None] = time.sleep,
         cleanup: Callable[[], None] | None = None,
@@ -210,6 +243,8 @@ class TelegramListener:
         self.client = client
         self.router = router
         self.bindings = bindings
+        self.command_menu = tuple(_normalize_command_menu_entry(item) for item in (command_menu or ()))
+        self.private_chat_ids = tuple(int(chat_id) for chat_id in (private_chat_ids or ()))
         self.poll_timeout = poll_timeout
         self.sleep = sleep
         self.cleanup = cleanup or (lambda: None)
@@ -224,6 +259,7 @@ class TelegramListener:
                 self.offset = next_offset
 
     def run_once(self) -> None:
+        self._sync_command_menu()
         self.cleanup()
         updates = self.client.get_updates(offset=self.offset, timeout=self.poll_timeout)
         for update in updates:
@@ -292,6 +328,105 @@ class TelegramListener:
             return update_id + 1
         return None
 
+    def _sync_command_menu(self) -> None:
+        if not self.command_menu:
+            return
+
+        get_my_commands = getattr(self.client, "get_my_commands", None)
+        set_my_commands = getattr(self.client, "set_my_commands", None)
+        if not callable(get_my_commands) or not callable(set_my_commands):
+            raise TypeError("Telegram client missing command menu sync methods")
+
+        self._sync_command_scope(get_my_commands, set_my_commands, scope=None)
+        self._sync_command_scope(
+            get_my_commands,
+            set_my_commands,
+            scope={"type": "all_private_chats"},
+        )
+        for chat_id in self.private_chat_ids:
+            self._sync_command_scope(
+                get_my_commands,
+                set_my_commands,
+                scope={"type": "chat", "chat_id": chat_id},
+            )
+
+        get_chat_menu_button = getattr(self.client, "get_chat_menu_button", None)
+        set_chat_menu_button = getattr(self.client, "set_chat_menu_button", None)
+        if not callable(get_chat_menu_button) or not callable(set_chat_menu_button):
+            return
+
+        expected_menu_button = {"type": "commands"}
+        for chat_id in self.private_chat_ids:
+            current_menu_button = _normalize_menu_button_type(get_chat_menu_button(chat_id=chat_id))
+            if current_menu_button == expected_menu_button:
+                continue
+            logger.info("Telegram chat menu button drift detected; syncing chat_id=%d", chat_id)
+            set_chat_menu_button(chat_id=chat_id, menu_button=expected_menu_button)
+
+    def _sync_command_scope(
+        self,
+        get_my_commands: Callable[..., list[dict[str, object]]],
+        set_my_commands: Callable[..., None],
+        *,
+        scope: Mapping[str, object] | None,
+    ) -> None:
+        remote_items = get_my_commands() if scope is None else get_my_commands(scope=dict(scope))
+        remote_commands = [
+            _normalize_command_menu_entry(item)
+            for item in remote_items
+            if isinstance(item, Mapping)
+        ]
+        expected_commands = list(self.command_menu)
+        if remote_commands == expected_commands:
+            return
+
+        scope_label = "default" if scope is None else str(scope.get("type", "scoped"))
+        logger.info(
+            "Telegram command menu drift detected; syncing %s scope with %d commands",
+            scope_label,
+            len(expected_commands),
+        )
+        if scope is None:
+            set_my_commands(expected_commands)
+            return
+        set_my_commands(expected_commands, scope=dict(scope))
+
+
+def _normalize_command_menu_entry(entry: Mapping[str, object]) -> dict[str, str]:
+    command = entry.get("command")
+    description = entry.get("description")
+    if not isinstance(command, str) or not command:
+        raise ValueError("Telegram command menu entry missing command")
+    if not isinstance(description, str) or not description:
+        raise ValueError("Telegram command menu entry missing description")
+    return {
+        "command": command,
+        "description": description,
+    }
+
+
+def _normalize_menu_button_type(entry: Mapping[str, object]) -> dict[str, str]:
+    button_type = entry.get("type")
+    if not isinstance(button_type, str) or not button_type:
+        raise ValueError("Telegram menu button missing type")
+    return {"type": button_type}
+
+
+def _should_record_private_binding(*, chat: Mapping[str, object], chat_id: int, user_id: int) -> bool:
+    chat_type = chat.get("type")
+    if isinstance(chat_type, str):
+        return chat_type == "private"
+    return chat_id > 0 and chat_id == user_id
+
+
+def _is_authorized_binding_user(*, router: object, user_id: int) -> bool:
+    daemon = getattr(router, "daemon", None)
+    config = getattr(daemon, "config", None)
+    allowed_user_ids = getattr(config, "allowed_user_ids", None)
+    if isinstance(allowed_user_ids, tuple):
+        return user_id in allowed_user_ids
+    return True
+
 
 def build_listener(
     *,
@@ -312,6 +447,8 @@ def build_listener(
         client=client or TelegramApiClient(settings.token),
         router=router,
         bindings=TelegramChatBindingStore(bindings_path),
+        command_menu=resolved_registry.telegram_commands(),
+        private_chat_ids=config.allowed_user_ids,
         poll_timeout=poll_timeout,
         cleanup=daemon.cleanup_idle_resources,
     )
@@ -356,22 +493,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"錯誤: {error}", file=sys.stderr)
         return 1
     return 0
-
-
-def _should_record_private_binding(*, chat: Mapping[str, object], chat_id: int, user_id: int) -> bool:
-    chat_type = chat.get("type")
-    if isinstance(chat_type, str):
-        return chat_type == "private"
-    return chat_id > 0 and chat_id == user_id
-
-
-def _is_authorized_binding_user(*, router: object, user_id: int) -> bool:
-    daemon = getattr(router, "daemon", None)
-    config = getattr(daemon, "config", None)
-    allowed_user_ids = getattr(config, "allowed_user_ids", None)
-    if isinstance(allowed_user_ids, tuple):
-        return user_id in allowed_user_ids
-    return True
 
 
 if __name__ == "__main__":

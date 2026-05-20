@@ -87,6 +87,88 @@ class RecordingClient:
         self.sent_messages.append({"chat_id": chat_id, "text": text})
 
 
+class CommandSyncClient(RecordingClient):
+    def __init__(self, updates: list[dict[str, object]], *, remote_commands: list[dict[str, str]]) -> None:
+        super().__init__(updates)
+        self.remote_commands = list(remote_commands)
+        self.all_private_commands: list[dict[str, str]] = []
+        self.set_my_commands_calls: list[dict[str, object]] = []
+
+    def get_my_commands(self, *, scope: dict[str, object] | None = None) -> list[dict[str, object]]:
+        if scope is None:
+            return list(self.remote_commands)
+        if scope.get("type") == "all_private_chats":
+            return list(self.all_private_commands)
+        raise AssertionError(f"unexpected scope: {scope}")
+
+    def set_my_commands(self, commands: list[dict[str, str]], *, scope: dict[str, object] | None = None) -> None:
+        self.set_my_commands_calls.append({"scope": scope, "commands": list(commands)})
+        if scope is None:
+            self.remote_commands = list(commands)
+            return
+        if scope.get("type") == "all_private_chats":
+            self.all_private_commands = list(commands)
+            return
+        raise AssertionError(f"unexpected scope: {scope}")
+
+
+class ScopedCommandSyncClient(RecordingClient):
+    def __init__(
+        self,
+        updates: list[dict[str, object]],
+        *,
+        default_commands: list[dict[str, str]],
+        all_private_commands: list[dict[str, str]],
+        chat_commands: dict[int, list[dict[str, str]]],
+        default_menu_button: dict[str, str],
+        chat_menu_buttons: dict[int, dict[str, str]],
+    ) -> None:
+        super().__init__(updates)
+        self.default_commands = list(default_commands)
+        self.all_private_commands = list(all_private_commands)
+        self.chat_commands = {chat_id: list(commands) for chat_id, commands in chat_commands.items()}
+        self.default_menu_button = dict(default_menu_button)
+        self.chat_menu_buttons = {chat_id: dict(button) for chat_id, button in chat_menu_buttons.items()}
+        self.set_my_commands_calls: list[dict[str, object]] = []
+        self.set_chat_menu_button_calls: list[dict[str, object]] = []
+
+    def get_my_commands(self, *, scope: dict[str, object] | None = None) -> list[dict[str, object]]:
+        if scope is None:
+            return list(self.default_commands)
+        scope_type = scope.get("type")
+        if scope_type == "all_private_chats":
+            return list(self.all_private_commands)
+        if scope_type == "chat":
+            return list(self.chat_commands.get(int(scope["chat_id"]), []))
+        raise AssertionError(f"unexpected scope: {scope}")
+
+    def set_my_commands(self, commands: list[dict[str, str]], *, scope: dict[str, object] | None = None) -> None:
+        self.set_my_commands_calls.append({"scope": scope, "commands": list(commands)})
+        if scope is None:
+            self.default_commands = list(commands)
+            return
+        scope_type = scope.get("type")
+        if scope_type == "all_private_chats":
+            self.all_private_commands = list(commands)
+            return
+        if scope_type == "chat":
+            self.chat_commands[int(scope["chat_id"])] = list(commands)
+            return
+        raise AssertionError(f"unexpected scope: {scope}")
+
+    def get_chat_menu_button(self, *, chat_id: int | None = None) -> dict[str, object]:
+        if chat_id is None:
+            return dict(self.default_menu_button)
+        return dict(self.chat_menu_buttons.get(chat_id, {"type": "default"}))
+
+    def set_chat_menu_button(self, *, menu_button: dict[str, str], chat_id: int | None = None) -> None:
+        self.set_chat_menu_button_calls.append({"chat_id": chat_id, "menu_button": dict(menu_button)})
+        if chat_id is None:
+            self.default_menu_button = dict(menu_button)
+            return
+        self.chat_menu_buttons[chat_id] = dict(menu_button)
+
+
 class TelegramApiClientTests(unittest.TestCase):
     def test_get_me_posts_to_bot_endpoint(self) -> None:
         opener = FakeOpener([{"ok": True, "result": {"id": 42, "username": "psc_bot"}}])
@@ -299,6 +381,62 @@ class TelegramListenerTests(unittest.TestCase):
         self.assertEqual(cleanup_calls, ["cleanup"])
         self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
 
+    def test_run_once_resyncs_missing_telegram_commands_before_polling(self) -> None:
+        client = CommandSyncClient([], remote_commands=[])
+        command_menu = [{"command": "status", "description": "顯示 runtime 狀態"}]
+        listener = TelegramListener(
+            client=client,
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            command_menu=command_menu,
+        )
+
+        listener.run_once()
+
+        self.assertEqual(
+            client.set_my_commands_calls,
+            [
+                {"scope": None, "commands": command_menu},
+                {"scope": {"type": "all_private_chats"}, "commands": command_menu},
+            ],
+        )
+        self.assertEqual(client.remote_commands, command_menu)
+        self.assertEqual(client.all_private_commands, command_menu)
+        self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
+
+    def test_run_once_resyncs_private_scope_and_chat_menu_button(self) -> None:
+        command_menu = [{"command": "status", "description": "顯示 runtime 狀態"}]
+        client = ScopedCommandSyncClient(
+            [],
+            default_commands=command_menu,
+            all_private_commands=[],
+            chat_commands={8313353234: []},
+            default_menu_button={"type": "commands"},
+            chat_menu_buttons={8313353234: {"type": "default"}},
+        )
+        listener = TelegramListener(
+            client=client,
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            command_menu=command_menu,
+            private_chat_ids=(8313353234,),
+        )
+
+        listener.run_once()
+
+        self.assertEqual(
+            client.set_my_commands_calls,
+            [
+                {"scope": {"type": "all_private_chats"}, "commands": command_menu},
+                {"scope": {"type": "chat", "chat_id": 8313353234}, "commands": command_menu},
+            ],
+        )
+        self.assertEqual(
+            client.set_chat_menu_button_calls,
+            [
+                {"chat_id": 8313353234, "menu_button": {"type": "commands"}},
+            ],
+        )
+        self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
+
     def test_run_once_does_not_advance_offset_when_processing_raises(self) -> None:
         class RaisingRouter:
             def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
@@ -440,6 +578,43 @@ class ListenerBuildTests(unittest.TestCase):
             self.assertFalse(response["ok"])
             self.assertIn("coordinator backend 未設定", response["message"])
 
+    def test_build_listener_wires_chat_backend_and_keeps_dispatch_guard(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            chat_backend = FakeChatBackend("chat ok")
+
+            with mock.patch("paulshaclaw.bot.listener.create_chat_backend", return_value=chat_backend) as factory:
+                listener = build_listener(
+                    config_path=str(config_path),
+                    settings=BotSettings(token="fake-token"),
+                    client=RecordingClient([]),
+                )
+
+            factory.assert_called_once_with()
+            chat_response = listener.router.handle_message(user_id=7, text="請說明目前進度")
+            dispatch_response = listener.router.handle_message(user_id=7, text="/dispatch task-1")
+
+            self.assertTrue(chat_response["ok"])
+            self.assertEqual(chat_response["message"], "chat ok")
+            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
+            self.assertFalse(dispatch_response["ok"])
+            self.assertIn("coordinator backend 未設定", dispatch_response["message"])
+            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
+
     def test_dispatch_through_listener_returns_coordinator_not_configured(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
@@ -480,43 +655,6 @@ class ListenerBuildTests(unittest.TestCase):
             self.assertEqual(len(client.sent_messages), 1)
             self.assertIn("coordinator backend 未設定", client.sent_messages[0]["text"])
             self.assertNotIn("local-", client.sent_messages[0]["text"])
-
-    def test_build_listener_wires_chat_backend_and_keeps_dispatch_guard(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "config.json"
-            config_path.write_text(
-                json.dumps(
-                    {
-                        "daemon_name": "psc",
-                        "default_project": "demo",
-                        "allowed_user_ids": [7],
-                        "coordinator": {"phase": "stage1", "default_payload": {}},
-                        "pane_assignments": [
-                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
-                        ],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            chat_backend = FakeChatBackend("chat ok")
-
-            with mock.patch("paulshaclaw.bot.listener.create_chat_backend", return_value=chat_backend) as factory:
-                listener = build_listener(
-                    config_path=str(config_path),
-                    settings=BotSettings(token="fake-token"),
-                    client=RecordingClient([]),
-                )
-
-            factory.assert_called_once_with()
-            chat_response = listener.router.handle_message(user_id=7, text="請說明目前進度")
-            dispatch_response = listener.router.handle_message(user_id=7, text="/dispatch task-1")
-
-            self.assertTrue(chat_response["ok"])
-            self.assertEqual(chat_response["message"], "chat ok")
-            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
-            self.assertFalse(dispatch_response["ok"])
-            self.assertIn("coordinator backend 未設定", dispatch_response["message"])
-            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
 
 
 class ListenerMainTests(unittest.TestCase):
