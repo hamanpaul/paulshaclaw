@@ -64,11 +64,11 @@ The model will not execute tools in this change. A future `ToolBridge` can map e
 
 ## Risks / Trade-offs
 
-- vLLM outage or timeout -> return sanitized `chat backend timeout` or `chat backend 未設定` style messages.
+- vLLM outage or timeout -> return sanitized `chat backend 逾時` or `chat backend 未設定` style messages.
 - Provider error could leak secrets -> never include request headers, API key, or full request body in user-facing errors.
 - Non-slash messages might accidentally trigger tools -> no tool bridge is enabled in this change.
 - Chat backend could slow Telegram polling -> use bounded per-request timeout and keep the existing listener backoff behavior.
-- Model replies can be long -> cap `max_tokens` and return the assistant content only.
+- Model replies can be long -> cap `max_tokens` to a concise Telegram-friendly default and return the assistant content only.
 
 ## Migration Plan
 

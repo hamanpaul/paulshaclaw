@@ -24,7 +24,7 @@ None. This change extends the existing Stage 1 Telegram/runtime capability inste
 ## Impact
 
 - Affected runtime code: `paulshaclaw/bot/telegram.py`, `paulshaclaw/bot/listener.py`, new `paulshaclaw/chat/` module.
-- Affected config: `paulshaclaw/config/paulshaclaw.sample.yaml` gains reserved chat provider shape.
+- Affected config and templates: Telegram secret bootstrap template gains `OPENAI_*` and optional timeout placeholders; the broader provider-shape YAML remains design-only in this PR.
 - Affected tests: Stage 1 Telegram router/listener tests and new chat backend/client tests.
 - Dependencies: no new third-party dependency; the OpenAI-compatible client uses Python standard library HTTP handling.
 - External system: local vLLM server at `http://192.168.199.199:8000/v1`, model `gemma4-31b-mtp`.

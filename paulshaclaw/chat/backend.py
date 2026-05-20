@@ -20,7 +20,7 @@ def create_chat_backend(
     *,
     env: Mapping[str, str] | None = None,
     opener=None,
-    timeout: float = 45.0,
+    timeout: float = 180.0,
 ) -> ChatBackend:
     try:
         config = load_openai_config(env, timeout=timeout)

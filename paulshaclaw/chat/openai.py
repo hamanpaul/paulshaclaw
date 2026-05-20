@@ -7,6 +7,11 @@ import urllib.request
 
 from paulshaclaw.chat.config import OpenAIChatConfig
 
+SYSTEM_PROMPT = (
+    "You are PaulShiaBro, a concise assistant for the operator. "
+    "Reply briefly in Traditional Chinese unless the operator asks otherwise."
+)
+
 
 class OpenAICompatibleChatBackend:
     def __init__(
@@ -34,7 +39,10 @@ class OpenAICompatibleChatBackend:
     def _build_request(self, text: str) -> urllib.request.Request:
         payload = {
             "model": self.config.model,
-            "messages": [{"role": "user", "content": text}],
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
             "max_tokens": self.config.max_tokens,
             "temperature": self.config.temperature,
         }
