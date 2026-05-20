@@ -68,12 +68,13 @@ The chat module boundary is:
 
 ```text
 paulshaclaw/chat/
-  config.py      # provider/env parsing and timeout validation
+  config.py      # provider/env parsing and reserved schema validation
   openai.py      # stdlib urllib OpenAI-compatible client
   backend.py     # ChatBackend protocol and factory
+  tools.py       # reserved ToolBridge protocol, disabled by default
 ```
 
-Future tool bridge work remains design-only in this change; no `tools.py` module ships yet.
+The names can be adjusted during implementation if the repo's package style suggests a smaller file split, but the responsibilities should stay separate.
 
 ## Data Flow
 
@@ -90,12 +91,16 @@ For non-slash text:
   "model": "gemma4-31b-mtp",
   "messages": [
     {
+      "role": "system",
+      "content": "You are PaulShiaBro, a concise assistant for the operator."
+    },
+    {
       "role": "user",
       "content": "<telegram text>"
     }
   ],
   "temperature": 0.2,
-  "max_tokens": 256
+  "max_tokens": 1024
 }
 ```
 
@@ -110,9 +115,8 @@ The initial runtime loads the local vLLM provider from environment variables:
 - `OPENAI_BASE_URL`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
-- `OPENAI_TIMEOUT_SECONDS` (optional, defaults to `180`)
 
-This matches the existing deployment and avoids adding a second required config file before the chat path is proven. The YAML below is an illustrative future shape, not a config file changed in this PR.
+This matches the existing deployment and avoids adding a second required config file before the chat path is proven.
 
 The global sample config should reserve the future shape:
 
@@ -124,8 +128,8 @@ chat:
       base_url_env: OPENAI_BASE_URL
       api_key_env: OPENAI_API_KEY
       model_env: OPENAI_MODEL
-      timeout_seconds: 180
-      max_tokens: 256
+      timeout_seconds: 45
+      max_tokens: 1024
       temperature: 0.2
     gemini_api:
       enabled: false
@@ -149,7 +153,7 @@ Official references support these reserved shapes:
 When chat is unavailable:
 
 - Missing provider env returns a clear user-facing message: `chat backend 未設定`.
-- HTTP timeout returns `chat backend 逾時`.
+- HTTP timeout returns `chat backend timeout`.
 - Provider HTTP/JSON errors return a short sanitized message.
 - Empty model output returns `chat backend 回覆為空`.
 
