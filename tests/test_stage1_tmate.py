@@ -62,12 +62,13 @@ class Stage1TmateTests(unittest.TestCase):
         self.assertEqual(manager.status(), {"ok": True, "kind": "tmate", "state": "stopped", "running": False})
         self.assertFalse(manager.state_path.exists())
 
-    def test_start_creates_session_links_and_state_file(self) -> None:
+    def test_start_waits_for_ready_links_and_creates_state_file(self) -> None:
         now = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
         executor = FakeExecutor()
         socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
         executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], ValueError("session absent"))
         executor.queue(["tmate", "-S", socket, "new-session", "-d", "-s", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "wait", "tmate-ready"], "")
         executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
         executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "1")
         executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh}"], "ssh rw")
@@ -97,6 +98,33 @@ class Stage1TmateTests(unittest.TestCase):
         self.assertEqual(state["timeout_seconds"], 3600)
         self.assertEqual(state["socket_path"], socket)
         self.assertEqual(state["started_at"], now.isoformat())
+
+    def test_start_returns_pending_when_ready_wait_times_out(self) -> None:
+        now = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)
+        executor = FakeExecutor()
+        socket = str(self.root / "run" / "paulshaclaw-tmate.sock")
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], ValueError("session absent"))
+        executor.queue(["tmate", "-S", socket, "new-session", "-d", "-s", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "wait", "tmate-ready"], ValueError("tmate command timed out after 10s"))
+        executor.queue(["tmate", "-S", socket, "has-session", "-t", "paulshaclaw"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{session_attached}"], "0")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh}"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_web}"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_ssh_ro}"], "")
+        executor.queue(["tmate", "-S", socket, "display-message", "-p", "#{tmate_web_ro}"], "")
+        manager = self.make_manager(executor, now)
+
+        result = manager.start()
+
+        self.assertEqual(result, {
+            "ok": True,
+            "kind": "tmate",
+            "state": "pending",
+            "running": True,
+            "attached_clients": 0,
+            "timeout_seconds": 3600,
+        })
+        self.assertTrue(manager.state_path.exists())
 
     def test_stop_kills_session_and_removes_state_file(self) -> None:
         now = datetime(2026, 5, 4, 0, 0, tzinfo=timezone.utc)

@@ -86,6 +86,7 @@ class TmateManager:
         }
         self._write_state(state)
 
+        self._wait_until_ready()
         return self.status()
 
     def stop(self) -> dict[str, object]:
@@ -185,6 +186,17 @@ class TmateManager:
     def _run(self, *args: str) -> str:
         argv = ["tmate", "-S", str(self.socket_path), *args]
         return self.executor(argv, self.command_timeout_seconds)
+
+    def _wait_until_ready(self) -> None:
+        try:
+            self._run("wait", "tmate-ready")
+        except ValueError as exc:
+            message = str(exc)
+            if message == "tmate not found":
+                raise
+            if message.startswith("tmate command timed out"):
+                return
+            return
 
     def _load_state(self) -> dict[str, object]:
         try:
