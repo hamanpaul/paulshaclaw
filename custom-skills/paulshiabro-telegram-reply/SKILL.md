@@ -1,11 +1,13 @@
 ---
 name: paulshiabro-telegram-reply
-description: Use whenever the user says "以bro回覆我", "以paulshiabro回覆我", "用 bro 回我", "從 telegram 回我", or otherwise wants the answer delivered through the local PaulShiaBro Telegram service instead of only appearing in the CLI. Use this even if they mention only bro/PaulShiaBro without saying "Telegram" explicitly.
+description: Use whenever the user wants the answer sent through PaulShiaBro / bro / Telegram, especially when the current workspace is unrelated to paulshaclaw and the reply flow must not depend on the active source tree or repo venv.
 ---
 
 # PaulShiaBro Telegram Reply
 
 Deliver the finished reply through the local PaulShiaBro Telegram bridge, then echo the same content in the CLI.
+
+This skill now carries its own skill-local tool, so it does **not** depend on the current workspace being a `paulshaclaw` checkout.
 
 ## When to use
 
@@ -16,49 +18,77 @@ Deliver the finished reply through the local PaulShiaBro Telegram bridge, then e
 ## Workflow
 
 1. Draft the final reply text first.
-2. Find the repository root with `git rev-parse --show-toplevel`.
-3. If the current working tree is not a `paulshaclaw` checkout with `.venv` available, stop and explain that the local PaulShiaBro bridge is unavailable from this directory.
-4. If the current context provides a source Telegram user id, pass `--source-user-id <id>`.
-5. If no source Telegram user id is available, omit that flag so the bridge fans out to all allowed users with known chat bindings.
-6. Send the reply through the bridge.
-7. After successful delivery, echo the same reply text in the CLI.
+2. Use the skill-local tool at `/home/paul_chen/.agents/skills/paulshiabro-telegram-reply/scripts/reply_bridge.py`.
+3. If the current context provides a source Telegram user id, pass `--source-user-id <id>`.
+4. If no source Telegram user id is available, omit that flag so the bridge fans out to all allowed users with known chat bindings.
+5. Send the reply through the bridge.
+6. After successful delivery, echo the same reply text in the CLI.
+
+## Bundled tool
+
+The bundled tool is self-contained and uses only these runtime files:
+
+- `~/.config/paulshaclaw/paulshaclaw.state.json`
+- `~/.config/paulshaclaw/paulshaclaw.telegram.secret.env`
+- `~/.agents/state/telegram-chat-bindings.json`
+
+It can be run from **any** working directory.
 
 ## Preferred command
 
-Use the repo venv and the local bridge module:
-
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel)
-"$REPO_ROOT/.venv/bin/python" -m paulshaclaw.bot.reply \
+python3 /home/paul_chen/.agents/skills/paulshiabro-telegram-reply/scripts/reply_bridge.py \
   --text '最終回覆內容放這裡'
 ```
 
 With a source user id:
 
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel)
-"$REPO_ROOT/.venv/bin/python" -m paulshaclaw.bot.reply \
+python3 /home/paul_chen/.agents/skills/paulshiabro-telegram-reply/scripts/reply_bridge.py \
   --text '最終回覆內容放這裡' \
   --source-user-id 8313353234
 ```
 
-## Multiline or quote-heavy replies
-
-If the reply contains quotes or multiple lines, prefer a tiny Python wrapper so the text stays exact:
+Dry-run without sending:
 
 ```bash
-REPO_ROOT=$(git rev-parse --show-toplevel)
-"$REPO_ROOT/.venv/bin/python" - <<'PY'
-from paulshaclaw.bot.reply import build_reply_bridge, _format_delivery_summary
+python3 /home/paul_chen/.agents/skills/paulshiabro-telegram-reply/scripts/reply_bridge.py \
+  --text '最終回覆內容放這裡' \
+  --dry-run
+```
+
+## Multiline or quote-heavy replies
+
+If the reply contains quotes or multiple lines, invoke the bundled tool through a tiny Python wrapper so the text stays exact:
+
+```bash
+python3 - <<'PY'
+import subprocess
+import sys
 
 text = """把最終 multiline 回覆完整放在這裡。"""
-targets = build_reply_bridge().reply(text=text, source_user_id=None)
-print(_format_delivery_summary(targets))
-print(text)
+tool = "/home/paul_chen/.agents/skills/paulshiabro-telegram-reply/scripts/reply_bridge.py"
+raise SystemExit(subprocess.run([sys.executable, tool, "--text", text], check=False).returncode)
 PY
 ```
 
-If you know the source user id, pass it into `reply(...)` instead of `None`.
+If you know the source user id, add `--source-user-id`.
+
+## Quick reference
+
+| Situation | Command shape |
+| --- | --- |
+| Normal reply | `python3 .../reply_bridge.py --text '...'` |
+| Reply to source user only | `python3 .../reply_bridge.py --text '...' --source-user-id 123` |
+| Verify wiring without sending | `python3 .../reply_bridge.py --text '...' --dry-run` |
+| Override config paths | add `--config ... --secret-env ... --bindings-path ...` |
+
+## Common mistakes
+
+- Running the old repo-venv command from an unrelated workspace — use the bundled tool instead.
+- Assuming the active git repo matters — it does not.
+- Omitting `--source-user-id` when you need a one-user reply.
+- Pretending send succeeded after a bridge error — surface the error plainly.
 
 ## Output expectations
 
