@@ -1,0 +1,156 @@
+import json
+import tempfile
+import unittest
+from hashlib import sha256
+from pathlib import Path
+
+from paulshaclaw.memory.importer.pipeline import ingest_queue_item
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+class IdempotencyPipelineTest(unittest.TestCase):
+    def setUp(self):
+        self.scratch = REPO_ROOT / ".test-work"
+        self.scratch.mkdir(exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=self.scratch)
+        self.root = Path(self.tmp.name) / "memory"
+        self.queue = self.root / "runtime" / "queue"
+        self.queue.mkdir(parents=True)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        try:
+            self.scratch.rmdir()
+        except OSError:
+            pass
+
+    def payload(self, *, session_id="sid-001", scope="turn", turns=1, files=None, prompts=None, ended_at="2026-05-24T10:00:00+00:00"):
+        return {
+            "tool": "copilot-cli",
+            "session_id": session_id,
+            "capture_scope": scope,
+            "ended_at": ended_at,
+            "cwd": str(REPO_ROOT),
+            "repo": "hamanpaul/paulshaclaw",
+            "commit": "e300b08",
+            "turn_count": turns,
+            "user_prompts": prompts if prompts is not None else ["implement importer"],
+            "assistant_summary": "summary",
+            "touched_files": files if files is not None else ["a.py"],
+            "referenced_artifacts": ["docs/spec.md"],
+        }
+
+    def write_queue_item(self, name, payload):
+        path = self.queue / f"{name}.json"
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        return path
+
+    def ledger_entries(self):
+        ledger = self.root / "runtime" / "ledger" / "import.jsonl"
+        return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
+
+    def expected_hash(self, payload):
+        subset = (
+            payload["session_id"],
+            payload["capture_scope"],
+            payload["turn_count"],
+            payload["ended_at"],
+            sorted(payload["touched_files"]),
+            len(payload["user_prompts"]),
+        )
+        canonical = json.dumps(subset, sort_keys=True, separators=(",", ":"))
+        return sha256(canonical.encode("utf-8")).hexdigest()
+
+    def test_first_write_then_identical_retry_is_hash_duplicate(self):
+        payload = self.payload()
+        first = self.write_queue_item("first", payload)
+        retry = self.write_queue_item("retry", payload)
+
+        first_decision = ingest_queue_item(first, memory_root=self.root)
+        retry_decision = ingest_queue_item(retry, memory_root=self.root)
+
+        self.assertEqual(first_decision["status"], "written")
+        self.assertEqual(retry_decision["status"], "hash-duplicate")
+        self.assertEqual(first_decision["content_hash"], self.expected_hash(payload))
+        inbox = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-001.md"
+        self.assertTrue(inbox.exists())
+        self.assertIn("source_session: sid-001", inbox.read_text(encoding="utf-8"))
+        archive = self.root / "archive" / "queue" / "2026-05" / "copilot-cli__sid-001.json"
+        self.assertTrue(archive.exists())
+        self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "hash-duplicate"])
+
+    def test_higher_completeness_updates_and_lower_completeness_stale_skips(self):
+        base = self.payload(scope="turn", turns=1, files=["a.py"], prompts=["one"])
+        richer = self.payload(scope="turn", turns=2, files=["a.py", "b.py"], prompts=["one", "two"])
+        stale = self.payload(scope="turn", turns=1, files=["a.py"], prompts=["one"], ended_at="2026-05-24T10:05:00+00:00")
+
+        decisions = [
+            ingest_queue_item(self.write_queue_item("base", base), memory_root=self.root),
+            ingest_queue_item(self.write_queue_item("richer", richer), memory_root=self.root),
+            ingest_queue_item(self.write_queue_item("stale", stale), memory_root=self.root),
+        ]
+
+        self.assertEqual([decision["status"] for decision in decisions], ["written", "updated", "stale-skip"])
+        self.assertEqual(decisions[1]["from_completeness"], [0, 1, 1, 1])
+        self.assertEqual(decisions[1]["to_completeness"], [0, 2, 2, 2])
+        self.assertEqual(decisions[2]["from_completeness"], [0, 2, 2, 2])
+        self.assertEqual(decisions[2]["to_completeness"], [0, 1, 1, 1])
+        inbox = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-001.md"
+        rendered = inbox.read_text(encoding="utf-8")
+        self.assertIn("2. two", rendered)
+        self.assertIn("- b.py", rendered)
+        self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "updated", "stale-skip"])
+
+    def test_watcher_final_updates_session_end_because_scope_rank_is_higher(self):
+        session_end = self.payload(scope="session_end", turns=3, files=["a.py"], prompts=["one"])
+        watcher_final = self.payload(scope="watcher_final", turns=3, files=["a.py"], prompts=["one"])
+
+        first = ingest_queue_item(self.write_queue_item("session_end", session_end), memory_root=self.root)
+        final = ingest_queue_item(self.write_queue_item("watcher_final", watcher_final), memory_root=self.root)
+
+        self.assertEqual(first["status"], "written")
+        self.assertEqual(final["status"], "updated")
+        self.assertNotEqual(first["content_hash"], final["content_hash"])
+        self.assertEqual(final["from_completeness"], [1, 3, 1, 1])
+        self.assertEqual(final["to_completeness"], [2, 3, 1, 1])
+        self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "updated"])
+
+    def test_lock_busy_appends_decision_to_ledger_without_archiving(self):
+        import fcntl
+
+        payload = self.payload()
+        queue_item = self.write_queue_item("locked", payload)
+        lock_dir = self.root / "runtime" / "locks"
+        lock_dir.mkdir(parents=True)
+        lock_path = lock_dir / "copilot-cli__sid-001.lock"
+
+        with lock_path.open("a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                decision = ingest_queue_item(queue_item, memory_root=self.root)
+            finally:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+
+        self.assertEqual(decision["status"], "lock-busy")
+        self.assertTrue(queue_item.exists())
+        self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["lock-busy"])
+
+    def test_queue_item_is_not_archived_when_ledger_append_fails(self):
+        from unittest import mock
+
+        payload = self.payload(session_id="sid-ledger-fail")
+        queue_item = self.write_queue_item("ledger_fail", payload)
+        archive = self.root / "archive" / "queue" / "2026-05" / "copilot-cli__sid-ledger-fail.json"
+
+        with mock.patch("paulshaclaw.memory.importer.pipeline._append_ledger", side_effect=OSError("ledger full")):
+            with self.assertRaisesRegex(OSError, "ledger full"):
+                ingest_queue_item(queue_item, memory_root=self.root)
+
+        self.assertTrue(queue_item.exists())
+        self.assertFalse(archive.exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
