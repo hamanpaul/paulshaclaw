@@ -14,21 +14,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("paths", nargs="+", help="Files or directories to scan")
     args = parser.parse_args(argv)
 
-    violations = list(find_violations(args.paths))
+    violations = find_violations(args.paths)
     for violation in violations:
-        print(f"{violation}: memory consumer must call policy.check_boundary(")
+        print(violation)
     return 1 if violations else 0
 
 
-def find_violations(paths: Iterable[str | Path]) -> tuple[Path, ...]:
-    violations: list[Path] = []
+def find_violations(paths: Iterable[str | Path]) -> tuple[str, ...]:
+    violations: list[str] = []
     for path in paths:
         for candidate in _python_files(Path(path)):
             if _ignored(candidate):
                 continue
-            text = candidate.read_text(encoding="utf-8")
+            try:
+                text = candidate.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                violations.append(f"{candidate}: unable to decode as UTF-8; treat as policy violation")
+                continue
+            except OSError:
+                violations.append(f"{candidate}: unable to read file; treat as policy violation")
+                continue
             if _is_memory_consumer(text) and not _has_boundary_call(text):
-                violations.append(candidate)
+                violations.append(f"{candidate}: memory consumer must call policy.check_boundary(")
     return tuple(violations)
 
 

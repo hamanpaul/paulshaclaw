@@ -30,6 +30,13 @@ def run_lint(lint, *args: str) -> int:
         return lint.main(list(args))
 
 
+def run_lint_with_output(lint, *args: str) -> tuple[int, str, str]:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        return lint.main(list(args)), stdout.getvalue(), stderr.getvalue()
+
+
 class PolicyConsumerLintTests(unittest.TestCase):
     def test_lint_accepts_consumer_that_calls_check_boundary(self):
         lint = load_lint_module()
@@ -91,6 +98,21 @@ class PolicyConsumerLintTests(unittest.TestCase):
             root = Path(tmp)
             (root / "consumer.py").write_text('def write_memory():\n    open("knowledge/note.md", "w").write("unsafe")\n', encoding="utf-8")
             self.assertNotEqual(run_lint(lint, str(root)), 0)
+
+    def test_lint_rejects_non_utf8_file_without_traceback(self):
+        lint = load_lint_module()
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            candidate = root / "consumer.py"
+            candidate.write_bytes(b"# memory-consumer\n\xff\n")
+
+            returncode, stdout, stderr = run_lint_with_output(lint, str(root))
+
+            self.assertNotEqual(returncode, 0)
+            self.assertIn(str(candidate), stdout)
+            self.assertIn("unable to decode as UTF-8", stdout)
+            self.assertNotIn("Traceback", stdout)
+            self.assertEqual(stderr, "")
 
 
 if __name__ == "__main__":

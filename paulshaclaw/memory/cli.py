@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Sequence
 
@@ -11,10 +12,18 @@ from . import policy as memory_policy
 BOUNDARY = "raw_to_distilled"
 
 
+class PayloadReadError(Exception):
+    """Raised when a payload file cannot be read as UTF-8 text."""
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    return int(args.func(args))
+    try:
+        return int(args.func(args))
+    except PayloadReadError as exc:
+        print(f"{parser.prog}: error: {exc}", file=sys.stderr)
+        return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -43,7 +52,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _dry_run_policy(args: argparse.Namespace) -> int:
-    payload = Path(args.payload_file).read_text(encoding="utf-8")
+    payload = _read_payload(args.payload_file)
     policy = _load_policy(args.override)
     result = _check(payload, session_ref=args.session_id, project_slug=args.project, policy=policy)
     summary = _summary(
@@ -61,7 +70,7 @@ def _dry_run_policy(args: argparse.Namespace) -> int:
 
 
 def _replay(args: argparse.Namespace) -> int:
-    payload = Path(args.payload_file).read_text(encoding="utf-8")
+    payload = _read_payload(args.payload_file)
     policy = _load_policy(args.override)
     result = _check(payload, session_ref=args.session, project_slug=args.project, policy=policy)
     out = Path(args.out)
@@ -84,6 +93,16 @@ def _replay(args: argparse.Namespace) -> int:
 
 def _load_policy(override_path: str | None):
     return memory_policy.load_policy(override_path=override_path)
+
+
+def _read_payload(payload_file: str) -> str:
+    path = Path(payload_file)
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise PayloadReadError(f"cannot read payload file {path!s}: {exc}") from None
+    except OSError as exc:
+        raise PayloadReadError(f"cannot read payload file {path!s}: {exc}") from None
 
 
 def _check(text: str, *, session_ref: str, project_slug: str, policy):

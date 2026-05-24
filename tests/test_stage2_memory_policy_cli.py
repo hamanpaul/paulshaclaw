@@ -135,6 +135,30 @@ class MemoryPolicyCliTests(unittest.TestCase):
             self.assertEqual(skipped[0]["boundary"], "raw_to_distilled")
             self.assertNotIn(SECRET, completed.stdout)
 
+    def test_dry_run_policy_reports_non_utf8_payload_cleanly(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            payload = root / "payload.txt"
+            payload.write_bytes(b"\xff\xfe")
+            env = self.fake_gitleaks_env(root)
+
+            completed = self.run_memory(
+                "memory",
+                "dry-run-policy",
+                "s1",
+                "--payload-file",
+                str(payload),
+                "--project",
+                "paulshaclaw",
+                env=env,
+            )
+
+            self.assertNotEqual(completed.returncode, 0)
+            self.assertEqual(completed.stdout, "")
+            self.assertIn(str(payload), completed.stderr)
+            self.assertIn("utf-8", completed.stderr.lower())
+            self.assertNotIn("Traceback", completed.stderr)
+
     def test_replay_writes_redacted_frontmatter_artifact_and_summary(self):
         with temporary_directory() as tmp:
             root = Path(tmp)
