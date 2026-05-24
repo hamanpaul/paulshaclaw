@@ -52,6 +52,12 @@ class IdempotencyPipelineTest(unittest.TestCase):
         path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
         return path
 
+    def write_queue_item_at(self, relative_path, payload):
+        path = self.root / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        return path
+
     def ledger_entries(self):
         ledger = self.root / "runtime" / "ledger" / "import.jsonl"
         if not ledger.exists():
@@ -131,6 +137,96 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertEqual(final["from_completeness"], [1, 3, 1, 1])
         self.assertEqual(final["to_completeness"], [2, 3, 1, 1])
         self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "updated"])
+
+    def test_updated_reclassification_moves_inbox_file_to_new_bucket(self):
+        first_payload = self.payload(
+            session_id="sid-bucket-move",
+            scope="turn",
+            turns=1,
+            files=["src/main.py"],
+            prompts=["implement importer"],
+        )
+        updated_payload = self.payload(
+            session_id="sid-bucket-move",
+            scope="session_end",
+            turns=1,
+            files=["docs/plan.md"],
+            prompts=["implementation plan"],
+        )
+
+        first = ingest_queue_item(self.write_queue_item("bucket-first", first_payload), memory_root=self.root)
+        updated = ingest_queue_item(self.write_queue_item("bucket-updated", updated_payload), memory_root=self.root)
+
+        sessions_path = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-bucket-move.md"
+        plans_path = self.root / "inbox" / "plans" / "copilot-cli" / "2026-05-24" / "sid-bucket-move.md"
+        self.assertEqual(first["classifier_bucket"], "sessions")
+        self.assertEqual(updated["classifier_bucket"], "plans")
+        self.assertEqual(updated["status"], "updated")
+        self.assertFalse(sessions_path.exists())
+        self.assertTrue(plans_path.exists())
+        self.assertIn("source_artifact: plan", plans_path.read_text(encoding="utf-8"))
+
+    def test_pipeline_uses_repo_field_as_git_toplevel_fallback_for_project_resolution(self):
+        config_dir = self.root.parent / "config"
+        config_dir.mkdir(parents=True)
+        (config_dir / "projects.yaml").write_text(
+            "\n".join(
+                [
+                    "version: 1",
+                    "projects:",
+                    "  obs-auto-moc:",
+                    "    roots:",
+                    "      - /work/custom-claw-tools/obs-auto-moc",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        payload = self.payload(
+            session_id="sid-project-fallback",
+            scope="session_end",
+            turns=1,
+            files=["src/main.py"],
+            prompts=["implement importer"],
+            ended_at="2026-05-24T11:00:00+00:00",
+        )
+        payload["cwd"] = "/tmp/unmatched/worktree"
+        payload["repo"] = "/work/custom-claw-tools/obs-auto-moc"
+
+        decision = ingest_queue_item(self.write_queue_item("project-fallback", payload), memory_root=self.root)
+
+        inbox = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-project-fallback.md"
+        self.assertEqual(decision["project"], "obs-auto-moc")
+        self.assertTrue(inbox.exists())
+        self.assertIn("project: obs-auto-moc", inbox.read_text(encoding="utf-8"))
+
+    def test_reclassification_updates_when_bucket_changes_without_content_hash_change(self):
+        payload = self.payload(
+            session_id="sid-hash-bucket",
+            scope="session_end",
+            turns=2,
+            files=["src/main.py"],
+            prompts=["implement importer"],
+            ended_at="2026-05-24T11:30:00+00:00",
+        )
+
+        first = ingest_queue_item(
+            self.write_queue_item_at("runtime/queue/hash-bucket-first.json", payload),
+            memory_root=self.root,
+        )
+        second = ingest_queue_item(
+            self.write_queue_item_at("docs/superpowers/plans/hash-bucket-second.json", payload),
+            memory_root=self.root,
+        )
+
+        sessions_path = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-hash-bucket.md"
+        plans_path = self.root / "inbox" / "plans" / "copilot-cli" / "2026-05-24" / "sid-hash-bucket.md"
+        self.assertEqual(first["status"], "written")
+        self.assertEqual(first["classifier_bucket"], "sessions")
+        self.assertEqual(second["status"], "updated")
+        self.assertEqual(second["classifier_bucket"], "plans")
+        self.assertFalse(sessions_path.exists())
+        self.assertTrue(plans_path.exists())
 
     def test_second_same_session_ingest_waits_for_lock_and_finishes_normally(self):
         import fcntl

@@ -15,7 +15,9 @@ from typing import Any
 
 from .adapters import claude, codex, copilot
 from .adapters.base import AdapterResult, NormalizedSession
+from .classifier import classify_session
 from .frontmatter import render_markdown
+from .project_resolver import resolve_project
 
 _SCOPE_RANK = {"turn": 0, "subagent": 0, "session_end": 1, "watcher_final": 2}
 _TERMINAL_STATUSES = {"written", "updated", "hash-duplicate", "stale-skip"}
@@ -182,6 +184,16 @@ def _remove_queue(queue_path: Path) -> None:
     queue_path.unlink()
 
 
+def _remove_stale_inbox(previous_inbox_path: str | None, current_inbox_path: Path) -> None:
+    if not previous_inbox_path:
+        return
+    previous = Path(previous_inbox_path)
+    if previous == current_inbox_path:
+        return
+    if previous.exists():
+        previous.unlink()
+
+
 def _decision_entry(
     *,
     status: str,
@@ -208,6 +220,7 @@ def _decision_entry(
         entry["to_completeness"] = list(incoming_completeness)
         entry["recorded_hash"] = recorded.get("content_hash")
         entry["incoming_hash"] = incoming_hash
+        entry["previous_inbox_path"] = recorded.get("inbox_path")
     return entry
 
 
@@ -220,11 +233,23 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
     incoming_hash = content_hash(session, result.capture_scope)
     incoming_completeness = completeness(session, result.capture_scope)
     captured_at, day, month = _date_parts(session)
-    inbox_path = root / "inbox" / "sessions" / session["tool"] / day / f"{safe_key(session['session_id'])}.md"
-    rendered = render_markdown(session, project="_unknown", classifier_bucket="sessions", captured_at=captured_at)
+    bucket = classify_session(session)
+    project = resolve_project(
+        cwd=session.get("cwd"),
+        git_toplevel=session.get("repo"),
+        remote_url=session.get("repo"),
+        memory_root=str(root),
+    )
+    inbox_path = root / "inbox" / bucket / session["tool"] / day / f"{safe_key(session['session_id'])}.md"
+    rendered = render_markdown(session, project=project, classifier_bucket=bucket, captured_at=captured_at)
     recorded = _load_recorded(root, key)
+    route_changed = recorded is not None and (
+        recorded.get("inbox_path") != str(inbox_path) or recorded.get("project") != project
+    )
     if recorded is None:
         status = "written"
+    elif route_changed:
+        status = "updated"
     elif incoming_hash == recorded.get("content_hash"):
         status = "hash-duplicate"
     elif tuple(incoming_completeness) > tuple(recorded.get("completeness", [])):
@@ -242,6 +267,8 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
         incoming_completeness=incoming_completeness,
         recorded=recorded,
     )
+    decision["classifier_bucket"] = bucket
+    decision["project"] = project
     decision["rendered"] = rendered
     return decision
 
@@ -276,6 +303,7 @@ def ingest_queue_item(queue_item: str | Path, *, memory_root: str | Path, dry_ru
                 archive_path = Path(decision["archive_path"])
                 if decision["status"] in {"written", "updated"}:
                     _atomic_write(inbox_path, rendered)
+                    _remove_stale_inbox(decision.get("previous_inbox_path"), inbox_path)
                     _archive_queue(queue_path, archive_path)
                     _append_ledger(root, decision)
                     _remove_queue(queue_path)
