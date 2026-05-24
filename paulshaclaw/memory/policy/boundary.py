@@ -13,6 +13,7 @@ from .redaction import CompletedGitleaks, PolicyHit, redact_lines, run_gitleaks
 
 DEFAULT_RETRY_COUNT = 3
 DEFAULT_RETRY_BACKOFF_MS = 50
+MVP_EXECUTABLE_BOUNDARIES = frozenset({"external_to_raw", "raw_to_distilled"})
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ def check_boundary(
     gitleaks_runner=None,
 ) -> BoundaryResult:
     effective_policy = policy if policy is not None else load_policy(override_path=None)
+    _ensure_mvp_executable_boundary(effective_policy, boundary)
     extra_hits: tuple[PolicyHit, ...] = ()
     if boundary == "raw_to_distilled":
         runner_kwargs = {}
@@ -213,6 +215,14 @@ def process_queue_with_policy(
 def _safe_name(value: str) -> str:
     safe = "".join(char if char.isalnum() or char in ("-", "_") else "-" for char in value)
     return safe or "unknown"
+
+
+def _ensure_mvp_executable_boundary(policy: EffectivePolicy, boundary: str) -> None:
+    boundary_policy = policy.boundaries.get(boundary)
+    if boundary_policy is None:
+        raise PolicyExecutionError(f"unknown boundary: {boundary}")
+    if boundary_policy.status == "deferred" or boundary not in MVP_EXECUTABLE_BOUNDARIES:
+        raise PolicyExecutionError(f"deferred boundary not executable in MVP: {boundary}")
 
 
 def _unlink_file_if_present(path: Path) -> None:

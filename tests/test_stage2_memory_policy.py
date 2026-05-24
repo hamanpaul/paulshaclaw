@@ -269,6 +269,11 @@ class ClassificationAndAuditTests(unittest.TestCase):
 
 
 class BoundaryTests(unittest.TestCase):
+    def test_deferred_boundary_check_is_not_executable_in_mvp(self):
+        mod = load_policy(self)
+        with self.assertRaisesRegex(mod.PolicyExecutionError, "deferred|MVP|not executable"):
+            mod.check_boundary("distilled_to_canonical", "safe text", project_slug="_unknown", session_ref="s1")
+
     def test_raw_to_distilled_boundary_returns_redacted_text_classification_and_metadata(self):
         mod = load_policy(self)
         result = mod.check_boundary("raw_to_distilled", "token=ghp_1234567890abcdefghijklmnopqrstuv", project_slug="paulshaclaw", session_ref="s1", gitleaks_runner=lambda *_a, **_k: mod.CompletedGitleaks(0, "[]", ""))
@@ -379,6 +384,49 @@ class BoundaryTests(unittest.TestCase):
             stub = json.loads(stub_text)
             self.assertEqual(stub["error_class"], "PolicyExecutionError")
             self.assertNotIn("safe text", stub_text)
+
+    def test_process_queue_deferred_boundary_retries_writes_stub_and_no_inbox(self):
+        mod = load_policy(self)
+        boundary_mod = importlib.import_module("paulshaclaw.memory.policy.boundary")
+        policy = mod.load_policy(override_path=None)
+        calls = []
+        original_check_boundary = boundary_mod.check_boundary
+
+        def counting_check_boundary(*args, **kwargs):
+            calls.append(args[0] if args else kwargs["boundary"])
+            return original_check_boundary(*args, **kwargs)
+
+        boundary_mod.check_boundary = counting_check_boundary
+        try:
+            with temporary_directory() as tmp:
+                root = Path(tmp)
+                queue = root / "queue.json"
+                inbox = root / "inbox.md"
+                queue.write_text("safe text", encoding="utf-8")
+                result = mod.process_queue_with_policy(
+                    queue_path=queue,
+                    inbox_path=inbox,
+                    failed_dir=root / "_failed",
+                    boundary="distilled_to_canonical",
+                    project_slug="_unknown",
+                    session_ref="s1",
+                    source_tool="codex",
+                    policy=policy,
+                )
+                self.assertEqual(calls, ["distilled_to_canonical"] * policy.boundaries["distilled_to_canonical"].retry_count)
+                self.assertEqual(result.status, "policy-error")
+                self.assertFalse(queue.exists())
+                self.assertFalse(inbox.exists())
+                self.assertTrue(result.stub_path.exists())
+                stub_text = result.stub_path.read_text(encoding="utf-8")
+                stub = json.loads(stub_text)
+                self.assertEqual(stub["boundary"], "distilled_to_canonical")
+                self.assertEqual(stub["error_class"], "PolicyExecutionError")
+                self.assertEqual(stub["policy_version"], policy.policy_version)
+                self.assertEqual(stub["effective_policy_hash"], policy.effective_policy_hash)
+                self.assertNotIn("safe text", stub_text)
+        finally:
+            boundary_mod.check_boundary = original_check_boundary
 
     def test_publish_failure_unlinks_queue_and_writes_stub(self):
         mod = load_policy(self)
