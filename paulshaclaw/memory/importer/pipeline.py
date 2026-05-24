@@ -6,6 +6,8 @@ import fcntl
 import json
 import re
 import shutil
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
@@ -16,6 +18,9 @@ from .adapters.base import AdapterResult, NormalizedSession
 from .frontmatter import render_markdown
 
 _SCOPE_RANK = {"turn": 0, "subagent": 0, "session_end": 1, "watcher_final": 2}
+_TERMINAL_STATUSES = {"written", "updated", "hash-duplicate", "stale-skip"}
+_LEDGER_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_LEDGER_THREAD_LOCKS_GUARD = threading.Lock()
 
 
 class PipelineError(Exception):
@@ -95,6 +100,34 @@ def _ledger_path(memory_root: Path) -> Path:
     return memory_root / "runtime" / "ledger" / "import.jsonl"
 
 
+def _ledger_lock_path(memory_root: Path) -> Path:
+    return memory_root / "runtime" / "locks" / "import-ledger.lock"
+
+
+def _thread_lock_for(path: Path) -> threading.Lock:
+    key = str(path.resolve(strict=False))
+    with _LEDGER_THREAD_LOCKS_GUARD:
+        lock = _LEDGER_THREAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _LEDGER_THREAD_LOCKS[key] = lock
+        return lock
+
+
+@contextmanager
+def _locked_ledger(memory_root: Path):
+    lock_path = _ledger_lock_path(memory_root)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    thread_lock = _thread_lock_for(lock_path)
+    with thread_lock:
+        with lock_path.open("a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+
+
 def _load_recorded(memory_root: Path, key: str) -> dict[str, Any] | None:
     ledger = _ledger_path(memory_root)
     if not ledger.exists():
@@ -117,8 +150,7 @@ def _append_ledger(memory_root: Path, entry: dict[str, Any]) -> None:
     ledger = _ledger_path(memory_root)
     ledger.parent.mkdir(parents=True, exist_ok=True)
     with ledger.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(entry, sort_keys=True, separators=(",", ":")))
-        handle.write("\n")
+        handle.write(json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def _atomic_write(path: Path, text: str) -> None:
@@ -128,11 +160,26 @@ def _atomic_write(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+def _archive_path(memory_root: Path, month: str, key: str, status: str, incoming_hash: str) -> Path:
+    archive_dir = memory_root / "archive" / "queue" / month
+    stem = f"{safe_key(key)}--{safe_key(status)}--{incoming_hash[:12]}"
+    candidate = archive_dir / f"{stem}.json"
+    suffix = 2
+    while candidate.exists():
+        candidate = archive_dir / f"{stem}--{suffix}.json"
+        suffix += 1
+    return candidate
+
+
 def _archive_queue(queue_path: Path, archive_path: Path) -> None:
     archive_path.parent.mkdir(parents=True, exist_ok=True)
     if queue_path.resolve() == archive_path.resolve():
         return
-    shutil.move(str(queue_path), str(archive_path))
+    shutil.copy2(str(queue_path), str(archive_path))
+
+
+def _remove_queue(queue_path: Path) -> None:
+    queue_path.unlink()
 
 
 def _decision_entry(
@@ -164,7 +211,7 @@ def _decision_entry(
     return entry
 
 
-def preview_queue_item(queue_item: str | Path, *, memory_root: str | Path) -> dict[str, Any]:
+def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | Path) -> dict[str, Any]:
     queue_path = Path(queue_item)
     root = Path(memory_root)
     result = _extract(queue_path)
@@ -174,7 +221,6 @@ def preview_queue_item(queue_item: str | Path, *, memory_root: str | Path) -> di
     incoming_completeness = completeness(session, result.capture_scope)
     captured_at, day, month = _date_parts(session)
     inbox_path = root / "inbox" / "sessions" / session["tool"] / day / f"{safe_key(session['session_id'])}.md"
-    archive_path = root / "archive" / "queue" / month / f"{safe_key(key)}.json"
     rendered = render_markdown(session, project="_unknown", classifier_bucket="sessions", captured_at=captured_at)
     recorded = _load_recorded(root, key)
     if recorded is None:
@@ -185,6 +231,7 @@ def preview_queue_item(queue_item: str | Path, *, memory_root: str | Path) -> di
         status = "updated"
     else:
         status = "stale-skip"
+    archive_path = _archive_path(root, month, key, status, incoming_hash)
     decision = _decision_entry(
         status=status,
         key=key,
@@ -197,6 +244,12 @@ def preview_queue_item(queue_item: str | Path, *, memory_root: str | Path) -> di
     )
     decision["rendered"] = rendered
     return decision
+
+
+def preview_queue_item(queue_item: str | Path, *, memory_root: str | Path) -> dict[str, Any]:
+    root = Path(memory_root)
+    with _locked_ledger(root):
+        return _preview_queue_item_unlocked(queue_item, memory_root=root)
 
 
 def ingest_queue_item(queue_item: str | Path, *, memory_root: str | Path, dry_run: bool = False) -> dict[str, Any]:
@@ -219,19 +272,26 @@ def ingest_queue_item(queue_item: str | Path, *, memory_root: str | Path, dry_ru
         except BlockingIOError:
             busy = dict(decision)
             busy["status"] = "lock-busy"
-            _append_ledger(root, busy)
+            with _locked_ledger(root):
+                _append_ledger(root, busy)
             return busy
         try:
-            decision = preview_queue_item(queue_path, memory_root=root)
-            rendered = decision.pop("rendered")
-            inbox_path = Path(decision["inbox_path"])
-            archive_path = Path(decision["archive_path"])
-            if decision["status"] in {"written", "updated"}:
-                _atomic_write(inbox_path, rendered)
-                _append_ledger(root, decision)
-                _archive_queue(queue_path, archive_path)
-            else:
-                _append_ledger(root, decision)
+            with _locked_ledger(root):
+                decision = _preview_queue_item_unlocked(queue_path, memory_root=root)
+                rendered = decision.pop("rendered")
+                inbox_path = Path(decision["inbox_path"])
+                archive_path = Path(decision["archive_path"])
+                if decision["status"] in {"written", "updated"}:
+                    _atomic_write(inbox_path, rendered)
+                    _archive_queue(queue_path, archive_path)
+                    _append_ledger(root, decision)
+                    _remove_queue(queue_path)
+                elif decision["status"] in _TERMINAL_STATUSES:
+                    _archive_queue(queue_path, archive_path)
+                    _append_ledger(root, decision)
+                    _remove_queue(queue_path)
+                else:
+                    _append_ledger(root, decision)
             return decision
         finally:
             fcntl.flock(lock_handle, fcntl.LOCK_UN)

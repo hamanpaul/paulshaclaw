@@ -86,12 +86,14 @@ class ImporterCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         self.assertIn('"status": "written"', completed.stdout)
+        decision = json.loads(completed.stdout)
         inbox = self.memory_root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "cli-sid-002.md"
-        archive = self.memory_root / "archive" / "queue" / "2026-05" / "copilot-cli__cli-sid-002.json"
+        archive = Path(decision["archive_path"])
         ledger = self.memory_root / "runtime" / "ledger" / "import.jsonl"
         self.assertTrue(inbox.exists())
         self.assertIn("source_session: cli-sid-002", inbox.read_text(encoding="utf-8"))
         self.assertTrue(archive.exists())
+        self.assertIn("--written--", archive.name)
         self.assertTrue(ledger.exists())
         self.assertFalse(queue_item.exists())
 
@@ -110,6 +112,23 @@ class ImporterCliTest(unittest.TestCase):
         combined = completed.stdout + completed.stderr
         self.assertIn("queue item not found", combined)
         self.assertNotIn("Traceback", combined)
+
+    def test_operational_os_error_returns_nonzero_without_traceback(self):
+        queue_item = self.write_payload(session_id="cli-sid-oserror")
+        self.memory_root.write_text("not a directory", encoding="utf-8")
+
+        completed = self.run_cli(
+            "ingest",
+            "--queue-item",
+            str(queue_item),
+            "--memory-root",
+            str(self.memory_root),
+        )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertEqual(completed.stdout, "")
+        self.assertIn("error:", completed.stderr)
+        self.assertNotIn("Traceback", completed.stderr)
 
 
 if __name__ == "__main__":

@@ -1,8 +1,10 @@
 import json
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
+from unittest import mock
 
 from paulshaclaw.memory.importer.pipeline import ingest_queue_item
 
@@ -49,6 +51,8 @@ class IdempotencyPipelineTest(unittest.TestCase):
 
     def ledger_entries(self):
         ledger = self.root / "runtime" / "ledger" / "import.jsonl"
+        if not ledger.exists():
+            return []
         return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines()]
 
     def expected_hash(self, payload):
@@ -77,7 +81,7 @@ class IdempotencyPipelineTest(unittest.TestCase):
         inbox = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-001.md"
         self.assertTrue(inbox.exists())
         self.assertIn("source_session: sid-001", inbox.read_text(encoding="utf-8"))
-        archive = self.root / "archive" / "queue" / "2026-05" / "copilot-cli__sid-001.json"
+        archive = self.root / "archive" / "queue" / "2026-05" / f"copilot-cli__sid-001--written--{self.expected_hash(payload)[:12]}.json"
         self.assertTrue(archive.exists())
         self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "hash-duplicate"])
 
@@ -137,19 +141,109 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertTrue(queue_item.exists())
         self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["lock-busy"])
 
-    def test_queue_item_is_not_archived_when_ledger_append_fails(self):
-        from unittest import mock
-
+    def test_queue_item_remains_retryable_when_ledger_append_fails_after_archive(self):
         payload = self.payload(session_id="sid-ledger-fail")
         queue_item = self.write_queue_item("ledger_fail", payload)
-        archive = self.root / "archive" / "queue" / "2026-05" / "copilot-cli__sid-ledger-fail.json"
+        archive = self.root / "archive" / "queue" / "2026-05" / f"copilot-cli__sid-ledger-fail--written--{self.expected_hash(payload)[:12]}.json"
 
         with mock.patch("paulshaclaw.memory.importer.pipeline._append_ledger", side_effect=OSError("ledger full")):
             with self.assertRaisesRegex(OSError, "ledger full"):
                 ingest_queue_item(queue_item, memory_root=self.root)
 
         self.assertTrue(queue_item.exists())
-        self.assertFalse(archive.exists())
+        self.assertTrue(archive.exists())
+        self.assertEqual(self.ledger_entries(), [])
+
+    def test_archive_failure_does_not_commit_written_ledger_and_retry_succeeds(self):
+        payload = self.payload(session_id="sid-archive-fail")
+        failing_queue = self.write_queue_item("archive_fail", payload)
+
+        with mock.patch("paulshaclaw.memory.importer.pipeline._archive_queue", side_effect=OSError("archive full")):
+            with self.assertRaisesRegex(OSError, "archive full"):
+                ingest_queue_item(failing_queue, memory_root=self.root)
+
+        self.assertEqual(
+            [entry["status"] for entry in self.ledger_entries() if entry["idempotency_key"] == "copilot-cli:sid-archive-fail"],
+            [],
+        )
+        self.assertTrue(failing_queue.exists())
+
+        retry_decision = ingest_queue_item(failing_queue, memory_root=self.root)
+
+        self.assertEqual(retry_decision["status"], "written")
+        self.assertFalse(failing_queue.exists())
+        self.assertTrue(Path(retry_decision["archive_path"]).exists())
+        self.assertEqual(
+            [entry["status"] for entry in self.ledger_entries() if entry["idempotency_key"] == "copilot-cli:sid-archive-fail"],
+            ["written"],
+        )
+
+    def test_concurrent_distinct_sessions_write_valid_complete_ledger_jsonl(self):
+        import time
+
+        queue_items = [
+            self.write_queue_item(f"concurrent-{index}", self.payload(session_id=f"sid-concurrent-{index:03d}", turns=index + 1))
+            for index in range(24)
+        ]
+
+        def slow_split_append(memory_root, entry):
+            ledger = memory_root / "runtime" / "ledger" / "import.jsonl"
+            ledger.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(entry, sort_keys=True, separators=(",", ":")) + "\n"
+            midpoint = len(line) // 2
+            with ledger.open("a", encoding="utf-8") as handle:
+                handle.write(line[:midpoint])
+                handle.flush()
+                time.sleep(0.005)
+                handle.write(line[midpoint:])
+                handle.flush()
+
+        with mock.patch("paulshaclaw.memory.importer.pipeline._append_ledger", side_effect=slow_split_append):
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                decisions = list(executor.map(lambda path: ingest_queue_item(path, memory_root=self.root), queue_items))
+
+        self.assertEqual([decision["status"] for decision in decisions], ["written"] * len(queue_items))
+        ledger = self.root / "runtime" / "ledger" / "import.jsonl"
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+        parsed = [json.loads(line) for line in lines]
+        self.assertEqual(len(parsed), len(queue_items))
+        self.assertEqual({entry["status"] for entry in parsed}, {"written"})
+        self.assertEqual(
+            {entry["idempotency_key"] for entry in parsed},
+            {f"copilot-cli:sid-concurrent-{index:03d}" for index in range(24)},
+        )
+
+    def test_duplicate_and_stale_queue_items_are_archived_with_unique_names(self):
+        base = self.payload(session_id="sid-archive-all", scope="turn", turns=1, files=["a.py"], prompts=["one"])
+        richer = self.payload(session_id="sid-archive-all", scope="turn", turns=2, files=["a.py", "b.py"], prompts=["one", "two"])
+        stale = self.payload(
+            session_id="sid-archive-all",
+            scope="turn",
+            turns=1,
+            files=["a.py"],
+            prompts=["one"],
+            ended_at="2026-05-24T10:05:00+00:00",
+        )
+        queue_items = [
+            self.write_queue_item("archive-all-base", base),
+            self.write_queue_item("archive-all-duplicate-1", base),
+            self.write_queue_item("archive-all-duplicate-2", base),
+            self.write_queue_item("archive-all-richer", richer),
+            self.write_queue_item("archive-all-stale", stale),
+        ]
+
+        decisions = [ingest_queue_item(queue_item, memory_root=self.root) for queue_item in queue_items]
+
+        self.assertEqual(
+            [decision["status"] for decision in decisions],
+            ["written", "hash-duplicate", "hash-duplicate", "updated", "stale-skip"],
+        )
+        self.assertFalse(any(queue_item.exists() for queue_item in queue_items))
+        archive_paths = [Path(decision["archive_path"]) for decision in decisions]
+        self.assertEqual(len(set(archive_paths)), len(archive_paths))
+        for decision, archive_path in zip(decisions, archive_paths):
+            self.assertTrue(archive_path.exists())
+            self.assertIn(f"--{decision['status']}--{decision['content_hash'][:12]}", archive_path.name)
 
 
 if __name__ == "__main__":

@@ -26,8 +26,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "ingest":
         try:
             decision = ingest_queue_item(args.queue_item, memory_root=args.memory_root, dry_run=args.dry_run)
-        except PipelineError as exc:
-            print(str(exc), file=sys.stderr)
+        except (PipelineError, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(decision, indent=2, sort_keys=True))
         return 0
