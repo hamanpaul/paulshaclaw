@@ -268,14 +268,7 @@ def ingest_queue_item(queue_item: str | Path, *, memory_root: str | Path, dry_ru
     lock_path = lock_dir / f"{safe_key(key)}.lock"
     with lock_path.open("a+", encoding="utf-8") as lock_handle:
         try:
-            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            busy = dict(decision)
-            busy["status"] = "lock-busy"
-            with _locked_ledger(root):
-                _append_ledger(root, busy)
-            return busy
-        try:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX)
             with _locked_ledger(root):
                 decision = _preview_queue_item_unlocked(queue_path, memory_root=root)
                 rendered = decision.pop("rendered")
@@ -290,8 +283,6 @@ def ingest_queue_item(queue_item: str | Path, *, memory_root: str | Path, dry_ru
                     _archive_queue(queue_path, archive_path)
                     _append_ledger(root, decision)
                     _remove_queue(queue_path)
-                else:
-                    _append_ledger(root, decision)
             return decision
         finally:
             fcntl.flock(lock_handle, fcntl.LOCK_UN)

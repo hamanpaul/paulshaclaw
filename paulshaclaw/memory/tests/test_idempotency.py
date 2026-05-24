@@ -1,11 +1,14 @@
 import json
 import tempfile
+import time
 import unittest
+from threading import Event
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from pathlib import Path
 from unittest import mock
 
+from paulshaclaw.memory.importer import pipeline
 from paulshaclaw.memory.importer.pipeline import ingest_queue_item
 
 
@@ -67,6 +70,14 @@ class IdempotencyPipelineTest(unittest.TestCase):
         canonical = json.dumps(subset, sort_keys=True, separators=(",", ":"))
         return sha256(canonical.encode("utf-8")).hexdigest()
 
+    def wait_until(self, predicate, *, timeout=2.0, interval=0.01):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(interval)
+        return predicate()
+
     def test_first_write_then_identical_retry_is_hash_duplicate(self):
         payload = self.payload()
         first = self.write_queue_item("first", payload)
@@ -121,25 +132,53 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertEqual(final["to_completeness"], [2, 3, 1, 1])
         self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "updated"])
 
-    def test_lock_busy_appends_decision_to_ledger_without_archiving(self):
+    def test_second_same_session_ingest_waits_for_lock_and_finishes_normally(self):
         import fcntl
 
         payload = self.payload()
-        queue_item = self.write_queue_item("locked", payload)
-        lock_dir = self.root / "runtime" / "locks"
-        lock_dir.mkdir(parents=True)
-        lock_path = lock_dir / "copilot-cli__sid-001.lock"
+        first_queue = self.write_queue_item("first", payload)
+        retry_queue = self.write_queue_item("retry", payload)
+        first_holding_lock = Event()
+        second_attempted_lock = Event()
+        release_first = Event()
+        lock_path = self.root / "runtime" / "locks" / "copilot-cli__sid-001.lock"
+        real_archive_queue = pipeline._archive_queue
+        real_flock = pipeline.fcntl.flock
 
-        with lock_path.open("a+", encoding="utf-8") as lock_handle:
-            fcntl.flock(lock_handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            try:
-                decision = ingest_queue_item(queue_item, memory_root=self.root)
-            finally:
-                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+        def unlocked_preview(queue_item, *, memory_root):
+            return pipeline._preview_queue_item_unlocked(queue_item, memory_root=memory_root)
 
-        self.assertEqual(decision["status"], "lock-busy")
-        self.assertTrue(queue_item.exists())
-        self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["lock-busy"])
+        def blocking_archive(queue_path, archive_path):
+            if Path(queue_path) == first_queue and not first_holding_lock.is_set():
+                first_holding_lock.set()
+                self.assertTrue(release_first.wait(timeout=2))
+            return real_archive_queue(queue_path, archive_path)
+
+        def instrumented_flock(lock_handle, operation):
+            if Path(lock_handle.name) == lock_path and operation & fcntl.LOCK_EX and first_holding_lock.is_set():
+                second_attempted_lock.set()
+            return real_flock(lock_handle, operation)
+
+        with mock.patch("paulshaclaw.memory.importer.pipeline.preview_queue_item", side_effect=unlocked_preview):
+            with mock.patch("paulshaclaw.memory.importer.pipeline._archive_queue", side_effect=blocking_archive):
+                with mock.patch("paulshaclaw.memory.importer.pipeline.fcntl.flock", side_effect=instrumented_flock):
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        first_future = executor.submit(ingest_queue_item, first_queue, memory_root=self.root)
+                        self.assertTrue(first_holding_lock.wait(timeout=2))
+                        retry_future = executor.submit(ingest_queue_item, retry_queue, memory_root=self.root)
+                        self.assertTrue(second_attempted_lock.wait(timeout=2))
+                        self.assertFalse(self.wait_until(retry_future.done, timeout=0.2))
+                        release_first.set()
+                        first_decision = first_future.result(timeout=2)
+                        retry_decision = retry_future.result(timeout=2)
+
+        self.assertEqual(first_decision["status"], "written")
+        self.assertEqual(retry_decision["status"], "hash-duplicate")
+        self.assertFalse(first_queue.exists())
+        self.assertFalse(retry_queue.exists())
+        self.assertTrue(Path(first_decision["archive_path"]).exists())
+        self.assertTrue(Path(retry_decision["archive_path"]).exists())
+        self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "hash-duplicate"])
 
     def test_queue_item_remains_retryable_when_ledger_append_fails_after_archive(self):
         payload = self.payload(session_id="sid-ledger-fail")
