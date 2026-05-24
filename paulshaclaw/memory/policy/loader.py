@@ -137,6 +137,8 @@ def _secret_rules(raw_rules: object) -> dict[str, SecretRule]:
 
 
 def _required_string(mapping: Mapping[str, Any], key: str) -> str:
+    if key not in mapping:
+        raise PolicyError(f"missing required policy field {key}")
     value = mapping[key]
     if not isinstance(value, str):
         raise PolicyError(f"policy field {key} must be a string")

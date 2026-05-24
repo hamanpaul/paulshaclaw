@@ -142,3 +142,25 @@ class PolicyLoaderTests(unittest.TestCase):
             }), encoding="utf-8")
             with self.assertRaises(mod.PolicyError):
                 mod.load_policy(override_path=override)
+
+    def test_secret_rule_missing_required_field_raises_policy_error(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            policy_dir = Path(tmp)
+            (policy_dir / "secrets.yaml").write_text(json.dumps({
+                "policy_version": "0.1.0",
+                "rules": [{"id": "local_secret", "pattern": "ACME", "severity": "medium", "description": "missing detector"}]
+            }), encoding="utf-8")
+            (policy_dir / "classification.yaml").write_text(json.dumps({
+                "policy_version": "0.1.0",
+                "levels": ["public", "private", "secret"],
+                "unknown_project_default": "private",
+                "redaction_hit_default": "private",
+                "project_defaults": []
+            }), encoding="utf-8")
+            (policy_dir / "boundaries.yaml").write_text(json.dumps({
+                "policy_version": "0.1.0",
+                "boundaries": []
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(mod.PolicyError, "detector|missing required field"):
+                mod.load_policy(default_dir=policy_dir)
