@@ -164,3 +164,156 @@ class PolicyLoaderTests(unittest.TestCase):
             }), encoding="utf-8")
             with self.assertRaisesRegex(mod.PolicyError, "detector|missing required field"):
                 mod.load_policy(default_dir=policy_dir)
+
+
+class RedactionTests(unittest.TestCase):
+    def test_regex_redacts_entire_lines_and_reports_hits_without_secret_text(self):
+        mod = load_policy(self)
+        policy = mod.load_policy(override_path=None)
+        text = "safe line\nAuthorization: Bearer sk-prod-secret-token\nnext line\n"
+        result = mod.redact_lines(text, policy=policy, session_ref="session-a", boundary="external_to_raw")
+        self.assertIn("safe line", result.text)
+        self.assertIn("[REDACTED LINE:", result.text)
+        self.assertNotIn("sk-prod-secret-token", result.text)
+        self.assertEqual(result.hit_count, 1)
+        self.assertEqual(result.stage, "hook")
+        self.assertEqual(result.hits[0].line_no, 2)
+
+
+class GitleaksTests(unittest.TestCase):
+    def test_gitleaks_json_hits_are_converted_to_policy_hits(self):
+        mod = load_policy(self)
+        report = [{"RuleID": "generic-api-key", "StartLine": 3}]
+        hits = mod.parse_gitleaks_report(json.dumps(report))
+        self.assertEqual(hits[0].rule_id, "generic-api-key")
+        self.assertEqual(hits[0].detector, "gitleaks")
+        self.assertEqual(hits[0].line_no, 3)
+
+    def test_gitleaks_failure_raises_policy_error(self):
+        mod = load_policy(self)
+        def failing_runner(*_args, **_kwargs):
+            raise FileNotFoundError("gitleaks")
+        with self.assertRaises(mod.PolicyExecutionError):
+            mod.run_gitleaks("content", runner=failing_runner)
+
+    def test_raw_to_distilled_gitleaks_only_hit_is_redacted(self):
+        mod = load_policy(self)
+        text = "safe\nsecret value that regex does not catch\n"
+        def runner(*_args, **_kwargs):
+            return mod.CompletedGitleaks(1, json.dumps([{"RuleID": "generic-api-key", "StartLine": 2}]), "")
+        result = mod.check_boundary("raw_to_distilled", text, project_slug="_unknown", session_ref="s1", gitleaks_runner=runner)
+        self.assertIn("[REDACTED LINE: generic-api-key x1]", result.text)
+        self.assertNotIn("secret value", result.text)
+
+
+class ClassificationAndAuditTests(unittest.TestCase):
+    def test_unknown_project_defaults_private_and_redaction_hit_downgrades(self):
+        mod = load_policy(self)
+        policy = mod.load_policy(override_path=None)
+        no_hit = mod.classify_artifact(policy=policy, project_slug="_unknown", redaction_hits=())
+        self.assertEqual(no_hit.level, "private")
+        hit = mod.classify_artifact(policy=policy, project_slug="paulshaclaw", redaction_hits=(mod.PolicyHit("github_pat", "regex", 1, "redact"),))
+        self.assertEqual(hit.level, "private")
+
+    def test_audit_writer_omits_secret_text(self):
+        mod = load_policy(self)
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "policy.jsonl"
+            event = mod.PolicyAuditEvent(boundary="external_to_raw", component="hook", session_ref="s1", policy_version="0.1.0", effective_policy_hash="hash", rule_id="github_pat", detector="regex", line_no=2, action="redact")
+            mod.append_policy_audit(path, event)
+            content = path.read_text(encoding="utf-8")
+        record = json.loads(content)
+        for field in ("ts", "boundary", "component", "session_ref", "policy_version", "effective_policy_hash", "rule_id", "detector", "line_no", "action"):
+            self.assertIn(field, record)
+        self.assertEqual(record["component"], "hook")
+        self.assertEqual(record["session_ref"], "s1")
+        self.assertEqual(record["detector"], "regex")
+        self.assertEqual(record["action"], "redact")
+        self.assertNotIn("ghp_", content)
+
+    def test_audit_event_rejects_raw_text_fields(self):
+        mod = load_policy(self)
+        with self.assertRaises(TypeError):
+            mod.PolicyAuditEvent(boundary="external_to_raw", component="hook", session_ref="s1", policy_version="0.1.0", effective_policy_hash="hash", rule_id="github_pat", detector="regex", line_no=2, action="redact", raw_line="ghp_secret")
+
+
+class BoundaryTests(unittest.TestCase):
+    def test_raw_to_distilled_boundary_returns_redacted_text_classification_and_metadata(self):
+        mod = load_policy(self)
+        result = mod.check_boundary("raw_to_distilled", "token=ghp_1234567890abcdefghijklmnopqrstuv", project_slug="paulshaclaw", session_ref="s1", gitleaks_runner=lambda *_a, **_k: mod.CompletedGitleaks(0, "[]", ""))
+        self.assertNotIn("ghp_1234567890abcdefghijklmnopqrstuv", result.text)
+        self.assertEqual(result.classification.level, "private")
+        self.assertEqual(result.ledger_metadata["redaction_hits"], 1)
+        self.assertIn("github_pat", result.ledger_metadata["redaction_types"])
+        self.assertIn(result.ledger_metadata["redaction_stage"], {"importer", "both"})
+        self.assertEqual(result.ledger_metadata["policy_version"], result.policy.policy_version)
+        self.assertEqual(result.ledger_metadata["effective_policy_hash"], result.policy.effective_policy_hash)
+
+    def test_failure_stub_contains_metadata_only(self):
+        mod = load_policy(self)
+        with TemporaryDirectory() as tmp:
+            stub = mod.write_failure_stub(Path(tmp), session_ref="s1", source_tool="codex", boundary="raw_to_distilled", error_class="PolicyExecutionError", policy_version="0.1.0", effective_policy_hash="hash", ledger_available=False)
+            text = stub.read_text(encoding="utf-8")
+        self.assertIn("ledger_status", text)
+        self.assertNotIn("conversation", text)
+        self.assertNotIn("ghp_", text)
+
+    def test_fail_closed_retry_exhaustion_writes_stub_unlinks_queue_and_publishes_no_inbox(self):
+        mod = load_policy(self)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            queue.write_text("secret=ghp_1234567890abcdefghijklmnopqrstuv", encoding="utf-8")
+            result = mod.handle_policy_failure(queue_path=queue, failed_dir=root / "_failed", inbox_path=inbox, session_ref="s1", source_tool="codex", boundary="raw_to_distilled", error=mod.PolicyExecutionError("boom"), policy=mod.load_policy(override_path=None), ledger_available=True)
+            self.assertFalse(queue.exists())
+            self.assertFalse(inbox.exists())
+            self.assertTrue(result.stub_path.exists())
+            self.assertNotIn("ghp_", result.stub_path.read_text(encoding="utf-8"))
+
+    def test_boundary_retries_gitleaks_failure_before_stub(self):
+        mod = load_policy(self)
+        calls = []
+        def failing_runner(*_args, **_kwargs):
+            calls.append("call")
+            raise FileNotFoundError("gitleaks")
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            queue.write_text("safe text", encoding="utf-8")
+            result = mod.process_queue_with_policy(queue_path=queue, inbox_path=inbox, failed_dir=root / "_failed", boundary="raw_to_distilled", project_slug="_unknown", session_ref="s1", source_tool="codex", gitleaks_runner=failing_runner)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(result.status, "policy-error")
+            self.assertFalse(queue.exists())
+            self.assertFalse(inbox.exists())
+            self.assertTrue(result.stub_path.exists())
+            self.assertNotIn("safe text", result.stub_path.read_text(encoding="utf-8"))
+
+    def test_publish_failure_unlinks_queue_and_writes_stub(self):
+        mod = load_policy(self)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            inbox.mkdir()
+            queue.write_text("secret=ghp_1234567890abcdefghijklmnopqrstuv", encoding="utf-8")
+            result = mod.process_queue_with_policy(queue_path=queue, inbox_path=inbox, failed_dir=root / "_failed", boundary="raw_to_distilled", project_slug="_unknown", session_ref="s1", source_tool="codex", gitleaks_runner=lambda *_a, **_k: mod.CompletedGitleaks(0, "[]", ""))
+            self.assertEqual(result.status, "policy-error")
+            self.assertFalse(queue.exists())
+            self.assertTrue(result.stub_path.exists())
+            self.assertNotIn("ghp_", result.stub_path.read_text(encoding="utf-8"))
+
+    def test_stub_write_failure_still_unlinks_queue(self):
+        mod = load_policy(self)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            failed_dir = root / "_failed"
+            failed_dir.write_text("not a directory", encoding="utf-8")
+            queue.write_text("secret=ghp_1234567890abcdefghijklmnopqrstuv", encoding="utf-8")
+            with self.assertRaises((FileExistsError, NotADirectoryError, OSError)):
+                mod.handle_policy_failure(queue_path=queue, failed_dir=failed_dir, inbox_path=inbox, session_ref="s1", source_tool="codex", boundary="raw_to_distilled", error=mod.PolicyExecutionError("boom"), policy=mod.load_policy(override_path=None), ledger_available=True)
+            self.assertFalse(queue.exists())
+            self.assertFalse(inbox.exists())

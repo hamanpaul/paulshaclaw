@@ -15,6 +15,10 @@ class PolicyVersionError(PolicyError):
     """Raised when the policy major version is unsupported."""
 
 
+class PolicyExecutionError(PolicyError):
+    """Raised when a policy boundary cannot be executed safely."""
+
+
 @dataclass(frozen=True)
 class SecretRule:
     rule_id: str

@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import time
+
+from .classification import ClassificationResult, classify_artifact
+from .loader import load_policy
+from .models import EffectivePolicy, PolicyExecutionError
+from .redaction import CompletedGitleaks, PolicyHit, redact_lines, run_gitleaks
+
+
+@dataclass(frozen=True)
+class BoundaryResult:
+    text: str
+    hits: tuple[PolicyHit, ...]
+    classification: ClassificationResult
+    ledger_metadata: dict[str, object]
+    policy: EffectivePolicy
+
+
+@dataclass(frozen=True)
+class QueuePolicyResult:
+    status: str
+    stub_path: Path | None = None
+    inbox_path: Path | None = None
+    boundary_result: BoundaryResult | None = None
+
+
+def check_boundary(
+    boundary: str,
+    text: str,
+    *,
+    project_slug: str,
+    session_ref: str,
+    policy: EffectivePolicy | None = None,
+    gitleaks_runner=None,
+) -> BoundaryResult:
+    effective_policy = policy if policy is not None else load_policy(override_path=None)
+    extra_hits: tuple[PolicyHit, ...] = ()
+    if boundary == "raw_to_distilled":
+        runner_kwargs = {}
+        if gitleaks_runner is not None:
+            runner_kwargs["runner"] = gitleaks_runner
+        extra_hits = run_gitleaks(text, **runner_kwargs)
+
+    redaction = redact_lines(
+        text,
+        policy=effective_policy,
+        session_ref=session_ref,
+        boundary=boundary,
+        extra_hits=extra_hits,
+    )
+    classification = classify_artifact(
+        policy=effective_policy,
+        project_slug=project_slug,
+        redaction_hits=redaction.hits,
+    )
+    ledger_metadata = {
+        "redaction_hits": redaction.hit_count,
+        "redaction_types": sorted({hit.rule_id for hit in redaction.hits}),
+        "redaction_stage": redaction.stage,
+        "policy_version": effective_policy.policy_version,
+        "effective_policy_hash": effective_policy.effective_policy_hash,
+        "classification_level": classification.level,
+        "classification_reason": classification.reason,
+        "classification_policy_hash": classification.policy_hash,
+        "classification_source": classification.source,
+    }
+    return BoundaryResult(redaction.text, redaction.hits, classification, ledger_metadata, effective_policy)
+
+
+def write_failure_stub(
+    failed_dir: str | Path,
+    *,
+    session_ref: str,
+    source_tool: str,
+    boundary: str,
+    error_class: str,
+    policy_version: str | None,
+    effective_policy_hash: str | None,
+    ledger_available: bool,
+) -> Path:
+    failed_path = Path(failed_dir)
+    failed_path.mkdir(parents=True, exist_ok=True)
+    stub_path = failed_path / f"{_safe_name(session_ref)}-{_safe_name(boundary)}-policy-error.json"
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "session_ref": session_ref,
+        "source_tool": source_tool,
+        "boundary": boundary,
+        "error_class": error_class,
+        "policy_version": policy_version,
+        "effective_policy_hash": effective_policy_hash,
+        "ledger_status": "available" if ledger_available else "unavailable",
+    }
+    stub_path.write_text(json.dumps(record, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    return stub_path
+
+
+def handle_policy_failure(
+    *,
+    queue_path: str | Path,
+    failed_dir: str | Path,
+    inbox_path: str | Path,
+    session_ref: str,
+    source_tool: str,
+    boundary: str,
+    error: Exception,
+    policy: EffectivePolicy | None,
+    ledger_available: bool,
+) -> QueuePolicyResult:
+    queue = Path(queue_path)
+    inbox = Path(inbox_path)
+    _unlink_file_if_present(inbox)
+    if queue.exists():
+        queue.unlink()
+    stub = write_failure_stub(
+        failed_dir,
+        session_ref=session_ref,
+        source_tool=source_tool,
+        boundary=boundary,
+        error_class=error.__class__.__name__,
+        policy_version=policy.policy_version if policy else None,
+        effective_policy_hash=policy.effective_policy_hash if policy else None,
+        ledger_available=ledger_available,
+    )
+    return QueuePolicyResult(status="policy-error", stub_path=stub)
+
+
+def process_queue_with_policy(
+    *,
+    queue_path: str | Path,
+    inbox_path: str | Path,
+    failed_dir: str | Path,
+    boundary: str,
+    project_slug: str,
+    session_ref: str,
+    source_tool: str,
+    gitleaks_runner=None,
+    policy: EffectivePolicy | None = None,
+    ledger_available: bool = True,
+) -> QueuePolicyResult:
+    effective_policy = policy if policy is not None else load_policy(override_path=None)
+    queue = Path(queue_path)
+    inbox = Path(inbox_path)
+    text = queue.read_text(encoding="utf-8")
+    boundary_policy = effective_policy.boundaries[boundary]
+    last_error: Exception = PolicyExecutionError("policy check did not run")
+    for attempt in range(boundary_policy.retry_count):
+        try:
+            result = check_boundary(
+                boundary,
+                text,
+                project_slug=project_slug,
+                session_ref=session_ref,
+                policy=effective_policy,
+                gitleaks_runner=gitleaks_runner,
+            )
+        except Exception as exc:
+            last_error = exc
+            if attempt < boundary_policy.retry_count - 1 and boundary_policy.retry_backoff_ms > 0:
+                time.sleep(boundary_policy.retry_backoff_ms / 1000)
+            continue
+        try:
+            inbox.parent.mkdir(parents=True, exist_ok=True)
+            inbox.write_text(result.text, encoding="utf-8")
+            queue.unlink()
+        except OSError as exc:
+            return handle_policy_failure(
+                queue_path=queue,
+                failed_dir=failed_dir,
+                inbox_path=inbox,
+                session_ref=session_ref,
+                source_tool=source_tool,
+                boundary=boundary,
+                error=PolicyExecutionError(f"publish failed: {exc.__class__.__name__}"),
+                policy=effective_policy,
+                ledger_available=ledger_available,
+            )
+        return QueuePolicyResult(status="ok", inbox_path=inbox, boundary_result=result)
+
+    return handle_policy_failure(
+        queue_path=queue,
+        failed_dir=failed_dir,
+        inbox_path=inbox,
+        session_ref=session_ref,
+        source_tool=source_tool,
+        boundary=boundary,
+        error=last_error,
+        policy=effective_policy,
+        ledger_available=ledger_available,
+    )
+
+
+def _safe_name(value: str) -> str:
+    safe = "".join(char if char.isalnum() or char in ("-", "_") else "-" for char in value)
+    return safe or "unknown"
+
+
+def _unlink_file_if_present(path: Path) -> None:
+    if path.exists() and (path.is_file() or path.is_symlink()):
+        path.unlink()
