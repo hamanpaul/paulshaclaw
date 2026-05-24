@@ -346,6 +346,40 @@ class BoundaryTests(unittest.TestCase):
         finally:
             boundary_mod.load_policy = original_loader
 
+    def test_process_queue_read_failure_writes_stub_and_no_inbox(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            queue.mkdir()
+            result = mod.process_queue_with_policy(queue_path=queue, inbox_path=inbox, failed_dir=root / "_failed", boundary="raw_to_distilled", project_slug="_unknown", session_ref="s1", source_tool="codex")
+            self.assertEqual(result.status, "policy-error")
+            self.assertTrue(queue.exists())
+            self.assertTrue(queue.is_dir())
+            self.assertFalse(inbox.exists())
+            self.assertTrue(result.stub_path.exists())
+            stub = json.loads(result.stub_path.read_text(encoding="utf-8"))
+            self.assertEqual(stub["error_class"], "IsADirectoryError")
+            self.assertNotIn("conversation", result.stub_path.read_text(encoding="utf-8"))
+
+    def test_process_queue_unknown_boundary_unlinks_queue_writes_stub_and_no_inbox(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            queue.write_text("safe text", encoding="utf-8")
+            result = mod.process_queue_with_policy(queue_path=queue, inbox_path=inbox, failed_dir=root / "_failed", boundary="unknown_boundary", project_slug="_unknown", session_ref="s1", source_tool="codex")
+            self.assertEqual(result.status, "policy-error")
+            self.assertFalse(queue.exists())
+            self.assertFalse(inbox.exists())
+            self.assertTrue(result.stub_path.exists())
+            stub_text = result.stub_path.read_text(encoding="utf-8")
+            stub = json.loads(stub_text)
+            self.assertEqual(stub["error_class"], "PolicyExecutionError")
+            self.assertNotIn("safe text", stub_text)
+
     def test_publish_failure_unlinks_queue_and_writes_stub(self):
         mod = load_policy(self)
         with TemporaryDirectory() as tmp:

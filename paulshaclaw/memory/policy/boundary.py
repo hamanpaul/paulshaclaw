@@ -118,8 +118,7 @@ def handle_policy_failure(
     queue = Path(queue_path)
     inbox = Path(inbox_path)
     _unlink_file_if_present(inbox)
-    if queue.exists():
-        queue.unlink()
+    _unlink_file_if_present(queue)
     stub = write_failure_stub(
         failed_dir,
         session_ref=session_ref,
@@ -160,6 +159,8 @@ def process_queue_with_policy(
     while attempt < retry_count:
         try:
             effective_policy = policy if policy is not None else load_policy(override_path=None)
+            if boundary not in effective_policy.boundaries:
+                raise PolicyExecutionError(f"unknown boundary: {boundary}")
             boundary_policy = effective_policy.boundaries[boundary]
             retry_count = boundary_policy.retry_count
             retry_backoff_ms = boundary_policy.retry_backoff_ms
