@@ -11,6 +11,9 @@ from .loader import load_policy
 from .models import EffectivePolicy, PolicyExecutionError
 from .redaction import CompletedGitleaks, PolicyHit, redact_lines, run_gitleaks
 
+DEFAULT_RETRY_COUNT = 3
+DEFAULT_RETRY_BACKOFF_MS = 50
+
 
 @dataclass(frozen=True)
 class BoundaryResult:
@@ -143,14 +146,24 @@ def process_queue_with_policy(
     policy: EffectivePolicy | None = None,
     ledger_available: bool = True,
 ) -> QueuePolicyResult:
-    effective_policy = policy if policy is not None else load_policy(override_path=None)
     queue = Path(queue_path)
     inbox = Path(inbox_path)
-    text = queue.read_text(encoding="utf-8")
-    boundary_policy = effective_policy.boundaries[boundary]
+    if policy is not None and boundary in policy.boundaries:
+        retry_count = policy.boundaries[boundary].retry_count
+        retry_backoff_ms = policy.boundaries[boundary].retry_backoff_ms
+    else:
+        retry_count = DEFAULT_RETRY_COUNT
+        retry_backoff_ms = DEFAULT_RETRY_BACKOFF_MS
     last_error: Exception = PolicyExecutionError("policy check did not run")
-    for attempt in range(boundary_policy.retry_count):
+    effective_policy: EffectivePolicy | None = policy
+    attempt = 0
+    while attempt < retry_count:
         try:
+            effective_policy = policy if policy is not None else load_policy(override_path=None)
+            boundary_policy = effective_policy.boundaries[boundary]
+            retry_count = boundary_policy.retry_count
+            retry_backoff_ms = boundary_policy.retry_backoff_ms
+            text = queue.read_text(encoding="utf-8")
             result = check_boundary(
                 boundary,
                 text,
@@ -161,8 +174,9 @@ def process_queue_with_policy(
             )
         except Exception as exc:
             last_error = exc
-            if attempt < boundary_policy.retry_count - 1 and boundary_policy.retry_backoff_ms > 0:
-                time.sleep(boundary_policy.retry_backoff_ms / 1000)
+            attempt += 1
+            if attempt < retry_count and retry_backoff_ms > 0:
+                time.sleep(retry_backoff_ms / 1000)
             continue
         try:
             inbox.parent.mkdir(parents=True, exist_ok=True)

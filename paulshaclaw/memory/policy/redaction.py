@@ -55,9 +55,11 @@ def parse_gitleaks_report(report_text: str) -> tuple[PolicyHit, ...]:
         if not isinstance(item, dict):
             continue
         rule_id = str(item.get("RuleID", "gitleaks"))
-        line_no = int(item.get("StartLine", 0))
-        if line_no > 0:
-            hits.append(PolicyHit(rule_id, "gitleaks", line_no, "redact"))
+        start_line = int(item.get("StartLine", 0))
+        end_line = int(item.get("EndLine", start_line))
+        if start_line > 0:
+            for line_no in range(start_line, max(start_line, end_line) + 1):
+                hits.append(PolicyHit(rule_id, "gitleaks", line_no, "redact"))
     return tuple(hits)
 
 

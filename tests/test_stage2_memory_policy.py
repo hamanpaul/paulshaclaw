@@ -205,6 +205,22 @@ class GitleaksTests(unittest.TestCase):
         self.assertIn("[REDACTED LINE: generic-api-key x1]", result.text)
         self.assertNotIn("secret value", result.text)
 
+    def test_gitleaks_multiline_hit_redacts_every_reported_line(self):
+        mod = load_policy(self)
+        text = "safe\nsecret line 1\nsecret line 2\nsafe after\n"
+        def runner(*_args, **_kwargs):
+            return mod.CompletedGitleaks(
+                1,
+                json.dumps([{"RuleID": "generic-api-key", "StartLine": 2, "EndLine": 3}]),
+                "",
+            )
+        result = mod.check_boundary("raw_to_distilled", text, project_slug="_unknown", session_ref="s1", gitleaks_runner=runner)
+        redacted_lines = result.text.splitlines()
+        self.assertEqual(redacted_lines[1], "[REDACTED LINE: generic-api-key x1]")
+        self.assertEqual(redacted_lines[2], "[REDACTED LINE: generic-api-key x1]")
+        self.assertNotIn("secret line 1", result.text)
+        self.assertNotIn("secret line 2", result.text)
+
 
 class ClassificationAndAuditTests(unittest.TestCase):
     def test_unknown_project_defaults_private_and_redaction_hit_downgrades(self):
@@ -214,6 +230,21 @@ class ClassificationAndAuditTests(unittest.TestCase):
         self.assertEqual(no_hit.level, "private")
         hit = mod.classify_artifact(policy=policy, project_slug="paulshaclaw", redaction_hits=(mod.PolicyHit("github_pat", "regex", 1, "redact"),))
         self.assertEqual(hit.level, "private")
+
+    def test_redaction_hit_does_not_downgrade_secret_project_default(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            override = Path(tmp) / "policy.override.yaml"
+            override.write_text(json.dumps({
+                "project_defaults": [{"project": "client", "level": "secret", "reason": "client secret"}]
+            }), encoding="utf-8")
+            policy = mod.load_policy(override_path=override)
+        result = mod.classify_artifact(
+            policy=policy,
+            project_slug="client",
+            redaction_hits=(mod.PolicyHit("github_pat", "regex", 1, "redact"),),
+        )
+        self.assertEqual(result.level, "secret")
 
     def test_audit_writer_omits_secret_text(self):
         mod = load_policy(self)
@@ -289,6 +320,31 @@ class BoundaryTests(unittest.TestCase):
             self.assertFalse(inbox.exists())
             self.assertTrue(result.stub_path.exists())
             self.assertNotIn("safe text", result.stub_path.read_text(encoding="utf-8"))
+
+    def test_process_queue_retries_policy_load_failure_before_stub(self):
+        mod = load_policy(self)
+        boundary_mod = importlib.import_module("paulshaclaw.memory.policy.boundary")
+        calls = []
+        original_loader = boundary_mod.load_policy
+        def failing_loader(*_args, **_kwargs):
+            calls.append("call")
+            raise mod.PolicyExecutionError("load failed")
+        boundary_mod.load_policy = failing_loader
+        try:
+            with temporary_directory() as tmp:
+                root = Path(tmp)
+                queue = root / "queue.json"
+                inbox = root / "inbox.md"
+                queue.write_text("safe text", encoding="utf-8")
+                result = mod.process_queue_with_policy(queue_path=queue, inbox_path=inbox, failed_dir=root / "_failed", boundary="raw_to_distilled", project_slug="_unknown", session_ref="s1", source_tool="codex")
+                self.assertEqual(len(calls), 3)
+                self.assertEqual(result.status, "policy-error")
+                self.assertFalse(queue.exists())
+                self.assertFalse(inbox.exists())
+                self.assertTrue(result.stub_path.exists())
+                self.assertNotIn("safe text", result.stub_path.read_text(encoding="utf-8"))
+        finally:
+            boundary_mod.load_policy = original_loader
 
     def test_publish_failure_unlinks_queue_and_writes_stub(self):
         mod = load_policy(self)
