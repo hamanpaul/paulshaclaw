@@ -68,7 +68,11 @@ def classify_session(session: Mapping[str, object]) -> str:
             or base.endswith("-report.md")
         ):
             return "reports"
-    if _has_any(prompt_text, ("report", "summary", "postmortem", "review", "evidence")):
+    if _has_any(prompt_text, ("report", "summary", "postmortem", "review", "evidence")) or (
+        "test" in prompt_text
+        and _has_any(prompt_text, ("result", "results", "verification", "verify"))
+        and _has_any(prompt_text, ("attach", "collect", "summarize", "archive"))
+    ):
         return "reports"
 
     return "sessions"

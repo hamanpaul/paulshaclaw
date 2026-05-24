@@ -149,6 +149,24 @@ class ClassifierTest(unittest.TestCase):
                     referenced_artifacts=["reports/verify/run-01/evidence.log"],
                 ),
             ),
+            (
+                "reports for test verification prompts",
+                "reports",
+                make_session(
+                    filename="runtime/queue/test-results.json",
+                    touched_files=["src/router.py"],
+                    prompts=["attach the test results from the latest verification run"],
+                ),
+            ),
+            (
+                "sessions for implementing test result parsing",
+                "sessions",
+                make_session(
+                    filename="runtime/queue/test-parser.json",
+                    touched_files=["src/test_results_parser.py"],
+                    prompts=["implement the test results parser for junit xml"],
+                ),
+            ),
         ]
 
         for name, expected, session in cases:

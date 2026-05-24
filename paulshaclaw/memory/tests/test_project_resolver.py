@@ -93,7 +93,7 @@ class ProjectResolverTest(unittest.TestCase):
         )
 
         project = resolve_project(
-            cwd="/work/custom-claw-tools/obs-auto-moc/.git/worktrees/feature",
+            cwd="/worktrees/stage2-memory-importer-mvp",
             git_toplevel="/work/custom-claw-tools/obs-auto-moc",
             projects=config,
         )
