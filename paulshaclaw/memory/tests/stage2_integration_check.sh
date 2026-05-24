@@ -60,4 +60,7 @@ require_text \
   "無阻斷性問題" \
   "Stage 3 frontmatter schema"
 
+echo "[stage2] validate memory policy consumer lint"
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.lint.policy_consumer_lint "$ROOT_DIR/paulshaclaw"
+
 echo "[stage2] ok"
