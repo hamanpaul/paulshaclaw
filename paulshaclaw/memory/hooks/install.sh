@@ -30,6 +30,16 @@ if [[ "$tree_only" != true ]]; then
   exit 2
 fi
 
+if [[ "$memory_root" =~ ^[[:space:]]*$ ]]; then
+  echo "install.sh: --memory-root must not be empty" >&2
+  exit 2
+fi
+
+if [[ "$memory_root" =~ ^/+$ ]]; then
+  echo "install.sh: --memory-root must not be /" >&2
+  exit 2
+fi
+
 dirs=(
   "inbox"
   "work-centric"
@@ -53,6 +63,6 @@ dirs=(
 
 for relative in "${dirs[@]}"; do
   path="${memory_root}/${relative}"
-  install -d -m 700 "$path"
-  touch "${path}/.gitkeep"
+  install -d -m 700 -- "$path"
+  touch -- "${path}/.gitkeep"
 done

@@ -65,6 +65,46 @@ body
             validate_file(doc),
         )
 
+    def test_lint_rejects_empty_required_project(self):
+        doc = self.write_doc("""---
+memory_layer: inbox
+project:
+source_agent: copilot-cli
+source_session: abc-123
+source_artifact: session
+captured_at: 2026-05-24T00:00:00+00:00
+provenance:
+  repo: hamanpaul/paulshaclaw
+  commit: e300b08
+  path: tests/session.json
+---
+body
+""")
+        self.assertIn(
+            "empty required frontmatter field: project",
+            validate_file(doc),
+        )
+
+    def test_lint_rejects_empty_required_nested_provenance_path(self):
+        doc = self.write_doc("""---
+memory_layer: inbox
+project: paulshaclaw
+source_agent: copilot-cli
+source_session: abc-123
+source_artifact: session
+captured_at: 2026-05-24T00:00:00+00:00
+provenance:
+  repo: hamanpaul/paulshaclaw
+  commit: e300b08
+  path:
+---
+body
+""")
+        self.assertIn(
+            "empty required frontmatter field: provenance.path",
+            validate_file(doc),
+        )
+
     def test_cli_exits_one_for_validation_errors(self):
         doc = self.write_doc("""---
 memory_layer: inbox

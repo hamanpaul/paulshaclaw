@@ -32,8 +32,11 @@ def validate_file(path: str | Path) -> list[str]:
 
     data = _parse_frontmatter(frontmatter)
     for field in REQUIRED_FIELDS:
-        if not _has_field(data, field):
+        has_field, value = _get_field(data, field)
+        if not has_field:
             errors.append(f"missing required frontmatter field: {field}")
+        elif not _is_non_empty_leaf(value):
+            errors.append(f"empty required frontmatter field: {field}")
     return errors
 
 
@@ -87,13 +90,17 @@ def _split_key_value(line: str) -> tuple[str, str]:
     return key.strip(), value.strip().strip('"').strip("'")
 
 
-def _has_field(data: dict[str, Any], dotted_field: str) -> bool:
+def _get_field(data: dict[str, Any], dotted_field: str) -> tuple[bool, Any]:
     current: Any = data
     for part in dotted_field.split("."):
         if not isinstance(current, dict) or part not in current:
-            return False
+            return False, None
         current = current[part]
-    return True
+    return True, current
+
+
+def _is_non_empty_leaf(value: Any) -> bool:
+    return isinstance(value, str) and value.strip() != ""
 
 
 def main(argv: list[str] | None = None) -> int:

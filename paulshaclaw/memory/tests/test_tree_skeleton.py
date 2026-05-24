@@ -62,6 +62,74 @@ class MemoryTreeSkeletonTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o700)
             self.assertTrue((path / ".gitkeep").exists(), relative)
 
+    def test_tree_only_rejects_empty_memory_root(self):
+        completed = subprocess.run(
+            [
+                "bash",
+                "paulshaclaw/memory/hooks/install.sh",
+                "--tree-only",
+                "--memory-root",
+                "",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--memory-root must not be empty", completed.stderr)
+
+    def test_tree_only_rejects_whitespace_only_memory_root(self):
+        completed = subprocess.run(
+            [
+                "bash",
+                str(REPO_ROOT / "paulshaclaw/memory/hooks/install.sh"),
+                "--tree-only",
+                "--memory-root",
+                "   ",
+            ],
+            cwd=self.tmp.name,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--memory-root must not be empty", completed.stderr)
+
+    def test_tree_only_rejects_filesystem_root_memory_root(self):
+        completed = subprocess.run(
+            [
+                "bash",
+                "paulshaclaw/memory/hooks/install.sh",
+                "--tree-only",
+                "--memory-root",
+                "/",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--memory-root must not be /", completed.stderr)
+
+    def test_tree_only_rejects_slash_only_memory_root(self):
+        completed = subprocess.run(
+            [
+                "bash",
+                "paulshaclaw/memory/hooks/install.sh",
+                "--tree-only",
+                "--memory-root",
+                "//",
+            ],
+            cwd=REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--memory-root must not be /", completed.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
