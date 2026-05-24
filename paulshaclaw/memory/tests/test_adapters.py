@@ -1,10 +1,13 @@
 import json
+import tempfile
 import unittest
 from pathlib import Path
 
 from paulshaclaw.memory.importer.adapters import claude, codex, copilot
+from paulshaclaw.memory.importer.adapters.base import read_payload
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 NORMALIZED_KEYS = {
     "session_id",
@@ -31,6 +34,19 @@ FRONTMATTER_ONLY_KEYS = {
 
 
 class AdapterContractTest(unittest.TestCase):
+    def setUp(self):
+        self.scratch = REPO_ROOT / ".test-work"
+        self.scratch.mkdir(exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=self.scratch)
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        try:
+            self.scratch.rmdir()
+        except OSError:
+            pass
+
     def load(self, relative):
         path = FIXTURES / relative / "payload.json"
         with path.open(encoding="utf-8") as handle:
@@ -149,6 +165,19 @@ class AdapterContractTest(unittest.TestCase):
                 self.assertEqual(result.session["referenced_artifacts"], [])
                 self.assertIsNone(result.session["repo"])
                 self.assertIsNone(result.session["commit"])
+
+    def test_read_payload_rejects_top_level_non_object_json(self):
+        cases = [
+            ("array", ["not", "an", "object"]),
+            ("string", "not an object"),
+        ]
+        for name, payload in cases:
+            with self.subTest(name=name):
+                path = self.root / f"{name}.json"
+                path.write_text(json.dumps(payload), encoding="utf-8")
+
+                with self.assertRaisesRegex(ValueError, "top-level JSON object"):
+                    read_payload(path)
 
 
 if __name__ == "__main__":

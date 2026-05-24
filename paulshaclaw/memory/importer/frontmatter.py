@@ -27,6 +27,30 @@ def _required_value(value: object, default: str = "_unknown") -> str:
     return rendered if rendered else default
 
 
+def _needs_yaml_quotes(value: str) -> bool:
+    return any(marker in value for marker in (": ", "#", "\"", "'", "\n", "\r"))
+
+
+def _frontmatter_value(value: object) -> str:
+    if value is None:
+        return ""
+    rendered = str(value)
+    if not rendered or not _needs_yaml_quotes(rendered):
+        return rendered
+    escaped = (
+        rendered.replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
+    return f'"{escaped}"'
+
+
+def _required_frontmatter_value(value: object, default: str = "_unknown") -> str:
+    rendered = "" if value is None else str(value)
+    return _frontmatter_value(rendered if rendered else default)
+
+
 def _artifact_name(classifier_bucket: str | None) -> str:
     if not classifier_bucket:
         return "session"
@@ -54,19 +78,19 @@ def render_markdown(
     memory_layer: str = "inbox",
 ) -> str:
     source_artifact = _artifact_name(classifier_bucket)
-    captured = captured_at or session.get("ended_at") or session.get("started_at") or ""
+    captured = captured_at or session.get("ended_at") or session.get("started_at") or "_unknown"
     lines = [
         "---",
-        f"memory_layer: {_value(memory_layer)}",
-        f"project: {_value(project or '_unknown')}",
-        f"source_agent: {_value(session.get('tool'))}",
-        f"source_session: {_value(session.get('session_id'))}",
-        f"source_artifact: {_value(source_artifact)}",
-        f"captured_at: {_value(captured)}",
+        f"memory_layer: {_frontmatter_value(memory_layer)}",
+        f"project: {_frontmatter_value(project or '_unknown')}",
+        f"source_agent: {_frontmatter_value(session.get('tool'))}",
+        f"source_session: {_frontmatter_value(session.get('session_id'))}",
+        f"source_artifact: {_frontmatter_value(source_artifact)}",
+        f"captured_at: {_frontmatter_value(captured)}",
         "provenance:",
-        f"  repo: {_required_value(session.get('repo'))}",
-        f"  commit: {_required_value(session.get('commit'))}",
-        f"  path: {_required_value(session.get('raw_payload_pointer'))}",
+        f"  repo: {_required_frontmatter_value(session.get('repo'))}",
+        f"  commit: {_required_frontmatter_value(session.get('commit'))}",
+        f"  path: {_required_frontmatter_value(session.get('raw_payload_pointer'))}",
         "---",
         "",
         f"# Session {_value(session.get('session_id'))}",

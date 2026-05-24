@@ -87,6 +87,72 @@ class FrontmatterRenderTest(unittest.TestCase):
         self.assertIn("## Referenced artifacts\n- (none)", rendered)
         self.assertIn("## Prompts\n- (none)", rendered)
 
+    def test_render_markdown_uses_unknown_captured_at_when_timestamps_are_missing(self):
+        session = {
+            "session_id": "synthetic-missing-timestamps",
+            "tool": "codex",
+            "started_at": None,
+            "ended_at": None,
+            "cwd": None,
+            "repo": None,
+            "commit": None,
+            "turn_count": 1,
+            "user_prompts": [],
+            "assistant_summary": "",
+            "touched_files": [],
+            "referenced_artifacts": [],
+            "raw_payload_pointer": "queue/synthetic.json",
+        }
+
+        rendered = render_markdown(session)
+
+        self.assertIn("captured_at: _unknown", rendered)
+        doc = self.root / "missing-timestamps.md"
+        doc.write_text(rendered, encoding="utf-8")
+        self.assertEqual(validate_file(doc), [])
+
+    def test_render_markdown_quotes_frontmatter_scalars_with_yaml_special_characters(self):
+        session = {
+            "session_id": "session: 001 # needs quoting",
+            "tool": "codex \"quoted\"",
+            "started_at": "2026-05-24T12:15:00+00:00",
+            "ended_at": None,
+            "cwd": None,
+            "repo": "hamanpaul/paulshaclaw: main # branch",
+            "commit": "abc\"def",
+            "turn_count": 1,
+            "user_prompts": [],
+            "assistant_summary": "",
+            "touched_files": [],
+            "referenced_artifacts": [],
+            "raw_payload_pointer": "queue/path\nwith: colon # hash",
+        }
+
+        rendered = render_markdown(
+            session,
+            project="paul: shaclaw # lab",
+            classifier_bucket="report: draft # tagged",
+            memory_layer="inbox # triage",
+        )
+
+        expected_lines = [
+            'memory_layer: "inbox # triage"',
+            'project: "paul: shaclaw # lab"',
+            'source_agent: "codex \\"quoted\\""',
+            'source_session: "session: 001 # needs quoting"',
+            'source_artifact: "report: draft # tagged"',
+            '  repo: "hamanpaul/paulshaclaw: main # branch"',
+            '  commit: "abc\\"def"',
+            '  path: "queue/path\\nwith: colon # hash"',
+        ]
+        for line in expected_lines:
+            with self.subTest(line=line):
+                self.assertIn(line, rendered)
+        self.assertNotIn("queue/path\nwith: colon", rendered)
+        doc = self.root / "quoted-scalars.md"
+        doc.write_text(rendered, encoding="utf-8")
+        self.assertEqual(validate_file(doc), [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,7 @@ def read_payload(path: str | Path) -> dict[str, Any]:
         data = json.load(handle)
     if isinstance(data, dict):
         return data
-    return {}
+    raise ValueError(f"{path} must contain a top-level JSON object")
 
 
 def string_or_empty(value: Any) -> str:
