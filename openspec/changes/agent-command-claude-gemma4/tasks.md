@@ -5,6 +5,7 @@
 - [x] 1.3 從 `~/.claude-gemma4/settings.json` 建立 `config/claude-gemma4-settings.json` template
 - [x] 1.4 確認 `scripts/claude-gemma4` 和 `scripts/claude-gemma4-proxy` 有執行權限且可正常啟動（smoke test）
   - 驗證紀錄：`test -x scripts/claude-gemma4`、`test -x scripts/claude-gemma4-proxy`、`python3 -m py_compile scripts/claude-gemma4-proxy`、`timeout 15s scripts/claude-gemma4 --help`；結果：exit status `0`，wrapper 成功輸出 Claude CLI help，proxy parse check 通過。
+  - clean-state proxy start：因既有 `127.0.0.1:18080` listener 持續運作，為避免干擾，改以 Python `SourceFileLoader` 載入 checked-in `scripts/claude-gemma4-proxy` 並僅覆寫 `PORT=18081`，再以 `curl -fsS http://127.0.0.1:18081/health` 驗證回 `ok`；整個 bounded run 以 `timeout 10s` 包住，`wait_rc=124` 確認服務於驗證後由 timeout 自動停止。
 
 ## 2. Agent process 偵測工具
 
