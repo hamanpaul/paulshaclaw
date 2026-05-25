@@ -308,6 +308,7 @@ def collect_codex(
     enabled: bool = False,
     auth_path: Path | None = None,
     usage_url: str = _CODEX_USAGE_URL,
+    max_age_seconds: int = 300,
     local_fallback: bool = False,
     codex_home: Path | None = None,
     fetcher: JsonFetcher | None = None,
@@ -699,6 +700,7 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
             enabled=config.codex.enabled,
             auth_path=config.codex.auth_path,
             usage_url=config.codex.usage_url,
+            max_age_seconds=config.codex.max_age_seconds,
             local_fallback=config.codex.local_fallback,
         ),
         "cc": collect_claude(

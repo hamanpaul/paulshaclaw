@@ -943,6 +943,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             enabled=False,
             auth_path=Path("/tmp/codex.json"),
             usage_url="https://example.invalid/usage",
+            max_age_seconds=34,
             local_fallback=True,
         )
 
