@@ -22,6 +22,7 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             'GEMMA_PROXY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/claude-gemma4-proxy"',
             script_text,
         )
+        self.assertIn('"effortLevel": "max"', script_text)
         self.assertNotIn("GEMMA_SETTINGS_TEMPLATE=", script_text)
         self.assertNotIn('cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"', script_text)
 
@@ -55,6 +56,7 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             {
                 "permissions": {"defaultMode": "bypassPermissions"},
                 "model": "gemma4-31b-mtp",
+                "effortLevel": "max",
                 "skipDangerousModePermissionPrompt": True,
             },
         )

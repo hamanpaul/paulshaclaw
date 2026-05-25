@@ -44,6 +44,7 @@ if [ ! -r "$GEMMA_SETTINGS" ]; then
     "defaultMode": "bypassPermissions"
   },
   "model": "gemma4-31b-mtp",
+  "effortLevel": "max",
   "skipDangerousModePermissionPrompt": true
 }
 JSON
