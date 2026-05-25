@@ -1662,6 +1662,21 @@ class Stage8CacheTests(unittest.TestCase):
             self.assertIn('\n  "generated_at"', content)
             self.assertTrue(content.endswith("\n"))
 
+    @unittest.skipUnless(hasattr(os, "chmod"), "POSIX permission test requires chmod")
+    def test_cache_directory_is_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cost"
+            cache = SnapshotCache(cache_dir, ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+
+            cache.write(snapshot)
+
+            mode = cache_dir.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o700)
+
     def test_load_snapshot_payload_keeps_benign_note(self) -> None:
         payload = {
             "generated_at": "2026-04-29T15:00:00+08:00",
@@ -1940,3 +1955,36 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(rendered_snapshot.cache_status, "stale")
         self.assertEqual(rendered_snapshot.providers["cdx"].source_status, "unknown")
         self.assertEqual(rendered_snapshot.providers["cc"].source_status, "unknown")
+
+    def test_status_main_degraded_snapshot_keeps_configured_copilot_accounts(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=False)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())

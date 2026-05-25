@@ -12,6 +12,16 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot, UsageWindow
 
 _DEFAULT_TIMEZONE = "Asia/Taipei"
+
+
+def _ensure_owner_only_dir(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 def _resolve_timezone(timezone: Any) -> tuple[str, ZoneInfo]:
     if not isinstance(timezone, str) or not timezone:
         return _DEFAULT_TIMEZONE, ZoneInfo(_DEFAULT_TIMEZONE)
@@ -198,7 +208,7 @@ class SnapshotCache:
         return load_snapshot_payload(payload)
 
     def write(self, snapshot: CostSnapshot) -> None:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_owner_only_dir(self.cache_dir)
         payload = json.dumps(snapshot.to_jsonable(), ensure_ascii=False, indent=2) + "\n"
         temp_path = self.cache_dir / f"{self.snapshot_path.name}.{os.getpid()}.tmp"
         try:
@@ -210,7 +220,7 @@ class SnapshotCache:
 
     @contextmanager
     def lock(self) -> Iterator[bool]:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_owner_only_dir(self.cache_dir)
         fd: int | None = None
         try:
             try:

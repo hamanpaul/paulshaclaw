@@ -8,7 +8,7 @@ from .__main__ import build_current_snapshot
 from .cache import SnapshotCache, build_snapshot
 from .config import load_cost_config
 from .formatter import format_footer
-from .models import CostSnapshot, ProviderSnapshot
+from .models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot
 
 _FALLBACK_LINE = "cdx 5h:-- wk:--  cc 5h:-- wk:--"
 
@@ -41,14 +41,29 @@ def _mark_snapshot_stale(snapshot: CostSnapshot) -> CostSnapshot:
     )
 
 
-def _build_degraded_snapshot(timezone: str) -> CostSnapshot:
+def _build_degraded_snapshot(config) -> CostSnapshot:
+    copilot_accounts = tuple(
+        CopilotAccountUsage(
+            account_id=account.account_id,
+            label=account.label,
+            kind=account.kind,
+            used_requests=None,
+            monthly_allowance=account.monthly_allowance,
+            source="unknown",
+        )
+        for account in getattr(config, "copilot_accounts", ())
+    )
+    providers = {
+        "cdx": ProviderSnapshot(source_status="unknown", windows={}),
+        "cc": ProviderSnapshot(source_status="unknown", windows={}),
+    }
+    if copilot_accounts:
+        providers["cpt"] = ProviderSnapshot(source_status="unknown", accounts=copilot_accounts)
+
     return build_snapshot(
-        timezone=timezone,
+        timezone=getattr(config, "timezone", "Asia/Taipei"),
         cache_status="stale",
-        providers={
-            "cdx": ProviderSnapshot(source_status="unknown", windows={}),
-            "cc": ProviderSnapshot(source_status="unknown", windows={}),
-        },
+        providers=providers,
     )
 
 
@@ -76,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
                     snapshot = (
                         _mark_snapshot_stale(previous_snapshot)
                         if previous_snapshot is not None
-                        else _build_degraded_snapshot(getattr(config, "timezone", "Asia/Taipei"))
+                        else _build_degraded_snapshot(config)
                     )
         if snapshot is None:
             snapshot = build_current_snapshot(config_path)
