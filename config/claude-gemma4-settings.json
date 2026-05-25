@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "gemma4-31b-mtp",
+  "skipDangerousModePermissionPrompt": true
+}
