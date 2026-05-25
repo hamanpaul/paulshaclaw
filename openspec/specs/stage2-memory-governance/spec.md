@@ -1,7 +1,9 @@
 # stage2-memory-governance Specification
 
 ## Purpose
-TBD - created by archiving change stage2-baseline. Update Purpose after archive.
+Define the Stage 2 memory governance contract, including the repo-local importer
+and hook substrate that writes canonical session artifacts into
+`~/.agents/memory/`.
 ## Requirements
 ### Requirement: Canonical memory routing path
 
@@ -182,3 +184,65 @@ Stage 2 SHALL provide `paulshaclaw.memory.policy` as the only supported policy e
 
 - **WHEN** a Python memory consumer fixture writes to a memory boundary without calling `paulshaclaw.memory.policy`
 - **THEN** `paulshaclaw/memory/lint/policy_consumer_lint.py` MUST exit non-zero
+
+### Requirement: Canonical agent memory tree
+
+Stage 2 SHALL provision `~/.agents/memory/` as the canonical agent memory substrate, fully disjoint from any Obsidian vault (`~/notes/`). The tree MUST contain `inbox/{sessions,plans,research,reports}/<tool>/<YYYY-MM-DD>/`, `work-centric/`, `knowledge/`, `runtime/{queue,queue/_failed,locks,ledger,indexes}/`, `log/`, `hooks/`, and `archive/queue/<YYYY-MM>/`. Directory mode MUST be 0700. `work-centric/`, `knowledge/`, and `runtime/indexes/` MUST be created as empty placeholders in this MVP; only `inbox/`, `runtime/queue*`, `runtime/locks`, `runtime/ledger`, `log/`, `hooks/`, and `archive/queue/` are active write targets in the repo-local implementation.
+
+#### Scenario: Install creates the canonical tree
+
+- **WHEN** an operator runs `~/.agents/memory/hooks/install.sh --tree-only`
+- **THEN** all directories listed above MUST exist with mode 0700
+- **THEN** placeholder subtrees MUST contain a `.gitkeep` file but no other content
+- **THEN** `~/notes/` MUST NOT be touched
+
+### Requirement: Hook-based session ingestion for three CLIs
+
+Stage 2 SHALL provide native hook integrations for Claude Code (`SessionEnd`), Codex CLI (`Stop` and `SubagentStop`), and GitHub Copilot CLI (`sessionEnd`). Hook scripts MUST be thin: they MUST write the raw payload into `~/.agents/memory/runtime/queue/` via atomic rename and fire-and-forget invoke `paulshaclaw.memory.importer.cli ingest --queue-item <path>`. Claude Code and GitHub Copilot CLI MAY use stable `<tool>__<session-id>.json` queue paths; Codex CLI MUST use a distinct per-event queue filename under `codex__<session-id>__<event-id>.json` because `Stop` and `SubagentStop` can fire multiple times within one session. Hook scripts MUST tag every payload with a `capture_scope` of `session_end`, `turn`, or `subagent`. Hook scripts MUST NOT raise to the host CLI; any failure MUST be logged to `~/.agents/memory/log/hooks.log` and the script MUST exit zero.
+
+#### Scenario: Claude SessionEnd writes a queue payload
+
+- **WHEN** an authorized operator finishes a Claude Code session
+- **THEN** `~/.agents/memory/runtime/queue/claude-code__<sid>.json` MUST appear within the hook timeout
+- **THEN** the payload MUST include `capture_scope: "session_end"`
+- **THEN** `~/.agents/memory/log/hooks.log` MUST NOT contain an ERROR entry for that session
+
+#### Scenario: Codex Stop is treated as turn snapshot
+
+- **WHEN** Codex CLI fires `Stop` mid-session
+- **THEN** the hook MUST write a distinct queue payload for that event with `capture_scope: "turn"` and `ended_at: null`
+- **THEN** the hook MUST NOT treat the event as session termination
+
+#### Scenario: Copilot sessionEnd renames camelCase keys
+
+- **WHEN** Copilot CLI fires `sessionEnd` with payload keys `sessionId`, `timestamp`, `cwd`, `reason`
+- **THEN** the hook MUST normalize `sessionId` to `session_id`
+- **THEN** the hook MUST supplement missing transcript fields by reading `~/.copilot/history-session-state/session_<sid>_*.json`
+
+### Requirement: Content-hash and completeness idempotency
+
+Stage 2 SHALL deduplicate session imports using `idempotency_key = "<source_agent>:<source_session>"`. The importer MUST compute `content_hash = sha256(canonical_json((session_id, capture_scope, turn_count, ended_at, sorted(touched_files), len(user_prompts))))` and `completeness = (scope_rank, turn_count, len(touched_files), len(user_prompts))` where `scope_rank` maps `{turn:0, subagent:0, session_end:1, watcher_final:2}`. For each incoming payload, after acquiring a `flock` on `runtime/locks/<key>.lock`, the importer MUST compare against the last ledger record for that key and resolve to exactly one of these statuses: `written`, `hash-duplicate`, `updated`, or `stale-skip`. Every decision MUST append a record to `~/.agents/memory/runtime/ledger/import.jsonl`.
+
+#### Scenario: Higher completeness yields updated
+
+- **WHEN** the importer processes a payload whose `completeness` is strictly greater (per Python tuple ordering) than the recorded entry
+- **THEN** the importer MUST overwrite the inbox file
+- **THEN** the ledger MUST receive an entry with `status: "updated"` including `from_completeness` and `to_completeness`
+
+### Requirement: Project identity resolution with longest-prefix
+
+Stage 2 SHALL resolve each session payload to a project identity using `~/.agents/config/projects.yaml`. Resolution MUST attempt, in order: (1) longest-prefix match of payload `cwd` against any project's `roots`; (2) longest-prefix match of explicit git toplevel against `roots`; (3) normalized match of remote URLs against `remotes`. If no rule hits, the importer MUST set `project: _unknown` and continue without raising. On alias collision, the first definition in `projects.yaml` wins and a WARN entry MUST be emitted through the importer logger.
+
+#### Scenario: Monorepo child wins over parent
+
+- **WHEN** `projects.yaml` declares both `monorepo` with root `/repo` and `monorepo-web` with root `/repo/web`, and the payload `cwd` is `/repo/web/src`
+- **THEN** the resolver MUST return `monorepo-web`
+
+### Requirement: Frontmatter contract for inbox entries
+
+Stage 2 SHALL produce every inbox markdown file with a YAML frontmatter block whose required fields match `docs/research/02.obs-auto-moc-memory-dream-mode-24-7-service-notes-.md` lines 220–234, aligned with Stage 3 frontmatter. The MVP MUST NOT introduce new frontmatter fields beyond that contract. Missing best-effort fields MUST appear as deterministic fallback scalars (for example `_unknown`) or empty collections, never as `null` or as missing keys.
+
+#### Scenario: Lint passes on repo-local fixtures
+
+- **WHEN** an operator runs `paulshaclaw/memory/lint/frontmatter_lint.py` over importer output produced from the repo-local fixture set
+- **THEN** the lint MUST report zero failures

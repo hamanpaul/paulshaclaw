@@ -1,0 +1,133 @@
+"""Shared adapter types and tolerant extraction helpers."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, TypedDict
+
+
+class NormalizedSession(TypedDict):
+    session_id: str
+    tool: str
+    started_at: str | None
+    ended_at: str | None
+    cwd: str | None
+    repo: str | None
+    commit: str | None
+    turn_count: int
+    user_prompts: list[str]
+    assistant_summary: str
+    touched_files: list[str]
+    referenced_artifacts: list[str]
+    raw_payload_pointer: str
+
+
+@dataclass(frozen=True)
+class AdapterResult:
+    session: NormalizedSession
+    capture_scope: str
+    raw_payload: dict[str, Any]
+
+
+def read_payload(path: str | Path) -> dict[str, Any]:
+    with Path(path).open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    if isinstance(data, dict):
+        return data
+    raise ValueError(f"{path} must contain a top-level JSON object")
+
+
+def string_or_empty(value: Any) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def string_or_none(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
+
+
+def history_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ("history", "turns", "messages"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def extract_user_prompts(payload: dict[str, Any]) -> list[str]:
+    explicit = string_list(payload.get("user_prompts"))
+    if explicit:
+        return explicit
+    prompts: list[str] = []
+    for item in history_items(payload):
+        if item.get("role") != "user":
+            continue
+        content = item.get("content") or item.get("text") or item.get("prompt")
+        if isinstance(content, str):
+            prompts.append(content)
+    return prompts
+
+
+def extract_turn_count(payload: dict[str, Any], prompts: list[str]) -> int:
+    value = payload.get("turn_count")
+    if isinstance(value, int):
+        return max(1, value)
+    if isinstance(value, str):
+        try:
+            return max(1, int(value))
+        except ValueError:
+            pass
+    items = history_items(payload)
+    if items:
+        return max(1, len(items))
+    return max(1, len(prompts))
+
+
+def extract_assistant_summary(payload: dict[str, Any]) -> str:
+    for key in ("assistant_summary", "summary"):
+        value = payload.get(key)
+        if isinstance(value, str):
+            return value[:2000]
+    for item in history_items(payload):
+        if item.get("role") != "assistant":
+            continue
+        content = item.get("content") or item.get("text")
+        if isinstance(content, str):
+            return content[:2000]
+    return ""
+
+
+def build_session(
+    *,
+    payload: dict[str, Any],
+    queue_path: str | Path,
+    tool: str,
+    session_id: str,
+    default_capture_scope: str,
+    ended_at: str | None,
+) -> AdapterResult:
+    prompts = extract_user_prompts(payload)
+    session: NormalizedSession = {
+        "session_id": session_id,
+        "tool": tool,
+        "started_at": string_or_none(payload.get("started_at")),
+        "ended_at": ended_at,
+        "cwd": string_or_none(payload.get("cwd")),
+        "repo": string_or_none(payload.get("repo")),
+        "commit": string_or_none(payload.get("commit")),
+        "turn_count": extract_turn_count(payload, prompts),
+        "user_prompts": prompts,
+        "assistant_summary": extract_assistant_summary(payload),
+        "touched_files": string_list(payload.get("touched_files")),
+        "referenced_artifacts": string_list(payload.get("referenced_artifacts")),
+        "raw_payload_pointer": str(queue_path),
+    }
+    capture_scope = string_or_empty(payload.get("capture_scope")) or default_capture_scope
+    return AdapterResult(session=session, capture_scope=capture_scope, raw_payload=payload)
