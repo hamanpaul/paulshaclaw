@@ -678,6 +678,46 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         self.assertEqual(total, 12)
 
+    def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
+            root.mkdir(parents=True)
+            (root / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session.shutdown",
+                        "data": {"totalPremiumRequests": 12},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
+                total = _read_local_observed_total(year=2026, month=5)
+
+        self.assertEqual(total, 0)
+
+    def test_read_local_observed_total_counts_timestamp_less_shutdowns_without_explicit_filter(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
+            root.mkdir(parents=True)
+            (root / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session.shutdown",
+                        "data": {"totalPremiumRequests": 12},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
+                total = _read_local_observed_total()
+
+        self.assertEqual(total, 12)
+
     def test_collect_copilot_keeps_fresh_status_when_other_accounts_are_unknown(self) -> None:
         path = self.write_config(
             """
