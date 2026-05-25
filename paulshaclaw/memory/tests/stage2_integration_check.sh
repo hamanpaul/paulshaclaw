@@ -2,6 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+TMP_PARENT="$ROOT_DIR/.test-work"
+mkdir -p "$TMP_PARENT"
+TMP_DIR="$(mktemp -d "$TMP_PARENT/stage2-integration-XXXXXX")"
+trap 'rm -rf -- "$TMP_DIR"' EXIT
 
 require_text() {
   local label="$1"
@@ -13,6 +17,36 @@ require_text() {
   for needle in "$@"; do
     grep -Fq "$needle" "$file"
   done
+}
+
+require_hook_dry_run() {
+  local label="$1"
+  local hook_script="$2"
+  local fixture="$3"
+  local queue_pattern="$4"
+  local output
+  local queue_item
+  local -a queue_matches=()
+
+  echo "[stage2] ${label}"
+  PSC_MEMORY_ROOT="$TMP_DIR/memory" \
+    PSC_CONFIG_ROOT="$TMP_DIR/config-root" \
+    python3 "$ROOT_DIR/paulshaclaw/memory/hooks/${hook_script}" <"$fixture"
+  while IFS= read -r match; do
+    queue_matches+=("$match")
+  done < <(find "$TMP_DIR/memory/runtime/queue" -maxdepth 1 -type f -name "$queue_pattern" | sort)
+  test "${#queue_matches[@]}" -eq 1
+  queue_item="${queue_matches[0]}"
+  test -s "$queue_item"
+  output="$(
+    python3 -m paulshaclaw.memory.importer.cli ingest \
+      --queue-item "$queue_item" \
+      --memory-root "$TMP_DIR/memory" \
+      --dry-run
+  )"
+  grep -Fq '"status": "written"' <<<"$output"
+  grep -Fq '"dry_run": true' <<<"$output"
+  grep -Fq '"classifier_bucket"' <<<"$output"
 }
 
 require_text \
@@ -62,5 +96,23 @@ require_text \
 
 echo "[stage2] validate memory policy consumer lint"
 PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.lint.policy_consumer_lint "$ROOT_DIR/paulshaclaw"
+
+require_hook_dry_run \
+  "fixture dry-run claude" \
+  "claude_session_end.py" \
+  "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/claude/session_end/payload.json" \
+  "claude-code__claude-session-end-001.json"
+
+require_hook_dry_run \
+  "fixture dry-run codex" \
+  "codex_session_end.py" \
+  "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/codex/stop/payload.json" \
+  "codex__codex-stop-001*.json"
+
+require_hook_dry_run \
+  "fixture dry-run copilot" \
+  "copilot_session_end.py" \
+  "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/copilot/session_end/payload.json" \
+  "copilot-cli__copilot-session-end-001.json"
 
 echo "[stage2] ok"

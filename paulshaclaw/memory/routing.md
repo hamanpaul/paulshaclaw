@@ -15,6 +15,25 @@
    - 從 `work-centric` 與 ledger 事件組 replay bundle
    - 提供給後續 workflow 做復盤、handoff、re-activation 判斷
 
+## 1.1 MVP 實作邊界
+
+本 repo 已落地的 Stage 2 Importer MVP 以 `paulshaclaw/memory/importer/` 與
+`paulshaclaw/memory/hooks/` 為主：
+
+1. hook scripts 只負責把 Claude / Codex / Copilot 的 session payload 寫進
+   `runtime/queue/`
+2. importer 做 adapter 正規化、frontmatter/render、project resolver、classifier、
+   idempotent ledger、`inbox/{sessions,plans,research,reports}/` 路由
+3. `work-centric -> knowledge` 的升級、replay、janitor、`decayed/reactivation`
+   仍沿用本文件既有 Stage 2 治理邊界，屬於後續 runtime slice
+
+MVP 設計與驗證細節見：
+
+- `docs/superpowers/specs/2026-05-24-stage2-memory-importer-mvp-design.md`
+- `openspec/changes/stage2-memory-importer-mvp/`
+
+`obs-auto-moc` watcher 只保留介面契約與 follow-up 指向，實作不在本 repo archive 內。
+
 ## 2. inbox -> work-centric -> knowledge 路由
 
 | 來源 | 初始落點 | 升級條件 | 目標落點 |
