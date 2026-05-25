@@ -4,6 +4,7 @@
 - [x] 1.2 複製 `~/.local/bin/claude-gemma4-proxy` 到 `scripts/claude-gemma4-proxy`
 - [x] 1.3 從 `~/.claude-gemma4/settings.json` 建立 `config/claude-gemma4-settings.json` template
 - [x] 1.4 確認 `scripts/claude-gemma4` 和 `scripts/claude-gemma4-proxy` 有執行權限且可正常啟動（smoke test）
+  - 驗證紀錄：`test -x scripts/claude-gemma4`、`test -x scripts/claude-gemma4-proxy`、`python3 -m py_compile scripts/claude-gemma4-proxy`、`timeout 15s scripts/claude-gemma4 --help`；結果：exit status `0`，wrapper 成功輸出 Claude CLI help，proxy parse check 通過。
 
 ## 2. Agent process 偵測工具
 
