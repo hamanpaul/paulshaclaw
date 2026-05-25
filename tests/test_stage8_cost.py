@@ -671,6 +671,28 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIsNone(provider.accounts[0].used_requests)
         local_mock.assert_called_once_with({"hamanpaul"})
 
+    def test_collect_copilot_marks_unknown_when_gh_is_missing_during_local_fallback(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            )
+        )
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch("paulshaclaw.cost.providers.subprocess.run", side_effect=FileNotFoundError("gh")),
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.accounts[0].source, "unknown")
+        self.assertIsNone(provider.accounts[0].used_requests)
+
     def test_read_local_observed_total_counts_current_month_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / ".copilot" / "session-state" / "s1"

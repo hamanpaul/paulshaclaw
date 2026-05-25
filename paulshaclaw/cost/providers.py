@@ -513,12 +513,15 @@ def _fetch_account_usage(account: CopilotAccountConfig) -> tuple[int, str]:
 
 
 def _get_active_github_login() -> str | None:
-    completed = subprocess.run(
-        ["gh", "auth", "status"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["gh", "auth", "status"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
     output = "\n".join(part for part in (completed.stdout, completed.stderr) if part)
     current_account: str | None = None
     for line in output.splitlines():
