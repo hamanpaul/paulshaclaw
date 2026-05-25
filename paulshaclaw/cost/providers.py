@@ -35,10 +35,10 @@ def _now_utc() -> datetime:
 def _display_reset(reset_at: datetime, now: datetime) -> str:
     local_reset = reset_at.astimezone(now.tzinfo or ZoneInfo("Asia/Taipei"))
     local_now = now.astimezone(local_reset.tzinfo)
-    if local_reset.date() == local_now.date():
+    seconds = max(0, (local_reset - local_now).total_seconds())
+    if seconds < 6 * 60 * 60:
         return local_reset.strftime("%H:%M")
 
-    seconds = max(0, (local_reset - local_now).total_seconds())
     if seconds < 24 * 60 * 60:
         hours = max(1, int(seconds // 3600))
         return f"{hours}h"
@@ -50,9 +50,31 @@ def _display_reset(reset_at: datetime, now: datetime) -> str:
 def _parse_epoch(value: Any, tz: timezone | ZoneInfo) -> datetime | None:
     try:
         epoch = float(value)
-    except (TypeError, ValueError):
+        return datetime.fromtimestamp(epoch, timezone.utc).astimezone(tz)
+    except (TypeError, ValueError, OverflowError, OSError):
         return None
-    return datetime.fromtimestamp(epoch, timezone.utc).astimezone(tz)
+
+
+def _is_openai_compatible_claude_record(*records: Mapping[str, Any]) -> bool:
+    excluded_markers = ("vllm", "openai-compatible", "openai_compatible")
+    url_markers = ("localhost", "127.0.0.1", "0.0.0.0")
+
+    for record in records:
+        for key in ("provider", "source", "base_url", "api_base", "baseUrl", "apiBase"):
+            value = record.get(key)
+            if not isinstance(value, str):
+                continue
+            normalized = value.lower()
+            if any(marker in normalized for marker in excluded_markers):
+                return True
+            if key.lower() in {"base_url", "api_base", "baseurl", "apibase"} and any(
+                marker in normalized for marker in url_markers
+            ):
+                return True
+            if key in {"provider", "source"} and normalized == "openai":
+                return True
+
+    return False
 
 
 def _window_from_rate_limit(
@@ -97,7 +119,10 @@ def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
     return time.time() - stat.st_mtime <= max_age_seconds
 
 
-def _claude_message_token_total(message: Mapping[str, Any]) -> int:
+def _claude_message_token_total(
+    message: Mapping[str, Any],
+    record: Mapping[str, Any] | None = None,
+) -> int:
     model = message.get("model")
     if not isinstance(model, str):
         return 0
@@ -106,6 +131,9 @@ def _claude_message_token_total(message: Mapping[str, Any]) -> int:
     if not normalized_model.startswith("claude-"):
         return 0
     if any(excluded in normalized_model for excluded in ("gemma4", "vllm", "openai-compatible")):
+        return 0
+    records = (message, record) if record is not None else (message,)
+    if _is_openai_compatible_claude_record(*records):
         return 0
 
     usage = message.get("usage")
@@ -144,7 +172,7 @@ def _claude_local_token_total(claude_home: Path) -> int:
                         continue
                     message = payload.get("message")
                     if isinstance(message, Mapping):
-                        total += _claude_message_token_total(message)
+                        total += _claude_message_token_total(message, payload)
         except OSError:
             continue
     return total

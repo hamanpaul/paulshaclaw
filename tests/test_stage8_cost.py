@@ -820,6 +820,59 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["weekly"].used_percent, 41)
         self.assertEqual(provider.windows["weekly"].display_reset, "3d")
 
+    def test_collect_claude_ignores_overflowing_sidecar_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": 10**20,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                local_fallback=False,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_claude_displays_close_cross_midnight_reset_as_local_clock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            reset_at = datetime(2026, 4, 30, 0, 15, tzinfo=ZoneInfo("Asia/Taipei"))
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": reset_at.timestamp(),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 23, 30, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.windows["five_hour"].display_reset, "00:15")
+
     def test_collect_claude_unknown_when_sidecar_missing(self) -> None:
         provider = collect_claude(
             statusline_sidecar=Path("missing-claude-rate-limits.json"),
@@ -867,6 +920,56 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.windows["five_hour"].used_percent, 1)
         self.assertEqual(provider.note, "local Claude Code token estimate")
+
+    def test_collect_claude_estimated_fallback_excludes_vllm_openai_compatible_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "usage": {"input_tokens": 15000, "output_tokens": 5000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "provider": "vllm",
+                                    "base_url": "http://localhost:8000/v1",
+                                    "usage": {"input_tokens": 900000, "output_tokens": 900000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "source": "openai-compatible",
+                                    "api_base": "http://localhost:8001/v1",
+                                    "usage": {"input_tokens": 800000, "output_tokens": 800000},
+                                }
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=Path(tmpdir) / "missing.json",
+                local_fallback=True,
+                claude_home=Path(tmpdir) / ".claude",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 2)
 
 
 class Stage8CacheTests(unittest.TestCase):
