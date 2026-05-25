@@ -308,6 +308,15 @@ if not isinstance(data, dict):
 hooks = data.setdefault("hooks", {})
 managed_marker = "codex_session_end.py"
 
+def _command_parts(command):
+    parts = command.strip().split()
+    while parts and "=" in parts[0]:
+        key, value = parts[0].split("=", 1)
+        if not key or not key.replace("_", "a").isalnum():
+            break
+        parts = parts[1:]
+    return parts
+
 def _managed_hook(command, status_msg):
     return {
         "type": "command",

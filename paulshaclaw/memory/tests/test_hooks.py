@@ -689,6 +689,91 @@ class InstallerTest(unittest.TestCase):
             ],
         )
 
+    def test_reinstall_replaces_legacy_prefixed_codex_hooks_without_managed_marker(self):
+        old_memory_root = self.root / "memory-old"
+        new_memory_root = self.root / "memory-new"
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        old_stop = (
+            f"PSC_MEMORY_ROOT={old_memory_root} "
+            f"PSC_CONFIG_ROOT={self.config_root} "
+            f"{old_memory_root}/hooks/.venv/bin/python {old_memory_root}/hooks/codex_session_end.py"
+        )
+        old_subagent = old_stop + " --subagent"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": old_stop,
+                                        "statusMessage": "paulsha-memory: capturing turn snapshot",
+                                    }
+                                ],
+                            }
+                        ],
+                        "SubagentStop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": old_subagent,
+                                        "statusMessage": "paulsha-memory: capturing subagent snapshot",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_install(
+            [
+                "--memory-root", str(new_memory_root),
+                "--config-root", str(self.config_root),
+                "--repo-root", self.repo_root,
+                "--skip-venv",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        hooks = json.loads(hooks_path.read_text())
+        stop_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("Stop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        subagent_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("SubagentStop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertEqual(
+            [cmd for cmd in stop_commands if "codex_session_end.py" in cmd],
+            [
+                f"PSC_MEMORY_ROOT={new_memory_root} "
+                f"PSC_CONFIG_ROOT={self.config_root} "
+                f"{new_memory_root}/hooks/.venv/bin/python {new_memory_root}/hooks/codex_session_end.py"
+            ],
+        )
+        self.assertEqual(
+            [cmd for cmd in subagent_commands if "codex_session_end.py" in cmd],
+            [
+                f"PSC_MEMORY_ROOT={new_memory_root} "
+                f"PSC_CONFIG_ROOT={self.config_root} "
+                f"{new_memory_root}/hooks/.venv/bin/python {new_memory_root}/hooks/codex_session_end.py --subagent"
+            ],
+        )
+
     # ------------------------------------------------------------------
     # Full install — Copilot config
     # ------------------------------------------------------------------
