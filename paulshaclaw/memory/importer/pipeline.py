@@ -229,6 +229,9 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
     root = Path(memory_root)
     result = _extract(queue_path)
     session = result.session
+    remote_url = result.raw_payload.get("remote_url") or result.raw_payload.get("remote") or session.get("repo")
+    if not isinstance(remote_url, str):
+        remote_url = None
     key = idempotency_key(session)
     incoming_hash = content_hash(session, result.capture_scope)
     incoming_completeness = completeness(session, result.capture_scope)
@@ -237,7 +240,7 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
     project = resolve_project(
         cwd=session.get("cwd"),
         git_toplevel=session.get("repo"),
-        remote_url=session.get("repo"),
+        remote_url=remote_url,
         memory_root=str(root),
     )
     inbox_path = root / "inbox" / bucket / session["tool"] / day / f"{safe_key(session['session_id'])}.md"

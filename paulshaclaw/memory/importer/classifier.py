@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import PurePosixPath
 from typing import Mapping
+
+_COMMIT_OR_PR_REFERENCE = re.compile(
+    r"(\bpr\s*#?\d+\b|\bpull request\s*#?\d+\b|\brefs/pull/\d+\b|\bpulls?/\d+\b|"
+    r"\bcommit[:/\s#-]*[0-9a-f]{7,40}\b|\bcommits?/[0-9a-f]{7,40}\b)"
+)
 
 
 def _lower_items(values: list[str]) -> list[str]:
@@ -23,6 +29,10 @@ def _touched_code_file(paths: list[str]) -> bool:
     return any(path.endswith(code_suffixes) for path in paths)
 
 
+def _has_commit_or_pr_reference(values: list[str]) -> bool:
+    return any(_COMMIT_OR_PR_REFERENCE.search(value) for value in values)
+
+
 def classify_session(session: Mapping[str, object]) -> str:
     filename = str(session.get("raw_payload_pointer") or "")
     touched_files = _lower_items(list(session.get("touched_files", [])))
@@ -30,6 +40,8 @@ def classify_session(session: Mapping[str, object]) -> str:
     referenced_artifacts = _lower_items(list(session.get("referenced_artifacts", [])))
     path_inputs = [filename.lower(), *touched_files]
     prompt_text = " ".join(prompts)
+    has_prompt_commit_or_pr_reference = _has_commit_or_pr_reference(prompts)
+    has_artifact_commit_or_pr_reference = _has_commit_or_pr_reference(referenced_artifacts)
 
     for path in path_inputs:
         base = _basename(path)
@@ -68,7 +80,7 @@ def classify_session(session: Mapping[str, object]) -> str:
             or base.endswith("-report.md")
         ):
             return "reports"
-    if _has_any(prompt_text, ("report", "summary", "postmortem", "review", "evidence")) or (
+    if _has_any(prompt_text, ("report", "summary", "postmortem", "evidence")) or has_artifact_commit_or_pr_reference or has_prompt_commit_or_pr_reference or (
         "test" in prompt_text
         and _has_any(prompt_text, ("result", "results", "verification", "verify"))
         and _has_any(prompt_text, ("attach", "collect", "summarize", "archive"))

@@ -38,20 +38,24 @@ def _best_root_match(candidate: str | None, projects: ProjectsConfig) -> str | N
 def normalize_remote(value: str | None) -> str:
     if not value:
         return ""
-    normalized = value.strip()
-    normalized = re.sub(r"\.git$", "", normalized)
-    normalized = re.sub(r"^[a-z]+://", "", normalized)
-    if normalized.startswith("git@"):
-        normalized = normalized[4:]
-    if normalized.startswith("ssh://"):
-        normalized = normalized[6:]
+    normalized = value.strip().replace("\\", "/")
+    normalized = normalized.rstrip("/")
+    normalized = re.sub(r"^[a-z][a-z0-9+.-]*://", "", normalized, flags=re.IGNORECASE)
     if normalized.startswith("git@"):
         normalized = normalized[4:]
     if ":" in normalized and "/" not in normalized.split(":", 1)[0]:
         normalized = normalized.replace(":", "/", 1)
+    normalized = normalized.rstrip("/")
+    normalized = re.sub(r"\.git$", "", normalized, flags=re.IGNORECASE)
     if normalized.count("/") == 1 and "." not in normalized.split("/", 1)[0]:
         normalized = f"github.com/{normalized}"
-    return normalized.strip("/")
+    parts = [part for part in normalized.strip("/").split("/") if part]
+    if not parts:
+        return ""
+    parts[0] = parts[0].lower()
+    if parts[0] == "github.com":
+        parts[1:] = [part.lower() for part in parts[1:]]
+    return "/".join(parts)
 
 
 def resolve_project(

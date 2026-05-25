@@ -200,6 +200,43 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertTrue(inbox.exists())
         self.assertIn("project: obs-auto-moc", inbox.read_text(encoding="utf-8"))
 
+    def test_pipeline_uses_raw_remote_url_for_project_resolution_when_repo_path_does_not_match(self):
+        config_dir = self.root.parent / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "projects.yaml").write_text(
+            "\n".join(
+                [
+                    "version: 1",
+                    "projects:",
+                    "  paulshaclaw:",
+                    "    remotes:",
+                    "      - github.com/hamanpaul/paulshaclaw",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        payload = self.payload(
+            session_id="sid-project-remote",
+            scope="session_end",
+            turns=1,
+            files=["src/main.py"],
+            prompts=["implement importer"],
+            ended_at="2026-05-24T11:10:00+00:00",
+        )
+        payload["cwd"] = "/worktrees/unmatched"
+        payload["repo"] = "/work/custom-claw-tools/unmatched"
+        payload["remote_url"] = "https://GitHub.com/hamanpaul/paulshaclaw.git/"
+
+        decision = ingest_queue_item(self.write_queue_item("project-remote", payload), memory_root=self.root)
+
+        inbox = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-project-remote.md"
+        rendered = inbox.read_text(encoding="utf-8")
+        self.assertEqual(decision["project"], "paulshaclaw")
+        self.assertTrue(inbox.exists())
+        self.assertIn("project: paulshaclaw", rendered)
+        self.assertIn("repo: /work/custom-claw-tools/unmatched", rendered)
+
     def test_reclassification_updates_when_bucket_changes_without_content_hash_change(self):
         payload = self.payload(
             session_id="sid-hash-bucket",

@@ -173,6 +173,39 @@ class ClassifierTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertEqual(classify_session(session), expected)
 
+    def test_generic_review_prompt_stays_in_sessions(self):
+        session = make_session(
+            filename="runtime/queue/review-request.json",
+            touched_files=["src/refactor.py"],
+            prompts=["please review this refactor"],
+        )
+
+        self.assertEqual(classify_session(session), "sessions")
+
+    def test_commit_and_pr_references_route_to_reports(self):
+        cases = [
+            make_session(
+                filename="runtime/queue/pr-reference.json",
+                touched_files=["src/router.py"],
+                prompts=["capture follow-up for PR #42"],
+            ),
+            make_session(
+                filename="runtime/queue/pr-reference-prompt-only.json",
+                touched_files=["src/router.py"],
+                prompts=["investigate PR #42"],
+            ),
+            make_session(
+                filename="runtime/queue/commit-reference.json",
+                touched_files=["src/router.py"],
+                prompts=["collect the linked artifact"],
+                referenced_artifacts=["commit:bcc47ef3d2a4943df53a4336301a9a4de201efa4"],
+            ),
+        ]
+
+        for session in cases:
+            with self.subTest(session=session["raw_payload_pointer"]):
+                self.assertEqual(classify_session(session), "reports")
+
 
 if __name__ == "__main__":
     unittest.main()

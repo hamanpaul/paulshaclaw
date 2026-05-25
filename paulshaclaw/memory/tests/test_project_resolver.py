@@ -121,6 +121,34 @@ class ProjectResolverTest(unittest.TestCase):
 
         self.assertEqual(project, "paulshaclaw")
 
+    def test_resolve_project_matches_remote_url_variants(self):
+        config = load_projects_config(
+            self.write_projects_config(
+                """
+                version: 1
+                projects:
+                  paulshaclaw:
+                    remotes:
+                      - github.com/hamanpaul/paulshaclaw
+                """
+            )
+        )
+
+        for remote_url in (
+            "https://github.com/hamanpaul/paulshaclaw.git/",
+            "GitHub.com/hamanpaul/paulshaclaw",
+            "ssh://git@github.com/hamanpaul/paulshaclaw.git",
+        ):
+            with self.subTest(remote_url=remote_url):
+                project = resolve_project(
+                    cwd="/unmatched/path",
+                    git_toplevel="/another/unmatched/path",
+                    remote_url=remote_url,
+                    projects=config,
+                )
+
+                self.assertEqual(project, "paulshaclaw")
+
     def test_resolve_project_returns_unknown_when_no_rule_matches(self):
         config = load_projects_config(
             self.write_projects_config(
