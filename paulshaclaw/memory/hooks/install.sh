@@ -203,6 +203,24 @@ if not isinstance(session_end_list, list):
     sys.exit(1)
 
 managed_marker = "claude_session_end.py"
+
+def _is_managed_claude_hook(hook):
+    if not isinstance(hook, dict):
+        return False
+    if hook.get("managedBy") == "paulsha-memory":
+        return True
+    if hook.get("type") != "command" or hook.get("timeout") != 10:
+        return False
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
+    parts = command.strip().split()
+    return (
+        len(parts) == 2
+        and parts[0].endswith("/hooks/.venv/bin/python")
+        and parts[1].endswith(f"/hooks/{managed_marker}")
+    )
+
 updated_entries = []
 target_entry = None
 for entry in session_end_list:
@@ -215,7 +233,7 @@ for entry in session_end_list:
     kept_hooks = [
         hook
         for hook in hooks_list
-        if not (isinstance(hook, dict) and managed_marker in hook.get("command", ""))
+        if not _is_managed_claude_hook(hook)
     ]
     updated_entry = dict(entry)
     updated_entry["hooks"] = kept_hooks
@@ -233,6 +251,7 @@ target_entry["hooks"].append(
         "type": "command",
         "command": hook_command,
         "timeout": 10,
+        "managedBy": "paulsha-memory",
     }
 )
 if target_entry not in updated_entries:
@@ -284,7 +303,29 @@ def _managed_hook(command, status_msg):
         "type": "command",
         "command": command,
         "statusMessage": status_msg,
+        "managedBy": "paulsha-memory",
     }
+
+def _is_managed_codex_hook(hook):
+    if not isinstance(hook, dict):
+        return False
+    if hook.get("managedBy") == "paulsha-memory":
+        return True
+    if hook.get("type") != "command":
+        return False
+    status_msg = hook.get("statusMessage")
+    if not isinstance(status_msg, str) or not status_msg.startswith("paulsha-memory:"):
+        return False
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
+    parts = command.strip().split()
+    return (
+        len(parts) in {2, 3}
+        and parts[0].endswith("/hooks/.venv/bin/python")
+        and parts[1].endswith(f"/hooks/{managed_marker}")
+        and (len(parts) == 2 or parts[2] == "--subagent")
+    )
 
 def _reconcile_event(name, command, status_msg):
     event_list = hooks.setdefault(name, [])
@@ -303,7 +344,7 @@ def _reconcile_event(name, command, status_msg):
         kept_hooks = [
             hook
             for hook in hooks_list
-            if not (isinstance(hook, dict) and managed_marker in hook.get("command", ""))
+            if not _is_managed_codex_hook(hook)
         ]
         updated_entry = dict(entry)
         updated_entry["hooks"] = kept_hooks

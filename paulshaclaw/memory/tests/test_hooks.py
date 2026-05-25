@@ -368,6 +368,41 @@ class InstallerTest(unittest.TestCase):
         settings = json.loads(settings_path.read_text())
         self.assertEqual(settings.get("existing_key"), "preserved_value")
 
+    def test_full_install_preserves_unrelated_claude_hook_with_matching_substring(self):
+        settings_path = self.config_root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        unrelated_command = "/tmp/custom-wrapper --delegate claude_session_end.py --keep"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {"type": "command", "command": unrelated_command},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_install(self.base_args)
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        settings = json.loads(settings_path.read_text())
+        commands = [
+            h["command"]
+            for entry in settings.get("hooks", {}).get("SessionEnd", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertIn(unrelated_command, commands)
+        self.assertEqual(sum("claude_session_end.py" in command for command in commands), 2)
+
     def test_full_install_fails_without_overwriting_invalid_claude_settings(self):
         settings_path = self.config_root / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -477,6 +512,49 @@ class InstallerTest(unittest.TestCase):
         ]
         matching = [c for c in stop_commands if "codex_session_end.py" in c]
         self.assertEqual(len(matching), 1, f"Duplicate codex Stop entries: {matching}")
+
+    def test_full_install_preserves_unrelated_codex_hook_with_matching_substring(self):
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        unrelated_stop = "/tmp/custom-wrapper codex_session_end.py --keep"
+        unrelated_subagent = "/tmp/custom-wrapper codex_session_end.py --keep --subagent"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {"matcher": ".*", "hooks": [{"type": "command", "command": unrelated_stop}]}
+                        ],
+                        "SubagentStop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [{"type": "command", "command": unrelated_subagent}],
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_install(self.base_args)
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        hooks = json.loads(hooks_path.read_text())
+        stop_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("Stop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        subagent_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("SubagentStop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertIn(unrelated_stop, stop_commands)
+        self.assertIn(unrelated_subagent, subagent_commands)
 
     def test_full_install_fails_without_overwriting_invalid_codex_hooks(self):
         hooks_path = self.config_root / ".codex" / "hooks.json"
@@ -618,6 +696,11 @@ class InstallerTest(unittest.TestCase):
     def test_uninstall_preserves_unrelated_claude_hooks_in_same_entry(self):
         settings_path = self.config_root / ".claude" / "settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
+        unrelated_command = "/tmp/custom-wrapper --delegate claude_session_end.py --keep"
+        managed_command = (
+            f"{self.memory_root}/hooks/.venv/bin/python "
+            f"{self.memory_root}/hooks/claude_session_end.py"
+        )
         settings_path.write_text(
             json.dumps(
                 {
@@ -626,8 +709,13 @@ class InstallerTest(unittest.TestCase):
                             {
                                 "matcher": "",
                                 "hooks": [
-                                    {"type": "command", "command": "/tmp/keep-me"},
-                                    {"type": "command", "command": "/tmp/old/claude_session_end.py"},
+                                    {"type": "command", "command": unrelated_command},
+                                    {
+                                        "type": "command",
+                                        "command": managed_command,
+                                        "timeout": 10,
+                                        "managedBy": "paulsha-memory",
+                                    },
                                 ],
                             }
                         ]
@@ -650,7 +738,7 @@ class InstallerTest(unittest.TestCase):
             for h in entry.get("hooks", [])
             if "command" in h
         ]
-        self.assertEqual(commands, ["/tmp/keep-me"])
+        self.assertEqual(commands, [unrelated_command])
 
     def test_uninstall_removes_managed_codex_hook_entries(self):
         _run_install(self.base_args)
@@ -677,6 +765,13 @@ class InstallerTest(unittest.TestCase):
     def test_uninstall_preserves_unrelated_codex_hooks_in_same_entry(self):
         hooks_path = self.config_root / ".codex" / "hooks.json"
         hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        unrelated_stop = "/tmp/custom-wrapper codex_session_end.py --keep"
+        unrelated_subagent = "/tmp/custom-wrapper codex_session_end.py --keep --subagent"
+        managed_stop = (
+            f"{self.memory_root}/hooks/.venv/bin/python "
+            f"{self.memory_root}/hooks/codex_session_end.py"
+        )
+        managed_subagent = managed_stop + " --subagent"
         hooks_path.write_text(
             json.dumps(
                 {
@@ -685,8 +780,13 @@ class InstallerTest(unittest.TestCase):
                             {
                                 "matcher": ".*",
                                 "hooks": [
-                                    {"type": "command", "command": "/tmp/keep-stop"},
-                                    {"type": "command", "command": "/tmp/old/codex_session_end.py"},
+                                    {"type": "command", "command": unrelated_stop},
+                                    {
+                                        "type": "command",
+                                        "command": managed_stop,
+                                        "statusMessage": "paulsha-memory: capturing turn snapshot",
+                                        "managedBy": "paulsha-memory",
+                                    },
                                 ],
                             }
                         ],
@@ -694,8 +794,13 @@ class InstallerTest(unittest.TestCase):
                             {
                                 "matcher": ".*",
                                 "hooks": [
-                                    {"type": "command", "command": "/tmp/keep-subagent"},
-                                    {"type": "command", "command": "/tmp/old/codex_session_end.py --subagent"},
+                                    {"type": "command", "command": unrelated_subagent},
+                                    {
+                                        "type": "command",
+                                        "command": managed_subagent,
+                                        "statusMessage": "paulsha-memory: capturing subagent snapshot",
+                                        "managedBy": "paulsha-memory",
+                                    },
                                 ],
                             }
                         ],
@@ -724,8 +829,8 @@ class InstallerTest(unittest.TestCase):
             for h in entry.get("hooks", [])
             if "command" in h
         ]
-        self.assertEqual(stop_commands, ["/tmp/keep-stop"])
-        self.assertEqual(subagent_commands, ["/tmp/keep-subagent"])
+        self.assertEqual(stop_commands, [unrelated_stop])
+        self.assertEqual(subagent_commands, [unrelated_subagent])
 
     def test_uninstall_removes_copilot_hook_file(self):
         _run_install(self.base_args)

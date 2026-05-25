@@ -61,6 +61,24 @@ except Exception:
     sys.exit(0)
 
 managed_marker = "claude_session_end.py"
+
+def _is_managed_claude_hook(hook):
+    if not isinstance(hook, dict):
+        return False
+    if hook.get("managedBy") == "paulsha-memory":
+        return True
+    if hook.get("type") != "command" or hook.get("timeout") != 10:
+        return False
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
+    parts = command.strip().split()
+    return (
+        len(parts) == 2
+        and parts[0].endswith("/hooks/.venv/bin/python")
+        and parts[1].endswith(f"/hooks/{managed_marker}")
+    )
+
 session_end_list = settings.get("hooks", {}).get("SessionEnd", [])
 filtered = []
 for entry in session_end_list:
@@ -73,7 +91,7 @@ for entry in session_end_list:
     kept_hooks = [
         hook
         for hook in hooks_list
-        if not (isinstance(hook, dict) and managed_marker in hook.get("command", ""))
+        if not _is_managed_claude_hook(hook)
     ]
     if kept_hooks:
         updated_entry = dict(entry)
@@ -104,6 +122,27 @@ except Exception:
     sys.exit(0)
 
 def _remove_managed(event_list, marker):
+    def _is_managed_codex_hook(hook):
+        if not isinstance(hook, dict):
+            return False
+        if hook.get("managedBy") == "paulsha-memory":
+            return True
+        if hook.get("type") != "command":
+            return False
+        status_msg = hook.get("statusMessage")
+        if not isinstance(status_msg, str) or not status_msg.startswith("paulsha-memory:"):
+            return False
+        command = hook.get("command")
+        if not isinstance(command, str):
+            return False
+        parts = command.strip().split()
+        return (
+            len(parts) in {2, 3}
+            and parts[0].endswith("/hooks/.venv/bin/python")
+            and parts[1].endswith(f"/hooks/{marker}")
+            and (len(parts) == 2 or parts[2] == "--subagent")
+        )
+
     filtered = []
     for entry in event_list:
         if not isinstance(entry, dict):
@@ -115,7 +154,7 @@ def _remove_managed(event_list, marker):
         kept_hooks = [
             hook
             for hook in hooks_list
-            if not (isinstance(hook, dict) and marker in hook.get("command", ""))
+            if not _is_managed_codex_hook(hook)
         ]
         if kept_hooks:
             updated_entry = dict(entry)

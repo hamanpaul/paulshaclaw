@@ -71,6 +71,18 @@ class FrontmatterRenderTest(unittest.TestCase):
         self.assertIn("## Referenced artifacts\n- docs/plan.md\n- docs/task.md", rendered)
         self.assertIn("## Prompts\n1. Draft frontmatter tests\n2. Keep key order stable", rendered)
 
+    def test_render_markdown_includes_summary_section(self):
+        result = copilot.extract(FIXTURES / "copilot/session_end/payload.json")
+
+        rendered = render_markdown(
+            result.session,
+            project="paulshaclaw",
+            classifier_bucket="session",
+            captured_at="2026-05-24T12:00:00+00:00",
+        )
+
+        self.assertIn("## Summary\nMapped sessionId to session_id.", rendered)
+
     def test_render_markdown_defaults_empty_body_lists_and_unknown_project(self):
         result = copilot.extract(FIXTURES / "copilot/minimal/payload.json")
 
