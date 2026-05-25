@@ -695,8 +695,17 @@ def collect_copilot(
 
 def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     providers = {
-        "cdx": collect_codex(),
-        "cc": collect_claude(),
+        "cdx": collect_codex(
+            enabled=config.codex.enabled,
+            auth_path=config.codex.auth_path,
+            usage_url=config.codex.usage_url,
+            local_fallback=config.codex.local_fallback,
+        ),
+        "cc": collect_claude(
+            statusline_sidecar=config.claude.statusline_sidecar,
+            max_age_seconds=config.claude.max_age_seconds,
+            local_fallback=config.claude.local_fallback,
+        ),
     }
     copilot = collect_copilot(config)
     if copilot.accounts:

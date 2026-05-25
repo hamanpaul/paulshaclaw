@@ -902,6 +902,50 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(set(providers), {"cdx", "cc", "cpt"})
         self.assertEqual(providers["cpt"].accounts[0].account_id, "fresh-user")
 
+    def test_collect_all_passes_claude_and_codex_config(self) -> None:
+        cfg = CostConfig(
+            claude=ClaudeProviderConfig(
+                statusline_sidecar=Path("/tmp/claude.json"),
+                max_age_seconds=12,
+                local_fallback=True,
+            ),
+            codex=CodexProviderConfig(
+                enabled=False,
+                auth_path=Path("/tmp/codex.json"),
+                usage_url="https://example.invalid/usage",
+                max_age_seconds=34,
+                local_fallback=True,
+            ),
+        )
+
+        with (
+            patch(
+                "paulshaclaw.cost.providers.collect_claude",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ) as claude,
+            patch(
+                "paulshaclaw.cost.providers.collect_codex",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ) as codex,
+            patch(
+                "paulshaclaw.cost.providers.collect_copilot",
+                return_value=ProviderSnapshot(source_status="unknown", accounts=()),
+            ),
+        ):
+            collect_all(cfg)
+
+        claude.assert_called_once_with(
+            statusline_sidecar=Path("/tmp/claude.json"),
+            max_age_seconds=12,
+            local_fallback=True,
+        )
+        codex.assert_called_once_with(
+            enabled=False,
+            auth_path=Path("/tmp/codex.json"),
+            usage_url="https://example.invalid/usage",
+            local_fallback=True,
+        )
+
     def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
         provider = collect_codex()
 
