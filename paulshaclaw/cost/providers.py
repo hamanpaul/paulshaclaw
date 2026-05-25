@@ -87,17 +87,21 @@ def _window_from_rate_limit(
     if not isinstance(rate_limit, Mapping):
         return None
 
+    raw_used_percent = rate_limit.get("used_percentage", rate_limit.get("used_percent"))
     try:
-        used_percent = int(rate_limit["used_percentage"])
-    except (KeyError, TypeError, ValueError):
+        used_percent = max(0, min(100, int(round(float(raw_used_percent)))))
+    except (TypeError, ValueError, OverflowError):
         return None
 
-    reset_at = _parse_epoch(rate_limit.get("resets_at"), now.tzinfo or ZoneInfo("Asia/Taipei"))
+    reset_at = _parse_epoch(
+        rate_limit.get("resets_at", rate_limit.get("reset_at")),
+        now.tzinfo or ZoneInfo("Asia/Taipei"),
+    )
     if reset_at is None:
         return None
 
     return UsageWindow(
-        used_percent=max(0, min(100, used_percent)),
+        used_percent=used_percent,
         reset_at=reset_at,
         display_reset=_display_reset(reset_at, now),
     )

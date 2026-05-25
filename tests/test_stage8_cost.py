@@ -821,6 +821,39 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["weekly"].used_percent, 41)
         self.assertEqual(provider.windows["weekly"].display_reset, "3d")
 
+    def test_collect_claude_parses_statusline_sidecar_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percent": "100.6",
+                                "reset_at": 1777447260,
+                            },
+                            "seven_day": {
+                                "used_percent": 40.6,
+                                "reset_at": 1777696800,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 100)
+        self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+        self.assertEqual(provider.windows["weekly"].used_percent, 41)
+        self.assertEqual(provider.windows["weekly"].display_reset, "3d")
+
     def test_collect_claude_ignores_overflowing_sidecar_reset(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sidecar = Path(tmpdir) / "claude_rate_limits.json"
