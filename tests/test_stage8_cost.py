@@ -133,6 +133,54 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cdx~", format_footer(snapshot, use_tmux_style=False))
 
+    def test_footer_marks_estimated_provider_with_question_suffix(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cc": ProviderSnapshot(
+                    source_status="estimated",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=35,
+                            reset_at=None,
+                            display_reset="2h",
+                        ),
+                    },
+                )
+            },
+        )
+
+        footer = format_footer(snapshot, use_tmux_style=False)
+
+        self.assertIn("cc? 5h:35%(2h) wk:--", footer)
+
+    def test_footer_uses_estimated_tmux_style(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cdx": ProviderSnapshot(
+                    source_status="estimated",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=91,
+                            reset_at=None,
+                            display_reset="1h",
+                        ),
+                    },
+                )
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("cdx?", footer)
+        self.assertIn("#[fg=magenta]91%(1h)#[default]", footer)
+        self.assertNotIn("#[fg=red]91%(1h)#[default]", footer)
+
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
             generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
