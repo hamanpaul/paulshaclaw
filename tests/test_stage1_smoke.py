@@ -285,6 +285,151 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertEqual(tmate_manager.calls, ["status"])
         self.assertIn("tmate: stopped", result["message"])
 
+    def test_agent_status_reports_running_state(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)):
+            result = daemon.handle_command("/agent status")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "agent")
+        self.assertEqual(result["state"], "running")
+        self.assertTrue(result["running"])
+        self.assertEqual(result["pane_id"], "%9")
+        self.assertEqual(result["pid"], 4242)
+
+    def test_agent_status_reports_stopped_state(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._agent_pane_id = "%9"
+
+        with mock.patch.object(daemon, "_detect_agent_process", return_value=None):
+            result = daemon.handle_command("/agent status")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "agent")
+        self.assertEqual(result["state"], "stopped")
+        self.assertFalse(result["running"])
+        self.assertNotIn("pane_id", result)
+        self.assertNotIn("pid", result)
+        self.assertIsNone(daemon._agent_pane_id)
+
+    def test_agent_start_returns_existing_process_without_creating_new_pane(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._cockpit_pane_id = "%1"
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run") as run_mock,
+        ):
+            result = daemon.handle_command("/agent start")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "running")
+        self.assertTrue(result["already_running"])
+        self.assertEqual(result["pane_id"], "%9")
+        self.assertEqual(result["pid"], 4242)
+        self.assertEqual(daemon._agent_pane_id, "%9")
+        run_mock.assert_not_called()
+
+    def test_agent_start_creates_split_window_and_remembers_pane(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._cockpit_pane_id = "%1"
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            expected_prefix = ["tmux", "split-window", "-h", "-t", "%1", "-P", "-F", "#{pane_id}"]
+            self.assertEqual(command[:8], expected_prefix)
+            self.assertTrue(command[8].endswith("claude-gemma4"))
+            return subprocess.CompletedProcess(command, 0, stdout="%9\n", stderr="")
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=None),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
+        ):
+            result = daemon.handle_command("/agent start")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "running")
+        self.assertTrue(result["started"])
+        self.assertEqual(result["pane_id"], "%9")
+        self.assertEqual(daemon._agent_pane_id, "%9")
+
+    def test_agent_startf_launches_force_flag(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._cockpit_pane_id = "%1"
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            self.assertEqual(command[:8], ["tmux", "split-window", "-h", "-t", "%1", "-P", "-F", "#{pane_id}"])
+            self.assertTrue(command[8].endswith("claude-gemma4 -f"))
+            return subprocess.CompletedProcess(command, 0, stdout="%10\n", stderr="")
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=None),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
+        ):
+            result = daemon.handle_command("/agent startf")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["pane_id"], "%10")
+        self.assertEqual(daemon._agent_pane_id, "%10")
+
+    def test_agent_stop_sends_exit_and_clears_agent_pane(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._agent_pane_id = "%9"
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True, "pane_id": "%9", "sent": "exit"}) as send_mock,
+        ):
+            result = daemon.handle_command("/agent stop")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "stopped")
+        self.assertFalse(result["running"])
+        self.assertTrue(result["stopped"])
+        self.assertEqual(result["pane_id"], "%9")
+        self.assertEqual(result["pid"], 4242)
+        self.assertIsNone(daemon._agent_pane_id)
+        send_mock.assert_called_once_with("%9", "exit")
+
+    def test_agent_stop_returns_already_stopped_when_no_agent_exists(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch.object(daemon, "_detect_agent_process", return_value=None):
+            result = daemon.handle_command("/agent stop")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "stopped")
+        self.assertFalse(result["running"])
+        self.assertTrue(result["already_stopped"])
+        self.assertIsNone(daemon._agent_pane_id)
+
+    def test_agent_start_errors_when_cockpit_pane_is_unavailable(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch.object(daemon, "_detect_agent_process", return_value=None):
+            with self.assertRaisesRegex(ValueError, "cockpit pane"):
+                daemon.handle_command("/agent start")
+
+    def test_agent_start_errors_when_tmux_is_unavailable(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._cockpit_pane_id = "%1"
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=None),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=FileNotFoundError),
+        ):
+            with self.assertRaisesRegex(ValueError, "tmux unavailable"):
+                daemon.handle_command("/agent start")
+
     def test_detect_agent_process_returns_none_when_tmux_is_unavailable(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())

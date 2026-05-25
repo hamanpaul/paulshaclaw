@@ -47,6 +47,8 @@ class PaulShiaBroDaemon:
         self.command_registry = command_registry or load_default_command_registry()
         tmate_timeout = self.command_registry.get("/tmate").func_call.timeout_seconds or 3600
         self.tmate_manager = tmate_manager or TmateManager(timeout_seconds=tmate_timeout)
+        self._cockpit_pane_id = next((pane.pane_id for pane in self.config.pane_assignments if pane.title == "cockpit"), None)
+        self._agent_pane_id: str | None = None
         self.command_dispatcher = CommandDispatcher(
             registry=self.command_registry,
             python_handlers={
@@ -54,6 +56,7 @@ class PaulShiaBroDaemon:
                 "status": self._handle_status_command,
                 "dispatch": self._handle_dispatch_command,
                 "tmate": self._handle_tmate_command,
+                "agent": self._handle_agent_command,
             },
         )
 
@@ -180,6 +183,22 @@ class PaulShiaBroDaemon:
 
         return None
 
+    def _resolve_agent_script_path(self) -> Path:
+        return Path(__file__).resolve().parents[2] / "scripts" / "claude-gemma4"
+
+    def _agent_status_payload(self, *, pane_id: str | None = None, pid: int | None = None) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "ok": True,
+            "kind": "agent",
+            "state": "running" if pane_id is not None else "stopped",
+            "running": pane_id is not None,
+        }
+        if pane_id is not None:
+            payload["pane_id"] = pane_id
+        if pid is not None:
+            payload["pid"] = pid
+        return payload
+
     def status_snapshot(self) -> dict[str, object]:
         return {
             "ok": True,
@@ -240,6 +259,84 @@ class PaulShiaBroDaemon:
         if action == "stop":
             return self.tmate_manager.stop()
         raise ValueError("/tmate 只接受 status/start/stop")
+
+    def _handle_agent_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
+        if len(args) > 1:
+            raise ValueError("/agent 只接受 start/startf/stop/status")
+
+        action = args[0] if args else "status"
+        if action == "status":
+            detected = self._detect_agent_process()
+            if detected is None:
+                self._agent_pane_id = None
+                return self._agent_status_payload()
+            pane_id, pid = detected
+            self._agent_pane_id = pane_id
+            return self._agent_status_payload(pane_id=pane_id, pid=pid)
+
+        if action in {"start", "startf"}:
+            detected = self._detect_agent_process()
+            if detected is not None:
+                pane_id, pid = detected
+                self._agent_pane_id = pane_id
+                payload = self._agent_status_payload(pane_id=pane_id, pid=pid)
+                payload["already_running"] = True
+                return payload
+
+            cockpit_pane_id = self._cockpit_pane_id
+            if not cockpit_pane_id:
+                raise ValueError("cockpit pane unavailable")
+
+            launch_argv = [str(self._resolve_agent_script_path())]
+            if action == "startf":
+                launch_argv.append("-f")
+
+            try:
+                result = subprocess.run(
+                    [
+                        "tmux",
+                        "split-window",
+                        "-h",
+                        "-t",
+                        cockpit_pane_id,
+                        "-P",
+                        "-F",
+                        "#{pane_id}",
+                        shlex.join(launch_argv),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as exc:
+                raise ValueError((exc.stderr or "").strip() or "tmux split-window failed") from exc
+            except FileNotFoundError as exc:
+                raise ValueError("tmux unavailable") from exc
+
+            pane_id = result.stdout.strip()
+            if not pane_id:
+                raise ValueError("tmux split-window did not return pane id")
+            self._agent_pane_id = pane_id
+            payload = self._agent_status_payload(pane_id=pane_id)
+            payload["started"] = True
+            return payload
+
+        if action == "stop":
+            detected = self._detect_agent_process()
+            if detected is None:
+                self._agent_pane_id = None
+                payload = self._agent_status_payload()
+                payload["already_stopped"] = True
+                return payload
+
+            pane_id, pid = detected
+            self._send_to_pane(pane_id, "exit")
+            self._agent_pane_id = None
+            payload = self._agent_status_payload()
+            payload.update({"stopped": True, "pane_id": pane_id, "pid": pid})
+            return payload
+
+        raise ValueError("/agent 只接受 start/startf/stop/status")
 
     def handle_command(self, command: str) -> dict[str, object]:
         return self.command_dispatcher.execute(command)

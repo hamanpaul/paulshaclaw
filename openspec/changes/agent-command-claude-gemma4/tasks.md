@@ -15,11 +15,11 @@
 ## 3. /agent 指令
 
 - [x] 3.1 在 `commands.json` 新增 `/agent` 指令定義（含 Telegram menu entry）
-- [ ] 3.2 在 `daemon.py` 新增 `_handle_agent_command` handler，支援 `start`、`startf`、`stop`、`status` 子命令
-- [ ] 3.3 實作 `start`/`startf`：先 `_detect_agent_process` 確認未運行 → `tmux split-window -h` → 執行 claude-gemma4（加/不加 -f）→ 記住 `_agent_pane_id`
-- [ ] 3.4 實作 `stop`：先偵測 → `tmux send-keys exit Enter` → 清除 `_agent_pane_id`
-- [ ] 3.5 實作 `status`：`_detect_agent_process` 回傳結果 → 格式化為 "running pane=%X" 或 "stopped"
-- [ ] 3.6 為 `/agent` handler 四個子命令撰寫 unit test
+- [x] 3.2 在 `daemon.py` 新增 `_handle_agent_command` handler，支援 `start`、`startf`、`stop`、`status` 子命令
+- [x] 3.3 實作 `start`/`startf`：先 `_detect_agent_process` 確認未運行 → `tmux split-window -h` → 執行 claude-gemma4（加/不加 -f）→ 記住 `_agent_pane_id`
+- [x] 3.4 實作 `stop`：先偵測 → `tmux send-keys exit Enter` → 清除 `_agent_pane_id`
+- [x] 3.5 實作 `status`：`_detect_agent_process` 回傳結果 → 格式化為 "running pane=%X" 或 "stopped"
+- [x] 3.6 為 `/agent` handler 四個子命令撰寫 unit test
 
 ## 4. 非指令對話路由修改
 
