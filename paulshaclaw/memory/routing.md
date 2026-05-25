@@ -7,6 +7,7 @@
 1. `importer`
    - 從 session distilled artifact、plan、research、report 收件到 `inbox/`
    - 附上來源、時間、workstream、artifact 類型
+   - 進入 `inbox/` 前必須先遵守 Topic 8 memory security policy（`external_to_raw` / `raw_to_distilled` 的 redaction、classification、audit 契約）
 2. `classifier`
    - 依內容把項目送往 `work-centric/` 或 `knowledge/`
    - 補上 `atomized_from`、`record-agent-reference` 與引用關係
@@ -38,6 +39,7 @@
 Stage 2 integration gate 最少要覆蓋：
 
 - importer 可把 artifact 放到正確 inbox 類別
+- importer 與 replay/dry-run 必須透過 `paulshaclaw.memory.policy` 執行 Topic 8 安全邊界，不得自行旁路 policy
 - classifier 可把內容從 `inbox` 升級到 `work-centric` 或 `knowledge`
 - replay 可從 ledger 與 work-centric 組出可追溯脈絡
 - `decayed/reactivation` 事件可被寫入並被 janitor 掃描

@@ -15,7 +15,7 @@
 |-------|------|------|:------------:|:-------:|
 | 0 | 前置工具 refine / rename / openspec 骨架 | **完成** | 13/13 | 腳本、yaml |
 | 1 | PaulShiaBro core daemon + TUI + Telegram bot | **完成** | 15+13/15+13 | bot, core, tui |
-| 2 | ~/.agents/memory 記憶中樞 + dream mode 24x7 | **spec 完成** | 13/13 | routing.md, service.md（無 .py；runtime 依賴 obs-auto-moc） |
+| 2 | ~/.agents/memory 記憶中樞 + dream mode 24x7 | **spec 完成；Security Policy 已落地；Importer sub-spec 待實作** | 13/13；`stage2-memory-importer-mvp` 0/40；`stage2-memory-security-policy` 48/48 | routing.md, service.md, memory/policy/（runtime 仍待 importer / paulsha-mem-moc 串接） |
 | 3 | Lifecycle（slash / artifact / phase gate） | **完成** | 9/9 | lifecycle/ |
 | 4 | Persona（角色目錄 / handoff / guardrail） | **完成** | 11/11 | persona/ |
 | 5 | 觀測 / 健康 / failover / 錯誤 log | **完成** | 9/9 | observability/ |
@@ -63,6 +63,14 @@ Stage 11 (cockpit) 依賴 Stage 1
 Hub-and-spoke · Artifact-first · Proposal-first · Fail-close · Stage 獨立性 · 三軸分層 · always-on 失敗域分離
 
 詳細 Stage 設計見 [`docs/research/`](./docs/research/)。
+
+**Stage 2 sub-spec**：
+- Stage 2 — Memory Importer MVP（記憶基底 + Importer，hooks 三家 + obs-auto-moc watcher 安全網）
+  - 設計規格：[`docs/superpowers/specs/2026-05-24-stage2-memory-importer-mvp-design.md`](./docs/superpowers/specs/2026-05-24-stage2-memory-importer-mvp-design.md)
+  - OpenSpec change：[`openspec/changes/stage2-memory-importer-mvp/`](./openspec/changes/stage2-memory-importer-mvp/)（proposal / design / tasks / specs delta against `stage2-memory-governance`）
+- Stage 2 — Memory Security Policy（Topic 8，記憶管理安全契約：redaction / classification / audit / policy enforcement）
+  - 設計規格：[`docs/superpowers/specs/2026-05-24-stage2-memory-security-policy-design.md`](./docs/superpowers/specs/2026-05-24-stage2-memory-security-policy-design.md)
+  - OpenSpec archive：[`openspec/changes/archive/2026-05-25-stage2-memory-security-policy/`](./openspec/changes/archive/2026-05-25-stage2-memory-security-policy/)（proposal / design / tasks / specs delta 已同步回 `stage2-memory-governance`）
 
 ## Install
 
