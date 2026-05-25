@@ -411,6 +411,57 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertTrue(cfg.codex.enabled)
         self.assertEqual(cfg.codex.auth_path, Path("~/.codex/auth.json").expanduser())
 
+    def test_load_cost_config_defaults_provider_sections_when_omitted(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts: []
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertIsInstance(cfg.claude, ClaudeProviderConfig)
+        self.assertIsInstance(cfg.codex, CodexProviderConfig)
+        self.assertEqual(
+            cfg.claude.statusline_sidecar,
+            Path("~/.agents/state/cost/claude_rate_limits.json").expanduser(),
+        )
+        self.assertEqual(cfg.claude.max_age_seconds, 300)
+        self.assertFalse(cfg.claude.local_fallback)
+        self.assertTrue(cfg.codex.enabled)
+        self.assertEqual(cfg.codex.auth_path, Path("~/.codex/auth.json").expanduser())
+        self.assertEqual(cfg.codex.usage_url, "https://chatgpt.com/api/codex/usage")
+        self.assertEqual(cfg.codex.max_age_seconds, 300)
+        self.assertFalse(cfg.codex.local_fallback)
+
+    def test_claude_and_codex_provider_config_parse_string_booleans(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                claude:
+                  local_fallback: "yes"
+                codex:
+                  enabled: "false"
+                  local_fallback: "off"
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertTrue(cfg.claude.local_fallback)
+        self.assertFalse(cfg.codex.enabled)
+        self.assertFalse(cfg.codex.local_fallback)
+
     def test_collect_copilot_uses_injected_fetcher_before_local_fallback(self) -> None:
         path = self.write_config(
             """

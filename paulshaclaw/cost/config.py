@@ -47,10 +47,10 @@ class CostConfig:
     warning_percent: int = 70
     critical_percent: int = 90
     copilot_accounts: tuple[CopilotAccountConfig, ...] = ()
-    claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
-    codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
     cache_dir: Path = field(default_factory=lambda: Path("~/.agents/state/cost").expanduser())
     log_path: Path = field(default_factory=lambda: Path("~/.agents/log/cost.log").expanduser())
+    claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
+    codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
 
 
 def _resolve_config_source(config_path: Path | None) -> Path | None:
