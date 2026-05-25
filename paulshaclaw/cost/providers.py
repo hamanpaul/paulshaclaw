@@ -50,6 +50,8 @@ def _display_reset(reset_at: datetime, now: datetime) -> str:
 def _parse_epoch(value: Any, tz: timezone | ZoneInfo) -> datetime | None:
     try:
         epoch = float(value)
+        if epoch < 0:
+            return None
         return datetime.fromtimestamp(epoch, timezone.utc).astimezone(tz)
     except (TypeError, ValueError, OverflowError, OSError):
         return None
@@ -67,11 +69,11 @@ def _is_openai_compatible_claude_record(*records: Mapping[str, Any]) -> bool:
             normalized = value.strip().lower()
             if any(marker in normalized for marker in excluded_markers):
                 return True
-            if key.lower() in {"base_url", "api_base", "baseurl", "apibase"} and any(
-                marker in normalized for marker in url_markers
-            ):
+            key_is_url_like = key.lower() in {"base_url", "api_base", "baseurl", "apibase"}
+            key_is_provider_source = key in {"provider", "source"}
+            if (key_is_url_like or key_is_provider_source) and any(marker in normalized for marker in url_markers):
                 return True
-            if key in {"provider", "source"} and normalized in {"openai", "local"}:
+            if key_is_provider_source and normalized in {"openai", "local"}:
                 return True
 
     return False
