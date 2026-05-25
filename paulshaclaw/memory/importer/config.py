@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,6 +30,9 @@ class ProjectsConfig:
 
 
 def default_projects_path(memory_root: str | Path | None = None) -> Path:
+    config_root = os.environ.get("PSC_CONFIG_ROOT", "").strip()
+    if config_root:
+        return Path(config_root) / ".agents" / "config" / "projects.yaml"
     if memory_root is None:
         return Path.home() / ".agents" / "config" / "projects.yaml"
     return Path(memory_root).parent / "config" / "projects.yaml"

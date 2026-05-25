@@ -1,9 +1,11 @@
+import os
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from paulshaclaw.memory.importer.config import load_projects_config
+from paulshaclaw.memory.importer.config import default_projects_path, load_projects_config
 from paulshaclaw.memory.importer.project_resolver import resolve_project
 
 
@@ -38,6 +40,13 @@ class ProjectResolverTest(unittest.TestCase):
         self.assertIn("obs-auto-moc", [project.slug for project in config.projects])
         self.assertEqual(config.aliases["paulsha"], "paulshaclaw")
         self.assertEqual(config.aliases["obs-moc"], "obs-auto-moc")
+
+    def test_default_projects_path_prefers_psc_config_root(self):
+        with mock.patch.dict(os.environ, {"PSC_CONFIG_ROOT": "/tmp/psc-config-root"}, clear=False):
+            self.assertEqual(
+                str(default_projects_path(memory_root="/tmp/custom-memory")),
+                "/tmp/psc-config-root/.agents/config/projects.yaml",
+            )
 
     def test_resolve_project_uses_cwd_longest_prefix(self):
         config = load_projects_config(

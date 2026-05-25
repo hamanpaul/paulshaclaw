@@ -353,6 +353,14 @@ class InstallerTest(unittest.TestCase):
             any("claude_session_end.py" in cmd for cmd in commands),
             f"claude_session_end.py not found in hook commands: {commands}",
         )
+        self.assertTrue(
+            any(f"PSC_MEMORY_ROOT={self.memory_root}" in cmd for cmd in commands),
+            f"PSC_MEMORY_ROOT override missing from Claude hook commands: {commands}",
+        )
+        self.assertTrue(
+            any(f"PSC_CONFIG_ROOT={self.config_root}" in cmd for cmd in commands),
+            f"PSC_CONFIG_ROOT override missing from Claude hook commands: {commands}",
+        )
 
     def test_full_install_preserves_existing_claude_settings_non_hook_keys(self):
         """Should not clobber existing keys outside 'hooks' in settings.json."""
@@ -460,7 +468,11 @@ class InstallerTest(unittest.TestCase):
         ]
         self.assertEqual(
             [cmd for cmd in commands if "claude_session_end.py" in cmd],
-            [f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/claude_session_end.py"],
+            [
+                f"PSC_MEMORY_ROOT={second_memory_root} "
+                f"PSC_CONFIG_ROOT={self.config_root} "
+                f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/claude_session_end.py"
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -486,6 +498,14 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(
             any("codex_session_end.py" in c for c in stop_commands),
             f"codex_session_end.py not in Stop hooks: {stop_commands}",
+        )
+        self.assertTrue(
+            any(f"PSC_MEMORY_ROOT={self.memory_root}" in c for c in stop_commands),
+            f"PSC_MEMORY_ROOT override missing from Codex Stop hooks: {stop_commands}",
+        )
+        self.assertTrue(
+            any(f"PSC_CONFIG_ROOT={self.config_root}" in c for c in stop_commands),
+            f"PSC_CONFIG_ROOT override missing from Codex Stop hooks: {stop_commands}",
         )
         subagent_commands = [
             h["command"]
@@ -602,11 +622,19 @@ class InstallerTest(unittest.TestCase):
         ]
         self.assertEqual(
             [cmd for cmd in stop_commands if "codex_session_end.py" in cmd],
-            [f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/codex_session_end.py"],
+            [
+                f"PSC_MEMORY_ROOT={second_memory_root} "
+                f"PSC_CONFIG_ROOT={self.config_root} "
+                f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/codex_session_end.py"
+            ],
         )
         self.assertEqual(
             [cmd for cmd in subagent_commands if "codex_session_end.py" in cmd],
-            [f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/codex_session_end.py --subagent"],
+            [
+                f"PSC_MEMORY_ROOT={second_memory_root} "
+                f"PSC_CONFIG_ROOT={self.config_root} "
+                f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/codex_session_end.py --subagent"
+            ],
         )
 
     # ------------------------------------------------------------------
@@ -627,6 +655,14 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(
             any("copilot_session_end.py" in c for c in bash_cmds),
             f"copilot_session_end.py not in bash: {bash_cmds}",
+        )
+        self.assertTrue(
+            any(f"PSC_MEMORY_ROOT={self.memory_root}" in c for c in bash_cmds),
+            f"PSC_MEMORY_ROOT override missing from Copilot hooks: {bash_cmds}",
+        )
+        self.assertTrue(
+            any(f"PSC_CONFIG_ROOT={self.config_root}" in c for c in bash_cmds),
+            f"PSC_CONFIG_ROOT override missing from Copilot hooks: {bash_cmds}",
         )
 
     # ------------------------------------------------------------------

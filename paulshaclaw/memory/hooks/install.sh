@@ -163,6 +163,7 @@ else
   venv_python="${venv_dir}/bin/python"
 fi
 hook_dir="${memory_root}/hooks"
+hook_env_prefix="PSC_MEMORY_ROOT=${memory_root} PSC_CONFIG_ROOT=${config_root}"
 
 # ------------------------------------------------------------------
 # Step 4: Claude settings.json — merge SessionEnd hook entry
@@ -171,7 +172,7 @@ claude_settings="${config_root}/.claude/settings.json"
 install -d -m 700 "$(dirname "$claude_settings")"
 
 # Build the hook entry we manage (use a sentinel comment-free marker in command)
-claude_hook_command="${venv_python} ${hook_dir}/claude_session_end.py"
+claude_hook_command="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_session_end.py"
 
 # Read existing JSON or start fresh
 if [[ -f "$claude_settings" ]]; then
@@ -269,8 +270,8 @@ PYEOF
 codex_hooks="${config_root}/.codex/hooks.json"
 install -d -m 700 "$(dirname "$codex_hooks")"
 
-codex_stop_command="${venv_python} ${hook_dir}/codex_session_end.py"
-codex_subagent_command="${venv_python} ${hook_dir}/codex_session_end.py --subagent"
+codex_stop_command="${hook_env_prefix} ${venv_python} ${hook_dir}/codex_session_end.py"
+codex_subagent_command="${hook_env_prefix} ${venv_python} ${hook_dir}/codex_session_end.py --subagent"
 
 if [[ -f "$codex_hooks" ]]; then
   existing_codex="$(cat "$codex_hooks")"
@@ -374,7 +375,7 @@ PYEOF
 copilot_hook="${config_root}/.copilot/hooks/paulsha-memory.json"
 install -d -m 700 "$(dirname "$copilot_hook")"
 
-copilot_command="${venv_python} ${hook_dir}/copilot_session_end.py"
+copilot_command="${hook_env_prefix} ${venv_python} ${hook_dir}/copilot_session_end.py"
 
 python3 - "$copilot_hook" "$copilot_command" <<'PYEOF'
 import json, sys
