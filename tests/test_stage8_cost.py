@@ -870,14 +870,29 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         )
 
     def test_collect_all_omits_copilot_when_no_accounts_are_configured(self) -> None:
-        cfg = CostConfig()
+        cfg = CostConfig(codex=CodexProviderConfig(enabled=False))
 
-        providers = collect_all(cfg)
+        with (
+            patch(
+                "paulshaclaw.cost.providers.collect_codex",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_claude",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_copilot",
+                return_value=ProviderSnapshot(source_status="unknown", accounts=()),
+            ),
+        ):
+            providers = collect_all(cfg)
 
         self.assertEqual(set(providers), {"cdx", "cc"})
 
     def test_collect_all_includes_copilot_when_accounts_are_configured(self) -> None:
         cfg = CostConfig(
+            codex=CodexProviderConfig(enabled=False),
             copilot_accounts=(
                 load_cost_config(
                     config_path=self.write_config(
@@ -897,7 +912,33 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             )
         )
 
-        providers = collect_all(cfg)
+        with (
+            patch(
+                "paulshaclaw.cost.providers.collect_codex",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_claude",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_copilot",
+                return_value=ProviderSnapshot(
+                    source_status="fresh",
+                    accounts=(
+                        CopilotAccountUsage(
+                            account_id="fresh-user",
+                            label="fresh",
+                            kind="personal",
+                            used_requests=42,
+                            monthly_allowance=None,
+                            source="test_stub",
+                        ),
+                    ),
+                ),
+            ),
+        ):
+            providers = collect_all(cfg)
 
         self.assertEqual(set(providers), {"cdx", "cc", "cpt"})
         self.assertEqual(providers["cpt"].accounts[0].account_id, "fresh-user")
