@@ -52,7 +52,8 @@ def normalize_remote(value: str | None) -> str:
             parsed.scheme.lower() == "ssh" and host.lower() == "github.com" and port == 22
         ):
             host = f"{host}:{port}"
-        normalized = "/".join(part for part in (host, parsed.path.lstrip("/")) if part)
+        path = parsed.path.lstrip("/") if host else parsed.path
+        normalized = "/".join(part for part in (host, path) if part)
     else:
         normalized = re.sub(r"^[^/@:]+@", "", normalized)
         if ":" in normalized and "/" not in normalized.split(":", 1)[0]:

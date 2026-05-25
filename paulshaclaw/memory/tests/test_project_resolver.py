@@ -239,6 +239,28 @@ class ProjectResolverTest(unittest.TestCase):
 
         self.assertEqual(project, "_unknown")
 
+    def test_resolve_project_preserves_file_remote_normalization(self):
+        config = load_projects_config(
+            self.write_projects_config(
+                """
+                version: 1
+                projects:
+                  local-repo:
+                    remotes:
+                      - file:///repo/path.git
+                """
+            )
+        )
+
+        project = resolve_project(
+            cwd="/unmatched/path",
+            git_toplevel="/another/unmatched/path",
+            remote_url="/repo/path.git",
+            projects=config,
+        )
+
+        self.assertEqual(project, "local-repo")
+
     def test_resolve_project_returns_unknown_when_no_rule_matches(self):
         config = load_projects_config(
             self.write_projects_config(
