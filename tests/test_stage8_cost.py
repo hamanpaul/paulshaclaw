@@ -507,23 +507,17 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.accounts[0].used_requests, 724)
         self.assertEqual(provider.accounts[0].source, "github_user_billing")
 
-    def test_collect_copilot_marks_local_observed_fallback(self) -> None:
-        path = self.write_config(
-            """
-            workspaces:
-              - path: /tmp/ws
-                name: ws
-            cost:
-              providers:
-                copilot:
-                  accounts:
-                    - id: local-user
-                      label: local
-                      kind: personal
-                      monthly_allowance: 100
-            """
+    def test_collect_copilot_marks_local_observed_provider_estimated(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="local-user",
+                    label="local",
+                    kind="personal",
+                    monthly_allowance=100,
+                ),
+            )
         )
-        cfg = load_cost_config(config_path=path)
 
         def fetcher(account):
             raise RuntimeError("network unavailable")
@@ -534,9 +528,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             local_observed={"local-user": 12},
         )
 
-        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.accounts[0].source, "local_observed")
-        self.assertEqual(provider.accounts[0].used_requests, 12)
 
     def test_collect_copilot_fetches_runtime_personal_usage_without_injected_fetcher(self) -> None:
         path = self.write_config(
@@ -646,16 +639,34 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIsNone(provider.accounts[0].used_requests)
         local_mock.assert_not_called()
 
-    def test_read_local_observed_total_parses_real_shutdown_event_shape(self) -> None:
+    def test_read_local_observed_total_counts_current_month_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
             root.mkdir(parents=True)
             (root / "events.jsonl").write_text(
                 "\n".join(
                     [
-                        json.dumps({"type": "session.start", "data": {"context": {"cwd": "/tmp/ws"}}}),
-                        json.dumps({"type": "session.shutdown", "data": {"totalPremiumRequests": 5}}),
-                        json.dumps({"type": "session.shutdown", "data": {"totalPremiumRequests": 7}}),
+                        json.dumps(
+                            {
+                                "type": "session.shutdown",
+                                "timestamp": "2026-04-30T23:59:00Z",
+                                "data": {"totalPremiumRequests": 99},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "session.shutdown",
+                                "timestamp": "2026-05-01T00:01:00Z",
+                                "data": {"totalPremiumRequests": 5},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "session.shutdown",
+                                "timestamp": "2026-05-20T12:00:00Z",
+                                "data": {"totalPremiumRequests": 7},
+                            }
+                        ),
                     ]
                 )
                 + "\n",
@@ -663,7 +674,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             )
 
             with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
-                total = _read_local_observed_total()
+                total = _read_local_observed_total(year=2026, month=5)
 
         self.assertEqual(total, 12)
 
@@ -696,7 +707,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.accounts[0].source, "github_user_billing")
         self.assertEqual(provider.accounts[1].source, "unknown")
 
-    def test_collect_copilot_keeps_stale_status_when_other_accounts_are_unknown(self) -> None:
+    def test_collect_copilot_keeps_estimated_status_when_other_accounts_are_unknown(self) -> None:
         path = self.write_config(
             """
             workspaces:
@@ -723,11 +734,11 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             local_observed={"local-user": 12},
         )
 
-        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.accounts[0].source, "local_observed")
         self.assertEqual(provider.accounts[1].source, "unknown")
 
-    def test_collect_copilot_prefers_fresh_over_stale_and_unknown(self) -> None:
+    def test_collect_copilot_prefers_fresh_over_estimated_and_unknown(self) -> None:
         path = self.write_config(
             """
             workspaces:

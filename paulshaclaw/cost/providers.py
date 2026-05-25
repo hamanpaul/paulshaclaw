@@ -530,12 +530,44 @@ def _get_active_github_login() -> str | None:
     return None
 
 
-def _read_local_observed_total() -> int:
+def _parse_event_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _event_month(payload: Mapping[str, Any]) -> tuple[int, int] | None:
+    for key in ("timestamp", "created_at"):
+        parsed = _parse_event_timestamp(payload.get(key))
+        if parsed is not None:
+            return parsed.year, parsed.month
+
+    data = payload.get("data")
+    if isinstance(data, Mapping):
+        for key in ("timestamp", "created_at"):
+            parsed = _parse_event_timestamp(data.get(key))
+            if parsed is not None:
+                return parsed.year, parsed.month
+
+    return None
+
+
+def _read_local_observed_total(year: int | None = None, month: int | None = None) -> int:
     root = Path.home() / ".copilot" / "session-state"
     if not root.exists():
         return 0
 
     total = 0
+    should_filter_month = year is not None and month is not None
     for event_path in root.rglob("events.jsonl"):
         try:
             with event_path.open("r", encoding="utf-8", errors="ignore") as handle:
@@ -547,6 +579,8 @@ def _read_local_observed_total() -> int:
                     if not isinstance(payload, dict):
                         continue
                     if payload.get("type") != "session.shutdown":
+                        continue
+                    if should_filter_month and _event_month(payload) != (year, month):
                         continue
                     data = payload.get("data")
                     if not isinstance(data, dict):
@@ -567,7 +601,8 @@ def _collect_local_observed_usage(allowed_accounts: set[str] | None = None) -> d
         return {}
     if allowed_accounts is not None and active_account not in allowed_accounts:
         return {}
-    total = _read_local_observed_total()
+    year, month = _current_month_utc()
+    total = _read_local_observed_total(year=year, month=month)
     if total <= 0:
         return {}
     return {active_account: total}
@@ -584,7 +619,7 @@ def collect_copilot(
 
     accounts: list[CopilotAccountUsage] = []
     has_fresh = False
-    has_stale = False
+    has_estimated = False
     resolved_local_observed = local_observed
 
     for account in config.copilot_accounts:
@@ -636,15 +671,15 @@ def collect_copilot(
                     source="local_observed",
                 )
             )
-            has_stale = True
+            has_estimated = True
             continue
 
         accounts.append(_unknown_account(account))
 
     if has_fresh:
         source_status = "fresh"
-    elif has_stale:
-        source_status = "stale"
+    elif has_estimated:
+        source_status = "estimated"
     else:
         source_status = "unknown"
 
