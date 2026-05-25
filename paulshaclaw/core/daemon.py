@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 from paulshaclaw.core.config import AppConfig, load_config
@@ -81,6 +83,102 @@ class PaulShiaBroDaemon:
         except FileNotFoundError as exc:
             raise ValueError("tmux not found") from exc
         return {"ok": True, "pane_id": pane_id, "sent": message}
+
+    def _is_agent_command(self, command: str) -> bool:
+        if not command:
+            return False
+        try:
+            argv = shlex.split(command)
+        except ValueError:
+            argv = command.split()
+
+        basenames = [Path(token).name for token in argv]
+        if "claude-gemma4-proxy" in basenames:
+            return False
+        if "claude-gemma4" in basenames:
+            return True
+        return basenames[:1] in (["claude"], ["claude.exe"]) and ".claude-gemma4/settings.json" in command
+
+    def _command_for_pid(self, pid: int) -> str | None:
+        try:
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "args="],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+        return result.stdout.strip() or None
+
+    def _find_process_in_tree(self, root_pid: int) -> int | None:
+        pending = [root_pid]
+        visited: set[int] = set()
+
+        while pending:
+            parent_pid = pending.pop()
+            if parent_pid in visited:
+                continue
+            visited.add(parent_pid)
+
+            if self._is_agent_command(self._command_for_pid(parent_pid) or ""):
+                return parent_pid
+
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-P", str(parent_pid), "-a"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except FileNotFoundError:
+                return None
+            except subprocess.CalledProcessError as exc:
+                if exc.returncode == 1:
+                    continue
+                return None
+
+            for line in result.stdout.splitlines():
+                parts = line.strip().split(maxsplit=1)
+                if not parts:
+                    continue
+                try:
+                    child_pid = int(parts[0])
+                except ValueError:
+                    continue
+                command = parts[1] if len(parts) > 1 else ""
+                if self._is_agent_command(command):
+                    return child_pid
+                pending.append(child_pid)
+
+        return None
+
+    def _detect_agent_process(self) -> tuple[str, int] | None:
+        try:
+            result = subprocess.run(
+                ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+
+        for line in result.stdout.splitlines():
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) != 2:
+                continue
+            pane_id, pane_pid_text = parts
+            try:
+                pane_pid = int(pane_pid_text)
+            except ValueError:
+                continue
+
+            agent_pid = self._find_process_in_tree(pane_pid)
+            if agent_pid is not None:
+                return pane_id, agent_pid
+
+        return None
 
     def status_snapshot(self) -> dict[str, object]:
         return {

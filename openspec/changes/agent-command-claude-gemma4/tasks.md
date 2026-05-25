@@ -9,8 +9,8 @@
 
 ## 2. Agent process 偵測工具
 
-- [ ] 2.1 在 `paulshaclaw/core/daemon.py` 新增 `_detect_agent_process()` 方法：掃描 tmux panes process tree，回傳 `(pane_id, pid)` 或 `None`
-- [ ] 2.2 為 `_detect_agent_process` 撰寫 unit test（mock tmux list-panes 和 process tree 查詢）
+- [x] 2.1 在 `paulshaclaw/core/daemon.py` 新增 `_detect_agent_process()` 方法：掃描 tmux panes process tree，回傳 `(pane_id, pid)` 或 `None`
+- [x] 2.2 為 `_detect_agent_process` 撰寫 unit test（mock tmux list-panes 和 process tree 查詢）
 
 ## 3. /agent 指令
 

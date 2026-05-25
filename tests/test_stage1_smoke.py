@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import load_config
@@ -282,6 +283,120 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(tmate_manager.calls, ["status"])
         self.assertIn("tmate: stopped", result["message"])
+
+    def test_detect_agent_process_returns_none_when_tmux_is_unavailable(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=FileNotFoundError):
+            result = daemon._detect_agent_process()
+
+        self.assertIsNone(result)
+
+    def test_detect_agent_process_returns_none_when_no_agent_process_exists(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
+                return subprocess.CompletedProcess(command, 0, stdout="%1 101\n%2 202\n", stderr="")
+            if command == ["ps", "-p", "101", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="bash\n", stderr="")
+            if command == ["pgrep", "-P", "101", "-a"]:
+                return subprocess.CompletedProcess(command, 0, stdout="111 bash\n", stderr="")
+            if command == ["ps", "-p", "111", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="bash\n", stderr="")
+            if command == ["pgrep", "-P", "111", "-a"]:
+                raise subprocess.CalledProcessError(1, command, output="", stderr="")
+            if command == ["ps", "-p", "202", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="bash\n", stderr="")
+            if command == ["pgrep", "-P", "202", "-a"]:
+                return subprocess.CompletedProcess(command, 0, stdout="212 python\n", stderr="")
+            if command == ["ps", "-p", "212", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="python\n", stderr="")
+            if command == ["pgrep", "-P", "212", "-a"]:
+                raise subprocess.CalledProcessError(1, command, output="", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run):
+            result = daemon._detect_agent_process()
+
+        self.assertIsNone(result)
+
+    def test_detect_agent_process_returns_pane_and_pid_for_nested_agent_process(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
+                return subprocess.CompletedProcess(command, 0, stdout="%1 101\n%2 202\n", stderr="")
+            if command == ["ps", "-p", "101", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="bash\n", stderr="")
+            if command == ["pgrep", "-P", "101", "-a"]:
+                return subprocess.CompletedProcess(command, 0, stdout="111 bash\n", stderr="")
+            if command == ["ps", "-p", "111", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="bash\n", stderr="")
+            if command == ["pgrep", "-P", "111", "-a"]:
+                return subprocess.CompletedProcess(command, 0, stdout="112 claude-gemma4 --project stage1\n", stderr="")
+            if command == ["ps", "-p", "112", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="claude-gemma4 --project stage1\n", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run):
+            result = daemon._detect_agent_process()
+
+        self.assertEqual(result, ("%1", 112))
+
+    def test_detect_agent_process_prefers_agent_over_proxy_process(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
+                return subprocess.CompletedProcess(command, 0, stdout="%1 101\n", stderr="")
+            if command == ["ps", "-p", "101", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="bash\n", stderr="")
+            if command == ["pgrep", "-P", "101", "-a"]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=(
+                        "111 python /repo/scripts/claude-gemma4-proxy\n"
+                        "112 /opt/claude/bin/claude.exe --settings /home/paul_chen/.claude-gemma4/settings.json\n"
+                    ),
+                    stderr="",
+                )
+            if command == ["ps", "-p", "111", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="python /repo/scripts/claude-gemma4-proxy\n", stderr="")
+            if command == ["ps", "-p", "112", "-o", "args="]:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout="/opt/claude/bin/claude.exe --settings /home/paul_chen/.claude-gemma4/settings.json\n",
+                    stderr="",
+                )
+            raise AssertionError(f"unexpected command: {command}")
+
+        with mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run):
+            result = daemon._detect_agent_process()
+
+        self.assertEqual(result, ("%1", 112))
+
+    def test_detect_agent_process_returns_pane_and_pid_when_pane_root_is_agent(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
+                return subprocess.CompletedProcess(command, 0, stdout="%1 101\n", stderr="")
+            if command == ["ps", "-p", "101", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="/repo/scripts/claude-gemma4 --project stage1\n", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run):
+            result = daemon._detect_agent_process()
+
+        self.assertEqual(result, ("%1", 101))
 
     def test_cli_entry_outputs_json_status(self) -> None:
         config_path = self.make_config_path()
