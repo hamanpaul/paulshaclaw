@@ -345,6 +345,7 @@ class IdempotencyPipelineTest(unittest.TestCase):
     def test_archive_failure_does_not_commit_written_ledger_and_retry_succeeds(self):
         payload = self.payload(session_id="sid-archive-fail")
         failing_queue = self.write_queue_item("archive_fail", payload)
+        inbox = self.root / "inbox" / "sessions" / "copilot-cli" / "2026-05-24" / "sid-archive-fail.md"
 
         with mock.patch("paulshaclaw.memory.importer.pipeline._archive_queue", side_effect=OSError("archive full")):
             with self.assertRaisesRegex(OSError, "archive full"):
@@ -355,6 +356,7 @@ class IdempotencyPipelineTest(unittest.TestCase):
             [],
         )
         self.assertTrue(failing_queue.exists())
+        self.assertFalse(inbox.exists())
 
         retry_decision = ingest_queue_item(failing_queue, memory_root=self.root)
 

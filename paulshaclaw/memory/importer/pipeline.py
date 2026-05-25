@@ -316,9 +316,9 @@ def ingest_queue_item(queue_item: str | Path, *, memory_root: str | Path, dry_ru
                 inbox_path = Path(decision["inbox_path"])
                 archive_path = Path(decision["archive_path"])
                 if decision["status"] in {"written", "updated"}:
+                    _archive_queue(queue_path, archive_path)
                     _atomic_write(inbox_path, rendered)
                     _remove_stale_inbox(decision.get("previous_inbox_path"), inbox_path)
-                    _archive_queue(queue_path, archive_path)
                     _append_ledger(root, decision)
                     _remove_queue(queue_path)
                 elif decision["status"] in _TERMINAL_STATUSES:
