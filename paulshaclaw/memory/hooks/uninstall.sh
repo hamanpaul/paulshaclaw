@@ -62,6 +62,15 @@ except Exception:
 
 managed_marker = "claude_session_end.py"
 
+def _command_parts(command):
+    parts = command.strip().split()
+    while parts and "=" in parts[0]:
+        key, value = parts[0].split("=", 1)
+        if not key or not key.replace("_", "a").isalnum():
+            break
+        parts = parts[1:]
+    return parts
+
 def _is_managed_claude_hook(hook):
     if not isinstance(hook, dict):
         return False
@@ -72,7 +81,7 @@ def _is_managed_claude_hook(hook):
     command = hook.get("command")
     if not isinstance(command, str):
         return False
-    parts = command.strip().split()
+    parts = _command_parts(command)
     return (
         len(parts) == 2
         and parts[0].endswith("/hooks/.venv/bin/python")
@@ -121,6 +130,15 @@ try:
 except Exception:
     sys.exit(0)
 
+def _command_parts(command):
+    parts = command.strip().split()
+    while parts and "=" in parts[0]:
+        key, value = parts[0].split("=", 1)
+        if not key or not key.replace("_", "a").isalnum():
+            break
+        parts = parts[1:]
+    return parts
+
 def _remove_managed(event_list, marker):
     def _is_managed_codex_hook(hook):
         if not isinstance(hook, dict):
@@ -135,7 +153,7 @@ def _remove_managed(event_list, marker):
         command = hook.get("command")
         if not isinstance(command, str):
             return False
-        parts = command.strip().split()
+        parts = _command_parts(command)
         return (
             len(parts) in {2, 3}
             and parts[0].endswith("/hooks/.venv/bin/python")

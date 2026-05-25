@@ -475,6 +475,58 @@ class InstallerTest(unittest.TestCase):
             ],
         )
 
+    def test_reinstall_replaces_legacy_prefixed_claude_hook_without_managed_marker(self):
+        old_memory_root = self.root / "memory-old"
+        new_memory_root = self.root / "memory-new"
+        settings_path = self.config_root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        old_command = (
+            f"PSC_MEMORY_ROOT={old_memory_root} "
+            f"PSC_CONFIG_ROOT={self.config_root} "
+            f"{old_memory_root}/hooks/.venv/bin/python {old_memory_root}/hooks/claude_session_end.py"
+        )
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [
+                            {
+                                "matcher": "",
+                                "hooks": [{"type": "command", "command": old_command, "timeout": 10}],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_install(
+            [
+                "--memory-root", str(new_memory_root),
+                "--config-root", str(self.config_root),
+                "--repo-root", self.repo_root,
+                "--skip-venv",
+            ]
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        settings = json.loads(settings_path.read_text())
+        commands = [
+            h["command"]
+            for entry in settings.get("hooks", {}).get("SessionEnd", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertEqual(
+            [cmd for cmd in commands if "claude_session_end.py" in cmd],
+            [
+                f"PSC_MEMORY_ROOT={new_memory_root} "
+                f"PSC_CONFIG_ROOT={self.config_root} "
+                f"{new_memory_root}/hooks/.venv/bin/python {new_memory_root}/hooks/claude_session_end.py"
+            ],
+        )
+
     # ------------------------------------------------------------------
     # Full install — Codex config
     # ------------------------------------------------------------------
@@ -907,6 +959,60 @@ class InstallerTest(unittest.TestCase):
 
         self.assertTrue(projects_path.exists(), "projects.yaml removed by uninstall")
         self.assertEqual(projects_path.read_text(encoding="utf-8"), original)
+
+    def test_uninstall_removes_legacy_prefixed_codex_hook_without_managed_marker(self):
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        old_memory_root = self.root / "memory-old"
+        old_stop = (
+            f"PSC_MEMORY_ROOT={old_memory_root} "
+            f"PSC_CONFIG_ROOT={self.config_root} "
+            f"{old_memory_root}/hooks/.venv/bin/python {old_memory_root}/hooks/codex_session_end.py"
+        )
+        old_subagent = old_stop + " --subagent"
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": old_stop,
+                                        "statusMessage": "paulsha-memory: capturing turn snapshot",
+                                    }
+                                ],
+                            }
+                        ],
+                        "SubagentStop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": old_subagent,
+                                        "statusMessage": "paulsha-memory: capturing subagent snapshot",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", str(self.config_root),
+        ])
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        hooks = json.loads(hooks_path.read_text())
+        self.assertEqual(hooks.get("hooks", {}).get("Stop", []), [])
+        self.assertEqual(hooks.get("hooks", {}).get("SubagentStop", []), [])
 
     def test_uninstall_is_idempotent(self):
         _run_install(self.base_args)
