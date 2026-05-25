@@ -60,6 +60,20 @@
         "target": "tmate",
         "timeout_seconds": 3600
       }
+    },
+    {
+      "name": "/agent",
+      "usage": "/agent [start|startf|stop|status]",
+      "summary": "管理 claude-gemma4 agent session",
+      "telegram_menu": {
+        "command": "agent",
+        "description": "管理 claude-gemma4 agent",
+        "enabled": true
+      },
+      "func_call": {
+        "type": "python",
+        "target": "agent"
+      }
     }
   ]
 }

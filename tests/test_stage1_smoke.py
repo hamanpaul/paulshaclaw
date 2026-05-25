@@ -265,6 +265,7 @@ class Stage1SmokeTest(unittest.TestCase):
         result = router.handle_message(user_id=1001, text="/help")
 
         self.assertTrue(result["ok"])
+        self.assertIn("/agent [start|startf|stop|status]", result["message"])
         self.assertIn("/tmate [status|start|stop]", result["message"])
         self.assertIn("/dispatch <task_id>|<pane_id> <message>", result["message"])
 
