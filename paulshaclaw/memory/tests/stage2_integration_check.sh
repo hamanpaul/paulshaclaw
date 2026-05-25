@@ -39,7 +39,7 @@ require_hook_dry_run() {
   queue_item="${queue_matches[0]}"
   test -s "$queue_item"
   output="$(
-    python3 -m paulshaclaw.memory.importer.cli ingest \
+    PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.importer.cli ingest \
       --queue-item "$queue_item" \
       --memory-root "$TMP_DIR/memory" \
       --dry-run

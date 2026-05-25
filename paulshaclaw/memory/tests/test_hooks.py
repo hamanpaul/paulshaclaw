@@ -334,6 +334,36 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue((self.memory_root / "inbox" / "sessions").is_dir())
         self.assertTrue((self.memory_root / "runtime" / "queue").is_dir())
 
+    def test_full_install_rejects_memory_root_with_whitespace(self):
+        memory_root = self.root / "memory root"
+
+        result = _run_install(
+            [
+                "--memory-root", str(memory_root),
+                "--config-root", str(self.config_root),
+                "--repo-root", self.repo_root,
+                "--skip-venv",
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not contain whitespace", result.stderr)
+
+    def test_full_install_rejects_config_root_with_whitespace(self):
+        config_root = self.root / "config root"
+
+        result = _run_install(
+            [
+                "--memory-root", str(self.memory_root),
+                "--config-root", str(config_root),
+                "--repo-root", self.repo_root,
+                "--skip-venv",
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must not contain whitespace", result.stderr)
+
     def test_full_install_deploys_hook_scripts(self):
         result = _run_install(self.base_args)
         self.assertEqual(result.returncode, 0, msg=result.stderr)

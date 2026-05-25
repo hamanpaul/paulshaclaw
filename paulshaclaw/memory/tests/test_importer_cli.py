@@ -131,5 +131,34 @@ class ImporterCliTest(unittest.TestCase):
         self.assertNotIn("Traceback", completed.stderr)
 
 
+class Stage2IntegrationCheckScriptTest(unittest.TestCase):
+    def setUp(self):
+        self.scratch = REPO_ROOT / ".test-work"
+        self.scratch.mkdir(exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(dir=self.scratch)
+        self.outside_repo_cwd = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+        try:
+            self.scratch.rmdir()
+        except OSError:
+            pass
+
+    def test_stage2_integration_check_succeeds_outside_repo_root(self):
+        script = REPO_ROOT / "paulshaclaw" / "memory" / "tests" / "stage2_integration_check.sh"
+
+        completed = subprocess.run(
+            ["bash", str(script)],
+            cwd=self.outside_repo_cwd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+        self.assertIn("[stage2] ok", completed.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

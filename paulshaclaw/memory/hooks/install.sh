@@ -76,6 +76,16 @@ if [[ "$memory_root" =~ ^/+$ ]]; then
   exit 2
 fi
 
+if [[ "$memory_root" =~ [[:space:]] ]]; then
+  echo "install.sh: --memory-root must not contain whitespace" >&2
+  exit 2
+fi
+
+if [[ "$config_root" =~ [[:space:]] ]]; then
+  echo "install.sh: --config-root must not contain whitespace" >&2
+  exit 2
+fi
+
 # Resolve repo_root if not provided
 if [[ -z "$repo_root" ]]; then
   if git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel &>/dev/null; then
