@@ -63,16 +63,6 @@ class FakeRouter:
         return self.response
 
 
-class FakeChatBackend:
-    def __init__(self, reply: str = "chat reply") -> None:
-        self.reply_text = reply
-        self.calls: list[dict[str, object]] = []
-
-    def reply(self, user_id: int, text: str) -> str:
-        self.calls.append({"user_id": user_id, "text": text})
-        return self.reply_text
-
-
 class RecordingClient:
     def __init__(self, updates: list[dict[str, object]]) -> None:
         self.updates = list(updates)
@@ -578,7 +568,7 @@ class ListenerBuildTests(unittest.TestCase):
             self.assertFalse(response["ok"])
             self.assertIn("coordinator backend 未設定", response["message"])
 
-    def test_build_listener_wires_chat_backend_and_keeps_dispatch_guard(self) -> None:
+    def test_build_listener_routes_agent_messages_without_chat_backend_and_keeps_dispatch_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
             config_path.write_text(
@@ -595,25 +585,24 @@ class ListenerBuildTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            chat_backend = FakeChatBackend("chat ok")
+            listener = build_listener(
+                config_path=str(config_path),
+                settings=BotSettings(token="fake-token"),
+                client=RecordingClient([]),
+            )
 
-            with mock.patch("paulshaclaw.bot.listener.create_chat_backend", return_value=chat_backend) as factory:
-                listener = build_listener(
-                    config_path=str(config_path),
-                    settings=BotSettings(token="fake-token"),
-                    client=RecordingClient([]),
-                )
+            self.assertFalse(hasattr(listener_module, "create_chat_backend"))
+            self.assertFalse(hasattr(listener.router, "chat_backend"))
 
-            factory.assert_called_once_with()
-            chat_response = listener.router.handle_message(user_id=7, text="請說明目前進度")
+            with mock.patch.object(listener.router.daemon, "route_to_agent", return_value="…") as route_mock:
+                chat_response = listener.router.handle_message(user_id=7, text="請說明目前進度")
             dispatch_response = listener.router.handle_message(user_id=7, text="/dispatch task-1")
 
             self.assertTrue(chat_response["ok"])
-            self.assertEqual(chat_response["message"], "chat ok")
-            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
+            self.assertEqual(chat_response["message"], "…")
+            route_mock.assert_called_once_with(user_id=7, text="請說明目前進度")
             self.assertFalse(dispatch_response["ok"])
             self.assertIn("coordinator backend 未設定", dispatch_response["message"])
-            self.assertEqual(chat_backend.calls, [{"user_id": 7, "text": "請說明目前進度"}])
 
     def test_dispatch_through_listener_returns_coordinator_not_configured(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

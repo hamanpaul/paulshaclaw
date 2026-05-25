@@ -53,16 +53,6 @@ class FakeTmateManager:
         return {"ok": True, "kind": "tmate", "state": "stopped", "running": False}
 
 
-class FakeChatBackend:
-    def __init__(self, reply: str = "chat reply") -> None:
-        self.reply_text = reply
-        self.calls: list[dict[str, object]] = []
-
-    def reply(self, user_id: int, text: str) -> str:
-        self.calls.append({"user_id": user_id, "text": text})
-        return self.reply_text
-
-
 def write_config_file() -> Path:
     config = {
         "daemon_name": "PaulShiaBro",
@@ -221,41 +211,81 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertIn("job-1", result["message"])
         self.assertEqual(result["result"]["scope"], "stage1-smoke")
 
-    def test_telegram_router_routes_authorized_non_slash_text_to_chat_backend(self) -> None:
+    def test_daemon_route_to_agent_sends_message_when_agent_running(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
-        chat_backend = FakeChatBackend("你好，我是 PaulShiaBro")
-        router = TelegramCommandRouter(daemon=daemon, chat_backend=chat_backend)
 
-        result = router.handle_message(user_id=1001, text="請幫我整理狀態")
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True, "pane_id": "%9", "sent": "ignored"}) as send_mock,
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="請幫我整理狀態")
+
+        self.assertEqual(result, "…")
+        self.assertEqual(daemon._agent_pane_id, "%9")
+        send_mock.assert_called_once_with("%9", "[user:1001] 請幫我整理狀態")
+
+    def test_daemon_route_to_agent_returns_fallback_when_agent_stopped(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._agent_pane_id = "%9"
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=None),
+            mock.patch.object(daemon, "_send_to_pane") as send_mock,
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="請幫我整理狀態")
+
+        self.assertEqual(result, "agent 未啟用，請使用 /agent start")
+        self.assertIsNone(daemon._agent_pane_id)
+        send_mock.assert_not_called()
+
+    def test_telegram_router_routes_authorized_non_slash_text_to_agent(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        router = TelegramCommandRouter(daemon=daemon)
+
+        with mock.patch.object(daemon, "route_to_agent", return_value="…") as route_mock:
+            result = router.handle_message(user_id=1001, text="請幫我整理狀態")
 
         self.assertTrue(result["ok"])
-        self.assertEqual(result["message"], "你好，我是 PaulShiaBro")
-        self.assertEqual(chat_backend.calls, [{"user_id": 1001, "text": "請幫我整理狀態"}])
+        self.assertEqual(result["message"], "…")
+        route_mock.assert_called_once_with(user_id=1001, text="請幫我整理狀態")
+
+    def test_telegram_router_surfaces_non_slash_agent_routing_error(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        router = TelegramCommandRouter(daemon=daemon)
+
+        with mock.patch.object(daemon, "route_to_agent", side_effect=ValueError("tmux not found")):
+            result = router.handle_message(user_id=1001, text="請幫我整理狀態")
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["message"], "tmux not found")
 
     def test_telegram_router_keeps_authorized_slash_command_on_daemon_path(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
-        chat_backend = FakeChatBackend()
-        router = TelegramCommandRouter(daemon=daemon, chat_backend=chat_backend)
+        router = TelegramCommandRouter(daemon=daemon)
 
-        result = router.handle_message(user_id=1001, text="  /status")
+        with mock.patch.object(daemon, "route_to_agent") as route_mock:
+            result = router.handle_message(user_id=1001, text="  /status")
 
         self.assertTrue(result["ok"])
         self.assertIn("PaulShiaBro", result["message"])
-        self.assertEqual(chat_backend.calls, [])
+        route_mock.assert_not_called()
 
-    def test_telegram_router_rejects_unauthorized_non_slash_text_before_chat_backend(self) -> None:
+    def test_telegram_router_rejects_unauthorized_non_slash_text_before_agent_routing(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
-        chat_backend = FakeChatBackend()
-        router = TelegramCommandRouter(daemon=daemon, chat_backend=chat_backend)
+        router = TelegramCommandRouter(daemon=daemon)
 
-        result = router.handle_message(user_id=9999, text="請幫我整理狀態")
+        with mock.patch.object(daemon, "route_to_agent") as route_mock:
+            result = router.handle_message(user_id=9999, text="請幫我整理狀態")
 
         self.assertFalse(result["ok"])
         self.assertIn("未授權", result["message"])
-        self.assertEqual(chat_backend.calls, [])
+        route_mock.assert_not_called()
 
     def test_help_command_lists_runtime_commands(self) -> None:
         config_path = self.make_config_path()

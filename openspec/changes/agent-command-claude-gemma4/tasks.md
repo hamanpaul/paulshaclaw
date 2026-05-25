@@ -23,10 +23,10 @@
 
 ## 4. 非指令對話路由修改
 
-- [ ] 4.1 修改 `telegram.py` 的 `TelegramCommandRouter`：移除 `chat_backend` 參數，非指令路由改為呼叫 daemon 的 agent 路由方法
-- [ ] 4.2 在 daemon 新增 `route_to_agent(user_id, text)` 方法：偵測 process → send-keys `[user:<user_id>] <text>` → 回傳 `"…"` 或 fallback
-- [ ] 4.3 修改 `listener.py`：移除 `create_chat_backend()` 呼叫和 import
-- [ ] 4.4 為對話路由（agent running / not running 兩條路徑）撰寫 unit test
+- [x] 4.1 修改 `telegram.py` 的 `TelegramCommandRouter`：移除 `chat_backend` 參數，非指令路由改為呼叫 daemon 的 agent 路由方法
+- [x] 4.2 在 daemon 新增 `route_to_agent(user_id, text)` 方法：偵測 process → send-keys `[user:<user_id>] <text>` → 回傳 `"…"` 或 fallback
+- [x] 4.3 修改 `listener.py`：移除 `create_chat_backend()` 呼叫和 import
+- [x] 4.4 為對話路由（agent running / not running 兩條路徑）撰寫 unit test
 
 ## 5. 移除 chat backend 模組
 

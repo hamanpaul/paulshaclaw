@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from paulshaclaw.chat.backend import ChatBackend, ClosedChatBackend
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
 
 
@@ -35,9 +34,8 @@ def _format_message(result: dict[str, object]) -> str:
 
 
 class TelegramCommandRouter:
-    def __init__(self, daemon: PaulShiaBroDaemon, chat_backend: ChatBackend | None = None) -> None:
+    def __init__(self, daemon: PaulShiaBroDaemon) -> None:
         self.daemon = daemon
-        self.chat_backend = chat_backend or ClosedChatBackend()
 
     def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
         if user_id not in self.daemon.config.allowed_user_ids:
@@ -47,10 +45,16 @@ class TelegramCommandRouter:
             }
 
         if not text.lstrip().startswith("/"):
-            return {
-                "ok": True,
-                "message": self.chat_backend.reply(user_id=user_id, text=text),
-            }
+            try:
+                return {
+                    "ok": True,
+                    "message": self.daemon.route_to_agent(user_id=user_id, text=text),
+                }
+            except ValueError as error:
+                return {
+                    "ok": False,
+                    "message": str(error),
+                }
 
         try:
             result = self.daemon.handle_command(text.lstrip())
