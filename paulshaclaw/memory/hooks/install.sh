@@ -3,6 +3,7 @@
 #
 # Modes:
 #   --tree-only   Create the memory directory tree only (no hooks, no config)
+#   --upgrade     Re-run the full install flow against an existing deployment
 #   (default)     Full install: tree + venv + hook scripts + config files
 #
 # Options:
@@ -22,6 +23,9 @@ while (($#)); do
   case "$1" in
     --tree-only)
       tree_only=true
+      shift
+      ;;
+    --upgrade)
       shift
       ;;
     --memory-root)

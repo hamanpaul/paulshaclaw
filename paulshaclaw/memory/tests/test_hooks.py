@@ -582,6 +582,12 @@ class InstallerTest(unittest.TestCase):
         combined = result.stdout + result.stderr
         self.assertIn("/hooks", combined, "Codex /hooks trust reminder not printed")
 
+    def test_upgrade_flag_is_accepted_as_full_install(self):
+        result = _run_install(self.base_args + ["--upgrade"])
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertTrue((self.memory_root / "hooks" / "install.sh").exists())
+
     # ------------------------------------------------------------------
     # Uninstaller
     # ------------------------------------------------------------------
