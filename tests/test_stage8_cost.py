@@ -36,6 +36,7 @@ from paulshaclaw.cost.models import (
     UsageWindow,
 )
 from paulshaclaw.cost.providers import (
+    _claude_message_token_total,
     _read_local_observed_total,
     collect_all,
     collect_claude,
@@ -882,6 +883,30 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.windows, {})
 
+    def test_claude_message_token_total_excludes_local_metadata(self) -> None:
+        usage = {"input_tokens": 1000, "output_tokens": 1000}
+
+        self.assertEqual(
+            _claude_message_token_total(
+                {
+                    "model": "claude-sonnet-4.5",
+                    "provider": "local",
+                    "usage": usage,
+                }
+            ),
+            0,
+        )
+        self.assertEqual(
+            _claude_message_token_total(
+                {
+                    "model": "claude-sonnet-4.5",
+                    "source": "local",
+                    "usage": usage,
+                }
+            ),
+            0,
+        )
+
     def test_collect_claude_estimated_fallback_excludes_gemma4(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
@@ -921,7 +946,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["five_hour"].used_percent, 1)
         self.assertEqual(provider.note, "local Claude Code token estimate")
 
-    def test_collect_claude_estimated_fallback_excludes_vllm_openai_compatible_records(self) -> None:
+    def test_collect_claude_estimated_fallback_excludes_vllm_openai_compatible_and_local_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
             sessions.mkdir(parents=True)
@@ -953,6 +978,24 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                                     "source": "openai-compatible",
                                     "api_base": "http://localhost:8001/v1",
                                     "usage": {"input_tokens": 800000, "output_tokens": 800000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "provider": "local",
+                                    "usage": {"input_tokens": 700000, "output_tokens": 300000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "source": "local",
+                                    "usage": {"input_tokens": 600000, "output_tokens": 400000},
                                 }
                             }
                         ),

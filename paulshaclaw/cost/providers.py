@@ -64,14 +64,14 @@ def _is_openai_compatible_claude_record(*records: Mapping[str, Any]) -> bool:
             value = record.get(key)
             if not isinstance(value, str):
                 continue
-            normalized = value.lower()
+            normalized = value.strip().lower()
             if any(marker in normalized for marker in excluded_markers):
                 return True
             if key.lower() in {"base_url", "api_base", "baseurl", "apibase"} and any(
                 marker in normalized for marker in url_markers
             ):
                 return True
-            if key in {"provider", "source"} and normalized == "openai":
+            if key in {"provider", "source"} and normalized in {"openai", "local"}:
                 return True
 
     return False
