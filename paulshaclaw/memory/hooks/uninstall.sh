@@ -44,6 +44,21 @@ while (($#)); do
   esac
 done
 
+if [[ "$config_root" =~ ^[[:space:]]*$ ]]; then
+  echo "uninstall.sh: --config-root must not be empty" >&2
+  exit 2
+fi
+
+if [[ "$config_root" =~ ^/+$ ]]; then
+  echo "uninstall.sh: --config-root must not be /" >&2
+  exit 2
+fi
+
+if [[ "$config_root" =~ [[:space:]] ]]; then
+  echo "uninstall.sh: --config-root must not contain whitespace" >&2
+  exit 2
+fi
+
 # ------------------------------------------------------------------
 # Remove managed Claude SessionEnd hook entry
 # ------------------------------------------------------------------

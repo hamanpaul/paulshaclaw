@@ -81,6 +81,16 @@ if [[ "$memory_root" =~ [[:space:]] ]]; then
   exit 2
 fi
 
+if [[ "$config_root" =~ ^[[:space:]]*$ ]]; then
+  echo "install.sh: --config-root must not be empty" >&2
+  exit 2
+fi
+
+if [[ "$config_root" =~ ^/+$ ]]; then
+  echo "install.sh: --config-root must not be /" >&2
+  exit 2
+fi
+
 if [[ "$config_root" =~ [[:space:]] ]]; then
   echo "install.sh: --config-root must not contain whitespace" >&2
   exit 2

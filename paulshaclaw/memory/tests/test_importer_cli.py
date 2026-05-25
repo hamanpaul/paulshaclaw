@@ -133,20 +133,17 @@ class ImporterCliTest(unittest.TestCase):
 
 class Stage2IntegrationCheckScriptTest(unittest.TestCase):
     def setUp(self):
-        self.scratch = REPO_ROOT / ".test-work"
-        self.scratch.mkdir(exist_ok=True)
-        self.tmp = tempfile.TemporaryDirectory(dir=self.scratch)
+        self.tmp = tempfile.TemporaryDirectory()
         self.outside_repo_cwd = Path(self.tmp.name)
 
     def tearDown(self):
         self.tmp.cleanup()
-        try:
-            self.scratch.rmdir()
-        except OSError:
-            pass
 
     def test_stage2_integration_check_succeeds_outside_repo_root(self):
         script = REPO_ROOT / "paulshaclaw" / "memory" / "tests" / "stage2_integration_check.sh"
+        repo_local_tmp_parent = REPO_ROOT / ".test-work"
+        if repo_local_tmp_parent.exists():
+            subprocess.run(["rm", "-rf", str(repo_local_tmp_parent)], check=False)
 
         completed = subprocess.run(
             ["bash", str(script)],
@@ -158,6 +155,7 @@ class Stage2IntegrationCheckScriptTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, msg=completed.stderr)
         self.assertIn("[stage2] ok", completed.stdout)
+        self.assertFalse(repo_local_tmp_parent.exists())
 
 
 if __name__ == "__main__":

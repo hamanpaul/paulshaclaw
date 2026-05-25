@@ -2,9 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-TMP_PARENT="$ROOT_DIR/.test-work"
-mkdir -p "$TMP_PARENT"
-TMP_DIR="$(mktemp -d "$TMP_PARENT/stage2-integration-XXXXXX")"
+TMP_DIR="$(mktemp -d)"
 trap 'rm -rf -- "$TMP_DIR"' EXIT
 
 require_text() {

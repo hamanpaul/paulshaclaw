@@ -3,14 +3,14 @@ projects:
   paulshaclaw:
     slug: paulshaclaw
     roots:
-      - /home/paul_chen/prj_pri/paulshaclaw
+      - /path/to/paulshaclaw
     remotes:
       - github.com/hamanpaul/paulshaclaw
     aliases: [paulsha, paulshia, psc]
   obs-auto-moc:
     slug: obs-auto-moc
     roots:
-      - /home/paul_chen/prj_pri/custom-claw-tools/obs-auto-moc
+      - /path/to/obs-auto-moc
     remotes:
       - github.com/hamanpaul/obs-auto-moc
     aliases: [auto-moc, obs-moc]

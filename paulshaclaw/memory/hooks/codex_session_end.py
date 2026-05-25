@@ -92,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         queue_payload = dict(payload)
         queue_payload["tool"] = TOOL
         queue_payload["capture_scope"] = capture_scope
-        # Codex: ended_at must remain absent/None — these are mid-session snapshots.
-        queue_payload.pop("ended_at", None)
+        # Codex Stop/SubagentStop are mid-session snapshots, so ended_at is explicit null.
+        queue_payload["ended_at"] = None
 
         queue_dir = root / "runtime" / "queue"
         queue_dir.mkdir(parents=True, exist_ok=True)

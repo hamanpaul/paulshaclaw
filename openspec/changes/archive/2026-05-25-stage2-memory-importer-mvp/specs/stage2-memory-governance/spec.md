@@ -19,7 +19,7 @@ Stage 2 SHALL provision `~/.agents/memory/` as the canonical agent memory substr
 
 ### Requirement: Hook-based session ingestion for three CLIs
 
-Stage 2 SHALL provide native hook integrations for Claude Code (`SessionEnd`), Codex CLI (`Stop` and `SubagentStop`), and GitHub Copilot CLI (`sessionEnd`). Hook scripts MUST be thin: they MUST write the raw payload to `~/.agents/memory/runtime/queue/<tool>__<session-id>.json` via atomic rename and fire-and-forget invoke `paulshaclaw.memory.importer.cli ingest --queue-item <path>`. Hook scripts MUST tag every payload with a `capture_scope` of `session_end`, `turn`, or `subagent`. Hook scripts MUST NOT raise to the host CLI; any failure MUST be logged to `~/.agents/memory/log/hooks.log` and the script MUST exit zero.
+Stage 2 SHALL provide native hook integrations for Claude Code (`SessionEnd`), Codex CLI (`Stop` and `SubagentStop`), and GitHub Copilot CLI (`sessionEnd`). Hook scripts MUST be thin: they MUST write the raw payload into `~/.agents/memory/runtime/queue/` via atomic rename and fire-and-forget invoke `paulshaclaw.memory.importer.cli ingest --queue-item <path>`. Claude Code and GitHub Copilot CLI MAY use stable `<tool>__<session-id>.json` queue paths; Codex CLI MUST use a distinct per-event queue filename under `codex__<session-id>__<event-id>.json` because `Stop` and `SubagentStop` can fire multiple times within one session. Hook scripts MUST tag every payload with a `capture_scope` of `session_end`, `turn`, or `subagent`. Hook scripts MUST NOT raise to the host CLI; any failure MUST be logged to `~/.agents/memory/log/hooks.log` and the script MUST exit zero.
 
 #### Scenario: Claude SessionEnd writes a queue payload
 
@@ -76,7 +76,7 @@ Stage 2 SHALL deduplicate session imports using `idempotency_key = "<source_agen
 
 ### Requirement: Project identity resolution with longest-prefix
 
-Stage 2 SHALL resolve each session payload to a project identity using `~/.agents/config/projects.yaml`. Resolution MUST attempt, in order: (1) longest-prefix match of payload `cwd` against any project's `roots`; (2) longest-prefix match of explicit git toplevel against `roots`; (3) normalized match of remote URLs against `remotes`. If no rule hits, the importer MUST set `project: _unknown` and continue without raising. On alias collision, the first definition in `projects.yaml` wins and a WARN entry MUST be appended to `importer.log`.
+Stage 2 SHALL resolve each session payload to a project identity using `~/.agents/config/projects.yaml`. Resolution MUST attempt, in order: (1) longest-prefix match of payload `cwd` against any project's `roots`; (2) longest-prefix match of explicit git toplevel against `roots`; (3) normalized match of remote URLs against `remotes`. If no rule hits, the importer MUST set `project: _unknown` and continue without raising. On alias collision, the first definition in `projects.yaml` wins and a WARN entry MUST be emitted through the importer logger.
 
 #### Scenario: Monorepo child wins over parent
 
@@ -91,7 +91,7 @@ Stage 2 SHALL resolve each session payload to a project identity using `~/.agent
 
 ### Requirement: Frontmatter contract for inbox entries
 
-Stage 2 SHALL produce every inbox markdown file with a YAML frontmatter block whose required fields match `docs/research/02.obs-auto-moc-memory-dream-mode-24-7-service-notes-.md` lines 220–234, aligned with Stage 3 frontmatter. The MVP MUST NOT introduce new frontmatter fields beyond that contract. Missing best-effort fields MUST appear as empty strings or empty arrays, never as `null` or as missing keys.
+Stage 2 SHALL produce every inbox markdown file with a YAML frontmatter block whose required fields match `docs/research/02.obs-auto-moc-memory-dream-mode-24-7-service-notes-.md` lines 220–234, aligned with Stage 3 frontmatter. The MVP MUST NOT introduce new frontmatter fields beyond that contract. Missing best-effort fields MUST appear as deterministic fallback scalars (for example `_unknown`) or empty collections, never as `null` or as missing keys.
 
 #### Scenario: Lint passes on full corpus-compatible fixtures
 

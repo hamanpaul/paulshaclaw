@@ -183,8 +183,8 @@ class HookQueueWriterTest(unittest.TestCase):
         self.assertEqual(len(matches), 1, f"expected one queue file, got {matches}")
         queue_file = matches[0]
         written = json.loads(queue_file.read_text())
-        # ended_at must be absent OR None — never a real timestamp
-        self.assertIsNone(written.get("ended_at"))
+        self.assertIn("ended_at", written)
+        self.assertIsNone(written["ended_at"])
 
     def test_codex_hook_exits_zero_on_invalid_json(self):
         result = _run_hook("codex_session_end.py", "{{bad", extra_env=self._env())
@@ -363,6 +363,32 @@ class InstallerTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must not contain whitespace", result.stderr)
+
+    def test_full_install_rejects_empty_config_root(self):
+        result = _run_install(
+            [
+                "--memory-root", str(self.memory_root),
+                "--config-root", "",
+                "--repo-root", self.repo_root,
+                "--skip-venv",
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--config-root must not be empty", result.stderr)
+
+    def test_full_install_rejects_filesystem_root_config_root(self):
+        result = _run_install(
+            [
+                "--memory-root", str(self.memory_root),
+                "--config-root", "/",
+                "--repo-root", self.repo_root,
+                "--skip-venv",
+            ]
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--config-root must not be /", result.stderr)
 
     def test_full_install_deploys_hook_scripts(self):
         result = _run_install(self.base_args)
@@ -959,6 +985,24 @@ class InstallerTest(unittest.TestCase):
             if "command" in h
         ]
         self.assertEqual(commands, [unrelated_command])
+
+    def test_uninstall_rejects_empty_config_root(self):
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", "",
+        ])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--config-root must not be empty", result.stderr)
+
+    def test_uninstall_rejects_filesystem_root_config_root(self):
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", "/",
+        ])
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--config-root must not be /", result.stderr)
 
     def test_uninstall_removes_managed_codex_hook_entries(self):
         _run_install(self.base_args)
