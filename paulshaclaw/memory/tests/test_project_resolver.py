@@ -137,7 +137,10 @@ class ProjectResolverTest(unittest.TestCase):
         for remote_url in (
             "https://github.com/hamanpaul/paulshaclaw.git/",
             "GitHub.com/hamanpaul/paulshaclaw",
+            "https://token@github.com/hamanpaul/paulshaclaw.git",
             "ssh://git@github.com/hamanpaul/paulshaclaw.git",
+            "ssh://git@github.com:22/hamanpaul/paulshaclaw.git",
+            "ssh://git@github.com:2222/hamanpaul/paulshaclaw.git",
         ):
             with self.subTest(remote_url=remote_url):
                 project = resolve_project(
@@ -148,6 +151,28 @@ class ProjectResolverTest(unittest.TestCase):
                 )
 
                 self.assertEqual(project, "paulshaclaw")
+
+    def test_resolve_project_treats_malformed_remote_port_as_non_match(self):
+        config = load_projects_config(
+            self.write_projects_config(
+                """
+                version: 1
+                projects:
+                  paulshaclaw:
+                    remotes:
+                      - github.com/hamanpaul/paulshaclaw
+                """
+            )
+        )
+
+        project = resolve_project(
+            cwd="/unmatched/path",
+            git_toplevel="/another/unmatched/path",
+            remote_url="ssh://git@github.com:abc/hamanpaul/paulshaclaw.git",
+            projects=config,
+        )
+
+        self.assertEqual(project, "_unknown")
 
     def test_resolve_project_returns_unknown_when_no_rule_matches(self):
         config = load_projects_config(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import PurePosixPath
+from urllib.parse import urlsplit
 
 from .config import ProjectsConfig, default_projects_path, load_projects_config
 
@@ -40,11 +41,18 @@ def normalize_remote(value: str | None) -> str:
         return ""
     normalized = value.strip().replace("\\", "/")
     normalized = normalized.rstrip("/")
-    normalized = re.sub(r"^[a-z][a-z0-9+.-]*://", "", normalized, flags=re.IGNORECASE)
-    if normalized.startswith("git@"):
-        normalized = normalized[4:]
-    if ":" in normalized and "/" not in normalized.split(":", 1)[0]:
-        normalized = normalized.replace(":", "/", 1)
+    if "://" in normalized:
+        parsed = urlsplit(normalized)
+        try:
+            parsed.port
+        except ValueError:
+            return ""
+        host = parsed.hostname or ""
+        normalized = "/".join(part for part in (host, parsed.path.lstrip("/")) if part)
+    else:
+        normalized = re.sub(r"^[^/@:]+@", "", normalized)
+        if ":" in normalized and "/" not in normalized.split(":", 1)[0]:
+            normalized = normalized.replace(":", "/", 1)
     normalized = normalized.rstrip("/")
     normalized = re.sub(r"\.git$", "", normalized, flags=re.IGNORECASE)
     if normalized.count("/") == 1 and "." not in normalized.split("/", 1)[0]:
