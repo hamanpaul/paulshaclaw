@@ -11,7 +11,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLAUDE_GEMMA4 = PROJECT_ROOT / "scripts" / "claude-gemma4"
 CLAUDE_GEMMA4_PROXY = PROJECT_ROOT / "scripts" / "claude-gemma4-proxy"
 CLAUDE_GEMMA4_SETTINGS = PROJECT_ROOT / "config" / "claude-gemma4-settings.json"
-SOURCE_CLAUDE_GEMMA4_SETTINGS = Path.home() / ".claude-gemma4" / "settings.json"
+EXPECTED_CLAUDE_GEMMA4_SETTINGS = {
+    "permissions": {"defaultMode": "bypassPermissions"},
+    "model": "gemma4-31b-mtp",
+    "skipDangerousModePermissionPrompt": True,
+    "theme": "dark",
+    "effortLevel": "low",
+}
 
 
 class ClaudeGemma4PackagingTests(unittest.TestCase):
@@ -52,13 +58,9 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
 
     def test_settings_template_matches_expected_defaults(self) -> None:
         self.assertTrue(CLAUDE_GEMMA4_SETTINGS.exists(), "config/claude-gemma4-settings.json should exist")
-        self.assertTrue(
-            SOURCE_CLAUDE_GEMMA4_SETTINGS.exists(),
-            f"{SOURCE_CLAUDE_GEMMA4_SETTINGS} should exist for packaging",
-        )
         self.assertEqual(
             json.loads(CLAUDE_GEMMA4_SETTINGS.read_text(encoding="utf-8")),
-            json.loads(SOURCE_CLAUDE_GEMMA4_SETTINGS.read_text(encoding="utf-8")),
+            EXPECTED_CLAUDE_GEMMA4_SETTINGS,
         )
 
 
