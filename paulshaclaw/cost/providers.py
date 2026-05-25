@@ -621,6 +621,7 @@ def collect_copilot(
     has_fresh = False
     has_estimated = False
     resolved_local_observed = local_observed
+    allowed_account_ids = {account.account_id for account in config.copilot_accounts}
 
     for account in config.copilot_accounts:
         if fetcher is not None:
@@ -659,6 +660,9 @@ def collect_copilot(
                 )
                 has_fresh = True
                 continue
+
+        if resolved_local_observed is None and fetcher is None:
+            resolved_local_observed = _collect_local_observed_usage(allowed_account_ids)
 
         if resolved_local_observed is not None and account.account_id in resolved_local_observed:
             accounts.append(

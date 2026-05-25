@@ -571,6 +571,38 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIn("month=", request_url)
         self.assertEqual(request_headers["Authorization"], "Bearer secret-token")
 
+    def test_collect_copilot_runtime_uses_attributed_local_fallback(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: hamanpaul
+                      label: haman
+                      kind: personal
+                      monthly_allowance: 1500
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch(
+                "paulshaclaw.cost.providers._collect_local_observed_usage",
+                return_value={"hamanpaul": 12},
+            ) as local_mock,
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.accounts[0].source, "local_observed")
+        self.assertEqual(provider.accounts[0].used_requests, 12)
+        local_mock.assert_called_once_with({"hamanpaul"})
+
     def test_collect_copilot_fetches_runtime_enterprise_usage_without_injected_fetcher(self) -> None:
         path = self.write_config(
             """
@@ -629,7 +661,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
             patch(
                 "paulshaclaw.cost.providers._collect_local_observed_usage",
-                return_value={"hamanpaul": 12},
+                return_value={"other-user": 12},
             ) as local_mock,
         ):
             provider = collect_copilot(cfg)
@@ -637,7 +669,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.accounts[0].source, "unknown")
         self.assertIsNone(provider.accounts[0].used_requests)
-        local_mock.assert_not_called()
+        local_mock.assert_called_once_with({"hamanpaul"})
 
     def test_read_local_observed_total_counts_current_month_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
