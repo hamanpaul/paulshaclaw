@@ -2057,3 +2057,36 @@ class Stage8CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("cpt haman:--", stdout.getvalue())
+
+    def test_status_main_degraded_snapshot_keeps_copilot_accounts_when_lock_raises(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        cache.lock.side_effect = OSError("chmod denied")
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("stage8 cost status degraded: chmod denied", stderr.getvalue())
