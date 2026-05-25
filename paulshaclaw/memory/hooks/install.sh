@@ -185,30 +185,55 @@ hook_command = sys.argv[3]
 
 try:
     settings = json.loads(existing_json)
-except Exception:
-    settings = {}
+except Exception as exc:
+    print(f"install.sh: invalid JSON in {settings_path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+if not isinstance(settings, dict):
+    print(f"install.sh: expected JSON object in {settings_path}", file=sys.stderr)
+    sys.exit(1)
 
 hooks = settings.setdefault("hooks", {})
 session_end_list = hooks.setdefault("SessionEnd", [])
+if not isinstance(session_end_list, list):
+    print(f"install.sh: hooks.SessionEnd must be a list in {settings_path}", file=sys.stderr)
+    sys.exit(1)
 
-# Check if our managed entry already present (match by command substring)
 managed_marker = "claude_session_end.py"
-already = any(
-    any(managed_marker in h.get("command", "")
-        for h in entry.get("hooks", []))
-    for entry in session_end_list
-)
+updated_entries = []
+target_entry = None
+for entry in session_end_list:
+    if not isinstance(entry, dict):
+        updated_entries.append(entry)
+        continue
+    hooks_list = entry.get("hooks", [])
+    if not isinstance(hooks_list, list):
+        hooks_list = []
+    kept_hooks = [
+        hook
+        for hook in hooks_list
+        if not (isinstance(hook, dict) and managed_marker in hook.get("command", ""))
+    ]
+    updated_entry = dict(entry)
+    updated_entry["hooks"] = kept_hooks
+    if updated_entry.get("matcher", "") == "" and target_entry is None:
+        target_entry = updated_entry
+    if kept_hooks:
+        updated_entries.append(updated_entry)
 
-if not already:
-    session_end_list.append({
-        "matcher": "",
-        "hooks": [{
-            "type": "command",
-            "command": hook_command,
-            "timeout": 10,
-        }]
-    })
-    settings["hooks"]["SessionEnd"] = session_end_list
+if target_entry is None:
+    target_entry = {"matcher": "", "hooks": []}
+    updated_entries.append(target_entry)
+
+target_entry["hooks"].append(
+    {
+        "type": "command",
+        "command": hook_command,
+        "timeout": 10,
+    }
+)
+if target_entry not in updated_entries:
+    updated_entries.append(target_entry)
+settings["hooks"]["SessionEnd"] = updated_entries
 
 with open(settings_path, "w", encoding="utf-8") as f:
     json.dump(settings, f, indent=2, sort_keys=True)
@@ -240,31 +265,58 @@ subagent_command = sys.argv[4]
 
 try:
     data = json.loads(existing_json)
-except Exception:
-    data = {}
+except Exception as exc:
+    print(f"install.sh: invalid JSON in {codex_path}: {exc}", file=sys.stderr)
+    sys.exit(1)
+if not isinstance(data, dict):
+    print(f"install.sh: expected JSON object in {codex_path}", file=sys.stderr)
+    sys.exit(1)
 
 hooks = data.setdefault("hooks", {})
+managed_marker = "codex_session_end.py"
 
-def _has_managed(event_list, marker):
-    return any(
-        any(marker in h.get("command", "")
-            for h in entry.get("hooks", []))
-        for entry in event_list
-    )
-
-def _managed_entry(command, status_msg):
+def _managed_hook(command, status_msg):
     return {
-        "matcher": ".*",
-        "hooks": [{"type": "command", "command": command, "statusMessage": status_msg}]
+        "type": "command",
+        "command": command,
+        "statusMessage": status_msg,
     }
 
-stop_list = hooks.setdefault("Stop", [])
-if not _has_managed(stop_list, "codex_session_end.py"):
-    stop_list.append(_managed_entry(stop_command, "paulsha-memory: capturing turn snapshot"))
+def _reconcile_event(name, command, status_msg):
+    event_list = hooks.setdefault(name, [])
+    if not isinstance(event_list, list):
+        print(f"install.sh: hooks.{name} must be a list in {codex_path}", file=sys.stderr)
+        sys.exit(1)
+    updated_entries = []
+    target_entry = None
+    for entry in event_list:
+        if not isinstance(entry, dict):
+            updated_entries.append(entry)
+            continue
+        hooks_list = entry.get("hooks", [])
+        if not isinstance(hooks_list, list):
+            hooks_list = []
+        kept_hooks = [
+            hook
+            for hook in hooks_list
+            if not (isinstance(hook, dict) and managed_marker in hook.get("command", ""))
+        ]
+        updated_entry = dict(entry)
+        updated_entry["hooks"] = kept_hooks
+        if updated_entry.get("matcher", ".*") == ".*" and target_entry is None:
+            target_entry = updated_entry
+        if kept_hooks:
+            updated_entries.append(updated_entry)
+    if target_entry is None:
+        target_entry = {"matcher": ".*", "hooks": []}
+        updated_entries.append(target_entry)
+    target_entry["hooks"].append(_managed_hook(command, status_msg))
+    if target_entry not in updated_entries:
+        updated_entries.append(target_entry)
+    hooks[name] = updated_entries
 
-subagent_list = hooks.setdefault("SubagentStop", [])
-if not _has_managed(subagent_list, "--subagent"):
-    subagent_list.append(_managed_entry(subagent_command, "paulsha-memory: capturing subagent snapshot"))
+_reconcile_event("Stop", stop_command, "paulsha-memory: capturing turn snapshot")
+_reconcile_event("SubagentStop", subagent_command, "paulsha-memory: capturing subagent snapshot")
 
 with open(codex_path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2, sort_keys=True)

@@ -368,6 +368,17 @@ class InstallerTest(unittest.TestCase):
         settings = json.loads(settings_path.read_text())
         self.assertEqual(settings.get("existing_key"), "preserved_value")
 
+    def test_full_install_fails_without_overwriting_invalid_claude_settings(self):
+        settings_path = self.config_root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        original = '{"hooks": invalid-json}'
+        settings_path.write_text(original, encoding="utf-8")
+
+        result = _run_install(self.base_args)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(settings_path.read_text(encoding="utf-8"), original)
+
     def test_full_install_does_not_duplicate_claude_hook_entry(self):
         """Running install twice should not add duplicate hook entries."""
         _run_install(self.base_args)
@@ -384,6 +395,38 @@ class InstallerTest(unittest.TestCase):
         ]
         matching = [c for c in commands if "claude_session_end.py" in c]
         self.assertEqual(len(matching), 1, f"Expected 1 claude hook entry, got: {matching}")
+
+    def test_reinstall_updates_claude_hook_command_to_new_memory_root(self):
+        first_memory_root = self.root / "memory-first"
+        second_memory_root = self.root / "memory-second"
+        first_args = [
+            "--memory-root", str(first_memory_root),
+            "--config-root", str(self.config_root),
+            "--repo-root", self.repo_root,
+            "--skip-venv",
+        ]
+        second_args = [
+            "--memory-root", str(second_memory_root),
+            "--config-root", str(self.config_root),
+            "--repo-root", self.repo_root,
+            "--skip-venv",
+        ]
+
+        self.assertEqual(_run_install(first_args).returncode, 0)
+        self.assertEqual(_run_install(second_args).returncode, 0)
+
+        settings_path = self.config_root / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text())
+        commands = [
+            h["command"]
+            for entry in settings.get("hooks", {}).get("SessionEnd", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertEqual(
+            [cmd for cmd in commands if "claude_session_end.py" in cmd],
+            [f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/claude_session_end.py"],
+        )
 
     # ------------------------------------------------------------------
     # Full install — Codex config
@@ -434,6 +477,59 @@ class InstallerTest(unittest.TestCase):
         ]
         matching = [c for c in stop_commands if "codex_session_end.py" in c]
         self.assertEqual(len(matching), 1, f"Duplicate codex Stop entries: {matching}")
+
+    def test_full_install_fails_without_overwriting_invalid_codex_hooks(self):
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        original = '{"hooks": invalid-json}'
+        hooks_path.write_text(original, encoding="utf-8")
+
+        result = _run_install(self.base_args)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(hooks_path.read_text(encoding="utf-8"), original)
+
+    def test_reinstall_updates_codex_hook_commands_to_new_memory_root(self):
+        first_memory_root = self.root / "memory-first"
+        second_memory_root = self.root / "memory-second"
+        first_args = [
+            "--memory-root", str(first_memory_root),
+            "--config-root", str(self.config_root),
+            "--repo-root", self.repo_root,
+            "--skip-venv",
+        ]
+        second_args = [
+            "--memory-root", str(second_memory_root),
+            "--config-root", str(self.config_root),
+            "--repo-root", self.repo_root,
+            "--skip-venv",
+        ]
+
+        self.assertEqual(_run_install(first_args).returncode, 0)
+        self.assertEqual(_run_install(second_args).returncode, 0)
+
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text())
+        stop_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("Stop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        subagent_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("SubagentStop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertEqual(
+            [cmd for cmd in stop_commands if "codex_session_end.py" in cmd],
+            [f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/codex_session_end.py"],
+        )
+        self.assertEqual(
+            [cmd for cmd in subagent_commands if "codex_session_end.py" in cmd],
+            [f"{second_memory_root}/hooks/.venv/bin/python {second_memory_root}/hooks/codex_session_end.py --subagent"],
+        )
 
     # ------------------------------------------------------------------
     # Full install — Copilot config
@@ -513,6 +609,43 @@ class InstallerTest(unittest.TestCase):
             f"claude hook not removed: {commands}",
         )
 
+    def test_uninstall_preserves_unrelated_claude_hooks_in_same_entry(self):
+        settings_path = self.config_root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "SessionEnd": [
+                            {
+                                "matcher": "",
+                                "hooks": [
+                                    {"type": "command", "command": "/tmp/keep-me"},
+                                    {"type": "command", "command": "/tmp/old/claude_session_end.py"},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", str(self.config_root),
+        ])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        settings = json.loads(settings_path.read_text())
+        commands = [
+            h["command"]
+            for entry in settings.get("hooks", {}).get("SessionEnd", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertEqual(commands, ["/tmp/keep-me"])
+
     def test_uninstall_removes_managed_codex_hook_entries(self):
         _run_install(self.base_args)
 
@@ -534,6 +667,59 @@ class InstallerTest(unittest.TestCase):
             any("codex_session_end.py" in c for c in stop_commands),
             f"codex hook not removed: {stop_commands}",
         )
+
+    def test_uninstall_preserves_unrelated_codex_hooks_in_same_entry(self):
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks_path.parent.mkdir(parents=True, exist_ok=True)
+        hooks_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "Stop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [
+                                    {"type": "command", "command": "/tmp/keep-stop"},
+                                    {"type": "command", "command": "/tmp/old/codex_session_end.py"},
+                                ],
+                            }
+                        ],
+                        "SubagentStop": [
+                            {
+                                "matcher": ".*",
+                                "hooks": [
+                                    {"type": "command", "command": "/tmp/keep-subagent"},
+                                    {"type": "command", "command": "/tmp/old/codex_session_end.py --subagent"},
+                                ],
+                            }
+                        ],
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", str(self.config_root),
+        ])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        hooks = json.loads(hooks_path.read_text())
+        stop_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("Stop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        subagent_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("SubagentStop", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertEqual(stop_commands, ["/tmp/keep-stop"])
+        self.assertEqual(subagent_commands, ["/tmp/keep-subagent"])
 
     def test_uninstall_removes_copilot_hook_file(self):
         _run_install(self.base_args)

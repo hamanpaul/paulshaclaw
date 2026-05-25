@@ -62,11 +62,23 @@ except Exception:
 
 managed_marker = "claude_session_end.py"
 session_end_list = settings.get("hooks", {}).get("SessionEnd", [])
-filtered = [
-    entry for entry in session_end_list
-    if not any(managed_marker in h.get("command", "")
-               for h in entry.get("hooks", []))
-]
+filtered = []
+for entry in session_end_list:
+    if not isinstance(entry, dict):
+        filtered.append(entry)
+        continue
+    hooks_list = entry.get("hooks", [])
+    if not isinstance(hooks_list, list):
+        hooks_list = []
+    kept_hooks = [
+        hook
+        for hook in hooks_list
+        if not (isinstance(hook, dict) and managed_marker in hook.get("command", ""))
+    ]
+    if kept_hooks:
+        updated_entry = dict(entry)
+        updated_entry["hooks"] = kept_hooks
+        filtered.append(updated_entry)
 settings.setdefault("hooks", {})["SessionEnd"] = filtered
 
 with open(settings_path, "w", encoding="utf-8") as f:
@@ -92,11 +104,24 @@ except Exception:
     sys.exit(0)
 
 def _remove_managed(event_list, marker):
-    return [
-        entry for entry in event_list
-        if not any(marker in h.get("command", "")
-                   for h in entry.get("hooks", []))
-    ]
+    filtered = []
+    for entry in event_list:
+        if not isinstance(entry, dict):
+            filtered.append(entry)
+            continue
+        hooks_list = entry.get("hooks", [])
+        if not isinstance(hooks_list, list):
+            hooks_list = []
+        kept_hooks = [
+            hook
+            for hook in hooks_list
+            if not (isinstance(hook, dict) and marker in hook.get("command", ""))
+        ]
+        if kept_hooks:
+            updated_entry = dict(entry)
+            updated_entry["hooks"] = kept_hooks
+            filtered.append(updated_entry)
+    return filtered
 
 hooks = data.get("hooks", {})
 if "Stop" in hooks:
