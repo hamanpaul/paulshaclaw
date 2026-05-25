@@ -8,6 +8,7 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -290,6 +291,19 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         path = Path(handle.name)
         self.addCleanup(path.unlink, missing_ok=True)
         return path
+
+    def scratch_tempdir(self) -> tempfile.TemporaryDirectory[str]:
+        scratch_root = Path(__file__).resolve().parents[1] / ".test-tmp"
+        scratch_root.mkdir(exist_ok=True)
+        env_tmpdir = os.environ.get("TMPDIR")
+
+        def cleanup_scratch_root() -> None:
+            with contextlib.suppress(OSError):
+                scratch_root.rmdir()
+
+        if not env_tmpdir or Path(env_tmpdir).resolve() != scratch_root.resolve():
+            self.addCleanup(cleanup_scratch_root)
+        return tempfile.TemporaryDirectory(dir=scratch_root)
 
     def test_cost_config_defaults(self) -> None:
         path = self.write_config(
@@ -818,6 +832,71 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["weekly"].used_percent, 41)
         self.assertEqual(provider.windows["weekly"].display_reset, "3d")
 
+    def test_collect_codex_rejects_trusted_payload_missing_secondary_window(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23,
+                    "reset_at": 1777447260,
+                },
+            }
+        }
+
+        provider = collect_codex(
+            enabled=True,
+            auth_path=Path("missing-auth.json"),
+            usage_url="https://chatgpt.com/api/codex/usage",
+            fetcher=lambda url, headers: payload,
+            token_reader=lambda path: ("access-token", "account-id"),
+            now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+        )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_codex_reads_real_auth_file_for_runtime_headers(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23,
+                    "reset_at": 1777447260,
+                },
+                "secondary_window": {
+                    "used_percent": 41,
+                    "reset_at": 1777696800,
+                },
+            }
+        }
+        captured_headers: list[Mapping[str, str]] = []
+
+        def fetcher(url: str, headers: Mapping[str, str]) -> dict[str, object]:
+            captured_headers.append(headers)
+            return payload
+
+        with self.scratch_tempdir() as tmpdir:
+            auth = Path(tmpdir) / "auth.json"
+            auth.write_text(
+                json.dumps(
+                    {
+                        "access_token": "auth-file-token",
+                        "account_id": "auth-file-account",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=auth,
+                usage_url="https://chatgpt.com/api/codex/usage",
+                fetcher=fetcher,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(captured_headers[0]["Authorization"], "Bearer auth-file-token")
+        self.assertEqual(captured_headers[0]["ChatGPT-Account-ID"], "auth-file-account")
+
     def test_collect_codex_falls_back_to_estimated_local_tokens(self) -> None:
         scratch_root = Path(__file__).resolve().parents[1] / ".test-tmp"
         scratch_root.mkdir(exist_ok=True)
@@ -856,6 +935,91 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.windows["five_hour"].used_percent, 5)
         self.assertEqual(provider.note, "local Codex token estimate")
+
+    def test_collect_codex_falls_back_to_nested_event_msg_payload_tokens(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                json.dumps(
+                    {
+                        "event_msg": {
+                            "payload": {
+                                "type": "token_count",
+                                "total_token_usage": {"total_tokens": 20000},
+                            }
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=Path(tmpdir) / "missing-auth.json",
+                local_fallback=True,
+                codex_home=Path(tmpdir) / ".codex",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 2)
+
+    def test_collect_codex_sums_per_session_file_max_token_counts(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "a.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps({"payload": {"type": "token_count", "total_tokens": 10000}}),
+                        json.dumps({"payload": {"type": "token_count", "total_tokens": 30000}}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (sessions / "b.jsonl").write_text(
+                json.dumps({"payload": {"type": "token_count", "total_tokens": 20000}}) + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=Path(tmpdir) / "missing-auth.json",
+                local_fallback=True,
+                codex_home=Path(tmpdir) / ".codex",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 5)
+
+    def test_collect_codex_rejects_unsafe_usage_url_without_injected_fetcher(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            auth = Path(tmpdir) / "auth.json"
+            auth.write_text(
+                json.dumps(
+                    {
+                        "access_token": "auth-file-token",
+                        "account_id": "auth-file-account",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "paulshaclaw.cost.providers._fetch_codex_usage",
+                side_effect=AssertionError("unsafe URL should not be fetched"),
+            ) as fetch_mock:
+                provider = collect_codex(
+                    enabled=True,
+                    auth_path=auth,
+                    usage_url="https://example.com/api/codex/usage",
+                )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+        fetch_mock.assert_not_called()
 
     def test_collect_codex_unknown_when_disabled_or_no_data(self) -> None:
         provider = collect_codex(enabled=False)

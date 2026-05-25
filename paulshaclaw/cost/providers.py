@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
@@ -212,6 +212,15 @@ def _fetch_codex_usage(url: str, headers: Mapping[str, str]) -> dict[str, Any]:
     return _fetch_json(url, headers)
 
 
+def _is_safe_codex_usage_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "chatgpt.com"
+        and parsed.path == "/api/codex/usage"
+    )
+
+
 def _codex_window(raw: Any, now: datetime) -> UsageWindow | None:
     if not isinstance(raw, Mapping):
         return None
@@ -239,6 +248,18 @@ def _codex_window(raw: Any, now: datetime) -> UsageWindow | None:
     )
 
 
+def _codex_token_count_payload(record: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    payload = record.get("payload")
+    if isinstance(payload, Mapping):
+        return payload
+    event_msg = record.get("event_msg")
+    if isinstance(event_msg, Mapping):
+        payload = event_msg.get("payload")
+        if isinstance(payload, Mapping):
+            return payload
+    return None
+
+
 def _codex_local_token_total(codex_home: Path) -> int:
     sessions = codex_home / "sessions"
     if not sessions.exists():
@@ -246,6 +267,7 @@ def _codex_local_token_total(codex_home: Path) -> int:
 
     observed = 0
     for session_path in sessions.rglob("*.jsonl"):
+        session_observed = 0
         try:
             with session_path.open("r", encoding="utf-8", errors="ignore") as handle:
                 for line in handle:
@@ -255,8 +277,8 @@ def _codex_local_token_total(codex_home: Path) -> int:
                         continue
                     if not isinstance(record, dict):
                         continue
-                    payload = record.get("payload")
-                    if not isinstance(payload, Mapping):
+                    payload = _codex_token_count_payload(record)
+                    if payload is None:
                         continue
                     if payload.get("type") != "token_count":
                         continue
@@ -266,11 +288,12 @@ def _codex_local_token_total(codex_home: Path) -> int:
                     else:
                         raw_total = payload.get("total_tokens")
                     try:
-                        observed = max(observed, int(raw_total))
+                        session_observed = max(session_observed, int(raw_total))
                     except (TypeError, ValueError):
                         continue
         except OSError:
             continue
+        observed += session_observed
     return observed
 
 
@@ -294,6 +317,8 @@ def collect_codex(
     resolved_token_reader = token_reader or _read_codex_token
 
     try:
+        if fetcher is None and not _is_safe_codex_usage_url(usage_url):
+            raise ValueError("unsafe Codex usage URL")
         access_token, account_id = resolved_token_reader(resolved_auth_path)
         if not access_token or not account_id:
             raise ValueError("missing Codex credentials")
@@ -308,16 +333,14 @@ def collect_codex(
         rate_limit = payload.get("rate_limit", payload.get("rateLimit"))
         if not isinstance(rate_limit, Mapping):
             raise ValueError("missing Codex rate limit")
-        windows: dict[str, UsageWindow] = {}
         five_hour = _codex_window(rate_limit.get("primary_window"), resolved_now)
         weekly = _codex_window(rate_limit.get("secondary_window"), resolved_now)
-        if five_hour is not None:
-            windows["five_hour"] = five_hour
-        if weekly is not None:
-            windows["weekly"] = weekly
-        if not windows:
+        if five_hour is None or weekly is None:
             raise ValueError("missing Codex quota windows")
-        return ProviderSnapshot(source_status="fresh", windows=windows)
+        return ProviderSnapshot(
+            source_status="fresh",
+            windows={"five_hour": five_hour, "weekly": weekly},
+        )
     except Exception:
         pass
 
