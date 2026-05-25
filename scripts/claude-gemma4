@@ -3,10 +3,8 @@ set -eu
 
 REAL_CLAUDE="/home/paul_chen/.nvm/versions/node/v22.20.0/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 SECRET_ENV="/home/paul_chen/.config/paulshaclaw/paulshaclaw.telegram.secret.env"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GEMMA_CONFIG_DIR="/home/paul_chen/.claude-gemma4"
 GEMMA_SETTINGS="$GEMMA_CONFIG_DIR/settings.json"
-GEMMA_SETTINGS_TEMPLATE="$REPO_ROOT/config/claude-gemma4-settings.json"
 GEMMA_PROXY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/claude-gemma4-proxy"
 GEMMA_PROXY_URL="http://127.0.0.1:18080"
 
@@ -40,11 +38,15 @@ fi
 mkdir -p "$GEMMA_CONFIG_DIR"
 
 if [ ! -r "$GEMMA_SETTINGS" ]; then
-  if [ ! -r "$GEMMA_SETTINGS_TEMPLATE" ]; then
-    echo "Claude Gemma4 settings template is not readable: $GEMMA_SETTINGS_TEMPLATE" >&2
-    exit 1
-  fi
-  cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"
+  cat > "$GEMMA_SETTINGS" <<'JSON'
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "gemma4-31b-mtp",
+  "skipDangerousModePermissionPrompt": true
+}
+JSON
 fi
 
 node - "$GEMMA_CONFIG_DIR/.claude.json" "$PWD" <<'NODE'
