@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from paulshaclaw.cost.config import CopilotAccountConfig, CostConfig
 from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
@@ -33,6 +33,13 @@ def _unknown_codex() -> ProviderSnapshot:
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _display_zone(timezone_name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, TypeError, ValueError):
+        return ZoneInfo("Asia/Taipei")
 
 
 def _display_reset(reset_at: datetime, now: datetime) -> str:
@@ -314,11 +321,12 @@ def collect_codex(
     fetcher: JsonFetcher | None = None,
     token_reader: CodexTokenReader | None = None,
     now: datetime | None = None,
+    timezone: str = "Asia/Taipei",
 ) -> ProviderSnapshot:
     if not enabled:
         return _unknown_codex()
 
-    resolved_now = now or _now_utc().astimezone(ZoneInfo("Asia/Taipei"))
+    resolved_now = now or _now_utc().astimezone(_display_zone(timezone))
     resolved_auth_path = auth_path or Path("~/.codex/auth.json").expanduser()
     resolved_fetcher = fetcher or _fetch_codex_usage
     resolved_token_reader = token_reader or _read_codex_token
@@ -370,8 +378,9 @@ def collect_claude(
     local_fallback: bool = False,
     claude_home: Path | None = None,
     now: datetime | None = None,
+    timezone: str = "Asia/Taipei",
 ) -> ProviderSnapshot:
-    resolved_now = now or _now_utc().astimezone(ZoneInfo("Asia/Taipei"))
+    resolved_now = now or _now_utc().astimezone(_display_zone(timezone))
     sidecar = statusline_sidecar or Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
     if _file_is_fresh(sidecar, max_age_seconds):
         payload = _read_json_file(sidecar)
@@ -702,11 +711,13 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
             usage_url=config.codex.usage_url,
             max_age_seconds=config.codex.max_age_seconds,
             local_fallback=config.codex.local_fallback,
+            timezone=config.timezone,
         ),
         "cc": collect_claude(
             statusline_sidecar=config.claude.statusline_sidecar,
             max_age_seconds=config.claude.max_age_seconds,
             local_fallback=config.claude.local_fallback,
+            timezone=config.timezone,
         ),
     }
     copilot = collect_copilot(config)

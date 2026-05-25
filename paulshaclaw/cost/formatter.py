@@ -24,7 +24,10 @@ def classify_usage(value: int | None) -> str:
 def _provider_label(name: str, provider: ProviderSnapshot) -> str:
     if provider.source_status == "stale":
         return f"{name}~"
-    if provider.source_status == "estimated":
+    if provider.source_status == "estimated" or any(
+        account.source == "local_observed" and account.used_requests is not None
+        for account in provider.accounts
+    ):
         return f"{name}?"
     return name
 
@@ -63,7 +66,9 @@ def _format_window_provider(name: str, provider: ProviderSnapshot, use_tmux_styl
 
 
 def _account_level(provider: ProviderSnapshot, account: CopilotAccountUsage) -> str:
-    if provider.source_status == "estimated" and account.used_requests is not None:
+    if (
+        provider.source_status == "estimated" or account.source == "local_observed"
+    ) and account.used_requests is not None:
         return "estimated"
     if account.used_requests is None or not account.monthly_allowance:
         return "neutral"

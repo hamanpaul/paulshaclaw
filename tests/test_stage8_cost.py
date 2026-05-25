@@ -218,6 +218,43 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertIn("#[fg=magenta]haman:724#[default]", footer)
         self.assertNotIn("#[fg=green]haman:724#[default]", footer)
 
+    def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cpt": ProviderSnapshot(
+                    source_status="fresh",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "fresh-user",
+                            "fresh",
+                            "personal",
+                            42,
+                            1500,
+                            "github_user_billing",
+                        ),
+                        CopilotAccountUsage(
+                            "local-user",
+                            "local",
+                            "personal",
+                            724,
+                            1500,
+                            "local_observed",
+                        ),
+                    ),
+                ),
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("cpt?", footer)
+        self.assertIn("#[fg=green]fresh:42#[default]", footer)
+        self.assertIn("#[fg=magenta]local:724#[default]", footer)
+        self.assertNotIn("#[fg=green]local:724#[default]", footer)
+
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
             generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
@@ -945,6 +982,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
     def test_collect_all_passes_claude_and_codex_config(self) -> None:
         cfg = CostConfig(
+            timezone="UTC",
             claude=ClaudeProviderConfig(
                 statusline_sidecar=Path("/tmp/claude.json"),
                 max_age_seconds=12,
@@ -979,6 +1017,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             statusline_sidecar=Path("/tmp/claude.json"),
             max_age_seconds=12,
             local_fallback=True,
+            timezone="UTC",
         )
         codex.assert_called_once_with(
             enabled=False,
@@ -986,6 +1025,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             usage_url="https://example.invalid/usage",
             max_age_seconds=34,
             local_fallback=True,
+            timezone="UTC",
         )
 
     def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
