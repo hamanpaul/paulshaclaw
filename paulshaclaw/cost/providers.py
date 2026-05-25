@@ -16,11 +16,14 @@ from paulshaclaw.cost.config import CopilotAccountConfig, CostConfig
 from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
 
 CopilotFetcher = Callable[[CopilotAccountConfig], tuple[int, str]]
+JsonFetcher = Callable[[str, Mapping[str, str]], dict[str, Any]]
+CodexTokenReader = Callable[[Path], tuple[str, str]]
 _GITHUB_API_ROOT = "https://api.github.com"
+_CODEX_USAGE_URL = "https://chatgpt.com/api/codex/usage"
 _ACCOUNT_RE = re.compile(r"account\s+([A-Za-z0-9-]+)")
 
 
-def collect_codex() -> ProviderSnapshot:
+def _unknown_codex() -> ProviderSnapshot:
     return ProviderSnapshot(
         source_status="unknown",
         windows={},
@@ -190,6 +193,144 @@ def _estimated_window_from_tokens(tokens: int) -> UsageWindow:
         reset_at=None,
         display_reset="local",
     )
+
+
+def _read_codex_token(auth_path: Path) -> tuple[str, str]:
+    payload = json.loads(auth_path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("invalid Codex auth payload")
+    access_token = payload.get("access_token")
+    account_id = payload.get("account_id")
+    if not isinstance(access_token, str) or not access_token:
+        raise ValueError("missing Codex access token")
+    if not isinstance(account_id, str) or not account_id:
+        raise ValueError("missing Codex account id")
+    return access_token, account_id
+
+
+def _fetch_codex_usage(url: str, headers: Mapping[str, str]) -> dict[str, Any]:
+    return _fetch_json(url, headers)
+
+
+def _codex_window(raw: Any, now: datetime) -> UsageWindow | None:
+    if not isinstance(raw, Mapping):
+        return None
+
+    raw_used_percent = raw.get(
+        "used_percent",
+        raw.get("usedPercentage", raw.get("used_percentage")),
+    )
+    try:
+        used_percent = max(0, min(100, int(round(float(raw_used_percent)))))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    reset_at = _parse_epoch(
+        raw.get("reset_at", raw.get("resetsAt")),
+        now.tzinfo or ZoneInfo("Asia/Taipei"),
+    )
+    if reset_at is None:
+        return None
+
+    return UsageWindow(
+        used_percent=used_percent,
+        reset_at=reset_at,
+        display_reset=_display_reset(reset_at, now),
+    )
+
+
+def _codex_local_token_total(codex_home: Path) -> int:
+    sessions = codex_home / "sessions"
+    if not sessions.exists():
+        return 0
+
+    observed = 0
+    for session_path in sessions.rglob("*.jsonl"):
+        try:
+            with session_path.open("r", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    payload = record.get("payload")
+                    if not isinstance(payload, Mapping):
+                        continue
+                    if payload.get("type") != "token_count":
+                        continue
+                    total_usage = payload.get("total_token_usage")
+                    if isinstance(total_usage, Mapping):
+                        raw_total = total_usage.get("total_tokens")
+                    else:
+                        raw_total = payload.get("total_tokens")
+                    try:
+                        observed = max(observed, int(raw_total))
+                    except (TypeError, ValueError):
+                        continue
+        except OSError:
+            continue
+    return observed
+
+
+def collect_codex(
+    *,
+    enabled: bool = False,
+    auth_path: Path | None = None,
+    usage_url: str = _CODEX_USAGE_URL,
+    local_fallback: bool = False,
+    codex_home: Path | None = None,
+    fetcher: JsonFetcher | None = None,
+    token_reader: CodexTokenReader | None = None,
+    now: datetime | None = None,
+) -> ProviderSnapshot:
+    if not enabled:
+        return _unknown_codex()
+
+    resolved_now = now or _now_utc().astimezone(ZoneInfo("Asia/Taipei"))
+    resolved_auth_path = auth_path or Path("~/.codex/auth.json").expanduser()
+    resolved_fetcher = fetcher or _fetch_codex_usage
+    resolved_token_reader = token_reader or _read_codex_token
+
+    try:
+        access_token, account_id = resolved_token_reader(resolved_auth_path)
+        if not access_token or not account_id:
+            raise ValueError("missing Codex credentials")
+        payload = resolved_fetcher(
+            usage_url,
+            {
+                "Accept": "application/json",
+                "Authorization": f"Bearer {access_token}",
+                "ChatGPT-Account-ID": account_id,
+            },
+        )
+        rate_limit = payload.get("rate_limit", payload.get("rateLimit"))
+        if not isinstance(rate_limit, Mapping):
+            raise ValueError("missing Codex rate limit")
+        windows: dict[str, UsageWindow] = {}
+        five_hour = _codex_window(rate_limit.get("primary_window"), resolved_now)
+        weekly = _codex_window(rate_limit.get("secondary_window"), resolved_now)
+        if five_hour is not None:
+            windows["five_hour"] = five_hour
+        if weekly is not None:
+            windows["weekly"] = weekly
+        if not windows:
+            raise ValueError("missing Codex quota windows")
+        return ProviderSnapshot(source_status="fresh", windows=windows)
+    except Exception:
+        pass
+
+    if local_fallback:
+        tokens = _codex_local_token_total(codex_home or Path("~/.codex").expanduser())
+        if tokens > 0:
+            return ProviderSnapshot(
+                source_status="estimated",
+                windows={"five_hour": _estimated_window_from_tokens(tokens)},
+                note="local Codex token estimate",
+            )
+
+    return _unknown_codex()
 
 
 def collect_claude(

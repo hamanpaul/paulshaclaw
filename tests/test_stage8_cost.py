@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -784,6 +785,80 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
     def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
         provider = collect_codex()
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_codex_parses_quota_payload(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23,
+                    "reset_at": 1777447260,
+                },
+                "secondary_window": {
+                    "used_percent": 41,
+                    "reset_at": 1777696800,
+                },
+            }
+        }
+
+        provider = collect_codex(
+            enabled=True,
+            auth_path=Path("/tmp/auth.json"),
+            usage_url="https://chatgpt.com/api/codex/usage",
+            fetcher=lambda url, headers: payload,
+            token_reader=lambda path: ("access-token", "account-id"),
+            now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+        )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 23)
+        self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+        self.assertEqual(provider.windows["weekly"].used_percent, 41)
+        self.assertEqual(provider.windows["weekly"].display_reset, "3d")
+
+    def test_collect_codex_falls_back_to_estimated_local_tokens(self) -> None:
+        scratch_root = Path(__file__).resolve().parents[1] / ".test-tmp"
+        scratch_root.mkdir(exist_ok=True)
+        env_tmpdir = os.environ.get("TMPDIR")
+
+        def cleanup_scratch_root() -> None:
+            with contextlib.suppress(OSError):
+                scratch_root.rmdir()
+
+        if not env_tmpdir or Path(env_tmpdir).resolve() != scratch_root.resolve():
+            self.addCleanup(cleanup_scratch_root)
+
+        with tempfile.TemporaryDirectory(dir=scratch_root) as tmpdir:
+            sessions = Path(tmpdir) / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                json.dumps(
+                    {
+                        "payload": {
+                            "type": "token_count",
+                            "total_token_usage": {"total_tokens": 50000},
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=Path(tmpdir) / "missing-auth.json",
+                local_fallback=True,
+                codex_home=Path(tmpdir) / ".codex",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 5)
+        self.assertEqual(provider.note, "local Codex token estimate")
+
+    def test_collect_codex_unknown_when_disabled_or_no_data(self) -> None:
+        provider = collect_codex(enabled=False)
 
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.windows, {})
