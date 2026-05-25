@@ -19,6 +19,7 @@ from .models import (
 )
 
 DEFAULT_POLICY_DIR = Path(__file__).resolve().parent
+_USE_DEFAULT_OVERRIDE = object()
 
 
 def _read_mapping(path: Path) -> Mapping[str, Any]:
@@ -38,7 +39,10 @@ def load_default_policy() -> EffectivePolicy:
     return load_policy(override_path=None)
 
 
-def load_policy(default_dir: str | Path | None = None, override_path: str | Path | None = None) -> EffectivePolicy:
+def load_policy(
+    default_dir: str | Path | None = None,
+    override_path: str | Path | None | object = _USE_DEFAULT_OVERRIDE,
+) -> EffectivePolicy:
     policy_dir = Path(default_dir) if default_dir is not None else DEFAULT_POLICY_DIR
     secrets = _read_mapping(policy_dir / "secrets.yaml")
     classification = _read_mapping(policy_dir / "classification.yaml")
@@ -55,27 +59,26 @@ def load_policy(default_dir: str | Path | None = None, override_path: str | Path
     disabled_rules: frozenset[str] = frozenset()
     disabled_rules_for_session: dict[str, frozenset[str]] = {}
 
-    if override_path is not None:
-        override_file = Path(override_path)
-        if override_file.exists():
-            override = _read_mapping(override_file)
-            disabled_rules = frozenset(str(rule_id) for rule_id in override.get("disable_rules", []))
-            disabled_rules_for_session = {
-                str(session_ref): frozenset(str(rule_id) for rule_id in rule_ids)
-                for session_ref, rule_ids in override.get("disable_rules_for_session", {}).items()
-            }
-            appended_rules = _secret_rules(override.get("append_regex_rules", []))
-            duplicate_rule_ids = set(secret_rules).intersection(appended_rules)
-            if duplicate_rule_ids:
-                raise PolicyError(
-                    "append_regex_rules cannot replace existing rules: "
-                    + ", ".join(sorted(duplicate_rule_ids))
-                )
-            secret_rules.update(appended_rules)
-            classification_policy = _merge_project_defaults(
-                classification_policy,
-                override.get("project_defaults", []),
+    override_file = _resolve_override_file(override_path)
+    if override_file is not None and override_file.exists():
+        override = _read_mapping(override_file)
+        disabled_rules = frozenset(str(rule_id) for rule_id in override.get("disable_rules", []))
+        disabled_rules_for_session = {
+            str(session_ref): frozenset(str(rule_id) for rule_id in rule_ids)
+            for session_ref, rule_ids in override.get("disable_rules_for_session", {}).items()
+        }
+        appended_rules = _secret_rules(override.get("append_regex_rules", []))
+        duplicate_rule_ids = set(secret_rules).intersection(appended_rules)
+        if duplicate_rule_ids:
+            raise PolicyError(
+                "append_regex_rules cannot replace existing rules: "
+                + ", ".join(sorted(duplicate_rule_ids))
             )
+        secret_rules.update(appended_rules)
+        classification_policy = _merge_project_defaults(
+            classification_policy,
+            override.get("project_defaults", []),
+        )
 
     return EffectivePolicy(
         policy_version=policy_version,
@@ -94,6 +97,13 @@ def load_policy(default_dir: str | Path | None = None, override_path: str | Path
         ),
     )
 
+
+def _resolve_override_file(override_path: str | Path | None | object) -> Path | None:
+    if override_path is _USE_DEFAULT_OVERRIDE:
+        return Path.home() / ".config" / "paulshaclaw" / "policy.override.yaml"
+    if override_path is None:
+        return None
+    return Path(override_path)
 
 
 def is_rule_disabled(policy: EffectivePolicy, rule_id: str, session_ref: str | None = None) -> bool:

@@ -201,6 +201,49 @@ class MemoryPolicyCliTests(unittest.TestCase):
             self.assertEqual(summary["policy_version"], "0.1.0")
             self.assertNotIn(SECRET, completed.stdout)
 
+    def test_replay_quotes_frontmatter_values_that_need_yaml_escaping(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            payload = root / "payload.txt"
+            out = root / "inbox.md"
+            override = root / "policy.override.yaml"
+            payload.write_text("safe line\n", encoding="utf-8")
+            override.write_text(
+                json.dumps(
+                    {
+                        "project_defaults": [
+                            {
+                                "project": "client",
+                                "level": "private",
+                                "reason": "needs: review # keep quoted",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env = self.fake_gitleaks_env(root)
+
+            completed = self.run_memory(
+                "memory",
+                "replay",
+                "--session",
+                "s1",
+                "--payload-file",
+                str(payload),
+                "--project",
+                "client",
+                "--override",
+                str(override),
+                "--out",
+                str(out),
+                env=env,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            artifact = out.read_text(encoding="utf-8")
+            self.assertRegex(artifact, r"classification_reason: [\"']needs: review # keep quoted[\"']")
+
     def test_replay_writes_safe_audit_log_for_redaction_hit(self):
         with temporary_directory() as tmp:
             root = Path(tmp)

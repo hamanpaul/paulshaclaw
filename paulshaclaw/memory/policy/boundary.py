@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 import time
 
 from .audit import append_policy_audits, build_policy_audit_events
@@ -43,7 +44,7 @@ def check_boundary(
     policy: EffectivePolicy | None = None,
     gitleaks_runner=None,
 ) -> BoundaryResult:
-    effective_policy = policy if policy is not None else load_policy(override_path=None)
+    effective_policy = policy if policy is not None else load_policy()
     _ensure_mvp_executable_boundary(effective_policy, boundary)
     extra_hits: tuple[PolicyHit, ...] = ()
     if boundary == "raw_to_distilled":
@@ -162,7 +163,7 @@ def process_queue_with_policy(
     attempt = 0
     while attempt < retry_count:
         try:
-            effective_policy = policy if policy is not None else load_policy(override_path=None)
+            effective_policy = policy if policy is not None else load_policy()
             if boundary not in effective_policy.boundaries:
                 raise PolicyExecutionError(f"unknown boundary: {boundary}")
             boundary_policy = effective_policy.boundaries[boundary]
@@ -184,8 +185,6 @@ def process_queue_with_policy(
                 time.sleep(retry_backoff_ms / 1000)
             continue
         try:
-            inbox.parent.mkdir(parents=True, exist_ok=True)
-            inbox.write_text(result.text, encoding="utf-8")
             _append_boundary_audit_records(
                 audit_path=audit_path,
                 boundary=boundary,
@@ -193,6 +192,7 @@ def process_queue_with_policy(
                 policy=effective_policy,
                 result=result,
             )
+            _write_text_atomically(inbox, result.text)
             queue.unlink()
         except OSError as exc:
             return handle_policy_failure(
@@ -262,3 +262,24 @@ def _append_boundary_audit_records(
             hits=result.hits,
         ),
     )
+
+
+def _write_text_atomically(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.tmp-",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            handle.write(text)
+            tmp_path = Path(handle.name)
+        tmp_path.replace(path)
+    except OSError:
+        if tmp_path is not None:
+            _unlink_file_if_present(tmp_path)
+        raise

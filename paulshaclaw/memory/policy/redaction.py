@@ -144,21 +144,32 @@ def _regex_hits(
     session_ref: str | None,
 ) -> tuple[PolicyHit, ...]:
     hits: list[PolicyHit] = []
+    compiled_rules = _compiled_regex_rules(policy, session_ref)
     for line_no, line in enumerate(lines, start=1):
         candidates: list[tuple[int, int, PolicyHit]] = []
-        for rule in policy.secret_rules.values():
-            if rule.detector != "regex" or is_rule_disabled(policy, rule.rule_id, session_ref):
-                continue
-            try:
-                pattern = re.compile(rule.pattern)
-            except re.error as exc:
-                raise PolicyError(f"invalid regex for rule {rule.rule_id}: {exc}") from exc
+        for rule_id, detector, pattern in compiled_rules:
             for match in pattern.finditer(line):
                 candidates.append(
-                    (match.start(), match.end(), PolicyHit(rule.rule_id, rule.detector, line_no, "redact"))
+                    (match.start(), match.end(), PolicyHit(rule_id, detector, line_no, "redact"))
                 )
         hits.extend(_non_overlapping_hits(candidates))
     return tuple(hits)
+
+
+def _compiled_regex_rules(
+    policy: EffectivePolicy,
+    session_ref: str | None,
+) -> tuple[tuple[str, str, re.Pattern[str]], ...]:
+    compiled: list[tuple[str, str, re.Pattern[str]]] = []
+    for rule in policy.secret_rules.values():
+        if rule.detector != "regex" or is_rule_disabled(policy, rule.rule_id, session_ref):
+            continue
+        try:
+            pattern = re.compile(rule.pattern)
+        except re.error as exc:
+            raise PolicyError(f"invalid regex for rule {rule.rule_id}: {exc}") from exc
+        compiled.append((rule.rule_id, rule.detector, pattern))
+    return tuple(compiled)
 
 
 def _non_overlapping_hits(candidates: list[tuple[int, int, PolicyHit]]) -> tuple[PolicyHit, ...]:

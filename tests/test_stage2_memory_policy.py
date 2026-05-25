@@ -42,6 +42,26 @@ class PolicyLoaderTests(unittest.TestCase):
         self.assertNotEqual(base.effective_policy_hash, overridden.effective_policy_hash)
         self.assertIn("github_pat", overridden.disabled_rules_for_session["session-a"])
 
+    def test_load_policy_uses_default_override_path_when_not_explicitly_disabled(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            home = Path(tmp)
+            override = home / ".config" / "paulshaclaw" / "policy.override.yaml"
+            override.parent.mkdir(parents=True, exist_ok=True)
+            override.write_text(json.dumps({"disable_rules": ["jwt"]}), encoding="utf-8")
+            original_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            try:
+                base = mod.load_policy(override_path=None)
+                overridden = mod.load_policy()
+            finally:
+                if original_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = original_home
+        self.assertNotIn("jwt", base.disabled_rules)
+        self.assertIn("jwt", overridden.disabled_rules)
+
     def test_override_supports_global_disable_local_regex_and_project_default(self):
         mod = load_policy(self)
         with temporary_directory() as tmp:
@@ -180,6 +200,29 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(result.stage, "hook")
         self.assertEqual(result.hits[0].line_no, 2)
 
+    def test_regex_patterns_are_compiled_once_per_rule(self):
+        mod = load_policy(self)
+        policy = mod.load_policy(override_path=None)
+        redaction_mod = importlib.import_module("paulshaclaw.memory.policy.redaction")
+        original_compile = redaction_mod.re.compile
+        observed: list[str] = []
+
+        def counting_compile(pattern, *args, **kwargs):
+            observed.append(pattern)
+            return original_compile(pattern, *args, **kwargs)
+
+        redaction_mod.re.compile = counting_compile
+        try:
+            mod.redact_lines(
+                f"safe line\nstill safe\ntoken=ghp_1234567890abcdefghijklmnopqrstuv\n",
+                policy=policy,
+                session_ref="session-a",
+                boundary="external_to_raw",
+            )
+        finally:
+            redaction_mod.re.compile = original_compile
+        self.assertEqual(observed.count(policy.secret_rules["github_pat"].pattern), 1)
+
 
 class GitleaksTests(unittest.TestCase):
     def test_gitleaks_json_hits_are_converted_to_policy_hits(self):
@@ -315,6 +358,29 @@ class BoundaryTests(unittest.TestCase):
         self.assertIn(result.ledger_metadata["redaction_stage"], {"importer", "both"})
         self.assertEqual(result.ledger_metadata["policy_version"], result.policy.policy_version)
         self.assertEqual(result.ledger_metadata["effective_policy_hash"], result.policy.effective_policy_hash)
+
+    def test_check_boundary_uses_default_override_when_no_policy_is_passed(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            home = Path(tmp)
+            override = home / ".config" / "paulshaclaw" / "policy.override.yaml"
+            override.parent.mkdir(parents=True, exist_ok=True)
+            override.write_text(json.dumps({"disable_rules_for_session": {"s1": ["github_pat"]}}), encoding="utf-8")
+            original_home = os.environ.get("HOME")
+            os.environ["HOME"] = str(home)
+            try:
+                result = mod.check_boundary(
+                    "external_to_raw",
+                    "token=ghp_1234567890abcdefghijklmnopqrstuv",
+                    project_slug="paulshaclaw",
+                    session_ref="s1",
+                )
+            finally:
+                if original_home is None:
+                    os.environ.pop("HOME", None)
+                else:
+                    os.environ["HOME"] = original_home
+        self.assertEqual(result.hits, ())
 
     def test_failure_stub_contains_metadata_only(self):
         mod = load_policy(self)
@@ -511,6 +577,41 @@ class BoundaryTests(unittest.TestCase):
             self.assertNotIn("ghp_", audit_text)
             self.assertNotIn(original_line, audit_text)
             self.assertNotIn("safe line", audit_text)
+
+    def test_process_queue_appends_audit_before_publishing_inbox(self):
+        mod = load_policy(self)
+        boundary_mod = importlib.import_module("paulshaclaw.memory.policy.boundary")
+        original_append_policy_audits = boundary_mod.append_policy_audits
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            audit = root / "policy-audit.jsonl"
+            queue.write_text("token=ghp_1234567890abcdefghijklmnopqrstuv\n", encoding="utf-8")
+            observed: dict[str, bool] = {}
+
+            def checking_append_policy_audits(path, events):
+                observed["inbox_exists_before_audit"] = inbox.exists()
+                return original_append_policy_audits(path, events)
+
+            boundary_mod.append_policy_audits = checking_append_policy_audits
+            try:
+                result = mod.process_queue_with_policy(
+                    queue_path=queue,
+                    inbox_path=inbox,
+                    failed_dir=root / "_failed",
+                    boundary="raw_to_distilled",
+                    project_slug="_unknown",
+                    session_ref="s1",
+                    source_tool="codex",
+                    gitleaks_runner=lambda *_a, **_k: mod.CompletedGitleaks(0, "[]", ""),
+                    audit_path=audit,
+                )
+                self.assertEqual(result.status, "ok")
+                self.assertFalse(observed["inbox_exists_before_audit"])
+                self.assertTrue(inbox.exists())
+            finally:
+                boundary_mod.append_policy_audits = original_append_policy_audits
 
     def test_publish_failure_unlinks_queue_and_writes_stub(self):
         mod = load_policy(self)

@@ -93,6 +93,8 @@ def _replay(args: argparse.Namespace) -> int:
 
 
 def _load_policy(override_path: str | None):
+    if override_path is None:
+        return memory_policy.load_policy()
     return memory_policy.load_policy(override_path=override_path)
 
 
@@ -165,14 +167,27 @@ def _artifact(result) -> str:
     return "".join(
         (
             "---\n",
-            f"classification_level: {classification.level}\n",
-            f"classification_reason: {classification.reason}\n",
-            f"classification_policy_hash: {classification.policy_hash}\n",
-            f"classification_source: {classification.source}\n",
+            f"classification_level: {_yaml_scalar(classification.level)}\n",
+            f"classification_reason: {_yaml_scalar(classification.reason)}\n",
+            f"classification_policy_hash: {_yaml_scalar(classification.policy_hash)}\n",
+            f"classification_source: {_yaml_scalar(classification.source)}\n",
             "---\n\n",
             result.text,
         )
     )
+
+
+def _yaml_scalar(value: str) -> str:
+    if (
+        not value
+        or value != value.strip()
+        or "\n" in value
+        or "\r" in value
+        or ": " in value
+        or "#" in value
+    ):
+        return json.dumps(value)
+    return value
 
 
 def _append_replay_audit(result, *, session_ref: str, audit_path: Path) -> None:
