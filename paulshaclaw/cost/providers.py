@@ -3,15 +3,17 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from zoneinfo import ZoneInfo
 
 from paulshaclaw.cost.config import CopilotAccountConfig, CostConfig
-from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot
+from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
 
 CopilotFetcher = Callable[[CopilotAccountConfig], tuple[int, str]]
 _GITHUB_API_ROOT = "https://api.github.com"
@@ -26,7 +28,169 @@ def collect_codex() -> ProviderSnapshot:
     )
 
 
-def collect_claude() -> ProviderSnapshot:
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _display_reset(reset_at: datetime, now: datetime) -> str:
+    local_reset = reset_at.astimezone(now.tzinfo or ZoneInfo("Asia/Taipei"))
+    local_now = now.astimezone(local_reset.tzinfo)
+    if local_reset.date() == local_now.date():
+        return local_reset.strftime("%H:%M")
+
+    seconds = max(0, (local_reset - local_now).total_seconds())
+    if seconds < 24 * 60 * 60:
+        hours = max(1, int(seconds // 3600))
+        return f"{hours}h"
+
+    days = max(1, int((seconds + 24 * 60 * 60 - 1) // (24 * 60 * 60)))
+    return f"{days}d"
+
+
+def _parse_epoch(value: Any, tz: timezone | ZoneInfo) -> datetime | None:
+    try:
+        epoch = float(value)
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(epoch, timezone.utc).astimezone(tz)
+
+
+def _window_from_rate_limit(
+    rate_limit: Any,
+    *,
+    now: datetime,
+) -> UsageWindow | None:
+    if not isinstance(rate_limit, Mapping):
+        return None
+
+    try:
+        used_percent = int(rate_limit["used_percentage"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    reset_at = _parse_epoch(rate_limit.get("resets_at"), now.tzinfo or ZoneInfo("Asia/Taipei"))
+    if reset_at is None:
+        return None
+
+    return UsageWindow(
+        used_percent=max(0, min(100, used_percent)),
+        reset_at=reset_at,
+        display_reset=_display_reset(reset_at, now),
+    )
+
+
+def _read_json_file(path: Path) -> dict[str, Any] | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return time.time() - stat.st_mtime <= max_age_seconds
+
+
+def _claude_message_token_total(message: Mapping[str, Any]) -> int:
+    model = message.get("model")
+    if not isinstance(model, str):
+        return 0
+
+    normalized_model = model.lower()
+    if not normalized_model.startswith("claude-"):
+        return 0
+    if any(excluded in normalized_model for excluded in ("gemma4", "vllm", "openai-compatible")):
+        return 0
+
+    usage = message.get("usage")
+    if not isinstance(usage, Mapping):
+        return 0
+
+    total = 0
+    for key in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+    ):
+        try:
+            total += int(usage.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _claude_local_token_total(claude_home: Path) -> int:
+    projects = claude_home / "projects"
+    if not projects.exists():
+        return 0
+
+    total = 0
+    for session_path in projects.rglob("*.jsonl"):
+        try:
+            with session_path.open("r", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    message = payload.get("message")
+                    if isinstance(message, Mapping):
+                        total += _claude_message_token_total(message)
+        except OSError:
+            continue
+    return total
+
+
+def _estimated_window_from_tokens(tokens: int) -> UsageWindow:
+    return UsageWindow(
+        used_percent=max(1, min(100, tokens // 10000)),
+        reset_at=None,
+        display_reset="local",
+    )
+
+
+def collect_claude(
+    *,
+    statusline_sidecar: Path | None = None,
+    max_age_seconds: int = 300,
+    local_fallback: bool = False,
+    claude_home: Path | None = None,
+    now: datetime | None = None,
+) -> ProviderSnapshot:
+    resolved_now = now or _now_utc().astimezone(ZoneInfo("Asia/Taipei"))
+    sidecar = statusline_sidecar or Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
+    if _file_is_fresh(sidecar, max_age_seconds):
+        payload = _read_json_file(sidecar)
+        rate_limits = payload.get("rate_limits") if payload else None
+        if isinstance(rate_limits, Mapping):
+            five_hour = _window_from_rate_limit(rate_limits.get("five_hour"), now=resolved_now)
+            weekly = _window_from_rate_limit(rate_limits.get("seven_day"), now=resolved_now)
+            windows: dict[str, UsageWindow] = {}
+            if five_hour is not None:
+                windows["five_hour"] = five_hour
+            if weekly is not None:
+                windows["weekly"] = weekly
+            if windows:
+                return ProviderSnapshot(source_status="fresh", windows=windows)
+
+    if local_fallback:
+        tokens = _claude_local_token_total(claude_home or Path("~/.claude").expanduser())
+        if tokens > 0:
+            return ProviderSnapshot(
+                source_status="estimated",
+                windows={"five_hour": _estimated_window_from_tokens(tokens)},
+                note="local Claude Code token estimate",
+            )
+
     return ProviderSnapshot(
         source_status="unknown",
         windows={},
