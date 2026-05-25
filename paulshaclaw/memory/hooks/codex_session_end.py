@@ -2,8 +2,8 @@
 """Codex Stop / SubagentStop hook.
 
 Reads stdin JSON (Codex Stop/SubagentStop payload), writes an atomic queue
-payload to runtime/queue/codex__<session-id>.json, then best-effort triggers
-the importer in the background.
+payload to runtime/queue/codex__<session-id>__<event-id>.json, then best-effort
+triggers the importer in the background.
 
 --subagent flag: sets capture_scope=subagent; without the flag capture_scope=turn.
 ended_at is always left absent/None for Codex payloads (mid-session snapshots).
@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 TOOL = "codex"
@@ -97,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         queue_dir = root / "runtime" / "queue"
         queue_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"{TOOL}__{_sanitize_id(session_id)}.json"
+        filename = f"{TOOL}__{_sanitize_id(session_id)}__{uuid.uuid4().hex}.json"
         queue_path = queue_dir / filename
         tmp_path = queue_dir / f".{filename}.tmp"
         tmp_path.write_text(

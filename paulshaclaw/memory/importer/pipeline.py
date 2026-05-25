@@ -224,6 +224,12 @@ def _decision_entry(
     return entry
 
 
+def _persisted_session(session: NormalizedSession, *, raw_payload_pointer: str) -> NormalizedSession:
+    persisted: NormalizedSession = dict(session)
+    persisted["raw_payload_pointer"] = raw_payload_pointer
+    return persisted
+
+
 def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | Path) -> dict[str, Any]:
     queue_path = Path(queue_item)
     root = Path(memory_root)
@@ -244,7 +250,6 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
         memory_root=str(root),
     )
     inbox_path = root / "inbox" / bucket / session["tool"] / day / f"{safe_key(session['session_id'])}.md"
-    rendered = render_markdown(session, project=project, classifier_bucket=bucket, captured_at=captured_at)
     recorded = _load_recorded(root, key)
     route_changed = recorded is not None and (
         recorded.get("inbox_path") != str(inbox_path) or recorded.get("project") != project
@@ -260,6 +265,7 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
     else:
         status = "stale-skip"
     archive_path = _archive_path(root, month, key, status, incoming_hash)
+    rendered_session = _persisted_session(session, raw_payload_pointer=str(archive_path))
     decision = _decision_entry(
         status=status,
         key=key,
@@ -272,7 +278,12 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
     )
     decision["classifier_bucket"] = bucket
     decision["project"] = project
-    decision["rendered"] = rendered
+    decision["rendered"] = render_markdown(
+        rendered_session,
+        project=project,
+        classifier_bucket=bucket,
+        captured_at=captured_at,
+    )
     return decision
 
 

@@ -147,8 +147,9 @@ class HookQueueWriterTest(unittest.TestCase):
         result = _run_hook("codex_session_end.py", payload, extra_env=self._env())
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        queue_file = self.memory_root / "runtime" / "queue" / "codex__codex-stop-001.json"
-        self.assertTrue(queue_file.exists(), f"expected {queue_file}")
+        matches = sorted((self.memory_root / "runtime" / "queue").glob("codex__codex-stop-001*.json"))
+        self.assertEqual(len(matches), 1, f"expected one queue file, got {matches}")
+        queue_file = matches[0]
         written = json.loads(queue_file.read_text())
         self.assertEqual(written["capture_scope"], "turn")
         self.assertEqual(written["tool"], "codex")
@@ -164,8 +165,9 @@ class HookQueueWriterTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        queue_file = self.memory_root / "runtime" / "queue" / "codex__codex-subagent-001.json"
-        self.assertTrue(queue_file.exists(), f"expected {queue_file}")
+        matches = sorted((self.memory_root / "runtime" / "queue").glob("codex__codex-subagent-001*.json"))
+        self.assertEqual(len(matches), 1, f"expected one queue file, got {matches}")
+        queue_file = matches[0]
         written = json.loads(queue_file.read_text())
         self.assertEqual(written["capture_scope"], "subagent")
         self.assertIsNone(written.get("ended_at"))
@@ -177,8 +179,9 @@ class HookQueueWriterTest(unittest.TestCase):
         result = _run_hook("codex_session_end.py", payload, extra_env=self._env())
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        queue_file = self.memory_root / "runtime" / "queue" / "codex__codex-turn-007.json"
-        self.assertTrue(queue_file.exists())
+        matches = sorted((self.memory_root / "runtime" / "queue").glob("codex__codex-turn-007*.json"))
+        self.assertEqual(len(matches), 1, f"expected one queue file, got {matches}")
+        queue_file = matches[0]
         written = json.loads(queue_file.read_text())
         # ended_at must be absent OR None — never a real timestamp
         self.assertIsNone(written.get("ended_at"))
@@ -186,6 +189,20 @@ class HookQueueWriterTest(unittest.TestCase):
     def test_codex_hook_exits_zero_on_invalid_json(self):
         result = _run_hook("codex_session_end.py", "{{bad", extra_env=self._env())
         self.assertEqual(result.returncode, 0)
+
+    def test_codex_hook_writes_unique_queue_file_per_event_for_same_session(self):
+        payload = {"session_id": "codex-race-001", "cwd": "/repo"}
+
+        first = _run_hook("codex_session_end.py", payload, extra_env=self._env())
+        second = _run_hook("codex_session_end.py", payload, extra_env=self._env())
+
+        self.assertEqual(first.returncode, 0, msg=first.stderr)
+        self.assertEqual(second.returncode, 0, msg=second.stderr)
+        matches = sorted((self.memory_root / "runtime" / "queue").glob("codex__codex-race-001*.json"))
+        self.assertEqual(len(matches), 2, f"expected distinct queue files, got {matches}")
+        for queue_file in matches:
+            written = json.loads(queue_file.read_text())
+            self.assertEqual(written["session_id"], "codex-race-001")
 
     # ------------------------------------------------------------------
     # Copilot hook

@@ -102,6 +102,22 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertTrue(archive.exists())
         self.assertEqual([entry["status"] for entry in self.ledger_entries()], ["written", "hash-duplicate"])
 
+    def test_written_markdown_uses_archived_payload_path_for_persisted_provenance(self):
+        payload = self.payload(session_id="sid-provenance-archive")
+        queue_item = self.write_queue_item("provenance-archive", payload)
+
+        decision = ingest_queue_item(queue_item, memory_root=self.root)
+
+        inbox = Path(decision["inbox_path"])
+        archive = Path(decision["archive_path"])
+        rendered = inbox.read_text(encoding="utf-8")
+        self.assertFalse(queue_item.exists())
+        self.assertTrue(archive.exists())
+        self.assertIn(f"  path: {archive}", rendered)
+        self.assertIn(f"- Raw payload: {archive}", rendered)
+        self.assertNotIn(f"  path: {queue_item}", rendered)
+        self.assertNotIn(f"- Raw payload: {queue_item}", rendered)
+
     def test_higher_completeness_updates_and_lower_completeness_stale_skips(self):
         base = self.payload(scope="turn", turns=1, files=["a.py"], prompts=["one"])
         richer = self.payload(scope="turn", turns=2, files=["a.py", "b.py"], prompts=["one", "two"])
