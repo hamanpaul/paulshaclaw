@@ -3,6 +3,7 @@
     "defaultMode": "bypassPermissions"
   },
   "model": "gemma4-31b-mtp",
-  "effortLevel": "max",
-  "skipDangerousModePermissionPrompt": true
+  "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
+  "effortLevel": "low"
 }
