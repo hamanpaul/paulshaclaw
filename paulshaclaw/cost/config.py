@@ -22,6 +22,24 @@ class CopilotAccountConfig:
 
 
 @dataclass(frozen=True)
+class ClaudeProviderConfig:
+    statusline_sidecar: Path = field(
+        default_factory=lambda: Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
+    )
+    max_age_seconds: int = 300
+    local_fallback: bool = False
+
+
+@dataclass(frozen=True)
+class CodexProviderConfig:
+    enabled: bool = True
+    auth_path: Path = field(default_factory=lambda: Path("~/.codex/auth.json").expanduser())
+    usage_url: str = "https://chatgpt.com/api/codex/usage"
+    max_age_seconds: int = 300
+    local_fallback: bool = False
+
+
+@dataclass(frozen=True)
 class CostConfig:
     timezone: str = "Asia/Taipei"
     cache_ttl_seconds: int = 120
@@ -29,6 +47,8 @@ class CostConfig:
     warning_percent: int = 70
     critical_percent: int = 90
     copilot_accounts: tuple[CopilotAccountConfig, ...] = ()
+    claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
+    codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
     cache_dir: Path = field(default_factory=lambda: Path("~/.agents/state/cost").expanduser())
     log_path: Path = field(default_factory=lambda: Path("~/.agents/log/cost.log").expanduser())
 
@@ -68,6 +88,20 @@ def _mapping(raw: Any, name: str) -> dict[str, Any]:
     return raw
 
 
+def _bool_value(value: Any, *, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"布林設定值無法解析：{value}")
+
+
 def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
     if raw is None:
         return ()
@@ -105,12 +139,47 @@ def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
     return tuple(items)
 
 
+def _parse_claude_provider(raw: Any) -> ClaudeProviderConfig:
+    item = _mapping(raw, "config.cost.providers.claude")
+    sidecar = item.get("statusline_sidecar")
+    max_age = item.get("max_age_seconds")
+    return ClaudeProviderConfig(
+        statusline_sidecar=(
+            Path(str(sidecar)).expanduser()
+            if sidecar
+            else Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
+        ),
+        max_age_seconds=int(max_age) if max_age is not None else 300,
+        local_fallback=_bool_value(item.get("local_fallback"), default=False),
+    )
+
+
+def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
+    item = _mapping(raw, "config.cost.providers.codex")
+    auth_path = item.get("auth_path")
+    max_age = item.get("max_age_seconds")
+    usage_url = item.get("usage_url")
+    return CodexProviderConfig(
+        enabled=_bool_value(item.get("enabled"), default=True),
+        auth_path=(
+            Path(str(auth_path)).expanduser()
+            if auth_path
+            else Path("~/.codex/auth.json").expanduser()
+        ),
+        usage_url=str(usage_url) if usage_url else "https://chatgpt.com/api/codex/usage",
+        max_age_seconds=int(max_age) if max_age is not None else 300,
+        local_fallback=_bool_value(item.get("local_fallback"), default=False),
+    )
+
+
 def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
     payload = _load_payload(config_path)
 
     cost = _mapping(payload.get("cost"), "config.cost")
     providers = _mapping(cost.get("providers"), "config.cost.providers")
     copilot = _mapping(providers.get("copilot"), "config.cost.providers.copilot")
+    claude = _mapping(providers.get("claude"), "config.cost.providers.claude")
+    codex = _mapping(providers.get("codex"), "config.cost.providers.codex")
     colors = _mapping(cost.get("colors"), "config.cost.colors")
 
     cache_dir_raw = cost.get("cache_dir")
@@ -123,6 +192,8 @@ def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
         warning_percent=int(colors.get("warning_percent", 70)),
         critical_percent=int(colors.get("critical_percent", 90)),
         copilot_accounts=_parse_copilot_accounts(copilot.get("accounts")),
+        claude=_parse_claude_provider(claude),
+        codex=_parse_codex_provider(codex),
         cache_dir=(
             Path(str(cache_dir_raw)).expanduser()
             if cache_dir_raw

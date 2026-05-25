@@ -22,7 +22,12 @@ from paulshaclaw.cost.cache import (
     load_snapshot_payload,
 )
 from paulshaclaw.cost import config as cost_config_module
-from paulshaclaw.cost.config import CostConfig, load_cost_config
+from paulshaclaw.cost.config import (
+    ClaudeProviderConfig,
+    CodexProviderConfig,
+    CostConfig,
+    load_cost_config,
+)
 from paulshaclaw.cost.formatter import classify_usage, format_footer
 from paulshaclaw.cost.models import (
     CopilotAccountUsage,
@@ -361,6 +366,50 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(cfg.copilot_accounts[0].account_id, "default-user")
         self.assertEqual(cfg.copilot_accounts[0].label, "default-user")
         self.assertEqual(cfg.copilot_accounts[0].kind, "personal")
+
+    def test_claude_and_codex_provider_config_are_parsed(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                claude:
+                  statusline_sidecar: /tmp/claude-rate.json
+                  max_age_seconds: 90
+                  local_fallback: true
+                codex:
+                  enabled: true
+                  auth_path: /tmp/codex-auth.json
+                  usage_url: https://chatgpt.com/api/codex/usage
+                  max_age_seconds: 45
+                  local_fallback: true
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertEqual(cfg.claude.statusline_sidecar, Path("/tmp/claude-rate.json"))
+        self.assertEqual(cfg.claude.max_age_seconds, 90)
+        self.assertTrue(cfg.claude.local_fallback)
+        self.assertTrue(cfg.codex.enabled)
+        self.assertEqual(cfg.codex.auth_path, Path("/tmp/codex-auth.json"))
+        self.assertEqual(cfg.codex.usage_url, "https://chatgpt.com/api/codex/usage")
+        self.assertEqual(cfg.codex.max_age_seconds, 45)
+        self.assertTrue(cfg.codex.local_fallback)
+
+    def test_claude_and_codex_provider_config_defaults_are_safe(self) -> None:
+        cfg = CostConfig()
+
+        self.assertIsInstance(cfg.claude, ClaudeProviderConfig)
+        self.assertIsInstance(cfg.codex, CodexProviderConfig)
+        self.assertEqual(
+            cfg.claude.statusline_sidecar,
+            Path("~/.agents/state/cost/claude_rate_limits.json").expanduser(),
+        )
+        self.assertTrue(cfg.codex.enabled)
+        self.assertEqual(cfg.codex.auth_path, Path("~/.codex/auth.json").expanduser())
 
     def test_collect_copilot_uses_injected_fetcher_before_local_fallback(self) -> None:
         path = self.write_config(
