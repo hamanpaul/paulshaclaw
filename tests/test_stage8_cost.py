@@ -181,6 +181,34 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertIn("#[fg=magenta]91%(1h)#[default]", footer)
         self.assertNotIn("#[fg=red]91%(1h)#[default]", footer)
 
+    def test_footer_uses_estimated_tmux_style_for_copilot_account(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cpt": ProviderSnapshot(
+                    source_status="estimated",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "hamanpaul",
+                            "haman",
+                            "personal",
+                            724,
+                            1500,
+                            "local_observed",
+                        ),
+                    ),
+                ),
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("cpt?", footer)
+        self.assertIn("#[fg=magenta]haman:724#[default]", footer)
+        self.assertNotIn("#[fg=green]haman:724#[default]", footer)
+
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
             generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
