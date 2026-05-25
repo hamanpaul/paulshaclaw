@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import time
 
+from .audit import append_policy_audits, build_policy_audit_events
 from .classification import ClassificationResult, classify_artifact
 from .loader import load_policy
 from .models import EffectivePolicy, PolicyExecutionError
@@ -146,6 +147,7 @@ def process_queue_with_policy(
     gitleaks_runner=None,
     policy: EffectivePolicy | None = None,
     ledger_available: bool = True,
+    audit_path: str | Path | None = None,
 ) -> QueuePolicyResult:
     queue = Path(queue_path)
     inbox = Path(inbox_path)
@@ -184,6 +186,13 @@ def process_queue_with_policy(
         try:
             inbox.parent.mkdir(parents=True, exist_ok=True)
             inbox.write_text(result.text, encoding="utf-8")
+            _append_boundary_audit_records(
+                audit_path=audit_path,
+                boundary=boundary,
+                session_ref=session_ref,
+                policy=effective_policy,
+                result=result,
+            )
             queue.unlink()
         except OSError as exc:
             return handle_policy_failure(
@@ -228,3 +237,28 @@ def _ensure_mvp_executable_boundary(policy: EffectivePolicy, boundary: str) -> N
 def _unlink_file_if_present(path: Path) -> None:
     if path.exists() and (path.is_file() or path.is_symlink()):
         path.unlink()
+
+
+def _append_boundary_audit_records(
+    *,
+    audit_path: str | Path | None,
+    boundary: str,
+    session_ref: str,
+    policy: EffectivePolicy | None,
+    result: BoundaryResult,
+) -> None:
+    if audit_path is None or policy is None:
+        return
+    boundary_policy = policy.boundaries.get(boundary)
+    if boundary_policy is None or not boundary_policy.audit_required:
+        return
+    append_policy_audits(
+        audit_path,
+        build_policy_audit_events(
+            boundary=boundary,
+            component=str(result.ledger_metadata["redaction_stage"]),
+            session_ref=session_ref,
+            policy=policy,
+            hits=result.hits,
+        ),
+    )

@@ -95,6 +95,7 @@ class MemoryPolicyCliTests(unittest.TestCase):
             self.assertEqual(summary["hits"][0]["action"], "redact")
             self.assertEqual(summary["hits"][0]["boundary"], "raw_to_distilled")
             self.assertFalse(inbox.exists())
+            self.assertEqual(list(root.glob("*.policy-audit.jsonl")), [])
             self.assertNotIn(SECRET, completed.stdout)
             self.assertNotIn(original_line, completed.stdout)
 
@@ -199,6 +200,61 @@ class MemoryPolicyCliTests(unittest.TestCase):
             self.assertIn("effective_policy_hash", summary)
             self.assertEqual(summary["policy_version"], "0.1.0")
             self.assertNotIn(SECRET, completed.stdout)
+
+    def test_replay_writes_safe_audit_log_for_redaction_hit(self):
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            payload = root / "payload.txt"
+            out = root / "inbox.md"
+            audit = root / "inbox.policy-audit.jsonl"
+            original_line = f"token={SECRET}"
+            payload.write_text(f"safe line\n{original_line}\n", encoding="utf-8")
+            env = self.fake_gitleaks_env(root)
+
+            completed = self.run_memory(
+                "memory",
+                "replay",
+                "--session",
+                "s1",
+                "--payload-file",
+                str(payload),
+                "--project",
+                "paulshaclaw",
+                "--out",
+                str(out),
+                env=env,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            records = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(records), 1)
+            record = records[0]
+            self.assertEqual(
+                set(record),
+                {
+                    "action",
+                    "boundary",
+                    "component",
+                    "detector",
+                    "effective_policy_hash",
+                    "line_no",
+                    "policy_version",
+                    "rule_id",
+                    "session_ref",
+                    "ts",
+                },
+            )
+            self.assertEqual(record["boundary"], "raw_to_distilled")
+            self.assertEqual(record["component"], "importer")
+            self.assertEqual(record["session_ref"], "s1")
+            self.assertEqual(record["rule_id"], "github_pat")
+            self.assertEqual(record["detector"], "regex")
+            self.assertEqual(record["line_no"], 2)
+            self.assertEqual(record["action"], "redact")
+            audit_text = audit.read_text(encoding="utf-8")
+            self.assertNotIn(SECRET, audit_text)
+            self.assertNotIn(original_line, audit_text)
+            self.assertNotIn("safe line", audit_text)
 
     def test_replay_uses_gitleaks_path_for_gitleaks_only_hit(self):
         with temporary_directory() as tmp:

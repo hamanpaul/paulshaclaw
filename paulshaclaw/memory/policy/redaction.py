@@ -70,7 +70,7 @@ def run_gitleaks(
     runner=subprocess.run,
 ) -> tuple[PolicyHit, ...]:
     try:
-        with TemporaryDirectory(prefix=".policy-gitleaks-", dir=Path.cwd()) as tmp:
+        with TemporaryDirectory(prefix="policy-gitleaks-") as tmp:
             tmp_dir = Path(tmp)
             source = tmp_dir / "input.txt"
             report = tmp_dir / "report.json"

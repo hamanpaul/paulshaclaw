@@ -76,6 +76,7 @@ def _replay(args: argparse.Namespace) -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(_artifact(result), encoding="utf-8")
+    _append_replay_audit(result, session_ref=args.session, audit_path=_replay_audit_path(out))
     summary = _summary(
         result,
         skipped_overrides=_skipped_overrides(
@@ -172,3 +173,23 @@ def _artifact(result) -> str:
             result.text,
         )
     )
+
+
+def _append_replay_audit(result, *, session_ref: str, audit_path: Path) -> None:
+    boundary_policy = result.policy.boundaries.get(BOUNDARY)
+    if boundary_policy is None or not boundary_policy.audit_required:
+        return
+    memory_policy.append_policy_audits(
+        audit_path,
+        memory_policy.build_policy_audit_events(
+            boundary=BOUNDARY,
+            component=str(result.ledger_metadata["redaction_stage"]),
+            session_ref=session_ref,
+            policy=result.policy,
+            hits=result.hits,
+        ),
+    )
+
+
+def _replay_audit_path(out: Path) -> Path:
+    return out.with_name(f"{out.stem}.policy-audit.jsonl")

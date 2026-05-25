@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -195,6 +196,36 @@ class GitleaksTests(unittest.TestCase):
             raise FileNotFoundError("gitleaks")
         with self.assertRaises(mod.PolicyExecutionError):
             mod.run_gitleaks("content", runner=failing_runner)
+
+    def test_run_gitleaks_uses_os_temp_dir_not_current_worktree(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            cwd = Path.cwd()
+            observed: dict[str, object] = {}
+
+            def runner(args, **_kwargs):
+                source = Path(args[args.index("--source") + 1])
+                report = Path(args[args.index("--report-path") + 1])
+                observed["source"] = source
+                observed["report"] = report
+                observed["entries"] = sorted(path.name for path in root.iterdir())
+                report.write_text("[]", encoding="utf-8")
+                return mod.CompletedGitleaks(0, "", "")
+
+            os.chdir(root)
+            try:
+                hits = mod.run_gitleaks("safe text\n", runner=runner)
+            finally:
+                os.chdir(cwd)
+
+            self.assertEqual(hits, ())
+            self.assertEqual(observed["entries"], [])
+            source = observed["source"]
+            report = observed["report"]
+            self.assertFalse(source == root or root in source.parents)
+            self.assertFalse(report == root or root in report.parents)
+            self.assertEqual(sorted(path.name for path in root.iterdir()), [])
 
     def test_raw_to_distilled_gitleaks_only_hit_is_redacted(self):
         mod = load_policy(self)
@@ -427,6 +458,59 @@ class BoundaryTests(unittest.TestCase):
                 self.assertNotIn("safe text", stub_text)
         finally:
             boundary_mod.check_boundary = original_check_boundary
+
+    def test_process_queue_writes_safe_rule_level_audit_records(self):
+        mod = load_policy(self)
+        with temporary_directory() as tmp:
+            root = Path(tmp)
+            queue = root / "queue.json"
+            inbox = root / "inbox.md"
+            audit = root / "policy-audit.jsonl"
+            original_line = "token=ghp_1234567890abcdefghijklmnopqrstuv"
+            queue.write_text(f"safe line\n{original_line}\n", encoding="utf-8")
+
+            result = mod.process_queue_with_policy(
+                queue_path=queue,
+                inbox_path=inbox,
+                failed_dir=root / "_failed",
+                boundary="raw_to_distilled",
+                project_slug="_unknown",
+                session_ref="s1",
+                source_tool="codex",
+                gitleaks_runner=lambda *_a, **_k: mod.CompletedGitleaks(0, "[]", ""),
+                audit_path=audit,
+            )
+
+            self.assertEqual(result.status, "ok")
+            records = [json.loads(line) for line in audit.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(records), 1)
+            record = records[0]
+            self.assertEqual(
+                set(record),
+                {
+                    "action",
+                    "boundary",
+                    "component",
+                    "detector",
+                    "effective_policy_hash",
+                    "line_no",
+                    "policy_version",
+                    "rule_id",
+                    "session_ref",
+                    "ts",
+                },
+            )
+            self.assertEqual(record["boundary"], "raw_to_distilled")
+            self.assertEqual(record["component"], "importer")
+            self.assertEqual(record["session_ref"], "s1")
+            self.assertEqual(record["rule_id"], "github_pat")
+            self.assertEqual(record["detector"], "regex")
+            self.assertEqual(record["line_no"], 2)
+            self.assertEqual(record["action"], "redact")
+            audit_text = audit.read_text(encoding="utf-8")
+            self.assertNotIn("ghp_", audit_text)
+            self.assertNotIn(original_line, audit_text)
+            self.assertNotIn("safe line", audit_text)
 
     def test_publish_failure_unlinks_queue_and_writes_stub(self):
         mod = load_policy(self)

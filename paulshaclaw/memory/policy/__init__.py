@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .loader import is_rule_disabled, load_default_policy, load_policy
-from .audit import PolicyAuditEvent, append_policy_audit
+from .audit import PolicyAuditEvent, append_policy_audit, append_policy_audits, build_policy_audit_events
 from .boundary import (
     BoundaryResult,
     QueuePolicyResult,
@@ -47,6 +47,8 @@ __all__ = [
     "RedactionResult",
     "SecretRule",
     "append_policy_audit",
+    "append_policy_audits",
+    "build_policy_audit_events",
     "check_boundary",
     "classify_artifact",
     "handle_policy_failure",
