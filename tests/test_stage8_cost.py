@@ -994,6 +994,32 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.windows["five_hour"].used_percent, 5)
 
+    def test_collect_codex_rejects_non_exact_usage_urls_before_reading_or_sending_token(self) -> None:
+        unsafe_urls = [
+            "https://chatgpt.com/api/codex/usage;x=1",
+            "https://chatgpt.com/api/codex/usage?x=1",
+            "https://chatgpt.com/api/codex/usage#x",
+            "https://user:pass@chatgpt.com/api/codex/usage",
+            "https://chatgpt.com:444/api/codex/usage",
+        ]
+
+        for usage_url in unsafe_urls:
+            with self.subTest(usage_url=usage_url):
+                fetcher = Mock(side_effect=AssertionError("unsafe URL should not receive a bearer token"))
+                token_reader = Mock(return_value=("auth-file-token", "auth-file-account"))
+                provider = collect_codex(
+                    enabled=True,
+                    auth_path=Path("unused-auth.json"),
+                    usage_url=usage_url,
+                    fetcher=fetcher,
+                    token_reader=token_reader,
+                )
+
+                self.assertEqual(provider.source_status, "unknown")
+                self.assertEqual(provider.windows, {})
+                token_reader.assert_not_called()
+                fetcher.assert_not_called()
+
     def test_collect_codex_rejects_unsafe_usage_url_without_injected_fetcher(self) -> None:
         with self.scratch_tempdir() as tmpdir:
             auth = Path(tmpdir) / "auth.json"

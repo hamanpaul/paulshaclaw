@@ -218,6 +218,12 @@ def _is_safe_codex_usage_url(url: str) -> bool:
         parsed.scheme == "https"
         and parsed.hostname == "chatgpt.com"
         and parsed.path == "/api/codex/usage"
+        and parsed.params == ""
+        and parsed.query == ""
+        and parsed.fragment == ""
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.port in (None, 443)
     )
 
 
@@ -317,7 +323,7 @@ def collect_codex(
     resolved_token_reader = token_reader or _read_codex_token
 
     try:
-        if fetcher is None and not _is_safe_codex_usage_url(usage_url):
+        if not _is_safe_codex_usage_url(usage_url):
             raise ValueError("unsafe Codex usage URL")
         access_token, account_id = resolved_token_reader(resolved_auth_path)
         if not access_token or not account_id:
