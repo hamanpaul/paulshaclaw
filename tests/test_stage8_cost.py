@@ -1677,6 +1677,38 @@ class Stage8CacheTests(unittest.TestCase):
             mode = cache_dir.stat().st_mode & 0o777
             self.assertEqual(mode, 0o700)
 
+    @unittest.skipUnless(hasattr(os, "chmod"), "POSIX permission test requires chmod")
+    def test_lock_hardens_existing_cache_directory_to_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cost"
+            cache_dir.mkdir(mode=0o755)
+            os.chmod(cache_dir, 0o755)
+            cache = SnapshotCache(cache_dir, ttl_seconds=120)
+
+            with cache.lock() as acquired:
+                self.assertTrue(acquired)
+
+            mode = cache_dir.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o700)
+
+    @unittest.skipUnless(hasattr(os, "chmod"), "POSIX permission test requires chmod")
+    def test_write_raises_when_cache_directory_cannot_be_hardened(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cost"
+            cache_dir.mkdir(mode=0o755)
+            os.chmod(cache_dir, 0o755)
+            cache = SnapshotCache(cache_dir, ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+
+            with patch("paulshaclaw.cost.cache.os.chmod", side_effect=OSError("chmod denied")):
+                with self.assertRaises(OSError):
+                    cache.write(snapshot)
+
+            self.assertFalse(cache.snapshot_path.exists())
+
     def test_load_snapshot_payload_keeps_benign_note(self) -> None:
         payload = {
             "generated_at": "2026-04-29T15:00:00+08:00",
@@ -1867,6 +1899,43 @@ class Stage8CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(stdout.getvalue().strip(), "reused-stale-footer")
+        self.assertIn("stage8 cost status degraded: refresh failed", stderr.getvalue())
+
+    def test_status_main_degrades_from_config_when_refresh_fails_without_stale_cache(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=True)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "build_current_snapshot", side_effect=RuntimeError("refresh failed")),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())
         self.assertIn("stage8 cost status degraded: refresh failed", stderr.getvalue())
 
     def test_status_main_uses_fresh_cache_without_rebuild(self) -> None:

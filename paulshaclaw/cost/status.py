@@ -83,10 +83,12 @@ def main(argv: list[str] | None = None) -> int:
                     try:
                         snapshot = build_current_snapshot(config_path)
                     except Exception as error:
-                        if previous_snapshot is None:
-                            raise
                         degraded_error = error
-                        snapshot = _mark_snapshot_stale(previous_snapshot)
+                        snapshot = (
+                            _mark_snapshot_stale(previous_snapshot)
+                            if previous_snapshot is not None
+                            else _build_degraded_snapshot(config)
+                        )
                 else:
                     snapshot = (
                         _mark_snapshot_stale(previous_snapshot)

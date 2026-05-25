@@ -19,7 +19,8 @@ def _ensure_owner_only_dir(path: Path) -> None:
     try:
         os.chmod(path, 0o700)
     except OSError:
-        pass
+        if path.stat().st_mode & 0o777 != 0o700:
+            raise
 
 
 def _resolve_timezone(timezone: Any) -> tuple[str, ZoneInfo]:
