@@ -44,10 +44,14 @@ def normalize_remote(value: str | None) -> str:
     if "://" in normalized:
         parsed = urlsplit(normalized)
         try:
-            parsed.port
+            port = parsed.port
         except ValueError:
             return ""
         host = parsed.hostname or ""
+        if port and not (
+            parsed.scheme.lower() == "ssh" and host.lower() == "github.com" and port == 22
+        ):
+            host = f"{host}:{port}"
         normalized = "/".join(part for part in (host, parsed.path.lstrip("/")) if part)
     else:
         normalized = re.sub(r"^[^/@:]+@", "", normalized)
