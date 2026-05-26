@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from io import StringIO
 from pathlib import Path
@@ -22,7 +24,12 @@ from paulshaclaw.cost.cache import (
     load_snapshot_payload,
 )
 from paulshaclaw.cost import config as cost_config_module
-from paulshaclaw.cost.config import CostConfig, load_cost_config
+from paulshaclaw.cost.config import (
+    ClaudeProviderConfig,
+    CodexProviderConfig,
+    CostConfig,
+    load_cost_config,
+)
 from paulshaclaw.cost.formatter import classify_usage, format_footer
 from paulshaclaw.cost.models import (
     CopilotAccountUsage,
@@ -31,8 +38,10 @@ from paulshaclaw.cost.models import (
     UsageWindow,
 )
 from paulshaclaw.cost.providers import (
+    _claude_message_token_total,
     _read_local_observed_total,
     collect_all,
+    collect_claude,
     collect_codex,
     collect_copilot,
 )
@@ -133,6 +142,119 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cdx~", format_footer(snapshot, use_tmux_style=False))
 
+    def test_footer_marks_estimated_provider_with_question_suffix(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cc": ProviderSnapshot(
+                    source_status="estimated",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=35,
+                            reset_at=None,
+                            display_reset="2h",
+                        ),
+                    },
+                )
+            },
+        )
+
+        footer = format_footer(snapshot, use_tmux_style=False)
+
+        self.assertIn("cc? 5h:35%(2h) wk:--", footer)
+
+    def test_footer_uses_estimated_tmux_style(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cdx": ProviderSnapshot(
+                    source_status="estimated",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=91,
+                            reset_at=None,
+                            display_reset="1h",
+                        ),
+                    },
+                )
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("cdx?", footer)
+        self.assertIn("#[fg=magenta]91%(1h)#[default]", footer)
+        self.assertNotIn("#[fg=red]91%(1h)#[default]", footer)
+
+    def test_footer_uses_estimated_tmux_style_for_copilot_account(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cpt": ProviderSnapshot(
+                    source_status="estimated",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "hamanpaul",
+                            "haman",
+                            "personal",
+                            724,
+                            1500,
+                            "local_observed",
+                        ),
+                    ),
+                ),
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("cpt?", footer)
+        self.assertIn("#[fg=magenta]haman:724#[default]", footer)
+        self.assertNotIn("#[fg=green]haman:724#[default]", footer)
+
+    def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cpt": ProviderSnapshot(
+                    source_status="fresh",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "fresh-user",
+                            "fresh",
+                            "personal",
+                            42,
+                            1500,
+                            "github_user_billing",
+                        ),
+                        CopilotAccountUsage(
+                            "local-user",
+                            "local",
+                            "personal",
+                            724,
+                            1500,
+                            "local_observed",
+                        ),
+                    ),
+                ),
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("cpt?", footer)
+        self.assertIn("#[fg=green]fresh:42#[default]", footer)
+        self.assertIn("#[fg=magenta]local:724#[default]", footer)
+        self.assertNotIn("#[fg=green]local:724#[default]", footer)
+
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
             generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
@@ -207,6 +329,19 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.addCleanup(path.unlink, missing_ok=True)
         return path
 
+    def scratch_tempdir(self) -> tempfile.TemporaryDirectory[str]:
+        scratch_root = Path(__file__).resolve().parents[1] / ".test-tmp"
+        scratch_root.mkdir(exist_ok=True)
+        env_tmpdir = os.environ.get("TMPDIR")
+
+        def cleanup_scratch_root() -> None:
+            with contextlib.suppress(OSError):
+                scratch_root.rmdir()
+
+        if not env_tmpdir or Path(env_tmpdir).resolve() != scratch_root.resolve():
+            self.addCleanup(cleanup_scratch_root)
+        return tempfile.TemporaryDirectory(dir=scratch_root)
+
     def test_cost_config_defaults(self) -> None:
         path = self.write_config(
             """
@@ -226,7 +361,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(cfg.critical_percent, 90)
         self.assertEqual(cfg.copilot_accounts, ())
 
-    def test_cost_config_uses_builtin_defaults_when_runtime_config_missing(self) -> None:
+    def test_cost_config_falls_back_to_sample_when_runtime_config_missing(self) -> None:
         with (
             patch.object(cost_config_module, "DEFAULT_CONFIG_PATH", Path("missing-cost-config.yaml")),
             patch.dict("os.environ", {}, clear=True),
@@ -234,7 +369,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             cfg = load_cost_config()
 
         self.assertEqual(cfg.timezone, "Asia/Taipei")
-        self.assertEqual(cfg.copilot_accounts, ())
+        self.assertEqual([account.label for account in cfg.copilot_accounts], ["haman", "arc"])
 
     def test_copilot_accounts_are_config_driven(self) -> None:
         path = self.write_config(
@@ -286,6 +421,101 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(cfg.copilot_accounts[0].label, "default-user")
         self.assertEqual(cfg.copilot_accounts[0].kind, "personal")
 
+    def test_claude_and_codex_provider_config_are_parsed(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                claude:
+                  statusline_sidecar: /tmp/claude-rate.json
+                  max_age_seconds: 90
+                  local_fallback: true
+                codex:
+                  enabled: true
+                  auth_path: /tmp/codex-auth.json
+                  usage_url: https://chatgpt.com/api/codex/usage
+                  max_age_seconds: 45
+                  local_fallback: true
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertEqual(cfg.claude.statusline_sidecar, Path("/tmp/claude-rate.json"))
+        self.assertEqual(cfg.claude.max_age_seconds, 90)
+        self.assertTrue(cfg.claude.local_fallback)
+        self.assertTrue(cfg.codex.enabled)
+        self.assertEqual(cfg.codex.auth_path, Path("/tmp/codex-auth.json"))
+        self.assertEqual(cfg.codex.usage_url, "https://chatgpt.com/api/codex/usage")
+        self.assertEqual(cfg.codex.max_age_seconds, 45)
+        self.assertTrue(cfg.codex.local_fallback)
+
+    def test_claude_and_codex_provider_config_defaults_are_safe(self) -> None:
+        cfg = CostConfig()
+
+        self.assertIsInstance(cfg.claude, ClaudeProviderConfig)
+        self.assertIsInstance(cfg.codex, CodexProviderConfig)
+        self.assertEqual(
+            cfg.claude.statusline_sidecar,
+            Path("~/.agents/state/cost/claude_rate_limits.json").expanduser(),
+        )
+        self.assertTrue(cfg.codex.enabled)
+        self.assertEqual(cfg.codex.auth_path, Path("~/.codex/auth.json").expanduser())
+
+    def test_load_cost_config_defaults_provider_sections_when_omitted(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts: []
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertIsInstance(cfg.claude, ClaudeProviderConfig)
+        self.assertIsInstance(cfg.codex, CodexProviderConfig)
+        self.assertEqual(
+            cfg.claude.statusline_sidecar,
+            Path("~/.agents/state/cost/claude_rate_limits.json").expanduser(),
+        )
+        self.assertEqual(cfg.claude.max_age_seconds, 300)
+        self.assertFalse(cfg.claude.local_fallback)
+        self.assertTrue(cfg.codex.enabled)
+        self.assertEqual(cfg.codex.auth_path, Path("~/.codex/auth.json").expanduser())
+        self.assertEqual(cfg.codex.usage_url, "https://chatgpt.com/api/codex/usage")
+        self.assertEqual(cfg.codex.max_age_seconds, 300)
+        self.assertFalse(cfg.codex.local_fallback)
+
+    def test_claude_and_codex_provider_config_parse_string_booleans(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                claude:
+                  local_fallback: "yes"
+                codex:
+                  enabled: "false"
+                  local_fallback: "off"
+            """
+        )
+
+        cfg = load_cost_config(config_path=path)
+
+        self.assertTrue(cfg.claude.local_fallback)
+        self.assertFalse(cfg.codex.enabled)
+        self.assertFalse(cfg.codex.local_fallback)
+
     def test_collect_copilot_uses_injected_fetcher_before_local_fallback(self) -> None:
         path = self.write_config(
             """
@@ -314,23 +544,17 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.accounts[0].used_requests, 724)
         self.assertEqual(provider.accounts[0].source, "github_user_billing")
 
-    def test_collect_copilot_marks_local_observed_fallback(self) -> None:
-        path = self.write_config(
-            """
-            workspaces:
-              - path: /tmp/ws
-                name: ws
-            cost:
-              providers:
-                copilot:
-                  accounts:
-                    - id: local-user
-                      label: local
-                      kind: personal
-                      monthly_allowance: 100
-            """
+    def test_collect_copilot_marks_local_observed_provider_estimated(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="local-user",
+                    label="local",
+                    kind="personal",
+                    monthly_allowance=100,
+                ),
+            )
         )
-        cfg = load_cost_config(config_path=path)
 
         def fetcher(account):
             raise RuntimeError("network unavailable")
@@ -341,9 +565,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             local_observed={"local-user": 12},
         )
 
-        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.accounts[0].source, "local_observed")
-        self.assertEqual(provider.accounts[0].used_requests, 12)
 
     def test_collect_copilot_fetches_runtime_personal_usage_without_injected_fetcher(self) -> None:
         path = self.write_config(
@@ -384,6 +607,38 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIn("year=", request_url)
         self.assertIn("month=", request_url)
         self.assertEqual(request_headers["Authorization"], "Bearer secret-token")
+
+    def test_collect_copilot_runtime_uses_attributed_local_fallback(self) -> None:
+        path = self.write_config(
+            """
+            workspaces:
+              - path: /tmp/ws
+                name: ws
+            cost:
+              providers:
+                copilot:
+                  accounts:
+                    - id: hamanpaul
+                      label: haman
+                      kind: personal
+                      monthly_allowance: 1500
+            """
+        )
+        cfg = load_cost_config(config_path=path)
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch(
+                "paulshaclaw.cost.providers._collect_local_observed_usage",
+                return_value={"hamanpaul": 12},
+            ) as local_mock,
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.accounts[0].source, "local_observed")
+        self.assertEqual(provider.accounts[0].used_requests, 12)
+        local_mock.assert_called_once_with({"hamanpaul"})
 
     def test_collect_copilot_fetches_runtime_enterprise_usage_without_injected_fetcher(self) -> None:
         path = self.write_config(
@@ -443,7 +698,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
             patch(
                 "paulshaclaw.cost.providers._collect_local_observed_usage",
-                return_value={"hamanpaul": 12},
+                return_value={"other-user": 12},
             ) as local_mock,
         ):
             provider = collect_copilot(cfg)
@@ -451,19 +706,99 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.accounts[0].source, "unknown")
         self.assertIsNone(provider.accounts[0].used_requests)
-        local_mock.assert_not_called()
+        local_mock.assert_called_once_with({"hamanpaul"})
 
-    def test_read_local_observed_total_parses_real_shutdown_event_shape(self) -> None:
+    def test_collect_copilot_marks_unknown_when_gh_is_missing_during_local_fallback(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            )
+        )
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch("paulshaclaw.cost.providers.subprocess.run", side_effect=FileNotFoundError("gh")),
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.accounts[0].source, "unknown")
+        self.assertIsNone(provider.accounts[0].used_requests)
+
+    def test_read_local_observed_total_counts_current_month_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
             root.mkdir(parents=True)
             (root / "events.jsonl").write_text(
                 "\n".join(
                     [
-                        json.dumps({"type": "session.start", "data": {"context": {"cwd": "/tmp/ws"}}}),
-                        json.dumps({"type": "session.shutdown", "data": {"totalPremiumRequests": 5}}),
-                        json.dumps({"type": "session.shutdown", "data": {"totalPremiumRequests": 7}}),
+                        json.dumps(
+                            {
+                                "type": "session.shutdown",
+                                "timestamp": "2026-04-30T23:59:00Z",
+                                "data": {"totalPremiumRequests": 99},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "session.shutdown",
+                                "timestamp": "2026-05-01T00:01:00Z",
+                                "data": {"totalPremiumRequests": 5},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "session.shutdown",
+                                "timestamp": "2026-05-20T12:00:00Z",
+                                "data": {"totalPremiumRequests": 7},
+                            }
+                        ),
                     ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
+                total = _read_local_observed_total(year=2026, month=5)
+
+        self.assertEqual(total, 12)
+
+    def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
+            root.mkdir(parents=True)
+            (root / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session.shutdown",
+                        "data": {"totalPremiumRequests": 12},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
+                total = _read_local_observed_total(year=2026, month=5)
+
+        self.assertEqual(total, 0)
+
+    def test_read_local_observed_total_counts_timestamp_less_shutdowns_without_explicit_filter(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
+            root.mkdir(parents=True)
+            (root / "events.jsonl").write_text(
+                json.dumps(
+                    {
+                        "type": "session.shutdown",
+                        "data": {"totalPremiumRequests": 12},
+                    }
                 )
                 + "\n",
                 encoding="utf-8",
@@ -503,7 +838,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.accounts[0].source, "github_user_billing")
         self.assertEqual(provider.accounts[1].source, "unknown")
 
-    def test_collect_copilot_keeps_stale_status_when_other_accounts_are_unknown(self) -> None:
+    def test_collect_copilot_keeps_estimated_status_when_other_accounts_are_unknown(self) -> None:
         path = self.write_config(
             """
             workspaces:
@@ -530,11 +865,11 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             local_observed={"local-user": 12},
         )
 
-        self.assertEqual(provider.source_status, "stale")
+        self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.accounts[0].source, "local_observed")
         self.assertEqual(provider.accounts[1].source, "unknown")
 
-    def test_collect_copilot_prefers_fresh_over_stale_and_unknown(self) -> None:
+    def test_collect_copilot_prefers_fresh_over_estimated_and_unknown(self) -> None:
         path = self.write_config(
             """
             workspaces:
@@ -572,14 +907,29 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         )
 
     def test_collect_all_omits_copilot_when_no_accounts_are_configured(self) -> None:
-        cfg = CostConfig()
+        cfg = CostConfig(codex=CodexProviderConfig(enabled=False))
 
-        providers = collect_all(cfg)
+        with (
+            patch(
+                "paulshaclaw.cost.providers.collect_codex",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_claude",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_copilot",
+                return_value=ProviderSnapshot(source_status="unknown", accounts=()),
+            ),
+        ):
+            providers = collect_all(cfg)
 
         self.assertEqual(set(providers), {"cdx", "cc"})
 
     def test_collect_all_includes_copilot_when_accounts_are_configured(self) -> None:
         cfg = CostConfig(
+            codex=CodexProviderConfig(enabled=False),
             copilot_accounts=(
                 load_cost_config(
                     config_path=self.write_config(
@@ -599,16 +949,674 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             )
         )
 
-        providers = collect_all(cfg)
+        with (
+            patch(
+                "paulshaclaw.cost.providers.collect_codex",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_claude",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ),
+            patch(
+                "paulshaclaw.cost.providers.collect_copilot",
+                return_value=ProviderSnapshot(
+                    source_status="fresh",
+                    accounts=(
+                        CopilotAccountUsage(
+                            account_id="fresh-user",
+                            label="fresh",
+                            kind="personal",
+                            used_requests=42,
+                            monthly_allowance=None,
+                            source="test_stub",
+                        ),
+                    ),
+                ),
+            ),
+        ):
+            providers = collect_all(cfg)
 
         self.assertEqual(set(providers), {"cdx", "cc", "cpt"})
         self.assertEqual(providers["cpt"].accounts[0].account_id, "fresh-user")
+
+    def test_collect_all_passes_claude_and_codex_config(self) -> None:
+        cfg = CostConfig(
+            timezone="UTC",
+            claude=ClaudeProviderConfig(
+                statusline_sidecar=Path("/tmp/claude.json"),
+                max_age_seconds=12,
+                local_fallback=True,
+            ),
+            codex=CodexProviderConfig(
+                enabled=False,
+                auth_path=Path("/tmp/codex.json"),
+                usage_url="https://example.invalid/usage",
+                max_age_seconds=34,
+                local_fallback=True,
+            ),
+        )
+
+        with (
+            patch(
+                "paulshaclaw.cost.providers.collect_claude",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ) as claude,
+            patch(
+                "paulshaclaw.cost.providers.collect_codex",
+                return_value=ProviderSnapshot(source_status="unknown", windows={}),
+            ) as codex,
+            patch(
+                "paulshaclaw.cost.providers.collect_copilot",
+                return_value=ProviderSnapshot(source_status="unknown", accounts=()),
+            ),
+        ):
+            collect_all(cfg)
+
+        claude.assert_called_once_with(
+            statusline_sidecar=Path("/tmp/claude.json"),
+            max_age_seconds=12,
+            local_fallback=True,
+            timezone="UTC",
+        )
+        codex.assert_called_once_with(
+            enabled=False,
+            auth_path=Path("/tmp/codex.json"),
+            usage_url="https://example.invalid/usage",
+            max_age_seconds=34,
+            local_fallback=True,
+            timezone="UTC",
+        )
 
     def test_collect_codex_does_not_estimate_missing_quota_windows(self) -> None:
         provider = collect_codex()
 
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.windows, {})
+
+    def test_collect_codex_parses_quota_payload(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23,
+                    "reset_at": 1777447260,
+                },
+                "secondary_window": {
+                    "used_percent": 41,
+                    "reset_at": 1777696800,
+                },
+            }
+        }
+
+        provider = collect_codex(
+            enabled=True,
+            auth_path=Path("/tmp/auth.json"),
+            usage_url="https://chatgpt.com/api/codex/usage",
+            fetcher=lambda url, headers: payload,
+            token_reader=lambda path: ("access-token", "account-id"),
+            now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+        )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 23)
+        self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+        self.assertEqual(provider.windows["weekly"].used_percent, 41)
+        self.assertEqual(provider.windows["weekly"].display_reset, "3d")
+
+    def test_collect_codex_rejects_trusted_payload_missing_secondary_window(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23,
+                    "reset_at": 1777447260,
+                },
+            }
+        }
+
+        provider = collect_codex(
+            enabled=True,
+            auth_path=Path("missing-auth.json"),
+            usage_url="https://chatgpt.com/api/codex/usage",
+            fetcher=lambda url, headers: payload,
+            token_reader=lambda path: ("access-token", "account-id"),
+            now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+        )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_codex_reads_real_auth_file_for_runtime_headers(self) -> None:
+        payload = {
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 23,
+                    "reset_at": 1777447260,
+                },
+                "secondary_window": {
+                    "used_percent": 41,
+                    "reset_at": 1777696800,
+                },
+            }
+        }
+        captured_headers: list[Mapping[str, str]] = []
+
+        def fetcher(url: str, headers: Mapping[str, str]) -> dict[str, object]:
+            captured_headers.append(headers)
+            return payload
+
+        with self.scratch_tempdir() as tmpdir:
+            auth = Path(tmpdir) / "auth.json"
+            auth.write_text(
+                json.dumps(
+                    {
+                        "access_token": "auth-file-token",
+                        "account_id": "auth-file-account",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=auth,
+                usage_url="https://chatgpt.com/api/codex/usage",
+                fetcher=fetcher,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(captured_headers[0]["Authorization"], "Bearer auth-file-token")
+        self.assertEqual(captured_headers[0]["ChatGPT-Account-ID"], "auth-file-account")
+
+    def test_collect_codex_falls_back_to_estimated_local_tokens(self) -> None:
+        scratch_root = Path(__file__).resolve().parents[1] / ".test-tmp"
+        scratch_root.mkdir(exist_ok=True)
+        env_tmpdir = os.environ.get("TMPDIR")
+
+        def cleanup_scratch_root() -> None:
+            with contextlib.suppress(OSError):
+                scratch_root.rmdir()
+
+        if not env_tmpdir or Path(env_tmpdir).resolve() != scratch_root.resolve():
+            self.addCleanup(cleanup_scratch_root)
+
+        with tempfile.TemporaryDirectory(dir=scratch_root) as tmpdir:
+            sessions = Path(tmpdir) / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                json.dumps(
+                    {
+                        "payload": {
+                            "type": "token_count",
+                            "total_token_usage": {"total_tokens": 50000},
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=Path(tmpdir) / "missing-auth.json",
+                local_fallback=True,
+                codex_home=Path(tmpdir) / ".codex",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 5)
+        self.assertEqual(provider.note, "local Codex token estimate")
+
+    def test_collect_codex_falls_back_to_nested_event_msg_payload_tokens(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                json.dumps(
+                    {
+                        "event_msg": {
+                            "payload": {
+                                "type": "token_count",
+                                "total_token_usage": {"total_tokens": 20000},
+                            }
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=Path(tmpdir) / "missing-auth.json",
+                local_fallback=True,
+                codex_home=Path(tmpdir) / ".codex",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 2)
+
+    def test_collect_codex_sums_per_session_file_max_token_counts(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / ".codex" / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "a.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps({"payload": {"type": "token_count", "total_tokens": 10000}}),
+                        json.dumps({"payload": {"type": "token_count", "total_tokens": 30000}}),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (sessions / "b.jsonl").write_text(
+                json.dumps({"payload": {"type": "token_count", "total_tokens": 20000}}) + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_codex(
+                enabled=True,
+                auth_path=Path(tmpdir) / "missing-auth.json",
+                local_fallback=True,
+                codex_home=Path(tmpdir) / ".codex",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 5)
+
+    def test_collect_codex_rejects_non_exact_usage_urls_before_reading_or_sending_token(self) -> None:
+        unsafe_urls = [
+            "https://chatgpt.com/api/codex/usage;x=1",
+            "https://chatgpt.com/api/codex/usage?x=1",
+            "https://chatgpt.com/api/codex/usage#x",
+            "https://user:pass@chatgpt.com/api/codex/usage",
+            "https://chatgpt.com:444/api/codex/usage",
+        ]
+
+        for usage_url in unsafe_urls:
+            with self.subTest(usage_url=usage_url):
+                fetcher = Mock(side_effect=AssertionError("unsafe URL should not receive a bearer token"))
+                token_reader = Mock(return_value=("auth-file-token", "auth-file-account"))
+                provider = collect_codex(
+                    enabled=True,
+                    auth_path=Path("unused-auth.json"),
+                    usage_url=usage_url,
+                    fetcher=fetcher,
+                    token_reader=token_reader,
+                )
+
+                self.assertEqual(provider.source_status, "unknown")
+                self.assertEqual(provider.windows, {})
+                token_reader.assert_not_called()
+                fetcher.assert_not_called()
+
+    def test_collect_codex_rejects_unsafe_usage_url_without_injected_fetcher(self) -> None:
+        with self.scratch_tempdir() as tmpdir:
+            auth = Path(tmpdir) / "auth.json"
+            auth.write_text(
+                json.dumps(
+                    {
+                        "access_token": "auth-file-token",
+                        "account_id": "auth-file-account",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch(
+                "paulshaclaw.cost.providers._fetch_codex_usage",
+                side_effect=AssertionError("unsafe URL should not be fetched"),
+            ) as fetch_mock:
+                provider = collect_codex(
+                    enabled=True,
+                    auth_path=auth,
+                    usage_url="https://example.com/api/codex/usage",
+                )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+        fetch_mock.assert_not_called()
+
+    def test_collect_codex_unknown_when_disabled_or_no_data(self) -> None:
+        provider = collect_codex(enabled=False)
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_claude_parses_statusline_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": 1777447260,
+                            },
+                            "seven_day": {
+                                "used_percentage": 41,
+                                "resets_at": 1777696800,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 18)
+        self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+        self.assertEqual(provider.windows["weekly"].used_percent, 41)
+        self.assertEqual(provider.windows["weekly"].display_reset, "3d")
+
+    def test_collect_claude_parses_statusline_sidecar_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percent": "100.6",
+                                "reset_at": 1777447260,
+                            },
+                            "seven_day": {
+                                "used_percent": 40.6,
+                                "reset_at": 1777696800,
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 100)
+        self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+        self.assertEqual(provider.windows["weekly"].used_percent, 41)
+        self.assertEqual(provider.windows["weekly"].display_reset, "3d")
+
+    def test_collect_claude_ignores_overflowing_sidecar_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": 10**20,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                local_fallback=False,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_claude_ignores_negative_sidecar_reset(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": -86400,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                local_fallback=False,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_collect_claude_displays_close_cross_midnight_reset_as_local_clock(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            reset_at = datetime(2026, 4, 30, 0, 15, tzinfo=ZoneInfo("Asia/Taipei"))
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": reset_at.timestamp(),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 23, 30, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.windows["five_hour"].display_reset, "00:15")
+
+    def test_collect_claude_unknown_when_sidecar_missing(self) -> None:
+        provider = collect_claude(
+            statusline_sidecar=Path("missing-claude-rate-limits.json"),
+            local_fallback=False,
+        )
+
+        self.assertEqual(provider.source_status, "unknown")
+        self.assertEqual(provider.windows, {})
+
+    def test_claude_message_token_total_excludes_local_metadata(self) -> None:
+        usage = {"input_tokens": 1000, "output_tokens": 1000}
+
+        self.assertEqual(
+            _claude_message_token_total(
+                {
+                    "model": "claude-sonnet-4.5",
+                    "provider": "local",
+                    "usage": usage,
+                }
+            ),
+            0,
+        )
+        self.assertEqual(
+            _claude_message_token_total(
+                {
+                    "model": "claude-sonnet-4.5",
+                    "source": "local",
+                    "usage": usage,
+                }
+            ),
+            0,
+        )
+
+    def test_collect_claude_estimated_fallback_excludes_gemma4(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "usage": {"input_tokens": 50, "output_tokens": 50},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "gemma4-31b-mtp",
+                                    "usage": {"input_tokens": 1000, "output_tokens": 1000},
+                                }
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=Path(tmpdir) / "missing.json",
+                local_fallback=True,
+                claude_home=Path(tmpdir) / ".claude",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 1)
+        self.assertEqual(provider.note, "local Claude Code token estimate")
+
+    def test_collect_claude_estimated_fallback_excludes_vllm_openai_compatible_and_local_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "usage": {"input_tokens": 15000, "output_tokens": 5000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "provider": "vllm",
+                                    "base_url": "http://localhost:8000/v1",
+                                    "usage": {"input_tokens": 900000, "output_tokens": 900000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "source": "openai-compatible",
+                                    "api_base": "http://localhost:8001/v1",
+                                    "usage": {"input_tokens": 800000, "output_tokens": 800000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "provider": "local",
+                                    "usage": {"input_tokens": 700000, "output_tokens": 300000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "source": "local",
+                                    "usage": {"input_tokens": 600000, "output_tokens": 400000},
+                                }
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=Path(tmpdir) / "missing.json",
+                local_fallback=True,
+                claude_home=Path(tmpdir) / ".claude",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 2)
+
+    def test_collect_claude_estimated_fallback_excludes_localhost_provider_and_source_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
+            sessions.mkdir(parents=True)
+            (sessions / "session.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "usage": {"input_tokens": 15000, "output_tokens": 5000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "provider": "localhost",
+                                    "usage": {"input_tokens": 900000, "output_tokens": 900000},
+                                }
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "message": {
+                                    "model": "claude-sonnet-4.5",
+                                    "source": "127.0.0.1",
+                                    "usage": {"input_tokens": 800000, "output_tokens": 800000},
+                                }
+                            }
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=Path(tmpdir) / "missing.json",
+                local_fallback=True,
+                claude_home=Path(tmpdir) / ".claude",
+            )
+
+        self.assertEqual(provider.source_status, "estimated")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 2)
 
 
 class Stage8CacheTests(unittest.TestCase):
@@ -693,6 +1701,53 @@ class Stage8CacheTests(unittest.TestCase):
             content = cache.snapshot_path.read_text(encoding="utf-8")
             self.assertIn('\n  "generated_at"', content)
             self.assertTrue(content.endswith("\n"))
+
+    @unittest.skipUnless(hasattr(os, "chmod"), "POSIX permission test requires chmod")
+    def test_cache_directory_is_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cost"
+            cache = SnapshotCache(cache_dir, ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+
+            cache.write(snapshot)
+
+            mode = cache_dir.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o700)
+
+    @unittest.skipUnless(hasattr(os, "chmod"), "POSIX permission test requires chmod")
+    def test_lock_hardens_existing_cache_directory_to_owner_only(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cost"
+            cache_dir.mkdir(mode=0o755)
+            os.chmod(cache_dir, 0o755)
+            cache = SnapshotCache(cache_dir, ttl_seconds=120)
+
+            with cache.lock() as acquired:
+                self.assertTrue(acquired)
+
+            mode = cache_dir.stat().st_mode & 0o777
+            self.assertEqual(mode, 0o700)
+
+    @unittest.skipUnless(hasattr(os, "chmod"), "POSIX permission test requires chmod")
+    def test_write_raises_when_cache_directory_cannot_be_hardened(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_dir = Path(tmpdir) / "cost"
+            cache_dir.mkdir(mode=0o755)
+            os.chmod(cache_dir, 0o755)
+            cache = SnapshotCache(cache_dir, ttl_seconds=120)
+            snapshot = build_snapshot(
+                timezone="Asia/Taipei",
+                providers={"cdx": ProviderSnapshot(source_status="unknown", windows={})},
+            )
+
+            with patch("paulshaclaw.cost.cache.os.chmod", side_effect=OSError("chmod denied")):
+                with self.assertRaises(OSError):
+                    cache.write(snapshot)
+
+            self.assertFalse(cache.snapshot_path.exists())
 
     def test_load_snapshot_payload_keeps_benign_note(self) -> None:
         payload = {
@@ -886,6 +1941,43 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue().strip(), "reused-stale-footer")
         self.assertIn("stage8 cost status degraded: refresh failed", stderr.getvalue())
 
+    def test_status_main_degrades_from_config_when_refresh_fails_without_stale_cache(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=True)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "build_current_snapshot", side_effect=RuntimeError("refresh failed")),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("stage8 cost status degraded: refresh failed", stderr.getvalue())
+
     def test_status_main_uses_fresh_cache_without_rebuild(self) -> None:
         config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
         snapshot = self._snapshot()
@@ -972,3 +2064,69 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(rendered_snapshot.cache_status, "stale")
         self.assertEqual(rendered_snapshot.providers["cdx"].source_status, "unknown")
         self.assertEqual(rendered_snapshot.providers["cc"].source_status, "unknown")
+
+    def test_status_main_degraded_snapshot_keeps_configured_copilot_accounts(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        lock_cm = Mock()
+        lock_cm.__enter__ = Mock(return_value=False)
+        lock_cm.__exit__ = Mock(return_value=False)
+        cache.lock.return_value = lock_cm
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())
+
+    def test_status_main_degraded_snapshot_keeps_copilot_accounts_when_lock_raises(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        cache.lock.side_effect = OSError("chmod denied")
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = cost_status_cli.main(["--plain"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("stage8 cost status degraded: chmod denied", stderr.getvalue())
