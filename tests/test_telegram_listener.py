@@ -19,6 +19,8 @@ from paulshaclaw.bot.listener import (
     load_config,
     validate_bot_identity,
 )
+from paulshaclaw.bot.telegram import TelegramCommandRouter
+from paulshaclaw.core.command_registry import load_default_command_registry
 
 
 class FakeResponse:
@@ -263,6 +265,90 @@ class BotSettingsTests(unittest.TestCase):
 
 
 class TelegramListenerTests(unittest.TestCase):
+    def test_command_router_formats_agent_status_and_actions(self) -> None:
+        class AgentCommandDaemon:
+            def __init__(self, response: dict[str, object]) -> None:
+                self.config = mock.Mock(allowed_user_ids={7})
+                self.response = response
+                self.calls: list[str] = []
+
+            def handle_command(self, command: str) -> dict[str, object]:
+                self.calls.append(command)
+                return self.response
+
+        cases = [
+            (
+                "/agent status",
+                {"ok": True, "kind": "agent", "state": "running", "running": True, "pane_id": "%9", "pid": 4242},
+                "agent: running\npane: %9\npid: 4242",
+            ),
+            (
+                "/agent status",
+                {"ok": True, "kind": "agent", "state": "stopped", "running": False},
+                "agent: stopped",
+            ),
+            (
+                "/agent start",
+                {
+                    "ok": True,
+                    "kind": "agent",
+                    "state": "running",
+                    "running": True,
+                    "pane_id": "%10",
+                    "started": True,
+                },
+                "agent: started\npane: %10",
+            ),
+            (
+                "/agent start",
+                {
+                    "ok": True,
+                    "kind": "agent",
+                    "state": "running",
+                    "running": True,
+                    "pane_id": "%9",
+                    "pid": 4242,
+                    "already_running": True,
+                },
+                "agent: already_running\npane: %9\npid: 4242",
+            ),
+            (
+                "/agent stop",
+                {
+                    "ok": True,
+                    "kind": "agent",
+                    "state": "stopped",
+                    "running": False,
+                    "pane_id": "%9",
+                    "pid": 4242,
+                    "stopped": True,
+                },
+                "agent: stopped\npane: %9\npid: 4242",
+            ),
+            (
+                "/agent stop",
+                {
+                    "ok": True,
+                    "kind": "agent",
+                    "state": "stopped",
+                    "running": False,
+                    "already_stopped": True,
+                },
+                "agent: already_stopped",
+            ),
+        ]
+
+        for command, response, expected_message in cases:
+            with self.subTest(command=command):
+                daemon = AgentCommandDaemon(response)
+                router = TelegramCommandRouter(daemon=daemon)
+
+                result = router.handle_message(user_id=7, text=command)
+
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["message"], expected_message)
+                self.assertEqual(daemon.calls, [command])
+
     def test_authorized_text_routing_sends_single_reply(self) -> None:
         client = RecordingClient([])
         router = FakeRouter({"ok": True, "message": "已派工 local-1 -> task-1", "result": {"job_id": "local-1"}})
@@ -651,7 +737,7 @@ class ListenerMainTests(unittest.TestCase):
         fake_listener = mock.Mock()
         fake_client = mock.Mock()
         fake_client.set_my_commands.return_value = None
-        fake_commands = [{"command": "tmate", "description": "管理 tmate remote access"}]
+        fake_commands = load_default_command_registry().telegram_commands()
         parent = mock.Mock()
         parent.attach_mock(fake_client, "client")
         parent.attach_mock(fake_listener, "listener")
@@ -671,6 +757,7 @@ class ListenerMainTests(unittest.TestCase):
         api_client.assert_called_once_with("fake-token")
         validate_identity.assert_called_once()
         fake_client.set_my_commands.assert_called_once_with(fake_commands)
+        self.assertIn({"command": "agent", "description": "管理 claude-gemma4 agent"}, fake_commands)
         build_listener_mock.assert_called_once()
         self.assertEqual(build_listener_mock.call_args.kwargs["config_path"], None)
         self.assertEqual(build_listener_mock.call_args.kwargs["poll_timeout"], 30)

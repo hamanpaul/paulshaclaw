@@ -424,7 +424,7 @@ class Stage1SmokeTest(unittest.TestCase):
         daemon._agent_pane_id = "%9"
 
         with (
-            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch.object(daemon, "_detect_agent_process", side_effect=[("%9", 4242), None]) as detect_mock,
             mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True, "pane_id": "%9", "sent": "exit"}) as send_mock,
         ):
             result = daemon.handle_command("/agent stop")
@@ -437,6 +437,28 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertEqual(result["pid"], 4242)
         self.assertIsNone(daemon._agent_pane_id)
         send_mock.assert_called_once_with("%9", "exit")
+        self.assertEqual(detect_mock.call_count, 2)
+
+    def test_agent_stop_reports_running_when_exit_does_not_take_effect_immediately(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._agent_pane_id = "%9"
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", side_effect=[("%9", 4242), ("%9", 4242), ("%9", 4242)]) as detect_mock,
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True, "pane_id": "%9", "sent": "exit"}) as send_mock,
+        ):
+            result = daemon.handle_command("/agent stop")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "running")
+        self.assertTrue(result["running"])
+        self.assertNotIn("stopped", result)
+        self.assertEqual(result["pane_id"], "%9")
+        self.assertEqual(result["pid"], 4242)
+        self.assertEqual(daemon._agent_pane_id, "%9")
+        send_mock.assert_called_once_with("%9", "exit")
+        self.assertEqual(detect_mock.call_count, 3)
 
     def test_agent_stop_returns_already_stopped_when_no_agent_exists(self) -> None:
         config_path = self.make_config_path()

@@ -19,6 +19,25 @@ def _format_message(result: dict[str, object]) -> str:
                 ]
             )
         return f"tmate: {state}"
+    if result.get("kind") == "agent":
+        if result.get("already_running"):
+            title = "agent: already_running"
+        elif result.get("already_stopped"):
+            title = "agent: already_stopped"
+        elif result.get("started"):
+            title = "agent: started"
+        elif result.get("stopped"):
+            title = "agent: stopped"
+        else:
+            title = f"agent: {result.get('state', 'unknown')}"
+
+        lines = [title]
+        pane_id = result.get("pane_id")
+        if pane_id:
+            lines.append(f"pane: {pane_id}")
+        if "pid" in result and result.get("pid") is not None:
+            lines.append(f"pid: {result['pid']}")
+        return "\n".join(lines)
     if "sent" in result:
         return f"已送出 -> {result['pane_id']}\n{result['sent']}"
     if "daemon" in result:

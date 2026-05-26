@@ -37,10 +37,12 @@
 
 ## 6. Telegram 指令格式化與 menu 更新
 
-- [ ] 6.1 在 `telegram.py` 的 `_format_message` 中新增 `/agent` 回覆格式化邏輯
-- [ ] 6.2 確認 Telegram command menu 同步包含新的 `/agent` 指令
+- [x] 6.1 在 `telegram.py` 的 `_format_message` 中新增 `/agent` 回覆格式化邏輯
+- [x] 6.2 確認 Telegram command menu 同步包含新的 `/agent` 指令
 
 ## 7. 整合驗證
 
-- [ ] 7.1 全量 pytest 通過（baseline 419 tests 扣除移除的 chat 測試，加上新增的 agent 測試）
-- [ ] 7.2 手動驗證：啟動 start.sh → `/agent start` → 送非指令文字 → 確認 claude-gemma4 收到並透過 bro 回覆 → `/agent stop`
+- [x] 7.1 全量 pytest 通過（baseline 419 tests 扣除移除的 chat 測試，加上新增的 agent 測試）
+  - 驗證紀錄：`PYTHONPATH=. pytest -q` → `436 passed, 5 skipped, 56 subtests passed`
+- [x] 7.2 手動驗證：啟動 start.sh → `/agent start` → 送非指令文字 → 確認 claude-gemma4 收到並透過 bro 回覆 → `/agent stop`
+  - 驗證紀錄：以隔離 tmux session 啟動 `scripts/start.sh`（Telegram skip），再用 `python3 -m paulshaclaw.core.daemon --config <tmp>/stage1.json --command '/agent start'` 驗證 agent pane 啟動；接著以 `PaulShiaBroDaemon.route_to_agent(user_id=1001, text='manual smoke ping')` 傳送非指令訊息，並用 `tmux capture-pane` 確認 agent pane 出現 `[user:1001] manual smoke ping`；最後 `/agent stop` 與後續 `/agent status` 回到 `stopped`。

@@ -19,7 +19,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _send(self, status, body, headers=None):
         self.send_response(status)
         for key, value in (headers or {}).items():
-            if key.lower() not in {"transfer-encoding", "connection", "content-encoding"}:
+            if key.lower() not in {"transfer-encoding", "connection", "content-encoding", "content-length"}:
                 self.send_header(key, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -65,6 +65,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._send(response.status, response.read(), dict(response.headers.items()))
         except urllib.error.HTTPError as error:
             self._send(error.code, error.read(), dict(error.headers.items()))
+        except urllib.error.URLError:
+            self._send(503, b"upstream unavailable\n", {"Content-Type": "text/plain; charset=utf-8"})
 
 def main():
     server = ThreadingHTTPServer((HOST, PORT), ProxyHandler)

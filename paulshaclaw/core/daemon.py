@@ -5,6 +5,7 @@ import json
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -341,10 +342,20 @@ class PaulShiaBroDaemon:
 
             pane_id, pid = detected
             self._send_to_pane(pane_id, "exit")
-            self._agent_pane_id = None
-            payload = self._agent_status_payload()
-            payload.update({"stopped": True, "pane_id": pane_id, "pid": pid})
-            return payload
+            recheck_attempts = 2
+            for attempt in range(recheck_attempts):
+                if attempt:
+                    time.sleep(0.1)
+                rechecked = self._detect_agent_process()
+                if rechecked is None:
+                    self._agent_pane_id = None
+                    payload = self._agent_status_payload()
+                    payload.update({"stopped": True, "pane_id": pane_id, "pid": pid})
+                    return payload
+
+            rechecked_pane_id, rechecked_pid = rechecked
+            self._agent_pane_id = rechecked_pane_id
+            return self._agent_status_payload(pane_id=rechecked_pane_id, pid=rechecked_pid)
 
         raise ValueError("/agent 只接受 start/startf/stop/status")
 
