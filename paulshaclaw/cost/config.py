@@ -9,6 +9,9 @@ import yaml
 
 DEFAULT_CONFIG_PATH = Path("~/.config/paulshaclaw/paulshaclaw.yaml")
 ENV_CONFIG_VAR = "PAULSHACLAW_CONFIG"
+SAMPLE_CONFIG_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "paulshaclaw.sample.yaml"
+)
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,8 @@ def _resolve_config_source(config_path: Path | None) -> Path | None:
     default = DEFAULT_CONFIG_PATH.expanduser()
     if default.exists():
         return default
+    if SAMPLE_CONFIG_PATH.exists():
+        return SAMPLE_CONFIG_PATH
     return None
 
 
