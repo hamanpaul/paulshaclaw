@@ -1,15 +1,27 @@
 #!/usr/bin/env bash
 set -eu
 
-REAL_CLAUDE="/home/paul_chen/.nvm/versions/node/v22.20.0/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-SECRET_ENV="/home/paul_chen/.config/paulshaclaw/paulshaclaw.telegram.secret.env"
-GEMMA_CONFIG_DIR="/home/paul_chen/.claude-gemma4"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SECRET_ENV="${PSC_CLAUDE_GEMMA4_SECRET_ENV:-${PSC_SECRET_ENV:-$HOME/.config/paulshaclaw/paulshaclaw.telegram.secret.env}}"
+GEMMA_CONFIG_DIR="${PSC_CLAUDE_GEMMA4_CONFIG_DIR:-${PSC_GEMMA4_CONFIG_DIR:-$HOME/.claude-gemma4}}"
 GEMMA_SETTINGS="$GEMMA_CONFIG_DIR/settings.json"
-GEMMA_PROXY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/claude-gemma4-proxy"
-GEMMA_PROXY_URL="http://127.0.0.1:18080"
+GEMMA_SETTINGS_TEMPLATE="${PSC_CLAUDE_GEMMA4_SETTINGS_TEMPLATE:-$SCRIPT_DIR/../config/claude-gemma4-settings.json}"
+GEMMA_PROXY="$SCRIPT_DIR/claude-gemma4-proxy"
+GEMMA_PROXY_URL="${PSC_CLAUDE_GEMMA4_PROXY_URL:-http://127.0.0.1:18080}"
 
-if [ ! -x "$REAL_CLAUDE" ]; then
-  echo "Claude executable not found: $REAL_CLAUDE" >&2
+if command -v claude >/dev/null 2>&1; then
+  REAL_CLAUDE="$(command -v claude)"
+elif command -v claude.exe >/dev/null 2>&1; then
+  REAL_CLAUDE="$(command -v claude.exe)"
+elif [ -x "$HOME/.nvm/versions/node/v22.20.0/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe" ]; then
+  REAL_CLAUDE="$HOME/.nvm/versions/node/v22.20.0/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+else
+  echo "Claude executable not found: claude or claude.exe" >&2
+  exit 1
+fi
+
+if [ ! -r "$GEMMA_SETTINGS_TEMPLATE" ]; then
+  echo "Claude Gemma4 settings template is not readable: $GEMMA_SETTINGS_TEMPLATE" >&2
   exit 1
 fi
 
@@ -20,34 +32,26 @@ fi
 
 . "$SECRET_ENV"
 
-if [ -z "${OPENAI_API_KEY:-}" ]; then
-  echo "OPENAI_API_KEY is not set in $SECRET_ENV" >&2
+CLAUDE_GEMMA4_API_KEY="${PSC_CLAUDE_GEMMA4_API_KEY:-${OPENAI_API_KEY:-}}"
+if [ -z "$CLAUDE_GEMMA4_API_KEY" ]; then
+  echo "PSC_CLAUDE_GEMMA4_API_KEY or OPENAI_API_KEY is not set in $SECRET_ENV" >&2
   exit 1
 fi
 
 if ! curl -fsS "$GEMMA_PROXY_URL/health" >/dev/null 2>&1; then
-  nohup "$GEMMA_PROXY" >/tmp/claude-gemma4-proxy.log 2>&1 &
+  nohup "$GEMMA_PROXY" >"$HOME/.claude-gemma4-proxy.log" 2>&1 &
   sleep 0.2
 fi
 
 if ! curl -fsS "$GEMMA_PROXY_URL/health" >/dev/null 2>&1; then
-  echo "Claude Gemma4 proxy failed to start; see /tmp/claude-gemma4-proxy.log" >&2
+  echo "Claude Gemma4 proxy failed to start; see $HOME/.claude-gemma4-proxy.log" >&2
   exit 1
 fi
 
 mkdir -p "$GEMMA_CONFIG_DIR"
 
 if [ ! -r "$GEMMA_SETTINGS" ]; then
-  cat > "$GEMMA_SETTINGS" <<'JSON'
-{
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "model": "gemma4-31b-mtp",
-  "effortLevel": "max",
-  "skipDangerousModePermissionPrompt": true
-}
-JSON
+  cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"
 fi
 
 node - "$GEMMA_CONFIG_DIR/.claude.json" "$PWD" <<'NODE'
@@ -78,7 +82,7 @@ unset ANTHROPIC_SMALL_FAST_MODEL
 export ANTHROPIC_CONFIG_DIR="$GEMMA_CONFIG_DIR"
 export CLAUDE_CONFIG_DIR="$GEMMA_CONFIG_DIR"
 export CLAUDE_SECURESTORAGE_CONFIG_DIR="$GEMMA_CONFIG_DIR"
-export ANTHROPIC_API_KEY="$OPENAI_API_KEY"
+export ANTHROPIC_API_KEY="$CLAUDE_GEMMA4_API_KEY"
 export ANTHROPIC_BASE_URL="$GEMMA_PROXY_URL"
 export ANTHROPIC_MODEL="gemma4-31b-mtp"
 export ANTHROPIC_CUSTOM_MODEL_OPTION="gemma4-31b-mtp"

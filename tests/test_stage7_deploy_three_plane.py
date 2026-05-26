@@ -67,6 +67,7 @@ class TemplateMappingTests(unittest.TestCase):
         self.assertIn("PSC_TELEGRAM_BOT_TOKEN=", telegram_secret_text)
         self.assertIn("PSC_TELEGRAM_EXPECTED_USERNAME=", telegram_secret_text)
         self.assertIn("PSC_TELEGRAM_EXPECTED_BOT_ID=", telegram_secret_text)
+        self.assertIn("PSC_CLAUDE_GEMMA4_API_KEY=", telegram_secret_text)
         self.assertNotIn("OPENAI_BASE_URL", telegram_secret_text)
         self.assertNotIn("OPENAI_API_KEY", telegram_secret_text)
         self.assertNotIn("OPENAI_MODEL", telegram_secret_text)

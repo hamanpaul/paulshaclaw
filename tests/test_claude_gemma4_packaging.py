@@ -24,6 +24,13 @@ EXPECTED_CLAUDE_GEMMA4_SETTINGS = {
     "effortLevel": "low",
 }
 
+EXPECTED_BOOTSTRAP_SECRET_TEMPLATE = (
+    "PSC_TELEGRAM_BOT_TOKEN=replace-with-botfather-token\n"
+    "PSC_TELEGRAM_EXPECTED_USERNAME=\n"
+    "PSC_TELEGRAM_EXPECTED_BOT_ID=\n"
+    "PSC_CLAUDE_GEMMA4_API_KEY=\n"
+)
+
 
 def load_proxy_module():
     loader = SourceFileLoader("claude_gemma4_proxy", str(CLAUDE_GEMMA4_PROXY))
@@ -71,13 +78,21 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertTrue(CLAUDE_GEMMA4.exists(), "scripts/claude-gemma4 should exist")
         self.assertTrue(os.access(CLAUDE_GEMMA4, os.X_OK), "scripts/claude-gemma4 should be executable")
         script_text = CLAUDE_GEMMA4.read_text(encoding="utf-8")
-        self.assertIn(
-            'GEMMA_PROXY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/claude-gemma4-proxy"',
-            script_text,
-        )
-        self.assertIn('"effortLevel": "max"', script_text)
-        self.assertNotIn("GEMMA_SETTINGS_TEMPLATE=", script_text)
-        self.assertNotIn('cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"', script_text)
+        self.assertIn('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', script_text)
+        self.assertIn('GEMMA_PROXY="$SCRIPT_DIR/claude-gemma4-proxy"', script_text)
+        self.assertIn('command -v claude', script_text)
+        self.assertIn('command -v claude.exe', script_text)
+        self.assertIn('${PSC_CLAUDE_GEMMA4_SECRET_ENV:-${PSC_SECRET_ENV:-$HOME/.config/paulshaclaw/paulshaclaw.telegram.secret.env}}', script_text)
+        self.assertIn('${PSC_CLAUDE_GEMMA4_CONFIG_DIR:-${PSC_GEMMA4_CONFIG_DIR:-$HOME/.claude-gemma4}}', script_text)
+        self.assertIn('${PSC_CLAUDE_GEMMA4_SETTINGS_TEMPLATE:-$SCRIPT_DIR/../config/claude-gemma4-settings.json}', script_text)
+        self.assertIn('PSC_CLAUDE_GEMMA4_API_KEY', script_text)
+        self.assertIn('OPENAI_API_KEY', script_text)
+        self.assertNotIn('cat > "$GEMMA_SETTINGS" <<'"'"'"'"'"'JSON'"'"'"'"'"'', script_text)
+        self.assertIn('cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"', script_text)
+        self.assertNotIn('/home/paul_chen/.nvm/versions/node', script_text)
+        self.assertNotIn('/home/paul_chen/.config/paulshaclaw', script_text)
+        self.assertNotIn('/home/paul_chen/.claude-gemma4', script_text)
+        self.assertNotIn('"effortLevel": "max"', script_text)
 
     def test_proxy_script_is_packaged_and_executable(self) -> None:
         self.assertTrue(CLAUDE_GEMMA4_PROXY.exists(), "scripts/claude-gemma4-proxy should exist")
@@ -121,6 +136,22 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertEqual(len(handler.send_calls), 1)
         self.assertEqual(handler.send_calls[0][0], 503)
 
+    def test_proxy_uses_configurable_upstream_base_url(self) -> None:
+        with mock.patch.dict(os.environ, {"PSC_CLAUDE_GEMMA4_UPSTREAM_URL": "http://example.com:9000"}):
+            module = load_proxy_module()
+
+        self.assertEqual(module.UPSTREAM, "http://example.com:9000")
+
+    def test_proxy_rejects_malformed_content_length_with_bad_request(self) -> None:
+        module = load_proxy_module()
+        handler = ProxyHandlerHarness()
+        handler.headers_in["content-length"] = "abc"
+
+        module.ProxyHandler._forward(handler)
+
+        self.assertEqual(handler.send_calls[0][0], 400)
+        self.assertIn(b"invalid content-length", handler.send_calls[0][1])
+
     def test_proxy_send_does_not_forward_duplicate_content_length_header(self) -> None:
         module = load_proxy_module()
         handler = ProxyHandlerHarness()
@@ -129,6 +160,11 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
 
         self.assertEqual(handler.sent_headers.count(("Content-Length", "999")), 0)
         self.assertEqual(handler.sent_headers.count(("Content-Length", "2")), 1)
+
+    def test_bootstrap_secret_template_includes_dedicated_claude_api_key(self) -> None:
+        template_path = PROJECT_ROOT / "paulshaclaw" / "deploy" / "templates" / "secret" / "bootstrap" / "__INSTANCE__.telegram.secret.env.tmpl"
+
+        self.assertEqual(template_path.read_text(encoding="utf-8"), EXPECTED_BOOTSTRAP_SECRET_TEMPLATE)
 
 
 if __name__ == "__main__":

@@ -286,7 +286,6 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("未授權", result["message"])
         route_mock.assert_not_called()
-        route_mock.assert_not_called()
 
     def test_global_sample_yaml_omits_legacy_chat_provider_shape(self) -> None:
         sample = Path(__file__).resolve().parents[1] / "paulshaclaw" / "config" / "paulshaclaw.sample.yaml"

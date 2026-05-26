@@ -2,7 +2,7 @@
 
 ### Requirement: OpenAI-compatible chat backend
 **Reason**: Replaced by claude-gemma4 agent pane routing. The stateless HTTP chat backend is superseded by an interactive Claude Code session with context memory.
-**Migration**: Non-command messages now route to the claude-gemma4 tmux pane. The `paulshaclaw/chat/` module (openai.py, config.py, backend.py) is deleted. `OPENAI_BASE_URL`, `OPENAI_API_KEY`, `OPENAI_MODEL` environment variables are no longer needed.
+**Migration**: Non-command messages now route to the claude-gemma4 tmux pane. The `paulshaclaw/chat/` module (openai.py, config.py, backend.py) is deleted. Runtime API keys now flow through `PSC_CLAUDE_GEMMA4_API_KEY` with `OPENAI_API_KEY` kept as a compatibility fallback, and the old `OPENAI_BASE_URL`/`OPENAI_MODEL` provider settings are no longer needed.
 
 ### Requirement: Chat backend conversation logging
 **Reason**: The IN/OUT logging tied to the chat backend reply cycle is removed. claude-gemma4 has its own session logs.

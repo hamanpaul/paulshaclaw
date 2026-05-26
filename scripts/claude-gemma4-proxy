@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-UPSTREAM = "http://192.168.199.199:8000"
+UPSTREAM = (os.environ.get("PSC_CLAUDE_GEMMA4_UPSTREAM_URL") or "http://192.168.199.199:8000").rstrip("/")
 HOST = "127.0.0.1"
 PORT = 18080
 
@@ -35,7 +36,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._forward()
 
     def _forward(self):
-        length = int(self.headers.get("content-length", "0") or "0")
+        raw_length = self.headers.get("content-length", "0") or "0"
+        try:
+            length = int(raw_length)
+        except ValueError:
+            self._send(400, b"invalid content-length\n", {"Content-Type": "text/plain; charset=utf-8"})
+            return
+        if length < 0:
+            self._send(400, b"invalid content-length\n", {"Content-Type": "text/plain; charset=utf-8"})
+            return
         body = self.rfile.read(length) if length else b""
 
         if self.command == "POST" and self.path.rstrip("/").endswith(("/messages", "/chat/completions")):
