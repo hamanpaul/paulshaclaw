@@ -143,6 +143,7 @@ Runtime rules:
 - Multiple accounts: preserve config order, e.g. `cpt haman:724 arc:127`.
 - `label` is the footer label; `id` is the provider account identifier.
 - `monthly_allowance` is used only for color threshold calculation and is not shown in footer.
+- If the operator sees `ha` / `haman` / `arc`, that text comes from `cost.providers.copilot.accounts[].label`.
 
 ## 5. Provider Adapters
 
@@ -152,11 +153,24 @@ Codex uses the Codex CLI quota source when available. The adapter maps the prima
 
 Local Codex session/token data may be shown only as `estimated` fallback with the `?` marker. It must not be presented as trusted quota usage.
 
+No extra paulshaclaw-specific feature flag is required beyond `cost.providers.codex.enabled` (default `true`). If the current Codex CLI login cannot access the ChatGPT Codex usage endpoint, Stage 8 degrades to estimated local data or `--`.
+
 ### 5.2 Claude Code (`cc`)
 
 Claude Code uses the Claude Code statusline `rate_limits` sidecar as the trusted quota source. The adapter maps `five_hour` to the 5-hour footer window and `seven_day` to the weekly footer window.
 
 Local fallback may use Claude Code session/token data only as `estimated` fallback. It must exclude gemma4, vLLM, and OpenAI-compatible local model usage so local Claude-like model traffic is not counted as Claude Code quota.
+
+Operationally, the sidecar is a local JSON file (default `~/.agents/state/cost/claude_rate_limits.json`) written by the operator's Claude Code statusline helper. The expected shape is:
+
+```json
+{
+  "rate_limits": {
+    "five_hour": { "used_percentage": 18, "resets_at": 1777447260 },
+    "seven_day": { "used_percentage": 41, "resets_at": 1777696800 }
+  }
+}
+```
 
 Stage 8 displays `weekly` as `wk`, even if an upstream source calls it `7d`.
 

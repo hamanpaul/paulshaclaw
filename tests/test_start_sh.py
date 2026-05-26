@@ -523,6 +523,71 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             self.assertNotIn("set-option -g", "\n".join(" ".join(call) for call in calls))
             self.assertFalse((home_dir / ".tmux.conf").exists())
 
+    def test_start_script_passes_paulshaclaw_config_to_stage8_footer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            repo_root = tmpdir_path / "repo"
+            home_dir = tmpdir_path / "home"
+            fake_bin = repo_root / ".venv" / "bin"
+            fake_scripts = repo_root / "scripts"
+            tmux_log = tmpdir_path / "tmux.log"
+            monitor_pidfile = tmpdir_path / "monitor.pid"
+            cockpit_pidfile = tmpdir_path / "cockpit.pid"
+            cockpit_started = tmpdir_path / "cockpit.started"
+            config_path = tmpdir_path / "custom-paulshaclaw.yaml"
+
+            fake_bin.mkdir(parents=True)
+            fake_scripts.mkdir(parents=True)
+            home_dir.mkdir(parents=True)
+            config_path.write_text("workspaces: []\n", encoding="utf-8")
+
+            fake_python = fake_bin / "python"
+            fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            fake_tmux = fake_bin / "tmux"
+            fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
+            fake_tmux.chmod(0o755)
+
+            start_sh = fake_scripts / "start.sh"
+            start_sh.write_text(
+                START_SH.read_text(encoding="utf-8").replace(
+                    "REPO=/home/paul_chen/prj_pri/paulshaclaw",
+                    f"REPO={repo_root}",
+                ),
+                encoding="utf-8",
+            )
+            start_sh.chmod(0o755)
+
+            env = dict(os.environ)
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            env["TMUX_PANE"] = "%0"
+            env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
+            env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
+            env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            env["FAKE_COCKPIT_MODE"] = "exit"
+            env["FAKE_TMUX_LOG"] = str(tmux_log)
+            env["PAULSHACLAW_CONFIG"] = str(config_path)
+
+            completed = subprocess.run(
+                ["bash", str(start_sh)],
+                cwd=repo_root,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            calls = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
+            status_right_calls = [call for call in calls if call[:2] == ["set-option", "status-right"]]
+            self.assertEqual(len(status_right_calls), 1)
+            status_right = status_right_calls[0][2]
+            self.assertIn(f"PAULSHACLAW_CONFIG={config_path}", status_right)
+            self.assertIn("paulshaclaw.cost.status", status_right)
+
     def test_start_script_falls_back_to_default_tmux_interval_when_config_load_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir_path = Path(tmpdir)

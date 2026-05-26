@@ -361,7 +361,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(cfg.critical_percent, 90)
         self.assertEqual(cfg.copilot_accounts, ())
 
-    def test_cost_config_uses_builtin_defaults_when_runtime_config_missing(self) -> None:
+    def test_cost_config_falls_back_to_sample_when_runtime_config_missing(self) -> None:
         with (
             patch.object(cost_config_module, "DEFAULT_CONFIG_PATH", Path("missing-cost-config.yaml")),
             patch.dict("os.environ", {}, clear=True),
@@ -369,7 +369,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             cfg = load_cost_config()
 
         self.assertEqual(cfg.timezone, "Asia/Taipei")
-        self.assertEqual(cfg.copilot_accounts, ())
+        self.assertEqual([account.label for account in cfg.copilot_accounts], ["haman", "arc"])
 
     def test_copilot_accounts_are_config_driven(self) -> None:
         path = self.write_config(
