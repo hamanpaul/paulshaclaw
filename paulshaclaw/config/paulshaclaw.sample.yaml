@@ -37,22 +37,3 @@ cost:
           kind: company
           monthly_allowance: 300
           org: example-org
-
-chat:
-  provider: openai_compatible
-  providers:
-    openai_compatible:
-      base_url_env: OPENAI_BASE_URL
-      api_key_env: OPENAI_API_KEY
-      model_env: OPENAI_MODEL
-      timeout_seconds: 180
-      max_tokens: 256
-      temperature: 0.2
-    gemini_api:
-      enabled: false
-      api_key_env: GEMINI_API_KEY
-      model: gemini-2.5-flash
-    copilot_oauth:
-      enabled: false
-      token_env: COPILOT_GITHUB_TOKEN
-      oauth_config_path: ~/.copilot/config.json

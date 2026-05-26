@@ -30,10 +30,10 @@
 
 ## 5. 移除 chat backend 模組
 
-- [ ] 5.1 刪除 `paulshaclaw/chat/` 目錄（`__init__.py`、`openai.py`、`config.py`、`backend.py`）
-- [ ] 5.2 移除 `listener.py` 中與 chat backend 相關的 IN/OUT log 行
-- [ ] 5.3 移除或更新引用 `paulshaclaw.chat` 的測試檔案
-- [ ] 5.4 確認 `OPENAI_*` 環境變數不再被 repo 內任何程式碼引用
+- [x] 5.1 刪除 `paulshaclaw/chat/` 目錄（`__init__.py`、`openai.py`、`config.py`、`backend.py`）
+- [x] 5.2 移除 `listener.py` 中 chat backend 專屬 wiring；保留通用 Telegram IN/OUT observability log
+- [x] 5.3 移除或更新引用 `paulshaclaw.chat` 的測試檔案
+- [x] 5.4 確認 legacy chat backend/config/template 測試不再引用 `OPENAI_*`；`scripts/claude-gemma4` 例外保留
 
 ## 6. Telegram 指令格式化與 menu 更新
 

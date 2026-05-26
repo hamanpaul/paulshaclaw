@@ -286,6 +286,17 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("未授權", result["message"])
         route_mock.assert_not_called()
+        route_mock.assert_not_called()
+
+    def test_global_sample_yaml_omits_legacy_chat_provider_shape(self) -> None:
+        sample = Path(__file__).resolve().parents[1] / "paulshaclaw" / "config" / "paulshaclaw.sample.yaml"
+
+        text = sample.read_text(encoding="utf-8")
+
+        self.assertNotIn("chat:", text)
+        self.assertNotIn("openai_compatible:", text)
+        self.assertNotIn("OPENAI_BASE_URL", text)
+        self.assertNotIn("OPENAI_API_KEY", text)
 
     def test_help_command_lists_runtime_commands(self) -> None:
         config_path = self.make_config_path()
