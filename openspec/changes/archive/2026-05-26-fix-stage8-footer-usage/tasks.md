@@ -39,4 +39,4 @@
 - [x] 6.1 Update Stage 8 docs/spec notes that currently describe Claude/Codex as pure stubs.
 - [x] 6.2 Run `python3 -m unittest tests.test_stage8_cost -v` from the worktree and fix regressions.
 - [x] 6.3 Run OpenSpec validation/status checks for `fix-stage8-footer-usage`.
-- [ ] 6.4 Prepare the change for code review, archive after implementation, then run policy checks before commit/push/PR.
+- [x] 6.4 Prepare the change for code review, archive after implementation, then run policy checks before commit/push/PR.
