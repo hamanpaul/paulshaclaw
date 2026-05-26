@@ -107,7 +107,7 @@ Stage 8 snapshot 是 provider-neutral JSON。Python 實作可用 dataclass，JSO
 
 Allowed status values:
 
-- `source_status`: `fresh`, `stale`, `unknown`, `error`
+- `source_status`: `fresh`, `stale`, `estimated`, `unknown`, `error`
 - `source`: `github_user_billing`, `github_org_billing`, `github_enterprise_billing`, `github_premium_request_report`, `github_metrics`, `local_observed`, `unknown`
 
 ## 4. Config
@@ -148,18 +148,15 @@ Runtime rules:
 
 ### 5.1 Codex (`cdx`)
 
-Codex v1 uses local session data as the initial source. The existing project-usage logic already reads `~/.codex/sessions/**/*.jsonl` and finds `event_msg.payload.type == token_count` plus `total_token_usage.total_tokens`; Stage 8 can reuse that parsing style for local observation.
+Codex uses the Codex CLI quota source when available. The adapter maps the primary quota window to `five_hour` and the secondary quota window to `weekly`. Because the source is not a public OpenAI Platform API contract, failures degrade to local estimated data or `--` without interrupting the footer.
 
-Quota windows (`5h`, `weekly`) require a reliable source of used percent and reset timestamp. If no reliable source exists, `cdx` must render `--` rather than estimate. Future online support can be added behind the same adapter contract.
+Local Codex session/token data may be shown only as `estimated` fallback with the `?` marker. It must not be presented as trusted quota usage.
 
 ### 5.2 Claude Code (`cc`)
 
-Claude Code v1 follows the `claude-usage` shape: `5h` and `weekly` utilization percent plus reset timestamps. Because the referenced endpoint is not official public API, the adapter must be best-effort:
+Claude Code uses the Claude Code statusline `rate_limits` sidecar as the trusted quota source. The adapter maps `five_hour` to the 5-hour footer window and `seven_day` to the weekly footer window.
 
-- Read credentials from configured path without printing contents.
-- Avoid passing tokens as command-line arguments.
-- Cache successful snapshots.
-- On failure, return stale cache with `cc~` if available, otherwise `cc 5h:-- wk:--`.
+Local fallback may use Claude Code session/token data only as `estimated` fallback. It must exclude gemma4, vLLM, and OpenAI-compatible local model usage so local Claude-like model traffic is not counted as Claude Code quota.
 
 Stage 8 displays `weekly` as `wk`, even if an upstream source calls it `7d`.
 
