@@ -48,6 +48,16 @@ def _build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--override")
     replay.set_defaults(func=_replay)
 
+    janitor = memory_subparsers.add_parser("janitor")
+    janitor_subparsers = janitor.add_subparsers(dest="janitor_command", required=True)
+    scan = janitor_subparsers.add_parser("scan")
+    scan.add_argument("--memory-root", required=True)
+    scan.add_argument("--knowledge-root", default=None)
+    scan.add_argument("--now", default=None)
+    scan.add_argument("--override", default=None)
+    scan.add_argument("--dry-run", action="store_true")
+    scan.set_defaults(func=_janitor_scan)
+
     return parser
 
 
@@ -90,6 +100,11 @@ def _replay(args: argparse.Namespace) -> int:
     summary["out"] = str(out)
     print(json.dumps(summary, sort_keys=True))
     return 0
+
+
+def _janitor_scan(args: argparse.Namespace) -> int:
+    from .janitor import cli as janitor_cli
+    return janitor_cli.run(args)
 
 
 def _load_policy(override_path: str | None):
@@ -204,6 +219,10 @@ def _append_replay_audit(result, *, session_ref: str, audit_path: Path) -> None:
             hits=result.hits,
         ),
     )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 
 def _replay_audit_path(out: Path) -> Path:

@@ -53,6 +53,8 @@ MVP 設計與驗證細節見：
    - replay bundle / workstream 關聯
    - 最新 `record-agent-reference`
 
+> **T4 已落地（2026-05）：** decayed/reactivation 事件由最小 janitor 寫入 `runtime/ledger/lifecycle.jsonl`，active 集合由 `paulshaclaw.memory.ledger.retrieval_set.active_records()` 提供。掃描入口：`psc memory janitor scan`。設計見 `docs/superpowers/specs/2026-05-31-stage2-t4-ledger-janitor-design.md`。
+
 ## 4. 驗證邊界
 
 Stage 2 integration gate 最少要覆蓋：
