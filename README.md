@@ -15,7 +15,7 @@
 |-------|------|------|:------------:|:-------:|
 | 0 | 前置工具 refine / rename / openspec 骨架 | **完成** | 13/13 | 腳本、yaml |
 | 1 | PaulShiaBro core daemon + TUI + Telegram bot | **完成** | 15+13/15+13 | bot, core, tui |
-| 2 | ~/.agents/memory 記憶中樞 + dream mode 24x7 | **spec 完成；Security Policy 已落地；Importer sub-spec 待實作** | 13/13；`stage2-memory-importer-mvp` 0/40；`stage2-memory-security-policy` 48/48 | routing.md, service.md, memory/policy/（runtime 仍待 importer / paulsha-mem-moc 串接） |
+| 2 | ~/.agents/memory 記憶中樞 + dream mode 24x7 | **spec 完成；Importer MVP 與 Security Policy 皆已落地** | 13/13；`stage2-memory-importer-mvp` 30/30；`stage2-memory-security-policy` 48/48 | routing.md, service.md, memory/{importer,policy,hooks}/（runtime 仍待 obs-auto-moc watcher 安全網串接） |
 | 3 | Lifecycle（slash / artifact / phase gate） | **完成** | 9/9 | lifecycle/ |
 | 4 | Persona（角色目錄 / handoff / guardrail） | **完成** | 11/11 | persona/ |
 | 5 | 觀測 / 健康 / failover / 錯誤 log | **完成** | 9/9 | observability/ |
