@@ -113,4 +113,11 @@ require_hook_dry_run \
   "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/copilot/session_end/payload.json" \
   "copilot-cli__copilot-session-end-001.json"
 
+echo "[stage2] janitor dry-run over fixtures"
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory janitor scan \
+  --memory-root "$(mktemp -d)" \
+  --knowledge-root "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/knowledge/ttl" \
+  --now "2026-05-31T00:00:00Z" \
+  --dry-run | grep -Fq '"decayed": 1'
+
 echo "[stage2] ok"
