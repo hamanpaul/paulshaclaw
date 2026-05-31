@@ -83,14 +83,15 @@ def append_event(
     actor: str,
     run_id: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
+    ts: Optional[str] = None,
 ) -> LifecycleEvent:
     """
     Append a lifecycle event to the ledger with hash chaining.
-    
+
     Uses fcntl.flock to serialize writers and ensure atomic appends.
     Computes event_hash as SHA256 of canonical JSON (excluding event_hash itself).
     Chains events via prev_hash pointing to previous event_hash.
-    
+
     Args:
         path: Path to lifecycle.jsonl file
         record_id: Memory record identifier
@@ -100,16 +101,19 @@ def append_event(
         actor: User/agent/process that triggered the event
         run_id: Optional batch/run identifier
         metadata: Optional event-specific metadata dict
-    
+        ts: Optional logical event timestamp (ISO8601). When provided it is
+            recorded verbatim so a scan's injected ``now`` drives the ledger's
+            temporal ordering; falls back to wall-clock when omitted.
+
     Returns:
         The appended LifecycleEvent dict
     """
     if event_type not in VALID_EVENT_TYPES:
         raise ValueError(f"Invalid event_type: {event_type}")
-    
+
     # Ensure directory exists
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Read and append under the same lock so seq and prev_hash stay linear.
     with open(path, "a+", encoding="utf-8") as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
@@ -118,7 +122,7 @@ def append_event(
             prev_hash = events[-1]["event_hash"] if events else None
             seq = events[-1]["seq"] + 1 if events else 1
 
-            now = datetime.now(timezone.utc).isoformat()
+            now = ts if ts else datetime.now(timezone.utc).isoformat()
             event: LifecycleEvent = {
                 "ts": now,
                 "event_id": f"{now}-{uuid.uuid4()}",

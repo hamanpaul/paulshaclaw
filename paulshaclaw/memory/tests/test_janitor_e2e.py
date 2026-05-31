@@ -115,6 +115,34 @@ class JanitorE2ETests(unittest.TestCase):
             raw = (root / "runtime" / "ledger" / "lifecycle.jsonl").read_text(encoding="utf-8")
             self.assertNotIn("body", raw)
 
+    def test_persisted_event_ts_uses_injected_now_not_wall_clock(self):
+        # The ledger's temporal ordering must come from the scan's logical `now`,
+        # otherwise anti-flap base and reactivation cutoff drift with wall-clock.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kroot = root / "knowledge"
+            shutil.copytree(FIXTURES / "ttl", kroot)
+            cfg, h = _cfg()
+            scanner.run_scan(root, knowledge_root=kroot, config=cfg, config_hash=h,
+                             now="2099-01-01T00:00:00Z", source_path_exists=PATH_OK)
+            events = lifecycle.read_events(root)
+            self.assertEqual(events[0]["ts"], "2099-01-01T00:00:00Z")
+
+    def test_hash_duplicate_reimport_does_not_reactivate(self):
+        # A no-op re-import (hash-duplicate) carries no new evidence and must NOT
+        # revive a decayed record; only written/updated may reactivate.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kroot = root / "knowledge"
+            shutil.copytree(FIXTURES / "ttl", kroot)
+            cfg, h = _cfg()
+            kwargs = dict(knowledge_root=kroot, config=cfg, config_hash=h, source_path_exists=PATH_OK)
+            scanner.run_scan(root, now="2026-05-31T00:00:00Z", **kwargs)  # decays
+            self.assertEqual(retrieval_set.record_state(root, "sl-ttl"), "decayed")
+            _seed_import(root, "claude:sess-ttl", "hash-duplicate", "2026-06-01T00:00:00Z")
+            scanner.run_scan(root, now="2026-06-02T00:00:00Z", **kwargs)
+            self.assertEqual(retrieval_set.record_state(root, "sl-ttl"), "decayed")
+
 
 if __name__ == "__main__":
     unittest.main()

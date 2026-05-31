@@ -13,6 +13,9 @@ from paulshaclaw.memory.janitor import record_source, rules
 from paulshaclaw.memory.janitor.config import JanitorConfig
 from paulshaclaw.memory.ledger import import_log, lifecycle
 
+# Import statuses that carry new evidence and may reactivate a decayed record.
+_REACTIVATION_STATUSES = {"written", "updated"}
+
 
 def _lifecycle_path(memory_root: Path) -> Path:
     """Get path to lifecycle ledger."""
@@ -53,29 +56,35 @@ def _build_import_index(memory_root: Path) -> dict[str, list[dict[str, str]]]:
     as source_key for matching with records).
     
     Returns:
-        Dict mapping source_key to list of dicts with 'status' and 'recorded_at'
+        Dict mapping source_key to list of dicts with 'status' and 'recorded_at'.
+        Only ``written``/``updated`` imports are indexed: those are the events
+        that carry new evidence and may legitimately reactivate a decayed
+        record. ``hash-duplicate``/``stale-skip`` add nothing and are ignored.
     """
     import_path = memory_root / "runtime" / "ledger" / "import.jsonl"
     records = import_log.read_import_records(import_path)
-    
+
     index: dict[str, list[dict[str, str]]] = {}
     for rec in records:
         # Extract source_key from idempotency_key
         source_key = rec.get("idempotency_key")
         if not source_key:
             continue
-        
+
         status = rec.get("status", "")
+        if status not in _REACTIVATION_STATUSES:
+            continue
+
         recorded_at = rec.get("recorded_at", "")
-        
+
         if source_key not in index:
             index[source_key] = []
-        
+
         index[source_key].append({
             "status": status,
             "recorded_at": recorded_at
         })
-    
+
     return index
 
 
@@ -109,6 +118,7 @@ def _persist_event(memory_root: Path, event: dict[str, Any]) -> None:
         actor="janitor",
         run_id=None,
         metadata=metadata,
+        ts=event.get("ts"),
     )
 
 
@@ -141,13 +151,20 @@ def run_scan(
     """
     # Load records
     records, warnings = record_source.iter_records(knowledge_root)
-    
-    # Build lifecycle state
+    record_skipped = len(warnings)
+
+    # Build lifecycle state (fails closed on a corrupt lifecycle ledger — the
+    # ledger is our own core state and must not be folded from bad data).
     lc_state = _build_lc_state(memory_root)
-    
-    # Build import index
-    import_index = _build_import_index(memory_root)
-    
+
+    # Build import index. import.jsonl is an auxiliary reactivation signal, so a
+    # corrupt line degrades (skip reactivation) rather than aborting the scan.
+    try:
+        import_index = _build_import_index(memory_root)
+    except ValueError as exc:
+        import_index = {}
+        warnings.append(f"import.jsonl unreadable; reactivation signals skipped: {exc}")
+
     # Plan scan
     if source_path_exists is None:
         events = rules.plan_scan(records, import_index, lc_state, config, now, config_hash)
@@ -165,7 +182,7 @@ def run_scan(
         "decayed": decayed_count,
         "reactivated": reactivated_count,
         "unchanged": unchanged_count,
-        "skipped": 0,
+        "skipped": record_skipped,
         "config_hash": config_hash,
         "dry_run": dry_run,
     }
