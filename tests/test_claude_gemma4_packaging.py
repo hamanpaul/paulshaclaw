@@ -5,6 +5,7 @@ import importlib.util
 import io
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from importlib.machinery import SourceFileLoader
@@ -15,10 +16,11 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLAUDE_GEMMA4 = PROJECT_ROOT / "scripts" / "claude-gemma4"
 CLAUDE_GEMMA4_PROXY = PROJECT_ROOT / "scripts" / "claude-gemma4-proxy"
+CLAUDE_GEMMA4_INSTALL = PROJECT_ROOT / "scripts" / "install-claude-gemma4"
 CLAUDE_GEMMA4_SETTINGS = PROJECT_ROOT / "config" / "claude-gemma4-settings.json"
 EXPECTED_CLAUDE_GEMMA4_SETTINGS = {
     "permissions": {"defaultMode": "bypassPermissions"},
-    "model": "gemma4-31b-mtp",
+    "model": "gemma4-26b-a4b-nvfp4",
     "skipDangerousModePermissionPrompt": True,
     "theme": "dark",
     "effortLevel": "low",
@@ -78,7 +80,7 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertTrue(CLAUDE_GEMMA4.exists(), "scripts/claude-gemma4 should exist")
         self.assertTrue(os.access(CLAUDE_GEMMA4, os.X_OK), "scripts/claude-gemma4 should be executable")
         script_text = CLAUDE_GEMMA4.read_text(encoding="utf-8")
-        self.assertIn('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', script_text)
+        self.assertIn('SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"', script_text)
         self.assertIn('GEMMA_PROXY="$SCRIPT_DIR/claude-gemma4-proxy"', script_text)
         self.assertIn('command -v claude', script_text)
         self.assertIn('command -v claude.exe', script_text)
@@ -100,6 +102,52 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             os.access(CLAUDE_GEMMA4_PROXY, os.X_OK),
             "scripts/claude-gemma4-proxy should be executable",
         )
+
+    def test_install_script_is_packaged_and_executable(self) -> None:
+        self.assertTrue(CLAUDE_GEMMA4_INSTALL.exists(), "scripts/install-claude-gemma4 should exist")
+        self.assertTrue(
+            os.access(CLAUDE_GEMMA4_INSTALL, os.X_OK),
+            "scripts/install-claude-gemma4 should be executable",
+        )
+        result = subprocess.run(
+            ["bash", "-n", str(CLAUDE_GEMMA4_INSTALL)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_install_script_symlinks_launcher_and_proxy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = dict(os.environ, PSC_CLAUDE_GEMMA4_BIN_DIR=tmpdir)
+            result = subprocess.run(
+                ["bash", str(CLAUDE_GEMMA4_INSTALL)],
+                capture_output=True,
+                check=False,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            launcher_link = Path(tmpdir) / "claude-gemma4"
+            proxy_link = Path(tmpdir) / "claude-gemma4-proxy"
+            self.assertTrue(launcher_link.is_symlink())
+            self.assertTrue(proxy_link.is_symlink())
+            self.assertEqual(launcher_link.resolve(), CLAUDE_GEMMA4.resolve())
+            self.assertEqual(proxy_link.resolve(), CLAUDE_GEMMA4_PROXY.resolve())
+
+            again = subprocess.run(
+                ["bash", str(CLAUDE_GEMMA4_INSTALL)],
+                capture_output=True,
+                check=False,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertIn("unchanged", again.stdout)
 
     def test_proxy_script_parses_with_py_compile(self) -> None:
         proxy_text = CLAUDE_GEMMA4_PROXY.read_text(encoding="utf-8")
@@ -141,6 +189,72 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             module = load_proxy_module()
 
         self.assertEqual(module.UPSTREAM, "http://example.com:9000")
+
+    def test_proxy_default_upstream_targets_live_endpoint(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", None)
+            module = load_proxy_module()
+
+        self.assertEqual(module.UPSTREAM, "http://192.168.199.199:8001")
+
+    def test_proxy_forward_hoists_system_when_path_has_query_string(self) -> None:
+        module = load_proxy_module()
+        handler = ProxyHandlerHarness()
+        handler.path = "/v1/messages?beta=true"
+        body = json.dumps(
+            {
+                "model": "gemma4-26b-a4b-nvfp4",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "system", "content": "Be concise."},
+                ],
+            }
+        ).encode("utf-8")
+        handler.headers_in["content-length"] = str(len(body))
+        handler.rfile = io.BytesIO(body)
+
+        captured: dict[str, bytes] = {}
+
+        class FakeResponse:
+            status = 200
+            headers: dict[str, str] = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout=0):
+            captured["data"] = request.data
+            return FakeResponse()
+
+        with mock.patch.object(module.urllib.request, "urlopen", side_effect=fake_urlopen):
+            module.ProxyHandler._forward(handler)
+
+        sent = json.loads(captured["data"].decode("utf-8"))
+        self.assertEqual([m["role"] for m in sent["messages"]], ["user"])
+        self.assertIn("Be concise.", sent.get("system", ""))
+
+    def test_proxy_hoists_system_role_messages_into_top_level_system(self) -> None:
+        module = load_proxy_module()
+        payload = {
+            "model": "gemma4-26b-a4b-nvfp4",
+            "system": "Base prompt.",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "system", "content": [{"type": "text", "text": "Be concise."}]},
+            ],
+        }
+
+        module.hoist_system_messages(payload)
+
+        self.assertEqual([m["role"] for m in payload["messages"]], ["user"])
+        self.assertIn("Base prompt.", payload["system"])
+        self.assertIn("Be concise.", payload["system"])
 
     def test_proxy_rejects_malformed_content_length_with_bad_request(self) -> None:
         module = load_proxy_module()

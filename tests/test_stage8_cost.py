@@ -1481,7 +1481,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                         json.dumps(
                             {
                                 "message": {
-                                    "model": "gemma4-31b-mtp",
+                                    "model": "gemma4-26b-a4b-nvfp4",
                                     "usage": {"input_tokens": 1000, "output_tokens": 1000},
                                 }
                             }

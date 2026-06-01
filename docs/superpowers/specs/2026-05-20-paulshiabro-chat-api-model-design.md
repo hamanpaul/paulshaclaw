@@ -7,15 +7,17 @@ PaulShiaBro Stage 1 currently routes Telegram text through `TelegramCommandRoute
 This change adds API-model-backed conversation for authorized Telegram users while preserving the existing command path. The first runtime provider is the local vLLM server exposed as an OpenAI-compatible API:
 
 ```text
-OPENAI_BASE_URL=http://192.168.199.199:8000/v1
+OPENAI_BASE_URL=http://192.168.199.199:8001/v1
 OPENAI_API_KEY=dummy
-OPENAI_MODEL=gemma4-31b-mtp
+OPENAI_MODEL=gemma4-26b-a4b-nvfp4
 ```
 
 On 2026-05-20, this endpoint was verified with:
 
 - `GET /v1/models`: returned model `gemma4-31b-mtp`, owned by `vllm`, with `max_model_len=8192`.
 - `POST /v1/chat/completions`: returned `PaulShiaBro vLLM 健康檢查正常。`.
+
+> Updated 2026-06-01: the vLLM endpoint moved to `http://192.168.199.199:8001/v1` and now serves `gemma4-26b-a4b-nvfp4` (`max_model_len=262144`). The config block and examples in this doc reflect the new endpoint; the 2026-05-20 verification above is kept verbatim as the original record.
 
 The vLLM server is therefore suitable for the initial chat integration. Gemini API and GitHub Copilot OAuth are reserved as future provider shapes only; they are not implemented in this change.
 
@@ -59,7 +61,7 @@ Telegram message
       -> other text: ChatBackend.reply(user_id=user_id, text=text)
           -> OpenAI-compatible client
           -> POST {OPENAI_BASE_URL}/chat/completions
-          -> gemma4-31b-mtp
+          -> gemma4-26b-a4b-nvfp4
 ```
 
 `TelegramCommandRouter` remains the authorization boundary. It does not parse provider config or construct HTTP requests. The daemon remains the command runtime and is not responsible for ordinary chat in this first version.
@@ -88,7 +90,7 @@ For non-slash text:
 
 ```json
 {
-  "model": "gemma4-31b-mtp",
+  "model": "gemma4-26b-a4b-nvfp4",
   "messages": [
     {
       "role": "system",
@@ -206,13 +208,13 @@ Manual verification after implementation:
 ```bash
 curl -sS --max-time 10 \
   -H 'Authorization: Bearer dummy' \
-  http://192.168.199.199:8000/v1/models
+  http://192.168.199.199:8001/v1/models
 
 curl -sS --max-time 45 \
   -H 'Authorization: Bearer dummy' \
   -H 'Content-Type: application/json' \
-  http://192.168.199.199:8000/v1/chat/completions \
-  -d '{"model":"gemma4-31b-mtp","messages":[{"role":"user","content":"請用一句中文回答：PaulShiaBro vLLM health check OK"}],"max_tokens":64,"temperature":0}'
+  http://192.168.199.199:8001/v1/chat/completions \
+  -d '{"model":"gemma4-26b-a4b-nvfp4","messages":[{"role":"user","content":"請用一句中文回答：PaulShiaBro vLLM health check OK"}],"max_tokens":64,"temperature":0}'
 ```
 
 Expected manual result: the second command returns a `chat.completion` response with a concise Chinese health-check answer.
