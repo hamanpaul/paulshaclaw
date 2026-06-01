@@ -87,7 +87,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         body = self.rfile.read(length) if length else b""
 
-        normalized_path = self.path.rstrip("/")
+        normalized_path = self.path.split("?", 1)[0].rstrip("/")
         if self.command == "POST" and normalized_path.endswith(("/messages", "/chat/completions")):
             try:
                 payload = json.loads(body.decode("utf-8"))

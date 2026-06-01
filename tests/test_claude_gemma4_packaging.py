@@ -142,6 +142,48 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
 
         self.assertEqual(module.UPSTREAM, "http://example.com:9000")
 
+    def test_proxy_forward_hoists_system_when_path_has_query_string(self) -> None:
+        module = load_proxy_module()
+        handler = ProxyHandlerHarness()
+        handler.path = "/v1/messages?beta=true"
+        body = json.dumps(
+            {
+                "model": "gemma4-26b-a4b-nvfp4",
+                "messages": [
+                    {"role": "user", "content": "hi"},
+                    {"role": "system", "content": "Be concise."},
+                ],
+            }
+        ).encode("utf-8")
+        handler.headers_in["content-length"] = str(len(body))
+        handler.rfile = io.BytesIO(body)
+
+        captured: dict[str, bytes] = {}
+
+        class FakeResponse:
+            status = 200
+            headers: dict[str, str] = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(request, timeout=0):
+            captured["data"] = request.data
+            return FakeResponse()
+
+        with mock.patch.object(module.urllib.request, "urlopen", side_effect=fake_urlopen):
+            module.ProxyHandler._forward(handler)
+
+        sent = json.loads(captured["data"].decode("utf-8"))
+        self.assertEqual([m["role"] for m in sent["messages"]], ["user"])
+        self.assertIn("Be concise.", sent.get("system", ""))
+
     def test_proxy_hoists_system_role_messages_into_top_level_system(self) -> None:
         module = load_proxy_module()
         payload = {
