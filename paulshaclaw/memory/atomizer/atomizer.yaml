@@ -1,0 +1,23 @@
+schema_version: 1
+split:
+  boundary_patterns:
+    - '^#{1,6}\s'
+  max_fragment_chars: 8000
+artifact_kind_map:
+  research: research
+  plan: plan
+  plans: plan
+  spec: spec
+  report: report
+  reports: report
+  review: review
+  session: report
+  sessions: report
+phase_map:
+  research: research
+  spec: define
+  plan: plan
+  report: review
+  review: review
+default_artifact_kind: report
+default_phase: review

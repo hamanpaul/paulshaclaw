@@ -53,6 +53,8 @@ MVP 設計與驗證細節見：
    - replay bundle / workstream 關聯
    - 最新 `record-agent-reference`
 
+> **T3 已落地（2026-05）：** inbox raw session 由 `psc memory atomize` 經確定性結構拆分 → 1:1 升級為 `knowledge/<project>/<slice_id>.md`;處理狀態記於 `runtime/ledger/processing.jsonl`,派生關係記於 `runtime/ledger/relations.jsonl`。設計見 `docs/superpowers/specs/2026-05-31-stage2-t3-atomizer-linker-design.md`。
+
 > **T4 已落地（2026-05）：** decayed/reactivation 事件由最小 janitor 寫入 `runtime/ledger/lifecycle.jsonl`，active 集合由 `paulshaclaw.memory.ledger.retrieval_set.active_records()` 提供。掃描入口：`psc memory janitor scan`。設計見 `docs/superpowers/specs/2026-05-31-stage2-t4-ledger-janitor-design.md`。
 
 ## 4. 驗證邊界

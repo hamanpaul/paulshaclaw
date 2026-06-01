@@ -58,6 +58,13 @@ def _build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--dry-run", action="store_true")
     scan.set_defaults(func=_janitor_scan)
 
+    atomize = memory_subparsers.add_parser("atomize")
+    atomize.add_argument("--memory-root", required=True)
+    atomize.add_argument("--now", default=None)
+    atomize.add_argument("--override", default=None)
+    atomize.add_argument("--dry-run", action="store_true")
+    atomize.set_defaults(func=_atomize)
+
     return parser
 
 
@@ -105,6 +112,16 @@ def _replay(args: argparse.Namespace) -> int:
 def _janitor_scan(args: argparse.Namespace) -> int:
     from .janitor import cli as janitor_cli
     return janitor_cli.run(args)
+
+
+def _atomize(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from .atomizer.cli import run as atomize_run
+
+    if args.now is None:
+        args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return atomize_run(args)
 
 
 def _load_policy(override_path: str | None):
