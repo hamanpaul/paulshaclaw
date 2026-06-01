@@ -142,6 +142,23 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
 
         self.assertEqual(module.UPSTREAM, "http://example.com:9000")
 
+    def test_proxy_hoists_system_role_messages_into_top_level_system(self) -> None:
+        module = load_proxy_module()
+        payload = {
+            "model": "gemma4-26b-a4b-nvfp4",
+            "system": "Base prompt.",
+            "messages": [
+                {"role": "user", "content": "hi"},
+                {"role": "system", "content": [{"type": "text", "text": "Be concise."}]},
+            ],
+        }
+
+        module.hoist_system_messages(payload)
+
+        self.assertEqual([m["role"] for m in payload["messages"]], ["user"])
+        self.assertIn("Base prompt.", payload["system"])
+        self.assertIn("Be concise.", payload["system"])
+
     def test_proxy_rejects_malformed_content_length_with_bad_request(self) -> None:
         module = load_proxy_module()
         handler = ProxyHandlerHarness()
