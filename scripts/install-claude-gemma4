@@ -50,10 +50,17 @@ link_one "$LAUNCHER_SRC" "$BIN_DIR/claude-gemma4"
 link_one "$PROXY_SRC" "$BIN_DIR/claude-gemma4-proxy"
 
 if [ "$RESTART_PROXY" = "1" ] && command -v ss >/dev/null 2>&1; then
-  pid="$(ss -ltnp 2>/dev/null | grep ':18080' | grep -oP 'pid=\K[0-9]+' | head -1 || true)"
-  if [ -n "${pid:-}" ]; then
+  pid="$(ss -ltnp 2>/dev/null | grep ':18080' | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2 || true)"
+  if [ -n "${pid:-}" ] && grep -qa "claude-gemma4-proxy" "/proc/$pid/cmdline" 2>/dev/null; then
     kill "$pid" 2>/dev/null || true
+    # wait for :18080 to be released so the next launch does not race the bind
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      ss -ltn 2>/dev/null | grep -q ':18080' || break
+      sleep 0.2
+    done
     echo "stopped running proxy (pid=$pid); next launch starts the updated one"
+  elif [ -n "${pid:-}" ]; then
+    echo "note: process on :18080 (pid=$pid) is not claude-gemma4-proxy; left untouched"
   fi
 fi
 

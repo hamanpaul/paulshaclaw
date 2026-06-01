@@ -190,6 +190,13 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
 
         self.assertEqual(module.UPSTREAM, "http://example.com:9000")
 
+    def test_proxy_default_upstream_targets_live_endpoint(self) -> None:
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", None)
+            module = load_proxy_module()
+
+        self.assertEqual(module.UPSTREAM, "http://192.168.199.199:8001")
+
     def test_proxy_forward_hoists_system_when_path_has_query_string(self) -> None:
         module = load_proxy_module()
         handler = ProxyHandlerHarness()
