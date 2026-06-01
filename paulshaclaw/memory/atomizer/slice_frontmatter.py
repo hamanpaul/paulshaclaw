@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import hashlib
+from dataclasses import dataclass
+
+from paulshaclaw.lifecycle import schema as stage3
+from .config import AtomizerConfig
+from .splitter import Fragment
+
+_T4_FIELDS = ("memory_layer", "source_agent", "captured_at", "provenance", "supersedes")
+# Stage 3 ordered fields first, then T4 + provenance handled specially in render().
+_SCALAR_ORDER = (
+    "phase", "project", "slice_id", "artifact_kind", "version", "created_at",
+    "created_by", "source_session", "gate_required", "checksum",
+    "memory_layer", "source_agent", "captured_at", "supersedes",
+    "distilled_from", "fragment_ref",
+)
+
+
+@dataclass(frozen=True)
+class Slice:
+    slice_id: str
+    frontmatter: dict[str, object]
+    body: str
+
+
+def _slice_id(fragment: Fragment) -> str:
+    key = f"{fragment.project}|{fragment.source_agent}|{fragment.source_session}|{fragment.fragment_index}"
+    return "sl-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+
+
+def build(fragment: Fragment, config: AtomizerConfig) -> Slice:
+    body = fragment.body
+    artifact_kind = config.artifact_kind_map.get(fragment.source_artifact, config.default_artifact_kind)
+    phase = config.phase_map.get(artifact_kind, config.default_phase)
+    slice_id = _slice_id(fragment)
+    session_ref = f"{fragment.source_agent}:{fragment.source_session}"
+    fragment_ref = f"{fragment.source_agent}__{fragment.source_session}__{fragment.fragment_index:03d}"
+    frontmatter: dict[str, object] = {
+        # Stage 3 required
+        "phase": phase,
+        "project": fragment.project,
+        "slice_id": slice_id,
+        "artifact_kind": artifact_kind,
+        "version": "1",
+        "created_at": fragment.captured_at,
+        "created_by": fragment.source_agent,
+        "source_session": fragment.source_session,
+        "gate_required": False,
+        "checksum": stage3.compute_checksum(body),
+        # T4 read contract
+        "memory_layer": "knowledge",
+        "source_agent": fragment.source_agent,
+        "captured_at": fragment.captured_at,
+        "provenance": dict(fragment.provenance),
+        "supersedes": [],
+        # derivation
+        "distilled_from": session_ref,
+        "fragment_ref": fragment_ref,
+    }
+    return Slice(slice_id=slice_id, frontmatter=frontmatter, body=body)
+
+
+def validate(frontmatter: dict[str, object], body: str) -> list[str]:
+    result = stage3.validate_frontmatter(frontmatter=frontmatter, body=body)
+    errors = list(result.errors)
+    for field in _T4_FIELDS:
+        if field not in frontmatter:
+            errors.append(f"missing T4 contract field: {field}")
+    if frontmatter.get("memory_layer") != "knowledge":
+        errors.append("memory_layer must be 'knowledge'")
+    return errors
+
+
+def _scalar(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        return "[" + ", ".join(str(v) for v in value) + "]"
+    return str(value)
+
+
+def render(slice_: Slice) -> str:
+    fm = slice_.frontmatter
+    lines = ["---"]
+    for key in _SCALAR_ORDER:
+        if key not in fm:
+            continue
+        lines.append(f"{key}: {_scalar(fm[key])}")
+    provenance = fm.get("provenance") or {}
+    if isinstance(provenance, dict):
+        lines.append("provenance:")
+        for pkey in ("repo", "commit", "path"):
+            lines.append(f"  {pkey}: {provenance.get(pkey, '')}")
+    lines.append("---")
+    return "\n".join(lines) + "\n" + slice_.body

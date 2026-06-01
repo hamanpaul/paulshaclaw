@@ -120,4 +120,12 @@ PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory janitor scan \
   --now "2026-05-31T00:00:00Z" \
   --dry-run | grep -Fq '"decayed": 1'
 
+echo "[stage2] atomizer dry-run over fixtures"
+ATOMIZE_ROOT="$(mktemp -d)"
+mkdir -p "$ATOMIZE_ROOT/inbox/research/claude/2026-05-31"
+cp "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/atomizer/raw/s1.md" \
+   "$ATOMIZE_ROOT/inbox/research/claude/2026-05-31/s1.md"
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory atomize \
+  --memory-root "$ATOMIZE_ROOT" --now "2026-05-31T03:00:00Z" --dry-run | grep -Fq '"slices":'
+
 echo "[stage2] ok"
