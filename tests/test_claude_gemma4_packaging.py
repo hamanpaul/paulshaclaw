@@ -18,7 +18,7 @@ CLAUDE_GEMMA4_PROXY = PROJECT_ROOT / "scripts" / "claude-gemma4-proxy"
 CLAUDE_GEMMA4_SETTINGS = PROJECT_ROOT / "config" / "claude-gemma4-settings.json"
 EXPECTED_CLAUDE_GEMMA4_SETTINGS = {
     "permissions": {"defaultMode": "bypassPermissions"},
-    "model": "gemma4-31b-mtp",
+    "model": "gemma4-26b-a4b-nvfp4",
     "skipDangerousModePermissionPrompt": True,
     "theme": "dark",
     "effortLevel": "low",
