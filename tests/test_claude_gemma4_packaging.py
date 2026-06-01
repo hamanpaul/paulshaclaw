@@ -5,6 +5,7 @@ import importlib.util
 import io
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from importlib.machinery import SourceFileLoader
@@ -15,6 +16,7 @@ from unittest import mock
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CLAUDE_GEMMA4 = PROJECT_ROOT / "scripts" / "claude-gemma4"
 CLAUDE_GEMMA4_PROXY = PROJECT_ROOT / "scripts" / "claude-gemma4-proxy"
+CLAUDE_GEMMA4_INSTALL = PROJECT_ROOT / "scripts" / "install-claude-gemma4"
 CLAUDE_GEMMA4_SETTINGS = PROJECT_ROOT / "config" / "claude-gemma4-settings.json"
 EXPECTED_CLAUDE_GEMMA4_SETTINGS = {
     "permissions": {"defaultMode": "bypassPermissions"},
@@ -78,7 +80,7 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertTrue(CLAUDE_GEMMA4.exists(), "scripts/claude-gemma4 should exist")
         self.assertTrue(os.access(CLAUDE_GEMMA4, os.X_OK), "scripts/claude-gemma4 should be executable")
         script_text = CLAUDE_GEMMA4.read_text(encoding="utf-8")
-        self.assertIn('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', script_text)
+        self.assertIn('SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"', script_text)
         self.assertIn('GEMMA_PROXY="$SCRIPT_DIR/claude-gemma4-proxy"', script_text)
         self.assertIn('command -v claude', script_text)
         self.assertIn('command -v claude.exe', script_text)
@@ -100,6 +102,52 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             os.access(CLAUDE_GEMMA4_PROXY, os.X_OK),
             "scripts/claude-gemma4-proxy should be executable",
         )
+
+    def test_install_script_is_packaged_and_executable(self) -> None:
+        self.assertTrue(CLAUDE_GEMMA4_INSTALL.exists(), "scripts/install-claude-gemma4 should exist")
+        self.assertTrue(
+            os.access(CLAUDE_GEMMA4_INSTALL, os.X_OK),
+            "scripts/install-claude-gemma4 should be executable",
+        )
+        result = subprocess.run(
+            ["bash", "-n", str(CLAUDE_GEMMA4_INSTALL)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_install_script_symlinks_launcher_and_proxy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env = dict(os.environ, PSC_CLAUDE_GEMMA4_BIN_DIR=tmpdir)
+            result = subprocess.run(
+                ["bash", str(CLAUDE_GEMMA4_INSTALL)],
+                capture_output=True,
+                check=False,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+            launcher_link = Path(tmpdir) / "claude-gemma4"
+            proxy_link = Path(tmpdir) / "claude-gemma4-proxy"
+            self.assertTrue(launcher_link.is_symlink())
+            self.assertTrue(proxy_link.is_symlink())
+            self.assertEqual(launcher_link.resolve(), CLAUDE_GEMMA4.resolve())
+            self.assertEqual(proxy_link.resolve(), CLAUDE_GEMMA4_PROXY.resolve())
+
+            again = subprocess.run(
+                ["bash", str(CLAUDE_GEMMA4_INSTALL)],
+                capture_output=True,
+                check=False,
+                text=True,
+                env=env,
+                timeout=10,
+            )
+            self.assertEqual(again.returncode, 0, again.stderr)
+            self.assertIn("unchanged", again.stdout)
 
     def test_proxy_script_parses_with_py_compile(self) -> None:
         proxy_text = CLAUDE_GEMMA4_PROXY.read_text(encoding="utf-8")

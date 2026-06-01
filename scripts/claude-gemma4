@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eu
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 SECRET_ENV="${PSC_CLAUDE_GEMMA4_SECRET_ENV:-${PSC_SECRET_ENV:-$HOME/.config/paulshaclaw/paulshaclaw.telegram.secret.env}}"
 GEMMA_CONFIG_DIR="${PSC_CLAUDE_GEMMA4_CONFIG_DIR:-${PSC_GEMMA4_CONFIG_DIR:-$HOME/.claude-gemma4}}"
 GEMMA_SETTINGS="$GEMMA_CONFIG_DIR/settings.json"
