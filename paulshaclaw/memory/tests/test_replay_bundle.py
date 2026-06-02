@@ -90,6 +90,35 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertIn("DISTILLED", blob)
             self.assertNotIn("RAW PROMPT CONTENT", blob)
 
+    def test_rebuild_does_not_destroy_previous_bundle_on_failure(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s1 = _slice(root, "sl-1")
+            out = root / "bundle-out"
+
+            bundle.build(root, [s1], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+            original_manifest = (out / "manifest.json").read_text(encoding="utf-8")
+            original_slice = (out / "slices" / "sl-1.md").read_text(encoding="utf-8")
+
+            s2 = _slice(root, "sl-2")
+            with mock.patch(
+                "paulshaclaw.memory.replay.bundle.shutil.copyfile",
+                side_effect=OSError("boom"),
+            ):
+                with self.assertRaises(bundle.BundleError):
+                    bundle.build(
+                        root,
+                        [s2],
+                        out,
+                        selection={"project": "p"},
+                        now="2026-06-02T06:01:00Z",
+                    )
+
+            self.assertEqual((out / "manifest.json").read_text(encoding="utf-8"), original_manifest)
+            self.assertEqual((out / "slices" / "sl-1.md").read_text(encoding="utf-8"), original_slice)
+            self.assertTrue((out / "slices" / "sl-1.md").exists())
+            self.assertFalse((out / "slices" / "sl-2.md").exists())
+
     def test_rebuild_cleans_stale_slices(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)
@@ -126,6 +155,15 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertFalse((out / "stale-root.txt").exists())
             self.assertFalse((out / "stale-dir").exists())
             self.assertTrue((out / "slices" / "sl-2.md").exists())
+
+    def test_out_dir_under_knowledge_is_rejected(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s = _slice(root, "sl-1")
+            out = root / "knowledge" / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
 
     def test_empty_selection_writes_empty_bundle_with_warning(self):
         with _tmp_dir() as tmp:
