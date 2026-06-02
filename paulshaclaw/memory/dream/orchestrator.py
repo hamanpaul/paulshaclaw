@@ -15,6 +15,10 @@ from typing import Any, Callable
 from paulshaclaw.memory.ledger import dream as dream_ledger
 
 
+def _error_category(exc: Exception) -> str:
+    return type(exc).__name__
+
+
 def _run_pass(
     name: str,
     fn: Callable[[], dict[str, Any]],
@@ -24,8 +28,9 @@ def _run_pass(
     try:
         result = fn()
     except Exception as exc:  # noqa: BLE001 - orchestration boundary
-        passes[name] = {"error": f"{type(exc).__name__}: {exc}"}
-        errors.append(f"{name}: {exc}")
+        category = _error_category(exc)
+        passes[name] = {"error": category}
+        errors.append(f"{name}:{category}")
         return False
 
     summary: dict[str, Any] = {}

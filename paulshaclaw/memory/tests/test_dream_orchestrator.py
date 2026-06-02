@@ -65,6 +65,9 @@ class TestDreamOrchestrator(unittest.TestCase):
             )
 
             self.assertEqual(calls, ["a", "j"])
+            record = dream.last_run(root)
+            self.assertEqual(record["passes"]["atomize"], {"error": "RuntimeError"})
+            self.assertEqual(record["errors"], ["atomize:RuntimeError"])
 
     def test_warnings_produce_partial(self):
         def atomize_fn():
@@ -84,6 +87,27 @@ class TestDreamOrchestrator(unittest.TestCase):
             )
 
             self.assertEqual(dream.last_run(root)["status"], "partial")
+
+    def test_failure_record_redacts_exception_message(self):
+        def atomize_fn():
+            raise RuntimeError("raw prompt leaked")
+
+        def janitor_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            record = orchestrator.run_dream(
+                root,
+                atomize_fn=atomize_fn,
+                janitor_fn=janitor_fn,
+                now="2026-06-02T00:00:00Z",
+                config_hash="cfg",
+            )
+
+            rendered = str(record)
+            self.assertIn("RuntimeError", rendered)
+            self.assertNotIn("raw prompt leaked", rendered)
 
     def test_dry_run_writes_no_ledger(self):
         def atomize_fn():

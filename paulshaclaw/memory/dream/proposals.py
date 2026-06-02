@@ -57,5 +57,7 @@ def pending(memory_root: Path) -> List[dict[str, Any]]:
     return out
 
 
-def requires_approval(kind: str) -> bool:
+def requires_approval(kind: str, *, decay_requires_approval: bool = False) -> bool:
+    if kind == "decay":
+        return decay_requires_approval
     return kind in _CANONICAL_KINDS

@@ -45,6 +45,10 @@ class DreamProposalsTest(unittest.TestCase):
         self.assertTrue(proposals.requires_approval("merge"))
         self.assertTrue(proposals.requires_approval("supersede"))
         self.assertTrue(proposals.requires_approval("contradiction"))
+        self.assertFalse(proposals.requires_approval("decay"))
+        self.assertTrue(
+            proposals.requires_approval("decay", decay_requires_approval=True)
+        )
 
 
 if __name__ == "__main__":
