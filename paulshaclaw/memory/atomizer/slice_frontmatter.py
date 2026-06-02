@@ -108,7 +108,7 @@ def build_from_proposal(proposal: "SliceProposal", session_meta: dict[str, objec
         slice_id=slice_id,
         frontmatter=frontmatter,
         body=body,
-        relations=tuple(dict(relation) for relation in proposal.relations),
+        relations=tuple(proposal.relations),
     )
 
 

@@ -70,6 +70,22 @@ class LlmOutputTests(unittest.TestCase):
         proposals = llm_output.parse(raw, PROJECTS)
         self.assertEqual(proposals[0].title, "7")
 
+    def test_tag_entries_are_stringified(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[7,true,null],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]'
+        )
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].tags, ("7", "True", "None"))
+
+    def test_source_fragment_indices_are_coerced_with_int(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":["1",2.9,true],"relations":[]}]'
+        )
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].source_fragment_indices, (1, 2, 1))
+
     def test_duplicate_titles_are_allowed(self):
         raw = (
             '[{"title":"dup","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b1",'

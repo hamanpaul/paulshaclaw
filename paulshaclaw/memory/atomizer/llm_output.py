@@ -72,26 +72,21 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
             raise LlmOutputError(f"proposal {index} has empty body")
 
         tags = _require_list(item, "tags", index, default_missing=True)
-        if not all(isinstance(tag, str) for tag in tags):
-            raise LlmOutputError(f"proposal {index} tags entries must be strings")
-
         source_fragment_indices = _require_list(item, "source_fragment_indices", index, default_missing=True)
-        if not all(isinstance(fragment_index, int) and not isinstance(fragment_index, bool)
-                   for fragment_index in source_fragment_indices):
-            raise LlmOutputError(f"proposal {index} source_fragment_indices entries must be ints")
 
         relations = _require_list(item, "relations", index, default_missing=True)
+        kind = item.get("artifact_kind")
         title = str(item.get("title", ""))
 
         proposals.append(
             SliceProposal(
                 title=title,
-                artifact_kind=artifact_kind,
-                project=project,
-                tags=tuple(tags),
+                artifact_kind=str(kind),
+                project=str(project),
+                tags=tuple(str(tag) for tag in tags),
                 body=body,
-                source_fragment_indices=tuple(source_fragment_indices),
-                relations=tuple(dict(relation) for relation in relations if isinstance(relation, dict)),
+                source_fragment_indices=tuple(int(fragment_index) for fragment_index in source_fragment_indices),
+                relations=tuple(relation for relation in relations if isinstance(relation, dict)),
             )
         )
     return proposals

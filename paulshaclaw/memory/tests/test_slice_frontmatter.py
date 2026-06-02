@@ -119,6 +119,11 @@ class BuildFromProposalTests(unittest.TestCase):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
         self.assertEqual(built.relations[0]["entity"], "MTK")
 
+    def test_relations_tuple_is_reused_without_copy(self):
+        proposal = _proposal()
+        built = slice_frontmatter.build_from_proposal(proposal, _SESSION_META)
+        self.assertIs(built.relations, proposal.relations)
+
     def test_proposal_phase_mapping_matches_plan(self):
         cases = {
             "research": "research",
