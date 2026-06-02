@@ -122,6 +122,38 @@ class AgentExecTests(unittest.TestCase):
             self.assertEqual(cached.run("p"), CANONICAL_FAKE_JSON)
         self.assertEqual(calls["n"], 1)
 
+    def test_caching_client_writes_via_temp_file_replace(self):
+        cache_dir = self.make_sandbox("cache-atomic")
+        cached = agent_exec.CachingAgentClient(
+            agent_exec.FakeAgentClient(CANONICAL_FAKE_JSON),
+            cache_dir,
+        )
+        cache_path = cached.cache_path_for("p")
+        temp_path = cache_path.with_name(f".{cache_path.name}.tmp")
+        write_targets: list[Path] = []
+        replace_calls: list[tuple[Path, Path]] = []
+        real_write_text = Path.write_text
+        real_replace = Path.replace
+
+        def write_spy(path: Path, *args, **kwargs):
+            write_targets.append(path)
+            return real_write_text(path, *args, **kwargs)
+
+        def replace_spy(path: Path, target: Path, *args, **kwargs):
+            replace_calls.append((path, target))
+            return real_replace(path, target, *args, **kwargs)
+
+        with (
+            mock.patch.object(Path, "write_text", autospec=True, side_effect=write_spy),
+            mock.patch.object(Path, "replace", autospec=True, side_effect=replace_spy),
+        ):
+            self.assertEqual(cached.run("p"), CANONICAL_FAKE_JSON)
+
+        self.assertEqual(write_targets, [temp_path])
+        self.assertEqual(replace_calls, [(temp_path, cache_path)])
+        self.assertFalse(temp_path.exists())
+        self.assertEqual(cache_path.read_text(encoding="utf-8"), CANONICAL_FAKE_JSON)
+
 
 if __name__ == "__main__":
     unittest.main()

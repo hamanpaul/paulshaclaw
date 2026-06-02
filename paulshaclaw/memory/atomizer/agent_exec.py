@@ -63,6 +63,17 @@ class CachingAgentClient(AgentClient):
         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
         return self._cache_dir / f"{prompt_hash}.txt"
 
+    @staticmethod
+    def _write_text_atomically(path: Path, text: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.tmp")
+        try:
+            tmp.write_text(text, encoding="utf-8")
+            tmp.replace(path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+
     def run(self, prompt: str) -> str:
         path = self.cache_path_for(prompt)
         if path.exists():
@@ -73,8 +84,6 @@ class CachingAgentClient(AgentClient):
             else:
                 if cached:
                     return cached
-
         output = self._inner.run(prompt)
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(output, encoding="utf-8")
+        self._write_text_atomically(path, output)
         return output
