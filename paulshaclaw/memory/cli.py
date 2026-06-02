@@ -67,6 +67,31 @@ def _build_parser() -> argparse.ArgumentParser:
     atomize.add_argument("--dry-run", action="store_true")
     atomize.set_defaults(func=_atomize)
 
+    dream = memory_subparsers.add_parser("dream")
+    dream_subparsers = dream.add_subparsers(dest="dream_command", required=True)
+    dream_run = dream_subparsers.add_parser("run")
+    dream_run.add_argument("--memory-root", required=True)
+    dream_run.add_argument("--now", default=None)
+    dream_run.add_argument("--dry-run", action="store_true")
+    dream_run.add_argument("--require-idle", action="store_true")
+    dream_run.add_argument("--max-load", type=float, default=1.0)
+    dream_run.add_argument("--promoter", choices=["identity", "llm"], default=None)
+    dream_run.add_argument("--agent-command", default=None)
+    dream_run.set_defaults(func=_dream)
+    dream_status = dream_subparsers.add_parser("status")
+    dream_status.add_argument("--memory-root", required=True)
+    dream_status.set_defaults(func=_dream)
+
+    bundle_p = memory_subparsers.add_parser("bundle")
+    bundle_p.add_argument("--memory-root", required=True)
+    bundle_p.add_argument("--project", default=None)
+    bundle_p.add_argument("--tag", action="append", default=None)
+    bundle_p.add_argument("--entity", default=None)
+    bundle_p.add_argument("--include-decayed", action="store_true")
+    bundle_p.add_argument("--out", required=True)
+    bundle_p.add_argument("--now", default=None)
+    bundle_p.set_defaults(func=_bundle)
+
     return parser
 
 
@@ -124,6 +149,26 @@ def _atomize(args: argparse.Namespace) -> int:
     if args.now is None:
         args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return atomize_run(args)
+
+
+def _dream(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from .dream.cli import run as dream_run
+
+    if getattr(args, "now", None) is None:
+        args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return dream_run(args)
+
+
+def _bundle(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from .replay.cli import run as bundle_run
+
+    if args.now is None:
+        args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return bundle_run(args)
 
 
 def _load_policy(override_path: str | None):

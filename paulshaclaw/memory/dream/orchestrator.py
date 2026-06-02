@@ -1,0 +1,85 @@
+"""Dream orchestrator.
+
+Coordinates Stage 2 "dream" passes (atomize + janitor) and appends an
+append-only dream run record to the dream ledger.
+
+This module is intentionally orchestration-only: callers inject the pass
+entrypoints via callables.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Callable
+
+from paulshaclaw.memory.ledger import dream as dream_ledger
+
+
+def _error_category(exc: Exception) -> str:
+    return type(exc).__name__
+
+
+def _run_pass(
+    name: str,
+    fn: Callable[[], dict[str, Any]],
+    passes: dict[str, Any],
+    errors: list[str],
+) -> bool:
+    try:
+        result = fn()
+    except Exception as exc:  # noqa: BLE001 - orchestration boundary
+        category = _error_category(exc)
+        passes[name] = {"error": category}
+        errors.append(f"{name}:{category}")
+        return False
+
+    summary: dict[str, Any] = {}
+    warnings: Any = None
+    if isinstance(result, dict):
+        value = result.get("summary")
+        if isinstance(value, dict):
+            summary = value
+        warnings = result.get("warnings")
+
+    passes[name] = summary
+
+    clean = not warnings and not summary.get("skipped")
+    return bool(clean)
+
+
+def run_dream(
+    memory_root: Path,
+    *,
+    atomize_fn: Callable[[], dict[str, Any]],
+    janitor_fn: Callable[[], dict[str, Any]],
+    now: str,
+    config_hash: str = "",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    passes: dict[str, Any] = {}
+    errors: list[str] = []
+
+    run_id = f"dream-{now}"
+
+    atomize_clean = _run_pass("atomize", atomize_fn, passes, errors)
+    janitor_clean = _run_pass("janitor", janitor_fn, passes, errors)
+
+    if errors:
+        status = "failed"
+    else:
+        status = "ok" if (atomize_clean and janitor_clean) else "partial"
+
+    record: dict[str, Any] = {
+        "ts": now,
+        "run_id": run_id,
+        "status": status,
+        "passes": passes,
+        "errors": errors,
+        "dream_config_hash": config_hash,
+        "dry_run": dry_run,
+    }
+
+    if not dry_run:
+        dream_ledger.append_run(memory_root, record)
+
+    return record

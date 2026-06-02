@@ -51,9 +51,13 @@ def _ignored(path: Path) -> bool:
     parts = path.parts
     if "tests" in parts or path.name.startswith("test_"):
         return True
+
     for index in range(len(parts) - 2):
         if parts[index:index + 3] == ("paulshaclaw", "memory", "policy"):
             return True
+        if parts[index:index + 3] == ("paulshaclaw", "memory", "ledger"):
+            return True
+
     return False
 
 

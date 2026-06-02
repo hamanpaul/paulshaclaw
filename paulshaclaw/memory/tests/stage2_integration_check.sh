@@ -2,8 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf -- "$TMP_DIR"' EXIT
+TMP_BASE="$ROOT_DIR/.psc_tmp"
+mkdir -p "$TMP_BASE"
+TMP_DIR="$TMP_BASE/stage2-$(date +%s)-$$"
+mkdir -p "$TMP_DIR"
+trap 'rm -rf -- "$TMP_DIR"; rmdir -- "$TMP_BASE" 2>/dev/null || true' EXIT
 
 require_text() {
   local label="$1"
@@ -114,14 +117,16 @@ require_hook_dry_run \
   "copilot-cli__copilot-session-end-001.json"
 
 echo "[stage2] janitor dry-run over fixtures"
+JANITOR_ROOT="$TMP_DIR/janitor-fixtures"
+mkdir -p "$JANITOR_ROOT"
 PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory janitor scan \
-  --memory-root "$(mktemp -d)" \
+  --memory-root "$JANITOR_ROOT" \
   --knowledge-root "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/knowledge/ttl" \
   --now "2026-05-31T00:00:00Z" \
   --dry-run | grep -Fq '"decayed": 1'
 
 echo "[stage2] atomizer dry-run over fixtures"
-ATOMIZE_ROOT="$(mktemp -d)"
+ATOMIZE_ROOT="$TMP_DIR/atomize-fixtures"
 mkdir -p "$ATOMIZE_ROOT/inbox/research/claude/2026-05-31"
 cp "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/atomizer/raw/s1.md" \
    "$ATOMIZE_ROOT/inbox/research/claude/2026-05-31/s1.md"
@@ -129,7 +134,7 @@ PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory atomize \
   --memory-root "$ATOMIZE_ROOT" --now "2026-05-31T03:00:00Z" --dry-run | grep -Fq '"slices":'
 
 echo "[stage2] atomizer llm stub dry-run"
-ATOMIZE_LLM_ROOT="$(mktemp -d)"
+ATOMIZE_LLM_ROOT="$TMP_DIR/atomize-llm-fixtures"
 mkdir -p "$ATOMIZE_LLM_ROOT/inbox/research/claude/2026-05-31"
 cp "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/atomizer/raw/s1.md" \
    "$ATOMIZE_LLM_ROOT/inbox/research/claude/2026-05-31/s1.md"
@@ -153,5 +158,20 @@ PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory atomize \
   --promoter llm \
   --override "$ATOMIZE_LLM_ROOT/atomizer.override.yaml" \
   --dry-run | grep -Fq '"slices": 1'
+
+echo "[stage2] dream dry-run + bundle over fixtures"
+DREAM_ROOT="$TMP_DIR/dream-fixtures"
+mkdir -p "$DREAM_ROOT/inbox/research/claude/2026-06-02"
+cp "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/atomizer/raw/s1.md" \
+   "$DREAM_ROOT/inbox/research/claude/2026-06-02/s1.md"
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory dream run \
+  --memory-root "$DREAM_ROOT" --now "2026-06-02T05:00:00Z" --promoter identity --dry-run \
+  | grep -Fq '"status"'
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory dream run \
+  --memory-root "$DREAM_ROOT" --now "2026-06-02T05:00:00Z" --promoter identity >/dev/null
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory bundle \
+  --memory-root "$DREAM_ROOT" --project paulshaclaw --out "$DREAM_ROOT/bundle" \
+  --now "2026-06-02T06:00:00Z" >/dev/null
+grep -Fq '"raw_excluded": true' "$DREAM_ROOT/bundle/manifest.json"
 
 echo "[stage2] ok"

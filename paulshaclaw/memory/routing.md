@@ -59,6 +59,8 @@ MVP 設計與驗證細節見：
 
 > **T4 已落地（2026-05）：** decayed/reactivation 事件由最小 janitor 寫入 `runtime/ledger/lifecycle.jsonl`，active 集合由 `paulshaclaw.memory.ledger.retrieval_set.active_records()` 提供。掃描入口：`psc memory janitor scan`。設計見 `docs/superpowers/specs/2026-05-31-stage2-t4-ledger-janitor-design.md`。
 
+> **T5 已落地（2026-06）：** `psc memory dream run`（idle-gated systemd timer 範本 Mon..Fri 05:00）編排 atomize→janitor 並記 `runtime/ledger/dream.jsonl`;`psc memory dream status` 回最後 run + backlog。`psc memory bundle --project/--tag/--entity` 組 replay bundle（只含 distilled slices + ledger，`raw_excluded:true`）。proposal-first 框架於 `runtime/proposals/`。設計見 `docs/superpowers/specs/2026-06-02-stage2-dream-service-design.md`。
+
 ## 4. 驗證邊界
 
 Stage 2 integration gate 最少要覆蓋：
