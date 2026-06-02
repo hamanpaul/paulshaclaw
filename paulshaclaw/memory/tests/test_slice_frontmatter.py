@@ -119,12 +119,34 @@ class BuildFromProposalTests(unittest.TestCase):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
         self.assertEqual(built.relations[0]["entity"], "MTK")
 
-    def test_render_round_trips_tags_and_source_fragments(self):
+    def test_render_keeps_legacy_scalar_list_format(self):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
-        parsed = parse_artifact_text(slice_frontmatter.render(built))
-        self.assertNotIn("title", parsed.frontmatter)
-        self.assertEqual(parsed.frontmatter["tags"], ["pwhm", "fsm"])
-        self.assertEqual(parsed.frontmatter["source_fragments"], [0, 1])
+        rendered = slice_frontmatter.render(built)
+        self.assertIn("tags: [pwhm, fsm]", rendered)
+        self.assertIn("source_fragments: [0, 1]", rendered)
+
+    def test_stage3_parser_keeps_bracketed_scalars_as_strings(self):
+        body = "distilled body"
+        text = (
+            "---\n"
+            "phase: review\n"
+            "project: prplos-core\n"
+            "slice_id: sl-1234567890abcdef\n"
+            "artifact_kind: report\n"
+            "version: 1\n"
+            "created_at: 2026-06-02T00:00:00Z\n"
+            "created_by: claude\n"
+            "source_session: s1\n"
+            "gate_required: false\n"
+            f"checksum: {compute_checksum(body)}\n"
+            'tags: ["pwhm", "fsm"]\n'
+            "source_fragments: [0, 1]\n"
+            "---\n"
+            f"{body}"
+        )
+        parsed = parse_artifact_text(text)
+        self.assertEqual(parsed.frontmatter["tags"], '["pwhm", "fsm"]')
+        self.assertEqual(parsed.frontmatter["source_fragments"], "[0, 1]")
 
 
 if __name__ == "__main__":

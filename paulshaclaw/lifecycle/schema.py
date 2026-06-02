@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
-import json
 import re
 
 
@@ -123,14 +122,6 @@ def _parse_scalar(value: str) -> object:
         return False
     if lowered in ("null", "none"):
         return None
-    if value.startswith("[") and value.endswith("]"):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            pass
-        else:
-            if isinstance(parsed, list):
-                return parsed
     if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         return value[1:-1]
     return value
