@@ -104,6 +104,27 @@ class ReplaySelectorTests(unittest.TestCase):
             got = selector.select(root, project="p")
             self.assertEqual([x.name for x in got], ["sl-fence.md"])
 
+    def test_duplicate_slice_id_rejected(self):
+        """Regression: duplicates of slice_id should be rejected consistently."""
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            # create two distinct files that declare the same slice_id
+            self._write_slice(root, "dup", project="projA")
+            self._write_slice(root, "dup", project="projB")
+            # discovery should detect the duplicate slice_id and raise
+            with self.assertRaises(selector.SelectorError):
+                selector.select(root, project="projA")
+
+    def test_project_and_tags_and_composition(self):
+        """Facets compose with AND semantics (project + tags)."""
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            self._write_slice(root, "sl-a", project="proj1", tags=["x", "y"]) 
+            self._write_slice(root, "sl-b", project="proj1", tags=["y"]) 
+            self._write_slice(root, "sl-c", project="proj2", tags=["x"]) 
+            got = selector.select(root, project="proj1", tags=["x"]) 
+            self.assertEqual([p.name for p in got], ["sl-a.md"])
+
 
 if __name__ == "__main__":
     unittest.main()

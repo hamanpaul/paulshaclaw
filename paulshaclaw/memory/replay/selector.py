@@ -100,8 +100,14 @@ def select(
         sid = fm.get("slice_id")
         if not sid:
             continue
-        slice_map[str(sid)] = p
-        fm_map[str(sid)] = fm
+        sid_str = str(sid)
+        if sid_str in slice_map:
+            # Duplicate slice_id detected: raise to prevent later files silently
+            # overwriting earlier discovered slices.
+            existing = slice_map[sid_str]
+            raise SelectorError(f"duplicate slice_id '{sid_str}' found in {existing!s} and {p!s}")
+        slice_map[sid_str] = p
+        fm_map[sid_str] = fm
 
     # Start with all discovered slice ids
     matched_ids = set(slice_map.keys())
