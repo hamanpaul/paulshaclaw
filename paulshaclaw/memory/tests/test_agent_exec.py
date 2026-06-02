@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import shutil
+import os
 import sys
+import tempfile
 import unittest
-import uuid
 from pathlib import Path
 from unittest import mock
 
@@ -19,21 +19,21 @@ CANONICAL_FAKE_JSON = (
 
 class AgentExecTests(unittest.TestCase):
     def make_sandbox(self, name: str) -> Path:
-        root = Path(__file__).resolve().parent / ".tmp-agent-exec"
-        path = root / f"{name}-{uuid.uuid4().hex}"
-        path.mkdir(parents=True, exist_ok=False)
-        self.addCleanup(shutil.rmtree, path, ignore_errors=True)
-        self.addCleanup(self._cleanup_parent, root)
-        return path
-
-    @staticmethod
-    def _cleanup_parent(root: Path) -> None:
-        if root.exists() and not any(root.iterdir()):
-            root.rmdir()
+        sandbox = tempfile.TemporaryDirectory(prefix=f"agent-exec-{name}-")
+        self.addCleanup(sandbox.cleanup)
+        return Path(sandbox.name)
 
     def test_fake_client_returns_canned(self):
         client = agent_exec.FakeAgentClient(CANONICAL_FAKE_JSON)
         self.assertEqual(client.run("anything"), CANONICAL_FAKE_JSON)
+
+    def test_make_sandbox_uses_system_temp_dir(self):
+        sandbox = self.make_sandbox("system-temp")
+        temp_root = Path(tempfile.gettempdir()).resolve()
+        self.assertEqual(
+            Path(os.path.commonpath([sandbox.resolve(), temp_root])),
+            temp_root,
+        )
 
     def test_exec_client_runs_stub_and_returns_stdout(self):
         client = agent_exec.AgentExecClient([sys.executable, str(STUB)], timeout=30)
