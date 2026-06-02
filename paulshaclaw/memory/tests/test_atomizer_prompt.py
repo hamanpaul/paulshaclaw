@@ -32,18 +32,14 @@ class PromptTests(unittest.TestCase):
                 [
                     "SKILLDOC",
                     "",
-                    "## Known projects (choose exactly one per slice, or _unknown)",
-                    "paulshaclaw, prplos-core",
+                    "paulshaclaw",
+                    "prplos-core",
                     "",
-                    "## Session fragments to atomize",
                     "[fragment 0]",
                     "alpha",
                     "",
                     "[fragment 1]",
                     "beta",
-                    "",
-                    "## Output",
-                    "Return ONLY the JSON array specified by the skill's output contract.",
                 ]
             ),
         )
