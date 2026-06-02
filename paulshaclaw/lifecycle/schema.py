@@ -75,7 +75,7 @@ def parse_artifact_text(text: str) -> ArtifactDocument:
         key = key.strip()
         if not key:
             raise ValueError("frontmatter key 不可為空")
-        frontmatter[key] = _parse_scalar(raw_value.strip())
+        frontmatter[key] = _parse_frontmatter_value(key, raw_value.strip())
     return ArtifactDocument(frontmatter=frontmatter, body=body)
 
 
@@ -125,6 +125,34 @@ def _parse_scalar(value: str) -> object:
     if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
         return value[1:-1]
     return value
+
+
+def _parse_frontmatter_value(key: str, value: str) -> object:
+    if key == "tags":
+        parsed = _parse_bracket_list(value)
+        if parsed is not None:
+            return [item.strip("\"'") for item in parsed]
+    if key == "source_fragments":
+        parsed = _parse_bracket_list(value)
+        if parsed is not None:
+            numbers: list[int] = []
+            for item in parsed:
+                try:
+                    numbers.append(int(item))
+                except ValueError:
+                    break
+            else:
+                return numbers
+    return _parse_scalar(value)
+
+
+def _parse_bracket_list(value: str) -> list[str] | None:
+    if not (value.startswith("[") and value.endswith("]")):
+        return None
+    inner = value[1:-1].strip()
+    if not inner:
+        return []
+    return [part.strip() for part in inner.split(",")]
 
 
 def _is_iso8601(value: object) -> bool:
