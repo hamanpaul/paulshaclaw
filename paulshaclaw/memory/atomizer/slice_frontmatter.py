@@ -70,15 +70,9 @@ def _phase_for_artifact_kind(artifact_kind: str) -> str:
     phase_map = {
         "research": "research",
         "spec": "define",
-        "roadmap": "plan",
-        "todo": "plan",
         "plan": "plan",
-        "task": "build",
-        "test": "verify",
         "report": "review",
         "review": "review",
-        "gate-report": "review",
-        "ship-record": "ship",
     }
     return phase_map.get(artifact_kind, "review")
 

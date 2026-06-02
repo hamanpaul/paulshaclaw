@@ -44,33 +44,6 @@ def _require_list(item: dict[str, Any], key: str, index: int) -> list[Any]:
     return value
 
 
-def _validate_relation(relation: dict[str, Any], index: int, relation_index: int) -> dict[str, Any]:
-    relation_type = relation.get("type")
-    if relation_type == "relates_to":
-        if set(relation) != {"type", "target_title"}:
-            raise LlmOutputError(
-                f"proposal {index} relation {relation_index} must only contain type and target_title"
-            )
-        target_title = relation.get("target_title")
-        if not isinstance(target_title, str) or not target_title.strip():
-            raise LlmOutputError(
-                f"proposal {index} relation {relation_index} target_title must be a non-empty string"
-            )
-    elif relation_type == "mentions":
-        if set(relation) != {"type", "entity"}:
-            raise LlmOutputError(
-                f"proposal {index} relation {relation_index} must only contain type and entity"
-            )
-        entity = relation.get("entity")
-        if not isinstance(entity, str) or not entity.strip():
-            raise LlmOutputError(
-                f"proposal {index} relation {relation_index} entity must be a non-empty string"
-            )
-    else:
-        raise LlmOutputError(f"proposal {index} relation {relation_index} has invalid type: {relation_type}")
-    return dict(relation)
-
-
 def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
     try:
         data = json.loads(_extract_json(raw))
@@ -108,17 +81,10 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
             raise LlmOutputError(f"proposal {index} source_fragment_indices entries must be ints")
 
         relations = _require_list(item, "relations", index)
-        if not all(isinstance(relation, dict) for relation in relations):
-            raise LlmOutputError(f"proposal {index} relations entries must be objects")
 
         title = item.get("title")
         if not isinstance(title, str) or not title.strip():
             raise LlmOutputError(f"proposal {index} title must be a non-empty string")
-
-        validated_relations = [
-            _validate_relation(relation, index, relation_index)
-            for relation_index, relation in enumerate(relations)
-        ]
 
         proposals.append(
             SliceProposal(
@@ -128,7 +94,7 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
                 tags=tuple(tags),
                 body=body,
                 source_fragment_indices=tuple(source_fragment_indices),
-                relations=tuple(validated_relations),
+                relations=tuple(dict(relation) for relation in relations if isinstance(relation, dict)),
             )
         )
     return proposals

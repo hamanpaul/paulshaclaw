@@ -119,6 +119,32 @@ class BuildFromProposalTests(unittest.TestCase):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
         self.assertEqual(built.relations[0]["entity"], "MTK")
 
+    def test_proposal_phase_mapping_matches_plan(self):
+        cases = {
+            "research": "research",
+            "spec": "define",
+            "plan": "plan",
+            "report": "review",
+            "review": "review",
+            "task": "review",
+            "roadmap": "review",
+        }
+        for artifact_kind, expected_phase in cases.items():
+            with self.subTest(artifact_kind=artifact_kind):
+                built = slice_frontmatter.build_from_proposal(
+                    SliceProposal(
+                        title="alpha",
+                        artifact_kind=artifact_kind,
+                        project="prplos-core",
+                        tags=("pwhm",),
+                        body="distilled body",
+                        source_fragment_indices=(0,),
+                        relations=(),
+                    ),
+                    _SESSION_META,
+                )
+                self.assertEqual(built.frontmatter["phase"], expected_phase)
+
     def test_render_keeps_legacy_scalar_list_format(self):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
         rendered = slice_frontmatter.render(built)

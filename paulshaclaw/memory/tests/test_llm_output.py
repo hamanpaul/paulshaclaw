@@ -81,13 +81,13 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
-    def test_invalid_relation_shape_raises(self):
+    def test_relation_objects_are_preserved_without_shape_validation(self):
         raw = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
             '"source_fragment_indices":[0],"relations":[{"type":"relates_to"}]}]'
         )
-        with self.assertRaises(llm_output.LlmOutputError):
-            llm_output.parse(raw, PROJECTS)
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].relations, ({"type": "relates_to"},))
 
     def test_dangling_relates_to_parses_for_later_resolution(self):
         raw = (
@@ -97,15 +97,18 @@ class LlmOutputTests(unittest.TestCase):
         proposals = llm_output.parse(raw, PROJECTS)
         self.assertEqual(proposals[0].relations, ({"type": "relates_to", "target_title": "missing"},))
 
-    def test_relation_extra_fields_raise(self):
+    def test_relation_extra_fields_are_preserved(self):
         raw = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"body a",'
             '"source_fragment_indices":[0],"relations":[{"type":"mentions","entity":"MTK","extra":"x"}]},'
             '{"title":"b","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"body b",'
             '"source_fragment_indices":[1],"relations":[]}]'
         )
-        with self.assertRaises(llm_output.LlmOutputError):
-            llm_output.parse(raw, PROJECTS)
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(
+            proposals[0].relations,
+            ({"type": "mentions", "entity": "MTK", "extra": "x"},),
+        )
 
 
 if __name__ == "__main__":

@@ -20,7 +20,7 @@ def _frag(index, body):
 
 
 class PromptTests(unittest.TestCase):
-    def test_includes_only_required_prompt_sections(self):
+    def test_matches_plan_prompt_sections(self):
         text = prompt_mod.build_prompt(
             "SKILLDOC",
             [_frag(0, "alpha"), _frag(1, "beta")],
@@ -32,14 +32,18 @@ class PromptTests(unittest.TestCase):
                 [
                     "SKILLDOC",
                     "",
-                    "paulshaclaw",
-                    "prplos-core",
+                    "## Known projects (choose exactly one per slice, or _unknown)",
+                    "paulshaclaw, prplos-core",
                     "",
+                    "## Session fragments to atomize",
                     "[fragment 0]",
                     "alpha",
                     "",
                     "[fragment 1]",
                     "beta",
+                    "",
+                    "## Output",
+                    "Return ONLY the JSON array specified by the skill's output contract.",
                 ]
             ),
         )

@@ -4,14 +4,18 @@ from .splitter import Fragment
 
 
 def build_prompt(skill_text: str, fragments: list[Fragment], known_projects: list[str]) -> str:
-    sections = [skill_text.rstrip("\n")]
-    if known_projects:
-        sections.append("\n".join(known_projects))
-    if fragments:
-        sections.append(
-            "\n\n".join(
-                f"[fragment {fragment.fragment_index}]\n{fragment.body}"
-                for fragment in fragments
-            )
-        )
-    return "\n\n".join(sections)
+    parts = [
+        skill_text.rstrip("\n"),
+        "",
+        "## Known projects (choose exactly one per slice, or _unknown)",
+        ", ".join(known_projects) if known_projects else "_unknown",
+        "",
+        "## Session fragments to atomize",
+    ]
+    for fragment in fragments:
+        parts.append(f"[fragment {fragment.fragment_index}]")
+        parts.append(fragment.body)
+        parts.append("")
+    parts.append("## Output")
+    parts.append("Return ONLY the JSON array specified by the skill's output contract.")
+    return "\n".join(parts)
