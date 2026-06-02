@@ -184,6 +184,8 @@ def _parse_proposals(data: Any, known_projects: list[str]) -> list[SliceProposal
 
         tags = _require_string_list(item, "tags", index)
         source_fragment_indices = _require_int_list(item, "source_fragment_indices", index)
+        if not source_fragment_indices:
+            raise LlmOutputError(f"proposal {index} source_fragment_indices must not be empty")
 
         relations = _require_list(item, "relations", index)
         validated_relations = tuple(

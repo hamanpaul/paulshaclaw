@@ -107,6 +107,16 @@ class LlmOutputTests(unittest.TestCase):
                 with self.assertRaises(llm_output.LlmOutputError):
                     llm_output.parse(raw, PROJECTS)
 
+    def test_empty_source_fragment_indices_raise(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[],"relations":[]}]'
+        )
+        with self.assertRaisesRegex(
+            llm_output.LlmOutputError, "proposal 0 source_fragment_indices must not be empty"
+        ):
+            llm_output.parse(raw, PROJECTS)
+
     def test_parses_bare_array_with_non_json_brackets_in_prose(self):
         raw = (
             'analysis [draft only]\n'
