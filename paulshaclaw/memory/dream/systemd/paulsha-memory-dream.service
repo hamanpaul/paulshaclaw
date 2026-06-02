@@ -1,0 +1,7 @@
+[Unit]
+Description=PaulSha memory dream service (atomize + janitor)
+
+[Service]
+Type=oneshot
+# %h = user home; adjust MEMORY_ROOT/PYTHONPATH at install time.
+ExecStart=/usr/bin/env python3 -m paulshaclaw.memory.cli memory dream run --memory-root %h/.agents/memory --require-idle

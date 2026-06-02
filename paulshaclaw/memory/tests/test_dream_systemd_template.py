@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+import unittest
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parents[1] / "dream"
+
+
+class SystemdTemplateTests(unittest.TestCase):
+    def test_timer_has_workday_morning_schedule(self):
+        timer = (BASE / "systemd" / "paulsha-memory-dream.timer").read_text(encoding="utf-8")
+        self.assertIn("OnCalendar", timer)
+        self.assertIn("Mon..Fri", timer)
+
+    def test_service_invokes_require_idle(self):
+        service = (BASE / "systemd" / "paulsha-memory-dream.service").read_text(encoding="utf-8")
+        self.assertIn("dream run", service)
+        self.assertIn("--require-idle", service)
+
+    def test_wrapper_script_exists(self):
+        self.assertTrue((BASE / "scripts" / "dream-idle-wrapper.sh").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
