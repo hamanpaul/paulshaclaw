@@ -19,6 +19,33 @@ class DreamIdleTest(unittest.TestCase):
         # fail-safe: if probe can't determine load, we consider system idle
         self.assertTrue(idle.is_idle(probe=bad_probe))
 
+    def test_probe_raises_attributeerror(self):
+        from paulshaclaw.memory.dream import idle
+
+        def bad_probe():
+            raise AttributeError("no load attribute")
+
+        # fail-safe: AttributeError should be treated same as OSError
+        self.assertTrue(idle.is_idle(probe=bad_probe))
+
+    def test_probe_returns_too_short_tuple(self):
+        from paulshaclaw.memory.dream import idle
+
+        # probe returns an empty tuple -> IndexError when accessing [0]
+        self.assertTrue(idle.is_idle(probe=lambda: ()))
+
+    def test_only_uses_1min_load_true(self):
+        from paulshaclaw.memory.dream import idle
+
+        # only the 1-minute load should be used
+        self.assertTrue(idle.is_idle(max_load=1.0, probe=lambda: (0.2, 9.0, 9.0)))
+
+    def test_only_uses_1min_load_false(self):
+        from paulshaclaw.memory.dream import idle
+
+        # ensure later load averages don't affect decision
+        self.assertFalse(idle.is_idle(max_load=1.0, probe=lambda: (2.0, 0.1, 0.1)))
+
 
 if __name__ == "__main__":
     unittest.main()
