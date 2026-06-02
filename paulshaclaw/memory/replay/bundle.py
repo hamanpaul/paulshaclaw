@@ -142,14 +142,20 @@ def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, s
         raise BundleError(f"slice failed schema validation: {src}: {errors[0]}")
 
     sid = fm.get("slice_id")
-    sid_str = str(sid).strip() if sid is not None else ""
+    # Require slice_id to be an actual string in YAML; reject other types
+    if not isinstance(sid, str):
+        raise BundleError(f"slice_id must be a string in frontmatter: {src}")
+    sid_str = sid.strip()
     if not sid_str:
         raise BundleError(f"slice_id missing in frontmatter: {src}")
     if Path(sid_str).name != sid_str or "\\" in sid_str:
         raise BundleError(f"slice_id must be a safe single path component: {src}")
 
     session = fm.get("distilled_from")
-    session_str = str(session).strip() if session is not None else ""
+    # Require distilled_from to be an actual string in YAML; reject other types
+    if not isinstance(session, str):
+        raise BundleError(f"distilled_from must be a string in frontmatter: {src}")
+    session_str = session.strip()
     if not session_str:
         raise BundleError(f"distilled_from missing in frontmatter: {src}")
 

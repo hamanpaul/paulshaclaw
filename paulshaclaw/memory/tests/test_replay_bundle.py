@@ -585,6 +585,33 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertNotEqual(code, 0)
             self.assertIn("bundle error", stderr.getvalue())
 
+    def test_build_rejects_non_string_slice_id_types(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            # create a valid slice then mutate slice_id to a non-string YAML value
+            s = _slice(root, "sl-valid")
+            text = s.read_text(encoding="utf-8")
+            text = re.sub(r"(?m)^slice_id:\s*sl-valid\s*$", "slice_id: [1,2,3]", text, count=1)
+            s.write_text(text, encoding="utf-8")
+            out = root / "bundle-out"
+
+            # current behavior should raise BundleError once we enforce type checking
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+    def test_build_rejects_non_string_distilled_from_types(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            # create a valid slice then mutate distilled_from to a non-string YAML value
+            s = _slice(root, "sl-valid-2", distilled_from="claude:s1")
+            text = s.read_text(encoding="utf-8")
+            text = re.sub(r"(?m)^distilled_from:\s*claude:s1\s*$", "distilled_from: 12345", text, count=1)
+            s.write_text(text, encoding="utf-8")
+            out = root / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
 
 if __name__ == "__main__":
     unittest.main()
