@@ -48,6 +48,31 @@ class PromptTests(unittest.TestCase):
             ),
         )
 
+    def test_preserves_skill_text_verbatim(self):
+        text = prompt_mod.build_prompt(
+            "SKILLDOC\n",
+            [_frag(0, "alpha")],
+            ["paulshaclaw"],
+        )
+        self.assertEqual(
+            text,
+            "\n".join(
+                [
+                    "SKILLDOC\n",
+                    "",
+                    "## Known projects (choose exactly one per slice, or _unknown)",
+                    "paulshaclaw",
+                    "",
+                    "## Session fragments to atomize",
+                    "[fragment 0]",
+                    "alpha",
+                    "",
+                    "## Output",
+                    "Return ONLY the JSON array specified by the skill's output contract.",
+                ]
+            ),
+        )
+
     def test_deterministic(self):
         frags = [_frag(0, "alpha")]
         self.assertEqual(

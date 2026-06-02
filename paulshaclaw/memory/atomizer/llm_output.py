@@ -37,8 +37,8 @@ def _extract_json(raw: str) -> str:
     return raw[start:end + 1]
 
 
-def _require_list(item: dict[str, Any], key: str, index: int) -> list[Any]:
-    value = item.get(key)
+def _require_list(item: dict[str, Any], key: str, index: int, *, default_missing: bool = False) -> list[Any]:
+    value = item.get(key, [] if default_missing else None)
     if not isinstance(value, list):
         raise LlmOutputError(f"proposal {index} {key} must be a list")
     return value
@@ -71,20 +71,17 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
         if not isinstance(body, str) or not body.strip():
             raise LlmOutputError(f"proposal {index} has empty body")
 
-        tags = _require_list(item, "tags", index)
+        tags = _require_list(item, "tags", index, default_missing=True)
         if not all(isinstance(tag, str) for tag in tags):
             raise LlmOutputError(f"proposal {index} tags entries must be strings")
 
-        source_fragment_indices = _require_list(item, "source_fragment_indices", index)
+        source_fragment_indices = _require_list(item, "source_fragment_indices", index, default_missing=True)
         if not all(isinstance(fragment_index, int) and not isinstance(fragment_index, bool)
                    for fragment_index in source_fragment_indices):
             raise LlmOutputError(f"proposal {index} source_fragment_indices entries must be ints")
 
-        relations = _require_list(item, "relations", index)
-
-        title = item.get("title")
-        if not isinstance(title, str) or not title.strip():
-            raise LlmOutputError(f"proposal {index} title must be a non-empty string")
+        relations = _require_list(item, "relations", index, default_missing=True)
+        title = str(item.get("title", ""))
 
         proposals.append(
             SliceProposal(

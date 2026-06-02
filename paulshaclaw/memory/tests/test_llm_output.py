@@ -54,13 +54,21 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
-    def test_empty_title_raises(self):
+    def test_missing_optional_fields_default_empty(self):
+        raw = '[{"artifact_kind":"report","project":"paulshaclaw","body":"b"}]'
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].title, "")
+        self.assertEqual(proposals[0].tags, ())
+        self.assertEqual(proposals[0].source_fragment_indices, ())
+        self.assertEqual(proposals[0].relations, ())
+
+    def test_title_is_stringified(self):
         raw = (
-            '[{"title":"  ","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '[{"title":7,"artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
             '"source_fragment_indices":[0],"relations":[]}]'
         )
-        with self.assertRaises(llm_output.LlmOutputError):
-            llm_output.parse(raw, PROJECTS)
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].title, "7")
 
     def test_duplicate_titles_are_allowed(self):
         raw = (
