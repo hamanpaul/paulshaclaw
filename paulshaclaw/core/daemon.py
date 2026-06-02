@@ -208,7 +208,7 @@ class PaulShiaBroDaemon:
 
         pane_id, _pid = detected
         self._agent_pane_id = pane_id
-        self._send_to_pane(pane_id, f"[user:{user_id}] {text}")
+        self._send_to_pane(pane_id, f"[bro:{user_id}] {text}")
         return "…"
     def status_snapshot(self) -> dict[str, object]:
         return {
