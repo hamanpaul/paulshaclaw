@@ -5,11 +5,11 @@ The system SHALL route Telegram non-command messages to the claude-gemma4 agent 
 
 #### Scenario: Message forwarded to running agent
 - **WHEN** operator sends a non-command message and claude-gemma4 process is detected
-- **THEN** system sends `[user:<user_id>] <text>` to the agent pane via tmux send-keys and replies to Telegram with `"…"`
+- **THEN** system sends `[bro:<user_id>] <text>` to the agent pane via tmux send-keys and replies to Telegram with `"…"`
 
 #### Scenario: Message format includes source user ID
 - **WHEN** operator sends a non-command message to a running agent
-- **THEN** the text sent to the agent pane MUST include the Telegram user ID in the format `[user:<user_id>]` so claude-gemma4 can use `--source-user-id` when replying via bro skill
+- **THEN** the text sent to the agent pane MUST include the Telegram user ID in the format `[bro:<user_id>]` so claude-gemma4 can use `--source-user-id` when replying via bro skill
 
 ### Requirement: Fallback reply when agent is not running
 The system SHALL reply with a fallback message when an operator sends a non-command message and no claude-gemma4 process is detected.
