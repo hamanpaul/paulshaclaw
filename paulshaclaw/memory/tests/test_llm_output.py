@@ -26,6 +26,14 @@ class LlmOutputTests(unittest.TestCase):
         )
         self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
 
+    def test_parses_bare_array_after_label_on_previous_line(self):
+        raw = (
+            "Output:\n"
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]'
+        )
+        self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
+
     def test_malformed_json_raises(self):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse("not json at all", PROJECTS)

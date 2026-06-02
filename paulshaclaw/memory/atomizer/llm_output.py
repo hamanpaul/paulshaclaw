@@ -59,8 +59,11 @@ def _iter_json_array_candidates(raw: str, offset: int):
 
 
 def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:
-    previous = _previous_non_whitespace(raw, start)
-    if previous in _EMBEDDED_JSON_PREFIXES:
+    previous_position = _previous_non_whitespace_index(raw, start)
+    previous = raw[previous_position] if previous_position is not None else None
+    if previous in _EMBEDDED_JSON_PREFIXES and not (
+        previous == ":" and "\n" in raw[previous_position + 1 : start]
+    ):
         return False
 
     following = _next_non_whitespace(raw, end)
@@ -70,10 +73,17 @@ def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:
     return True
 
 
-def _previous_non_whitespace(raw: str, index: int) -> str | None:
+def _previous_non_whitespace_index(raw: str, index: int) -> int | None:
     for position in range(index - 1, -1, -1):
         if not raw[position].isspace():
-            return raw[position]
+            return position
+    return None
+
+
+def _previous_non_whitespace(raw: str, index: int) -> str | None:
+    position = _previous_non_whitespace_index(raw, index)
+    if position is not None:
+        return raw[position]
     return None
 
 
