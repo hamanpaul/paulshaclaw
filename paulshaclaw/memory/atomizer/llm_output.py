@@ -37,11 +37,56 @@ def _extract_json(raw: str) -> str:
     return raw[start:end + 1]
 
 
-def _require_list(item: dict[str, Any], key: str, index: int, *, default_missing: bool = False) -> list[Any]:
-    value = item.get(key, [] if default_missing else None)
+def _require_field(item: dict[str, Any], key: str, index: int) -> Any:
+    if key not in item:
+        raise LlmOutputError(f"proposal {index} missing {key}")
+    return item[key]
+
+
+def _require_list(item: dict[str, Any], key: str, index: int) -> list[Any]:
+    value = _require_field(item, key, index)
     if not isinstance(value, list):
         raise LlmOutputError(f"proposal {index} {key} must be a list")
     return value
+
+
+def _require_non_empty_string(item: dict[str, Any], key: str, index: int) -> str:
+    value = _require_field(item, key, index)
+    if not isinstance(value, str) or not value.strip():
+        raise LlmOutputError(f"proposal {index} {key} must be a non-empty string")
+    return value
+
+
+def _validate_relation(relation: Any, proposal_index: int, relation_index: int) -> dict[str, Any]:
+    if not isinstance(relation, dict):
+        raise LlmOutputError(f"proposal {proposal_index} relation {relation_index} is not an object")
+
+    relation_type = relation.get("type")
+    if relation_type == "relates_to":
+        if set(relation) != {"type", "target_title"}:
+            raise LlmOutputError(
+                f"proposal {proposal_index} relation {relation_index} must match relates_to shape"
+            )
+        target_title = relation.get("target_title")
+        if not isinstance(target_title, str) or not target_title.strip():
+            raise LlmOutputError(
+                f"proposal {proposal_index} relation {relation_index} target_title must be a non-empty string"
+            )
+        return relation
+
+    if relation_type == "mentions":
+        if set(relation) != {"type", "entity"}:
+            raise LlmOutputError(
+                f"proposal {proposal_index} relation {relation_index} must match mentions shape"
+            )
+        entity = relation.get("entity")
+        if not isinstance(entity, str) or not entity.strip():
+            raise LlmOutputError(
+                f"proposal {proposal_index} relation {relation_index} entity must be a non-empty string"
+            )
+        return relation
+
+    raise LlmOutputError(f"proposal {proposal_index} relation {relation_index} has unsupported type: {relation_type}")
 
 
 def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
@@ -55,6 +100,7 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
 
     allowed_projects = set(known_projects) | {"_unknown"}
     proposals: list[SliceProposal] = []
+    seen_titles: set[str] = set()
     for index, item in enumerate(data):
         if not isinstance(item, dict):
             raise LlmOutputError(f"proposal {index} is not an object")
@@ -67,16 +113,23 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
         if project not in allowed_projects:
             raise LlmOutputError(f"proposal {index} has unknown project: {project}")
 
+        title = _require_non_empty_string(item, "title", index)
+        if title in seen_titles:
+            raise LlmOutputError(f"proposal {index} has duplicate title: {title}")
+        seen_titles.add(title)
         body = item.get("body")
         if not isinstance(body, str) or not body.strip():
             raise LlmOutputError(f"proposal {index} has empty body")
 
-        tags = _require_list(item, "tags", index, default_missing=True)
-        source_fragment_indices = _require_list(item, "source_fragment_indices", index, default_missing=True)
+        tags = _require_list(item, "tags", index)
+        source_fragment_indices = _require_list(item, "source_fragment_indices", index)
 
-        relations = _require_list(item, "relations", index, default_missing=True)
+        relations = _require_list(item, "relations", index)
         kind = item.get("artifact_kind")
-        title = str(item.get("title", ""))
+        validated_relations = tuple(
+            _validate_relation(relation, index, relation_index)
+            for relation_index, relation in enumerate(relations)
+        )
 
         proposals.append(
             SliceProposal(
@@ -86,7 +139,7 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
                 tags=tuple(str(tag) for tag in tags),
                 body=body,
                 source_fragment_indices=tuple(int(fragment_index) for fragment_index in source_fragment_indices),
-                relations=tuple(relation for relation in relations if isinstance(relation, dict)),
+                relations=validated_relations,
             )
         )
     return proposals

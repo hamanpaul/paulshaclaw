@@ -54,21 +54,28 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
-    def test_missing_optional_fields_default_empty(self):
-        raw = '[{"artifact_kind":"report","project":"paulshaclaw","body":"b"}]'
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(proposals[0].title, "")
-        self.assertEqual(proposals[0].tags, ())
-        self.assertEqual(proposals[0].source_fragment_indices, ())
-        self.assertEqual(proposals[0].relations, ())
-
-    def test_title_is_stringified(self):
-        raw = (
-            '[{"title":7,"artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
-            '"source_fragment_indices":[0],"relations":[]}]'
+    def test_missing_required_fields_raise(self):
+        cases = (
+            ('[{"artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b","source_fragment_indices":[0],"relations":[]}]'),
+            ('[{"title":"a","artifact_kind":"report","project":"paulshaclaw","body":"b","source_fragment_indices":[0],"relations":[]}]'),
+            ('[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b","relations":[]}]'),
+            ('[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b","source_fragment_indices":[0]}]'),
         )
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(proposals[0].title, "7")
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(llm_output.LlmOutputError):
+                    llm_output.parse(raw, PROJECTS)
+
+    def test_title_must_be_non_empty_string(self):
+        cases = (
+            '[{"title":"","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b","source_fragment_indices":[0],"relations":[]}]',
+            '[{"title":"   ","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b","source_fragment_indices":[0],"relations":[]}]',
+            '[{"title":7,"artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b","source_fragment_indices":[0],"relations":[]}]',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(llm_output.LlmOutputError):
+                    llm_output.parse(raw, PROJECTS)
 
     def test_tag_entries_are_stringified(self):
         raw = (
@@ -86,16 +93,15 @@ class LlmOutputTests(unittest.TestCase):
         proposals = llm_output.parse(raw, PROJECTS)
         self.assertEqual(proposals[0].source_fragment_indices, (1, 2, 1))
 
-    def test_duplicate_titles_are_allowed(self):
+    def test_duplicate_titles_raise(self):
         raw = (
             '[{"title":"dup","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b1",'
             '"source_fragment_indices":[0],"relations":[]},'
             '{"title":"dup","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b2",'
             '"source_fragment_indices":[1],"relations":[]}]'
         )
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(len(proposals), 2)
-        self.assertEqual([proposal.title for proposal in proposals], ["dup", "dup"])
+        with self.assertRaises(llm_output.LlmOutputError):
+            llm_output.parse(raw, PROJECTS)
 
     def test_non_list_fields_raise(self):
         raw = (
@@ -105,13 +111,13 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
-    def test_relation_objects_are_preserved_without_shape_validation(self):
+    def test_relation_entries_must_be_objects(self):
         raw = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
-            '"source_fragment_indices":[0],"relations":[{"type":"relates_to"}]}]'
+            '"source_fragment_indices":[0],"relations":["bad"]}]'
         )
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(proposals[0].relations, ({"type": "relates_to"},))
+        with self.assertRaises(llm_output.LlmOutputError):
+            llm_output.parse(raw, PROJECTS)
 
     def test_dangling_relates_to_parses_for_later_resolution(self):
         raw = (
@@ -121,18 +127,47 @@ class LlmOutputTests(unittest.TestCase):
         proposals = llm_output.parse(raw, PROJECTS)
         self.assertEqual(proposals[0].relations, ({"type": "relates_to", "target_title": "missing"},))
 
-    def test_relation_extra_fields_are_preserved(self):
+    def test_relates_to_relation_requires_non_empty_target_title(self):
+        cases = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[{"type":"relates_to"}]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[{"type":"relates_to","target_title":"  "}]}]',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(llm_output.LlmOutputError):
+                    llm_output.parse(raw, PROJECTS)
+
+    def test_mentions_relation_requires_non_empty_entity(self):
+        cases = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[{"type":"mentions"}]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[{"type":"mentions","entity":"  "}]}]',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(llm_output.LlmOutputError):
+                    llm_output.parse(raw, PROJECTS)
+
+    def test_unknown_relation_type_raises(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[{"type":"unknown","target_title":"x"}]}]'
+        )
+        with self.assertRaises(llm_output.LlmOutputError):
+            llm_output.parse(raw, PROJECTS)
+
+    def test_relation_extra_fields_raise(self):
         raw = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"body a",'
             '"source_fragment_indices":[0],"relations":[{"type":"mentions","entity":"MTK","extra":"x"}]},'
             '{"title":"b","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"body b",'
             '"source_fragment_indices":[1],"relations":[]}]'
         )
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(
-            proposals[0].relations,
-            ({"type": "mentions", "entity": "MTK", "extra": "x"},),
-        )
+        with self.assertRaises(llm_output.LlmOutputError):
+            llm_output.parse(raw, PROJECTS)
 
 
 if __name__ == "__main__":
