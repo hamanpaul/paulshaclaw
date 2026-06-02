@@ -19,6 +19,9 @@ def run(args: argparse.Namespace) -> int:
             entity=args.entity,
             include_decayed=args.include_decayed,
         )
+        if not slices:
+            print("warning: empty selection", file=sys.stderr)
+
         selection = {
             "project": args.project,
             "tags": tags,

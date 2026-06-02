@@ -7,6 +7,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from paulshaclaw.memory.replay import bundle, cli
 
@@ -77,7 +78,24 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertIn("DISTILLED", blob)
             self.assertNotIn("RAW PROMPT CONTENT", blob)
 
-    def test_empty_selection_writes_empty_bundle(self):
+    def test_rebuild_cleans_stale_slices(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s1 = _slice(root, "sl-1")
+            out = root / "bundle-out"
+
+            bundle.build(root, [s1], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+            self.assertTrue((out / "slices" / "sl-1.md").exists())
+
+            (out / "slices" / "stale.md").write_text("STALE\n", encoding="utf-8")
+            s2 = _slice(root, "sl-2")
+            bundle.build(root, [s2], out, selection={"project": "p"}, now="2026-06-02T06:01:00Z")
+
+            self.assertFalse((out / "slices" / "stale.md").exists())
+            self.assertFalse((out / "slices" / "sl-1.md").exists())
+            self.assertTrue((out / "slices" / "sl-2.md").exists())
+
+    def test_empty_selection_writes_empty_bundle_with_warning(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)
             out = root / "bundle-out"
@@ -86,8 +104,10 @@ class ReplayBundleTests(unittest.TestCase):
 
             manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(manifest["counts"]["slices"], 0)
+            self.assertIn("warnings", manifest)
+            self.assertTrue(any("empty" in w for w in manifest["warnings"]))
 
-    def test_corrupt_lifecycle_ledger_does_not_break_bundle_creation(self):
+    def test_corrupt_lifecycle_ledger_emits_warning(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)
             s = _slice(root, "sl-1")
@@ -99,7 +119,9 @@ class ReplayBundleTests(unittest.TestCase):
 
             bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
 
-            self.assertTrue((out / "manifest.json").exists())
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertIn("warnings", manifest)
+            self.assertTrue(any("lifecycle" in w for w in manifest["warnings"]))
             self.assertTrue((out / "ledger.jsonl").exists())
 
     def test_duplicate_slice_ids_raise_bundle_error(self):
@@ -111,6 +133,36 @@ class ReplayBundleTests(unittest.TestCase):
 
             with self.assertRaises(bundle.BundleError):
                 bundle.build(root, [s1, s2], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+    def test_cli_warns_but_succeeds_on_empty_selection(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            out = root / "bundle-out"
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project="p",
+                tag=None,
+                entity=None,
+                include_decayed=False,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            stdout = io.StringIO()
+            with (
+                mock.patch("paulshaclaw.memory.replay.selector.select", return_value=[]),
+                contextlib.redirect_stderr(stderr),
+                contextlib.redirect_stdout(stdout),
+            ):
+                code = cli.run(args)
+
+            self.assertEqual(code, 0)
+            self.assertIn("empty", stderr.getvalue().lower())
+            self.assertIn(str(out), stdout.getvalue())
+
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertTrue(any("empty" in w for w in manifest.get("warnings", [])))
 
     def test_cli_surfaces_selector_error_cleanly(self):
         with _tmp_dir() as tmp:
@@ -132,6 +184,64 @@ class ReplayBundleTests(unittest.TestCase):
 
             self.assertNotEqual(code, 0)
             self.assertIn("facet", stderr.getvalue())
+
+    def test_cli_surfaces_relations_ledger_failure_cleanly(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s = _slice(root, "sl-1")
+            out = root / "bundle-out"
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project="p",
+                tag=None,
+                entity=None,
+                include_decayed=False,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            with (
+                mock.patch("paulshaclaw.memory.replay.selector.select", return_value=[s]),
+                mock.patch(
+                    "paulshaclaw.memory.replay.bundle.relations.read_edges",
+                    side_effect=Exception("boom"),
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = cli.run(args)
+
+            self.assertNotEqual(code, 0)
+            self.assertIn("bundle error", stderr.getvalue())
+
+    def test_cli_surfaces_processing_ledger_failure_cleanly(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s = _slice(root, "sl-1")
+            out = root / "bundle-out"
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project="p",
+                tag=None,
+                entity=None,
+                include_decayed=False,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            with (
+                mock.patch("paulshaclaw.memory.replay.selector.select", return_value=[s]),
+                mock.patch(
+                    "paulshaclaw.memory.replay.bundle.processing.read_events",
+                    side_effect=Exception("boom"),
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = cli.run(args)
+
+            self.assertNotEqual(code, 0)
+            self.assertIn("bundle error", stderr.getvalue())
 
 
 if __name__ == "__main__":

@@ -69,8 +69,17 @@ def build(
         if session:
             sessions.add(session)
 
+    warnings: list[str] = []
+    if not slice_paths:
+        warnings.append("empty selection")
+
     out_dir.mkdir(parents=True, exist_ok=True)
     slices_out = out_dir / "slices"
+    if slices_out.exists():
+        if slices_out.is_dir():
+            shutil.rmtree(slices_out)
+        else:
+            slices_out.unlink()
     slices_out.mkdir(parents=True, exist_ok=True)
 
     slice_ids = [sid for sid, _, _ in slice_infos]
@@ -85,18 +94,29 @@ def build(
 
     try:
         lifecycle_events = lifecycle.read_events(memory_root)
-    except (OSError, UnicodeDecodeError, ValueError):
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        warnings.append(f"lifecycle ledger unreadable: {exc}")
         lifecycle_events = []
 
     for event in lifecycle_events:
         if str(event.get("record_id", "")) in slice_id_set:
             events.append({"ledger": "lifecycle", **event})
 
-    for edge in relations.read_edges(memory_root):
+    try:
+        edges = relations.read_edges(memory_root)
+    except Exception as exc:
+        raise BundleError(f"failed to read relations ledger: {exc}") from exc
+
+    for edge in edges:
         if edge.get("from") in node_set or edge.get("to") in node_set:
             events.append({"ledger": "relations", **edge})
 
-    for record in processing.read_events(memory_root):
+    try:
+        processing_events = processing.read_events(memory_root)
+    except Exception as exc:
+        raise BundleError(f"failed to read processing ledger: {exc}") from exc
+
+    for record in processing_events:
         if record.get("session_key") in sessions:
             events.append({"ledger": "processing", **record})
 
@@ -112,6 +132,8 @@ def build(
         "counts": {"slices": len(unique_slice_ids), "ledger_events": len(events)},
         "raw_excluded": True,
     }
+    if warnings:
+        manifest["warnings"] = warnings
     (out_dir / "manifest.json").write_text(
         json.dumps(manifest, sort_keys=True, indent=2) + "\n",
         encoding="utf-8",
