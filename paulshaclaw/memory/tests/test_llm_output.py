@@ -135,6 +135,14 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
+    def test_unknown_top_level_fields_raise(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[],"extra":"x"}]'
+        )
+        with self.assertRaises(llm_output.LlmOutputError):
+            llm_output.parse(raw, PROJECTS)
+
     def test_relation_entries_must_be_objects(self):
         raw = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
@@ -192,6 +200,17 @@ class LlmOutputTests(unittest.TestCase):
         )
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
+
+    def test_skips_syntactically_valid_non_proposal_array(self):
+        raw = (
+            'analysis scratch: [1, 2, 3]\n'
+            'actual payload follows\n'
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]'
+        )
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(len(proposals), 1)
+        self.assertEqual(proposals[0].title, "a")
 
 
 if __name__ == "__main__":

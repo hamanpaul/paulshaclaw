@@ -9,6 +9,19 @@ from paulshaclaw.lifecycle.schema import ARTIFACT_KINDS
 
 _FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
 _JSON_DECODER = json.JSONDecoder()
+_EMBEDDED_JSON_PREFIXES = frozenset({":", ",", "[", "{", '"'})
+_EMBEDDED_JSON_SUFFIXES = frozenset({":", ",", "]", "}"})
+_PROPOSAL_KEYS = frozenset(
+    {
+        "title",
+        "artifact_kind",
+        "project",
+        "tags",
+        "body",
+        "source_fragment_indices",
+        "relations",
+    }
+)
 
 
 class LlmOutputError(Exception):
@@ -26,17 +39,14 @@ class SliceProposal:
     relations: tuple[dict[str, Any], ...]
 
 
-def _extract_json(raw: str) -> str:
+def _iter_json_arrays(raw: str):
     for fenced in _FENCED_BLOCK_RE.finditer(raw):
-        try:
-            return _extract_json_array_candidate(fenced.group(1))
-        except LlmOutputError:
-            continue
+        yield from _iter_json_array_candidates(fenced.group(1))
 
-    return _extract_json_array_candidate(raw)
+    yield from _iter_json_array_candidates(raw)
 
 
-def _extract_json_array_candidate(raw: str) -> str:
+def _iter_json_array_candidates(raw: str):
     for start, character in enumerate(raw):
         if character != "[":
             continue
@@ -44,10 +54,34 @@ def _extract_json_array_candidate(raw: str) -> str:
             candidate, end = _JSON_DECODER.raw_decode(raw, start)
         except json.JSONDecodeError:
             continue
-        if isinstance(candidate, list):
-            return raw[start:end]
+        if isinstance(candidate, list) and _is_standalone_json_value(raw, start, end):
+            yield candidate
 
-    raise LlmOutputError("no JSON array found in agent output")
+
+def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:
+    previous = _previous_non_whitespace(raw, start)
+    if previous in _EMBEDDED_JSON_PREFIXES:
+        return False
+
+    following = _next_non_whitespace(raw, end)
+    if following in _EMBEDDED_JSON_SUFFIXES:
+        return False
+
+    return True
+
+
+def _previous_non_whitespace(raw: str, index: int) -> str | None:
+    for position in range(index - 1, -1, -1):
+        if not raw[position].isspace():
+            return raw[position]
+    return None
+
+
+def _next_non_whitespace(raw: str, index: int) -> str | None:
+    for position in range(index, len(raw)):
+        if not raw[position].isspace():
+            return raw[position]
+    return None
 
 
 def _require_field(item: dict[str, Any], key: str, index: int) -> Any:
@@ -118,12 +152,7 @@ def _validate_relation(relation: Any, proposal_index: int, relation_index: int) 
     raise LlmOutputError(f"proposal {proposal_index} relation {relation_index} has unsupported type: {relation_type}")
 
 
-def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
-    try:
-        data = json.loads(_extract_json(raw))
-    except json.JSONDecodeError as exc:
-        raise LlmOutputError(f"invalid JSON: {exc}") from exc
-
+def _parse_proposals(data: Any, known_projects: list[str]) -> list[SliceProposal]:
     if not isinstance(data, list):
         raise LlmOutputError("agent output must be a JSON array")
 
@@ -133,6 +162,9 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
     for index, item in enumerate(data):
         if not isinstance(item, dict):
             raise LlmOutputError(f"proposal {index} is not an object")
+        unknown_keys = sorted(set(item) - _PROPOSAL_KEYS)
+        if unknown_keys:
+            raise LlmOutputError(f"proposal {index} has unknown fields: {', '.join(unknown_keys)}")
 
         artifact_kind = item.get("artifact_kind")
         if artifact_kind not in ARTIFACT_KINDS:
@@ -171,3 +203,17 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
             )
         )
     return proposals
+
+
+def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
+    last_error: LlmOutputError | None = None
+    for data in _iter_json_arrays(raw):
+        try:
+            return _parse_proposals(data, known_projects)
+        except LlmOutputError as exc:
+            last_error = exc
+
+    if last_error is not None:
+        raise last_error
+
+    raise LlmOutputError("no JSON array found in agent output")
