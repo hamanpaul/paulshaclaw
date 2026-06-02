@@ -46,11 +46,11 @@ def pending(memory_root: Path) -> List[dict[str, Any]]:
     if not d.exists():
         return []
     out: List[dict[str, Any]] = []
-    for p in d.glob("*.json"):
+    for p in sorted(d.glob("*.json")):
         try:
             with p.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
-        except Exception:
+        except json.JSONDecodeError:
             continue
         if data.get("status") == "pending":
             out.append(data)
