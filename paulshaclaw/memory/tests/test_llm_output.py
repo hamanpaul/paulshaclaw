@@ -77,21 +77,45 @@ class LlmOutputTests(unittest.TestCase):
                 with self.assertRaises(llm_output.LlmOutputError):
                     llm_output.parse(raw, PROJECTS)
 
-    def test_tag_entries_are_stringified(self):
-        raw = (
-            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[7,true,null],"body":"b",'
-            '"source_fragment_indices":[0],"relations":[]}]'
+    def test_tag_entries_must_be_strings(self):
+        cases = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[7],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[true],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[null],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]',
         )
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(proposals[0].tags, ("7", "True", "None"))
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(llm_output.LlmOutputError):
+                    llm_output.parse(raw, PROJECTS)
 
-    def test_source_fragment_indices_are_coerced_with_int(self):
-        raw = (
+    def test_source_fragment_indices_must_be_ints_and_not_bools(self):
+        cases = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
-            '"source_fragment_indices":["1",2.9,true],"relations":[]}]'
+            '"source_fragment_indices":["1"],"relations":[]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[2.9],"relations":[]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[true],"relations":[]}]',
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[false],"relations":[]}]',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw):
+                with self.assertRaises(llm_output.LlmOutputError):
+                    llm_output.parse(raw, PROJECTS)
+
+    def test_parses_bare_array_with_non_json_brackets_in_prose(self):
+        raw = (
+            'analysis [draft only]\n'
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]\n'
+            'done ] trailing note'
         )
         proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual(proposals[0].source_fragment_indices, (1, 2, 1))
+        self.assertEqual(len(proposals), 1)
 
     def test_duplicate_titles_raise(self):
         raw = (

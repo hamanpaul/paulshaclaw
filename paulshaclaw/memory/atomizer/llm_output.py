@@ -7,7 +7,8 @@ from typing import Any
 
 from paulshaclaw.lifecycle.schema import ARTIFACT_KINDS
 
-_FENCED_JSON_RE = re.compile(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", re.IGNORECASE)
+_FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
+_JSON_DECODER = json.JSONDecoder()
 
 
 class LlmOutputError(Exception):
@@ -26,15 +27,27 @@ class SliceProposal:
 
 
 def _extract_json(raw: str) -> str:
-    fenced = _FENCED_JSON_RE.search(raw)
-    if fenced:
-        return fenced.group(1)
+    for fenced in _FENCED_BLOCK_RE.finditer(raw):
+        try:
+            return _extract_json_array_candidate(fenced.group(1))
+        except LlmOutputError:
+            continue
 
-    start = raw.find("[")
-    end = raw.rfind("]")
-    if start == -1 or end == -1 or end < start:
-        raise LlmOutputError("no JSON array found in agent output")
-    return raw[start:end + 1]
+    return _extract_json_array_candidate(raw)
+
+
+def _extract_json_array_candidate(raw: str) -> str:
+    for start, character in enumerate(raw):
+        if character != "[":
+            continue
+        try:
+            candidate, end = _JSON_DECODER.raw_decode(raw, start)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, list):
+            return raw[start:end]
+
+    raise LlmOutputError("no JSON array found in agent output")
 
 
 def _require_field(item: dict[str, Any], key: str, index: int) -> Any:
@@ -55,6 +68,22 @@ def _require_non_empty_string(item: dict[str, Any], key: str, index: int) -> str
     if not isinstance(value, str) or not value.strip():
         raise LlmOutputError(f"proposal {index} {key} must be a non-empty string")
     return value
+
+
+def _require_string_list(item: dict[str, Any], key: str, index: int) -> tuple[str, ...]:
+    values = _require_list(item, key, index)
+    for value_index, value in enumerate(values):
+        if not isinstance(value, str):
+            raise LlmOutputError(f"proposal {index} {key}[{value_index}] must be a string")
+    return tuple(values)
+
+
+def _require_int_list(item: dict[str, Any], key: str, index: int) -> tuple[int, ...]:
+    values = _require_list(item, key, index)
+    for value_index, value in enumerate(values):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise LlmOutputError(f"proposal {index} {key}[{value_index}] must be an int")
+    return tuple(values)
 
 
 def _validate_relation(relation: Any, proposal_index: int, relation_index: int) -> dict[str, Any]:
@@ -121,11 +150,10 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
         if not isinstance(body, str) or not body.strip():
             raise LlmOutputError(f"proposal {index} has empty body")
 
-        tags = _require_list(item, "tags", index)
-        source_fragment_indices = _require_list(item, "source_fragment_indices", index)
+        tags = _require_string_list(item, "tags", index)
+        source_fragment_indices = _require_int_list(item, "source_fragment_indices", index)
 
         relations = _require_list(item, "relations", index)
-        kind = item.get("artifact_kind")
         validated_relations = tuple(
             _validate_relation(relation, index, relation_index)
             for relation_index, relation in enumerate(relations)
@@ -134,11 +162,11 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
         proposals.append(
             SliceProposal(
                 title=title,
-                artifact_kind=str(kind),
-                project=str(project),
-                tags=tuple(str(tag) for tag in tags),
+                artifact_kind=artifact_kind,
+                project=project,
+                tags=tags,
                 body=body,
-                source_fragment_indices=tuple(int(fragment_index) for fragment_index in source_fragment_indices),
+                source_fragment_indices=source_fragment_indices,
                 relations=validated_relations,
             )
         )
