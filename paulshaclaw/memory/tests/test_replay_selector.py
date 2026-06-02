@@ -10,7 +10,8 @@ from paulshaclaw.memory.ledger import relations, lifecycle
 
 class ReplaySelectorTests(unittest.TestCase):
     def _write_slice(self, root: Path, slice_id: str, project: str = "p", tags: list | None = None):
-        k = root / "knowledge"
+        # place slices under knowledge/<project>/<slice_id>.md to match real layout
+        k = root / "knowledge" / project
         k.mkdir(parents=True, exist_ok=True)
         p = k / f"{slice_id}.md"
         fm_lines = [
@@ -20,7 +21,10 @@ class ReplaySelectorTests(unittest.TestCase):
             f"project: {project}",
         ]
         if tags is not None:
-            fm_lines.append(f"tags: {tags}")
+            # write tags as a valid YAML block list
+            fm_lines.append("tags:")
+            for t in tags:
+                fm_lines.append(f"  - {t}")
         fm_lines.append("---")
         fm_lines.append("body")
         p.write_text("\n".join(fm_lines), encoding="utf-8")

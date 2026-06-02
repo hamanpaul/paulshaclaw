@@ -16,9 +16,9 @@ class SelectorError(Exception):
 
 
 def _frontmatter(text: str) -> Dict[str, object]:
-    """Parse simple YAML-like frontmatter delimited by '---' into a dict.
+    """Parse YAML frontmatter delimited by '---' into a dict.
 
-    Supports simple scalars and JSON arrays (rendered by slice_frontmatter.render).
+    Use yaml.safe_load when PyYAML is available. If PyYAML is unavailable, return {}.
     """
     text = text or ""
     if not text.startswith("---"):
@@ -27,37 +27,20 @@ def _frontmatter(text: str) -> Dict[str, object]:
     if len(parts) < 3:
         return {}
     fm_text = parts[1].strip()
-    fm: Dict[str, object] = {}
-    for line in fm_text.splitlines():
-        line = line.rstrip()
-        if not line or ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key = key.strip()
-        val = val.strip()
-        # Try JSON decode for lists/objects
-        if val.startswith("[") or val.startswith("{"):
-            try:
-                fm[key] = json.loads(val)
-                continue
-            except Exception:
-                # tolerate Python-style single-quoted lists/dicts from tests
-                try:
-                    fm[key] = json.loads(val.replace("'", '"'))
-                    continue
-                except Exception:
-                    pass
-        # Booleans
-        if val.lower() in ("true", "false"):
-            fm[key] = val.lower() == "true"
-            continue
-        # Quoted strings
-        if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-            fm[key] = val[1:-1]
-            continue
-        # Plain string or number
-        fm[key] = val
-    return fm
+    # Prefer real YAML parsing when available
+    try:
+        import yaml  # type: ignore
+
+        try:
+            data = yaml.safe_load(fm_text)
+            if isinstance(data, dict):
+                return data
+            return {}
+        except Exception:
+            return {}
+    except Exception:
+        # PyYAML not available; return empty dict per spec
+        return {}
 
 
 def _entity_slice_ids(memory_root: Path, entity: str) -> List[str]:
