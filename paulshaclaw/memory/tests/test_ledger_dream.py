@@ -71,6 +71,15 @@ class TestDreamLedger(unittest.TestCase):
             with self.assertRaises(dream.DreamLedgerError):
                 dream.read_runs(root)
 
+    def test_append_run_rejects_non_dict(self):
+        """append_run should reject non-dict records at write time."""
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            # common bad payloads: list, None, int, string
+            for bad in ([], None, 123, "hi"):
+                with self.assertRaises(TypeError):
+                    dream.append_run(root, bad)
+
     def test_backlog_depth_counts_markdown_excluding_slices(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

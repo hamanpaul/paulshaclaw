@@ -25,6 +25,10 @@ def append_run(memory_root: Path, record: dict[str, Any]) -> None:
     The record must be provided (including ts) by the caller; this function
     does not generate timestamps.
     """
+    # Validate input early: ledger only accepts JSON objects (mappings).
+    if not isinstance(record, dict):
+        raise TypeError("record must be a mapping (dict)")
+
     path = dream_path(memory_root)
     path.parent.mkdir(parents=True, exist_ok=True)
 
