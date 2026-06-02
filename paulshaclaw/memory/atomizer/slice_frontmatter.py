@@ -26,6 +26,7 @@ class Slice:
     slice_id: str
     frontmatter: dict[str, object]
     body: str
+    title: str | None = None
     relations: tuple[dict[str, object], ...] = ()
 
 
@@ -108,6 +109,7 @@ def build_from_proposal(proposal: "SliceProposal", session_meta: dict[str, objec
         slice_id=slice_id,
         frontmatter=frontmatter,
         body=body,
+        title=proposal.title,
         relations=tuple(proposal.relations),
     )
 

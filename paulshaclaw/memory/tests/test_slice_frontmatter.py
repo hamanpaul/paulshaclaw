@@ -100,6 +100,11 @@ class BuildFromProposalTests(unittest.TestCase):
         ).hexdigest()[:16]
         self.assertEqual(built.slice_id, expected)
 
+    def test_runtime_title_retained_without_storing_frontmatter_field(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        self.assertEqual(built.title, "alpha")
+        self.assertNotIn("title", built.frontmatter)
+
     def test_union_frontmatter_with_tags(self):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
         self.assertNotIn("title", built.frontmatter)
@@ -155,6 +160,11 @@ class BuildFromProposalTests(unittest.TestCase):
         rendered = slice_frontmatter.render(built)
         self.assertIn("tags: [pwhm, fsm]", rendered)
         self.assertIn("source_fragments: [0, 1]", rendered)
+        self.assertNotIn("title:", rendered)
+
+    def test_legacy_build_leaves_runtime_title_unset(self):
+        built = slice_frontmatter.build(_frag(), CFG)
+        self.assertIsNone(built.title)
 
     def test_stage3_parser_keeps_bracketed_scalars_as_strings(self):
         body = "distilled body"
