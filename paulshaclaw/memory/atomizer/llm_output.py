@@ -135,14 +135,4 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
                 relations=tuple(validated_relations),
             )
         )
-    titles = {proposal.title for proposal in proposals}
-    for index, proposal in enumerate(proposals):
-        for relation_index, relation in enumerate(proposal.relations):
-            if relation["type"] != "relates_to":
-                continue
-            target_title = relation["target_title"]
-            if target_title == proposal.title or target_title not in titles:
-                raise LlmOutputError(
-                    f"proposal {index} relation {relation_index} target_title must match another proposal title"
-                )
     return proposals

@@ -88,13 +88,13 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
-    def test_dangling_relates_to_raises(self):
+    def test_dangling_relates_to_parses_for_later_resolution(self):
         raw = (
             '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
             '"source_fragment_indices":[0],"relations":[{"type":"relates_to","target_title":"missing"}]}]'
         )
-        with self.assertRaises(llm_output.LlmOutputError):
-            llm_output.parse(raw, PROJECTS)
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].relations, ({"type": "relates_to", "target_title": "missing"},))
 
     def test_relation_extra_fields_raise(self):
         raw = (

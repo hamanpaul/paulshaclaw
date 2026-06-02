@@ -102,7 +102,7 @@ class BuildFromProposalTests(unittest.TestCase):
 
     def test_union_frontmatter_with_tags(self):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
-        self.assertEqual(built.frontmatter["title"], "alpha")
+        self.assertNotIn("title", built.frontmatter)
         self.assertEqual(built.frontmatter["project"], "prplos-core")
         self.assertEqual(built.frontmatter["artifact_kind"], "report")
         self.assertEqual(built.frontmatter["tags"], ["pwhm", "fsm"])
@@ -122,6 +122,7 @@ class BuildFromProposalTests(unittest.TestCase):
     def test_render_round_trips_tags_and_source_fragments(self):
         built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
         parsed = parse_artifact_text(slice_frontmatter.render(built))
+        self.assertNotIn("title", parsed.frontmatter)
         self.assertEqual(parsed.frontmatter["tags"], ["pwhm", "fsm"])
         self.assertEqual(parsed.frontmatter["source_fragments"], [0, 1])
 

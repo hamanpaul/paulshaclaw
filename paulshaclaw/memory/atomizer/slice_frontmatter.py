@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 _T4_FIELDS = ("memory_layer", "source_agent", "captured_at", "provenance", "supersedes")
 # Stage 3 ordered fields first, then T4 + provenance handled specially in render().
 _SCALAR_ORDER = (
-    "phase", "project", "title", "slice_id", "artifact_kind", "version", "created_at",
+    "phase", "project", "slice_id", "artifact_kind", "version", "created_at",
     "created_by", "source_session", "gate_required", "checksum",
     "memory_layer", "source_agent", "captured_at", "supersedes",
     "distilled_from", "fragment_ref", "tags", "source_fragments",
@@ -94,7 +94,6 @@ def build_from_proposal(proposal: "SliceProposal", session_meta: dict[str, objec
     frontmatter: dict[str, object] = {
         "phase": _phase_for_artifact_kind(proposal.artifact_kind),
         "project": proposal.project,
-        "title": proposal.title,
         "slice_id": slice_id,
         "artifact_kind": proposal.artifact_kind,
         "version": "1",
