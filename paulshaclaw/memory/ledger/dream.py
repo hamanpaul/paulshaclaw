@@ -60,9 +60,12 @@ def read_runs(memory_root: Path) -> list[dict[str, Any]]:
                 if not line:
                     continue
                 try:
-                    runs.append(json.loads(line))
+                    value = json.loads(line)
                 except json.JSONDecodeError as e:
                     raise DreamLedgerError(f"Malformed JSON at line {line_num}: {e}") from e
+                if not isinstance(value, dict):
+                    raise DreamLedgerError(f"Invalid ledger entry at line {line_num}: expected object")
+                runs.append(value)
         finally:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 

@@ -59,6 +59,18 @@ class TestDreamLedger(unittest.TestCase):
 
             self.assertIn("line", str(ctx.exception).lower())
 
+    def test_non_dict_json_line_fails(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            path = dream.dream_path(root)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w") as f:
+                f.write(json.dumps({"ts": "2025-01-01T00:00:00Z", "run_id": "r1"}) + "\n")
+                f.write("[]\n")
+
+            with self.assertRaises(dream.DreamLedgerError):
+                dream.read_runs(root)
+
     def test_backlog_depth_counts_markdown_excluding_slices(self):
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
