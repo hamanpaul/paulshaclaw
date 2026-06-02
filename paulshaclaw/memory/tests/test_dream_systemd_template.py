@@ -18,7 +18,12 @@ class SystemdTemplateTests(unittest.TestCase):
         self.assertIn("--require-idle", service)
 
     def test_wrapper_script_exists(self):
-        self.assertTrue((BASE / "scripts" / "dream-idle-wrapper.sh").exists())
+        path = BASE / "scripts" / "dream-idle-wrapper.sh"
+        self.assertTrue(path.exists())
+        text = path.read_text(encoding="utf-8")
+        self.assertTrue(text.startswith("#!"))
+        self.assertIn("PSC_MEMORY_ROOT", text)
+        self.assertIn("--require-idle", text)
 
 
 if __name__ == "__main__":

@@ -53,6 +53,11 @@ class DreamCliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertTrue(payload.get("dry_run"))
+            self.assertIn("passes", payload)
+            self.assertIn("atomize", payload["passes"])
+            self.assertIn("janitor", payload["passes"])
             self.assertIsNone(dream.last_run(root))
 
     def test_require_idle_busy_skips(self):
@@ -76,6 +81,9 @@ class DreamCliTests(unittest.TestCase):
                     ]
                 )
             self.assertEqual(rc, 0)
+            payload = json.loads(buf.getvalue())
+            self.assertEqual(payload.get("skipped"), "system busy")
+            self.assertEqual(payload.get("backlog_depth"), 1)
             self.assertIsNone(dream.last_run(root))
 
     def test_status_reports_backlog(self):

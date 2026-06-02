@@ -28,8 +28,8 @@ def _run(args: argparse.Namespace) -> int:
         )
         return 0
 
-    atom_cfg, atom_hash = atomizer_config.load_config(override_path=None)
-    jan_cfg, jan_hash = janitor_config.load_config(override_path=None)
+    atom_cfg, atom_hash = atomizer_config.load_config()
+    jan_cfg, jan_hash = janitor_config.load_config()
     promoter = atomizer_cli._build_promoter(args, atom_cfg, memory_root)
     now = args.now
 
