@@ -62,15 +62,16 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
 
-    def test_duplicate_titles_raise(self):
+    def test_duplicate_titles_are_allowed(self):
         raw = (
             '[{"title":"dup","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b1",'
             '"source_fragment_indices":[0],"relations":[]},'
             '{"title":"dup","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b2",'
             '"source_fragment_indices":[1],"relations":[]}]'
         )
-        with self.assertRaises(llm_output.LlmOutputError):
-            llm_output.parse(raw, PROJECTS)
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(len(proposals), 2)
+        self.assertEqual([proposal.title for proposal in proposals], ["dup", "dup"])
 
     def test_non_list_fields_raise(self):
         raw = (

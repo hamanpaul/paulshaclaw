@@ -20,24 +20,33 @@ def _frag(index, body):
 
 
 class PromptTests(unittest.TestCase):
-    def test_includes_skill_fragments_projects_and_json_only_instruction(self):
+    def test_includes_only_required_prompt_sections(self):
         text = prompt_mod.build_prompt(
             "SKILLDOC",
             [_frag(0, "alpha"), _frag(1, "beta")],
             ["paulshaclaw", "prplos-core"],
         )
-        self.assertIn("SKILLDOC", text)
-        self.assertIn("alpha", text)
-        self.assertIn("beta", text)
-        self.assertIn("prplos-core", text)
-        self.assertIn("paulshaclaw", text)
-        self.assertIn("[fragment 0]", text)
-        self.assertIn("[fragment 1]", text)
-        self.assertIn("captured_at: 2026-06-02T00:00:00Z", text)
-        self.assertIn("provenance.repo: r", text)
-        self.assertIn("provenance.commit: c", text)
-        self.assertIn("provenance.path: p", text)
-        self.assertIn("Return ONLY the JSON array", text)
+        self.assertEqual(
+            text,
+            "\n".join(
+                [
+                    "SKILLDOC",
+                    "",
+                    "## Known projects (choose exactly one per slice, or _unknown)",
+                    "paulshaclaw, prplos-core",
+                    "",
+                    "## Session fragments to atomize",
+                    "[fragment 0]",
+                    "alpha",
+                    "",
+                    "[fragment 1]",
+                    "beta",
+                    "",
+                    "## Output",
+                    "Return ONLY the JSON array specified by the skill's output contract.",
+                ]
+            ),
+        )
 
     def test_deterministic(self):
         frags = [_frag(0, "alpha")]

@@ -13,21 +13,7 @@ def build_prompt(skill_text: str, fragments: list[Fragment], known_projects: lis
         "## Session fragments to atomize",
     ]
     for fragment in fragments:
-        parts.extend(
-            [
-                f"[fragment {fragment.fragment_index}]",
-                f"project: {fragment.project}",
-                f"source_agent: {fragment.source_agent}",
-                f"source_session: {fragment.source_session}",
-                f"source_artifact: {fragment.source_artifact}",
-                f"captured_at: {fragment.captured_at}",
-                f"provenance.repo: {fragment.provenance.get('repo', '')}",
-                f"provenance.commit: {fragment.provenance.get('commit', '')}",
-                f"provenance.path: {fragment.provenance.get('path', '')}",
-                fragment.body,
-                "",
-            ]
-        )
+        parts.extend([f"[fragment {fragment.fragment_index}]", fragment.body, ""])
     parts.extend(
         [
             "## Output",

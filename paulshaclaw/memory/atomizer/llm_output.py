@@ -82,7 +82,6 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
 
     allowed_projects = set(known_projects) | {"_unknown"}
     proposals: list[SliceProposal] = []
-    seen_titles: set[str] = set()
     for index, item in enumerate(data):
         if not isinstance(item, dict):
             raise LlmOutputError(f"proposal {index} is not an object")
@@ -115,9 +114,6 @@ def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
         title = item.get("title")
         if not isinstance(title, str) or not title.strip():
             raise LlmOutputError(f"proposal {index} title must be a non-empty string")
-        if title in seen_titles:
-            raise LlmOutputError(f"proposal {index} has duplicate title: {title}")
-        seen_titles.add(title)
 
         validated_relations = [
             _validate_relation(relation, index, relation_index)
