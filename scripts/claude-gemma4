@@ -54,6 +54,22 @@ if [ ! -r "$GEMMA_SETTINGS" ]; then
   cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"
 fi
 
+# Mirror custom skills into the gemma4 config dir so it self-heals on every
+# launch. Claude Code only loads user skills from $CLAUDE_CONFIG_DIR/skills,
+# so without this gemma4 sees none of the custom-skills. A real dir holding
+# per-skill symlinks mirrors ~/.claude/skills, so Claude Code's periodic
+# cleanup does not drop it the way it would a whole-dir symlink.
+GEMMA_SKILLS="$GEMMA_CONFIG_DIR/skills"
+SRC_SKILLS="${PSC_CLAUDE_GEMMA4_SKILLS_SRC:-$HOME/.agents/skills}"
+if [ -d "$SRC_SKILLS" ]; then
+  mkdir -p "$GEMMA_SKILLS"
+  for s in "$SRC_SKILLS"/*; do
+    [ -e "$s" ] || continue
+    dest="$GEMMA_SKILLS/$(basename "$s")"
+    [ -e "$dest" ] || [ -L "$dest" ] || ln -s "$s" "$dest"
+  done
+fi
+
 node - "$GEMMA_CONFIG_DIR/.claude.json" "$PWD" <<'NODE'
 const fs = require('fs');
 const [file, cwd] = process.argv.slice(2);
