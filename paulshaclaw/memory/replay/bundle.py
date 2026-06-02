@@ -73,18 +73,27 @@ def build(
     if not slice_paths:
         warnings.append("empty selection")
 
-    out_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        if out_dir.exists():
+            if not out_dir.is_dir():
+                raise BundleError(f"output path is not a directory: {out_dir}")
+            shutil.rmtree(out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise BundleError(f"failed to prepare output directory {out_dir}: {exc}") from exc
+
     slices_out = out_dir / "slices"
-    if slices_out.exists():
-        if slices_out.is_dir():
-            shutil.rmtree(slices_out)
-        else:
-            slices_out.unlink()
-    slices_out.mkdir(parents=True, exist_ok=True)
+    try:
+        slices_out.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise BundleError(f"failed to create slices directory: {exc}") from exc
 
     slice_ids = [sid for sid, _, _ in slice_infos]
     for sid, src, _session in slice_infos:
-        shutil.copyfile(src, slices_out / f"{sid}.md")
+        try:
+            shutil.copyfile(src, slices_out / f"{sid}.md")
+        except OSError as exc:
+            raise BundleError(f"failed to copy slice '{sid}' from {src}: {exc}") from exc
 
     unique_slice_ids = sorted(set(slice_ids))
     slice_id_set = set(unique_slice_ids)
@@ -121,9 +130,12 @@ def build(
             events.append({"ledger": "processing", **record})
 
     ledger_path = out_dir / "ledger.jsonl"
-    with ledger_path.open("w", encoding="utf-8") as handle:
-        for event in events:
-            handle.write(_canonical_jsonl_line(event) + "\n")
+    try:
+        with ledger_path.open("w", encoding="utf-8") as handle:
+            for event in events:
+                handle.write(_canonical_jsonl_line(event) + "\n")
+    except OSError as exc:
+        raise BundleError(f"failed to write ledger: {exc}") from exc
 
     manifest = {
         "generated_ts": now,
@@ -134,8 +146,11 @@ def build(
     }
     if warnings:
         manifest["warnings"] = warnings
-    (out_dir / "manifest.json").write_text(
-        json.dumps(manifest, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    try:
+        (out_dir / "manifest.json").write_text(
+            json.dumps(manifest, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise BundleError(f"failed to write manifest: {exc}") from exc
     return out_dir

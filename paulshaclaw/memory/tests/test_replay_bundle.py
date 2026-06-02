@@ -95,6 +95,26 @@ class ReplayBundleTests(unittest.TestCase):
             self.assertFalse((out / "slices" / "sl-1.md").exists())
             self.assertTrue((out / "slices" / "sl-2.md").exists())
 
+    def test_rebuild_cleans_stale_root_files_and_dirs(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s1 = _slice(root, "sl-1")
+            out = root / "bundle-out"
+
+            bundle.build(root, [s1], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+            self.assertTrue((out / "manifest.json").exists())
+
+            (out / "stale-root.txt").write_text("STALE\n", encoding="utf-8")
+            (out / "stale-dir").mkdir(parents=True, exist_ok=True)
+            (out / "stale-dir" / "nested.txt").write_text("STALE\n", encoding="utf-8")
+
+            s2 = _slice(root, "sl-2")
+            bundle.build(root, [s2], out, selection={"project": "p"}, now="2026-06-02T06:01:00Z")
+
+            self.assertFalse((out / "stale-root.txt").exists())
+            self.assertFalse((out / "stale-dir").exists())
+            self.assertTrue((out / "slices" / "sl-2.md").exists())
+
     def test_empty_selection_writes_empty_bundle_with_warning(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)
@@ -163,6 +183,34 @@ class ReplayBundleTests(unittest.TestCase):
 
             manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(any("empty" in w for w in manifest.get("warnings", [])))
+
+    def test_cli_out_path_is_file_returns_clean_error(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            out = root / "bundle-out"
+            out.write_text("NOT A DIR\n", encoding="utf-8")
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project="p",
+                tag=None,
+                entity=None,
+                include_decayed=False,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            with (
+                mock.patch("paulshaclaw.memory.replay.selector.select", return_value=[]),
+                contextlib.redirect_stderr(stderr),
+            ):
+                code = cli.run(args)
+
+            self.assertNotEqual(code, 0)
+            msg = stderr.getvalue()
+            self.assertIn("bundle error", msg)
+            self.assertIn("not a directory", msg.lower())
+            self.assertNotIn("Traceback", msg)
 
     def test_cli_surfaces_selector_error_cleanly(self):
         with _tmp_dir() as tmp:
