@@ -46,6 +46,13 @@ class DreamIdleTest(unittest.TestCase):
         # ensure later load averages don't affect decision
         self.assertFalse(idle.is_idle(max_load=1.0, probe=lambda: (2.0, 0.1, 0.1)))
 
+    def test_probe_scalar_raises_typeerror(self):
+        """Scalar probe results are not supported; should raise TypeError."""
+        from paulshaclaw.memory.dream import idle
+
+        with self.assertRaises(TypeError):
+            idle.is_idle(probe=lambda: 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()
