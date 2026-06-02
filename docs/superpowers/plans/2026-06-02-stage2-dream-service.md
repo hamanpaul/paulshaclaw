@@ -1281,6 +1281,9 @@ git commit -m "test(stage2): add T5 dream/bundle E2E and integration wiring"
 
 ---
 
-## Verification Summary（實作完成後填）
+## Verification Summary（2026-06-02）
 
-（填入：`test_dream_*`/`test_ledger_dream`/`test_replay_*` 聚焦結果、`unittest discover -s paulshaclaw/memory/tests` 全套、`stage2_integration_check.sh` 輸出、systemd 範本測試、opt-in 手動 timer 安裝說明、`tests/` 回歸狀態。）
+- E2E: `python3 -m unittest paulshaclaw.memory.tests.test_dream_e2e -v` → **OK** (1 test)
+- Memory regression: `python3 -m unittest discover -s paulshaclaw/memory/tests -q` → **OK** (439 tests, skipped=1)
+- Integration gate: `bash paulshaclaw/memory/tests/stage2_integration_check.sh` → ends with **`[stage2] ok`** (dream dry-run + run + bundle fixture included)
+- Repo regression: `python3 -m unittest discover -s tests -q` → **OK** (378 tests)
