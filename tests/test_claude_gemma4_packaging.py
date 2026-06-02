@@ -96,6 +96,49 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertNotIn('/home/paul_chen/.claude-gemma4', script_text)
         self.assertNotIn('"effortLevel": "max"', script_text)
 
+    def test_launcher_mirrors_custom_skills_into_config_dir(self) -> None:
+        script_text = CLAUDE_GEMMA4.read_text(encoding="utf-8")
+        # Skills wiring must live in the launcher (repo = runtime), not be a
+        # manual runtime artifact that cleanup keeps wiping.
+        self.assertIn('GEMMA_SKILLS="$GEMMA_CONFIG_DIR/skills"', script_text)
+        self.assertIn('${PSC_CLAUDE_GEMMA4_SKILLS_SRC:-$HOME/.agents/skills}', script_text)
+        self.assertIn('ln -s "$s" "$dest"', script_text)
+
+    def test_launcher_skill_mirror_creates_per_skill_symlinks(self) -> None:
+        # Exercise the mirror block in isolation: a real dir + per-skill symlinks,
+        # idempotent across repeated runs.
+        snippet = (
+            'set -eu\n'
+            'GEMMA_CONFIG_DIR="$1"\n'
+            'GEMMA_SKILLS="$GEMMA_CONFIG_DIR/skills"\n'
+            'SRC_SKILLS="${PSC_CLAUDE_GEMMA4_SKILLS_SRC:-$HOME/.agents/skills}"\n'
+            'if [ -d "$SRC_SKILLS" ]; then\n'
+            '  mkdir -p "$GEMMA_SKILLS"\n'
+            '  for s in "$SRC_SKILLS"/*; do\n'
+            '    [ -e "$s" ] || continue\n'
+            '    dest="$GEMMA_SKILLS/$(basename "$s")"\n'
+            '    [ -e "$dest" ] || [ -L "$dest" ] || ln -s "$s" "$dest"\n'
+            '  done\n'
+            'fi\n'
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            src = Path(tmpdir) / "src-skills"
+            (src / "alpha").mkdir(parents=True)
+            (src / "beta").mkdir()
+            cfg = Path(tmpdir) / "gemma-config"
+            env = dict(os.environ, PSC_CLAUDE_GEMMA4_SKILLS_SRC=str(src))
+            for _ in range(2):  # idempotent: a second run must not error or duplicate
+                result = subprocess.run(
+                    ["bash", "-c", snippet, "bash", str(cfg)],
+                    capture_output=True, check=False, text=True, env=env, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            skills = cfg / "skills"
+            self.assertTrue(skills.is_dir() and not skills.is_symlink())
+            self.assertTrue((skills / "alpha").is_symlink())
+            self.assertEqual((skills / "alpha").resolve(), (src / "alpha").resolve())
+            self.assertTrue((skills / "beta").is_symlink())
+
     def test_proxy_script_is_packaged_and_executable(self) -> None:
         self.assertTrue(CLAUDE_GEMMA4_PROXY.exists(), "scripts/claude-gemma4-proxy should exist")
         self.assertTrue(
