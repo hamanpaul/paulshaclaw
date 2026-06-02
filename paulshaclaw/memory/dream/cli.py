@@ -44,6 +44,11 @@ def _run(args: argparse.Namespace) -> int:
         )
 
     def janitor_fn() -> dict[str, object]:
+        # In the dream/service context the provenance source repos are usually
+        # not checked out at the run CWD, so a CWD-relative path probe gives
+        # false negatives and would spuriously decay freshly atomized knowledge.
+        # Return None (cannot determine) so source_invalid decay is disabled here;
+        # TTL and supersede decay still apply.
         return janitor_scanner.run_scan(
             memory_root=memory_root,
             knowledge_root=memory_root / "knowledge",
@@ -51,6 +56,7 @@ def _run(args: argparse.Namespace) -> int:
             config_hash=jan_hash,
             now=now,
             dry_run=args.dry_run,
+            source_path_exists=lambda record: None,
         )
 
     result = orchestrator.run_dream(
