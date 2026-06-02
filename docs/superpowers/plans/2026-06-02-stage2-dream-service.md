@@ -1287,3 +1287,4 @@ git commit -m "test(stage2): add T5 dream/bundle E2E and integration wiring"
 - Memory regression: `python3 -m unittest discover -s paulshaclaw/memory/tests -q` → **OK** (439 tests, skipped=1)
 - Integration gate: `bash paulshaclaw/memory/tests/stage2_integration_check.sh` → ends with **`[stage2] ok`** (dream dry-run + run + bundle fixture included)
 - Repo regression: `python3 -m unittest discover -s tests -q` → **OK** (378 tests)
+- Full repo suite: `PYTHONPATH=. pytest -q` → **OK** (820 passed, 1 skipped, 94 subtests passed)
