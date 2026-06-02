@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
+from ..atomizer import slice_frontmatter
 from ..ledger import lifecycle, processing, relations
 
 
@@ -60,14 +61,41 @@ def _frontmatter_value(lines: Iterable[str], key: str) -> str | None:
     return None
 
 
-def _frontmatter_yaml_or_raise(text: str, *, src: Path) -> dict[str, Any]:
-    lines = _frontmatter_lines(text)
-    if not lines:
+def _normalize_yaml_types(value: object) -> object:
+    try:
+        from datetime import date, datetime
+
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+    except Exception:
+        pass
+
+    if isinstance(value, dict):
+        return {str(k): _normalize_yaml_types(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_normalize_yaml_types(v) for v in value]
+    return value
+
+
+def _frontmatter_yaml_or_raise(text: str, *, src: Path) -> tuple[dict[str, Any], str]:
+    text = text or ""
+    lines = text.splitlines(keepends=True)
+    if not lines or lines[0].strip() != "---":
         raise BundleError(f"slice missing YAML frontmatter: {src}")
 
-    block = "\n".join(lines)
+    end: int | None = None
+    for idx in range(1, len(lines)):
+        if lines[idx].strip() == "---":
+            end = idx
+            break
+    if end is None:
+        raise BundleError(f"slice YAML frontmatter is not closed: {src}")
+
+    block = "".join(lines[1:end])
     if not block.strip():
         raise BundleError(f"slice YAML frontmatter is empty: {src}")
+
+    body = "".join(lines[end + 1 :])
 
     try:
         import yaml  # type: ignore
@@ -75,14 +103,18 @@ def _frontmatter_yaml_or_raise(text: str, *, src: Path) -> dict[str, Any]:
         raise BundleError("PyYAML is required to validate slice frontmatter") from exc
 
     try:
-        data = yaml.safe_load(block)
+        loaded = yaml.safe_load(block)
     except Exception as exc:
         raise BundleError(f"slice frontmatter is not valid YAML: {src}: {exc}") from exc
 
-    if not isinstance(data, dict):
+    if not isinstance(loaded, dict):
         raise BundleError(f"slice frontmatter must be a mapping: {src}")
 
-    return data
+    normalized = _normalize_yaml_types(loaded)
+    if not isinstance(normalized, dict):
+        raise BundleError(f"slice frontmatter must be a mapping: {src}")
+
+    return normalized, body
 
 
 def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, str]:
@@ -103,10 +135,11 @@ def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, s
     except (OSError, UnicodeDecodeError) as exc:
         raise BundleError(f"slice unreadable: {src}: {exc}") from exc
 
-    fm = _frontmatter_yaml_or_raise(text, src=src_resolved)
+    fm, body = _frontmatter_yaml_or_raise(text, src=src_resolved)
 
-    if fm.get("memory_layer") != "knowledge":
-        raise BundleError(f"slice memory_layer must be 'knowledge': {src}")
+    errors = slice_frontmatter.validate(fm, body)
+    if errors:
+        raise BundleError(f"slice failed schema validation: {src}: {errors[0]}")
 
     sid = fm.get("slice_id")
     sid_str = str(sid).strip() if sid is not None else ""

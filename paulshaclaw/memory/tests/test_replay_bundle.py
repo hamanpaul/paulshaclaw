@@ -4,11 +4,14 @@ import argparse
 import contextlib
 import io
 import json
+import re
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
+from paulshaclaw.lifecycle.schema import compute_checksum
+from paulshaclaw.memory.atomizer import slice_frontmatter
 from paulshaclaw.memory.replay import bundle, cli
 
 
@@ -32,19 +35,49 @@ def _slice(
     path = root / "knowledge" / "p" / name
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    sid = f"\"{slice_id}\"" if quote_slice_id else slice_id
-    session = f"\"{distilled_from}\"" if quote_distilled_from else distilled_from
+    body = f"DISTILLED {slice_id}\n"
+    frontmatter: dict[str, object] = {
+        # Stage 3 required
+        "phase": "review",
+        "project": "p",
+        "slice_id": slice_id,
+        "artifact_kind": "report",
+        "version": "1",
+        "created_at": "2026-06-02T00:00:00Z",
+        "created_by": "claude",
+        "source_session": "s1",
+        "gate_required": False,
+        "checksum": compute_checksum(body),
+        # T4 read contract
+        "memory_layer": "knowledge",
+        "source_agent": "claude",
+        "captured_at": "2026-06-02T00:00:00Z",
+        "provenance": {"repo": "r", "commit": "c", "path": "p"},
+        "supersedes": [],
+        # derivation
+        "distilled_from": distilled_from,
+    }
 
-    path.write_text(
-        "---\n"
-        f"slice_id: {sid}\n"
-        "project: p\n"
-        "memory_layer: knowledge\n"
-        f"distilled_from: {session}\n"
-        "---\n"
-        f"DISTILLED {slice_id}\n",
-        encoding="utf-8",
+    text = slice_frontmatter.render(
+        slice_frontmatter.Slice(slice_id=slice_id, frontmatter=frontmatter, body=body)
     )
+
+    if quote_slice_id:
+        text = re.sub(
+            rf"(?m)^slice_id:\s*{re.escape(slice_id)}\s*$",
+            f'slice_id: "{slice_id}"',
+            text,
+            count=1,
+        )
+    if quote_distilled_from:
+        text = re.sub(
+            rf"(?m)^distilled_from:\s*{re.escape(distilled_from)}\s*$",
+            f'distilled_from: "{distilled_from}"',
+            text,
+            count=1,
+        )
+
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -127,6 +160,28 @@ class ReplayBundleTests(unittest.TestCase):
 
             with self.assertRaises(bundle.BundleError):
                 bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+            self.assertFalse(out.exists())
+
+    def test_build_rejects_forged_under_specified_knowledge_markdown_as_slice(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            forged = root / "knowledge" / "p" / "forged.md"
+            forged.parent.mkdir(parents=True, exist_ok=True)
+            forged.write_text(
+                "---\n"
+                "slice_id: sl-forged\n"
+                "project: p\n"
+                "memory_layer: knowledge\n"
+                "distilled_from: claude:s1\n"
+                "---\n"
+                "FORGED\n",
+                encoding="utf-8",
+            )
+            out = root / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [forged], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
 
             self.assertFalse(out.exists())
 
