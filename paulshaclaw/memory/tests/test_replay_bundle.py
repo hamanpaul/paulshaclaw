@@ -67,6 +67,37 @@ def _raw_inbox(root: Path) -> Path:
 
 
 class ReplayBundleTests(unittest.TestCase):
+    def test_build_rejects_raw_inbox_markdown_as_slice(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            raw = _raw_inbox(root)
+            out = root / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [raw], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+            self.assertFalse(out.exists())
+
+    def test_build_rejects_malformed_frontmatter_as_slice(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            bad = root / "knowledge" / "p" / "bad.md"
+            bad.parent.mkdir(parents=True, exist_ok=True)
+            bad.write_text(
+                "---\n"
+                "slice_id: [unterminated\n"
+                "memory_layer: knowledge\n"
+                "---\n"
+                "NOT REALLY A SLICE\n",
+                encoding="utf-8",
+            )
+            out = root / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [bad], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+            self.assertFalse(out.exists())
+
     def test_build_writes_manifest_slices_ledger_and_excludes_raw(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)

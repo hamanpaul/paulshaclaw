@@ -60,30 +60,65 @@ def _frontmatter_value(lines: Iterable[str], key: str) -> str | None:
     return None
 
 
-def _slice_id_of(path: Path) -> str:
-    text = path.read_text(encoding="utf-8")
+def _frontmatter_yaml_or_raise(text: str, *, src: Path) -> dict[str, Any]:
+    lines = _frontmatter_lines(text)
+    if not lines:
+        raise BundleError(f"slice missing YAML frontmatter: {src}")
 
-    fm = _frontmatter_dict(text)
+    block = "\n".join(lines)
+    if not block.strip():
+        raise BundleError(f"slice YAML frontmatter is empty: {src}")
+
+    try:
+        import yaml  # type: ignore
+    except Exception as exc:
+        raise BundleError("PyYAML is required to validate slice frontmatter") from exc
+
+    try:
+        data = yaml.safe_load(block)
+    except Exception as exc:
+        raise BundleError(f"slice frontmatter is not valid YAML: {src}: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise BundleError(f"slice frontmatter must be a mapping: {src}")
+
+    return data
+
+
+def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, str | None]:
+    try:
+        src_resolved = src.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise BundleError(f"slice path not found: {src}") from exc
+
+    knowledge_root_resolved = knowledge_root.resolve(strict=False)
+    if not _is_within(src_resolved, knowledge_root_resolved):
+        raise BundleError(f"slice path must be under knowledge root: {src}")
+
+    if not src_resolved.is_file():
+        raise BundleError(f"slice path is not a file: {src}")
+
+    try:
+        text = src_resolved.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise BundleError(f"slice unreadable: {src}: {exc}") from exc
+
+    fm = _frontmatter_yaml_or_raise(text, src=src_resolved)
+
+    if fm.get("memory_layer") != "knowledge":
+        raise BundleError(f"slice memory_layer must be 'knowledge': {src}")
+
     sid = fm.get("slice_id")
-    if sid:
-        return str(sid)
+    sid_str = str(sid).strip() if sid is not None else ""
+    if not sid_str:
+        raise BundleError(f"slice_id missing in frontmatter: {src}")
 
-    # Fallback for environments without YAML parsing.
-    lines = _frontmatter_lines(text)
-    return _frontmatter_value(lines, "slice_id") or path.stem
-
-
-def _distilled_from(path: Path) -> str | None:
-    text = path.read_text(encoding="utf-8")
-
-    fm = _frontmatter_dict(text)
     session = fm.get("distilled_from")
-    if session:
-        return str(session)
+    session_str = str(session).strip() if session is not None else None
+    if session_str == "":
+        session_str = None
 
-    # Fallback for environments without YAML parsing.
-    lines = _frontmatter_lines(text)
-    return _frontmatter_value(lines, "distilled_from")
+    return sid_str, src_resolved, session_str
 
 
 def _canonical_jsonl_line(event: dict[str, Any]) -> str:
@@ -98,17 +133,20 @@ def build(
     selection: dict[str, object],
     now: str,
 ) -> Path:
+    knowledge_root = (memory_root / "knowledge").resolve(strict=False)
+
     slice_infos: list[tuple[str, Path, str | None]] = []
     seen: dict[str, Path] = {}
     sessions: set[str] = set()
 
     for src in slice_paths:
-        sid = _slice_id_of(src)
+        sid, src_resolved, session = _validated_slice_info(knowledge_root, src)
         if sid in seen:
-            raise BundleError(f"duplicate slice_id '{sid}' selected in {seen[sid]!s} and {src!s}")
-        seen[sid] = src
-        session = _distilled_from(src)
-        slice_infos.append((sid, src, session))
+            raise BundleError(
+                f"duplicate slice_id '{sid}' selected in {seen[sid]!s} and {src_resolved!s}"
+            )
+        seen[sid] = src_resolved
+        slice_infos.append((sid, src_resolved, session))
         if session:
             sessions.add(session)
 
@@ -116,7 +154,6 @@ def build(
     if not slice_paths:
         warnings.append("empty selection")
 
-    knowledge_root = (memory_root / "knowledge").resolve(strict=False)
     out_dir_resolved = out_dir.resolve(strict=False)
     if _is_within(out_dir_resolved, knowledge_root):
         raise BundleError(f"output directory must not be under knowledge root: {out_dir}")
