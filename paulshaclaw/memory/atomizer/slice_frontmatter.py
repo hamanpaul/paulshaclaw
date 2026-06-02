@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -129,7 +130,7 @@ def _scalar(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, list):
-        return "[" + ", ".join(str(v) for v in value) + "]"
+        return json.dumps(value, ensure_ascii=True)
     return str(value)
 
 

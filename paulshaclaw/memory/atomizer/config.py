@@ -2,7 +2,7 @@
 import copy
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -10,6 +10,7 @@ from typing import Any
 
 # Default config directory is package location
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Supported schema version
 _SUPPORTED_SCHEMA = "1"
@@ -33,6 +34,12 @@ class AtomizerConfig:
     phase_map: Mapping[str, str]
     default_artifact_kind: str = "report"
     default_phase: str = "review"
+    agent_exec_command: tuple[str, ...] = ("scripts/claude-gemma4",)
+    agent_exec_timeout: int = 600
+    agent_exec_model: str = "unknown"
+    default_promoter: str = "identity"
+    skill_path: str = "skills/atomize-knowledge-slice.md"
+    known_projects_file: str = "~/.agents/config/projects.yaml"
 
 
 def _read_mapping(path: Path) -> Mapping[str, Any]:
@@ -111,6 +118,73 @@ def _resolve_override(override_path):
         return Path(override_path)
 
 
+def _require_non_empty_string(value: object, field_name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise AtomizerConfigError(f"{field_name} must be non-empty string")
+    return value
+
+
+def _parse_agent_exec_command(value: object) -> tuple[str, ...]:
+    if isinstance(value, str) or not isinstance(value, list):
+        raise AtomizerConfigError("agent_exec.command must be list")
+    if not value:
+        raise AtomizerConfigError("agent_exec.command must not be empty")
+    command: list[str] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, str) or not item:
+            raise AtomizerConfigError(f"agent_exec.command[{index}] must be non-empty string")
+        command.append(item)
+    return tuple(command)
+
+
+def _parse_positive_int(value: object, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise AtomizerConfigError(f"{field_name} must be int, got bool")
+    if isinstance(value, float):
+        raise AtomizerConfigError(f"{field_name} must be int, got float")
+    if not isinstance(value, (int, str)):
+        raise AtomizerConfigError(f"{field_name} must be a positive int")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise AtomizerConfigError(f"{field_name} must be a positive int") from exc
+    if parsed <= 0:
+        raise AtomizerConfigError(f"{field_name} must be positive, got {parsed}")
+    return parsed
+
+
+def is_safe_path_component(value: str) -> bool:
+    return (
+        value.strip() == value
+        and value not in {"", ".", ".."}
+        and "/" not in value
+        and "\\" not in value
+        and "*" not in value
+        and "?" not in value
+        and "[" not in value
+        and "]" not in value
+        and "\x00" not in value
+    )
+
+
+def resolve_command_argv(
+    command: Sequence[str], *, base_dir: str | Path = PROJECT_ROOT
+) -> tuple[str, ...]:
+    root = Path(base_dir)
+    resolved: list[str] = []
+    for token in command:
+        candidate = Path(token).expanduser()
+        if candidate.is_absolute():
+            resolved.append(str(candidate))
+            continue
+        rooted_candidate = root / candidate
+        if candidate.parts and rooted_candidate.exists():
+            resolved.append(str(rooted_candidate))
+            continue
+        resolved.append(token)
+    return tuple(resolved)
+
+
 def load_config(
     default_dir: str | Path | None = None,
     override_path: str | Path | None | object = _DEFAULT_SENTINEL
@@ -186,6 +260,38 @@ def load_config(
     # Extract defaults
     default_artifact_kind = config_data.get("default_artifact_kind", "report")
     default_phase = config_data.get("default_phase", "review")
+
+    agent_exec_config = config_data.get("agent_exec", {})
+    if not isinstance(agent_exec_config, Mapping):
+        raise AtomizerConfigError(
+            f"agent_exec must be a mapping, got {type(agent_exec_config).__name__}"
+        )
+    agent_exec_command = _parse_agent_exec_command(
+        agent_exec_config.get("command", ["scripts/claude-gemma4"])
+    )
+    agent_exec_timeout = _parse_positive_int(
+        agent_exec_config.get("timeout_seconds", 600),
+        "agent_exec.timeout_seconds",
+    )
+    agent_exec_model = _require_non_empty_string(
+        agent_exec_config.get("model", "unknown"),
+        "agent_exec.model",
+    )
+
+    default_promoter = _require_non_empty_string(
+        config_data.get("promoter", "identity"),
+        "promoter",
+    )
+    if default_promoter not in {"identity", "llm"}:
+        raise AtomizerConfigError(f"promoter must be identity or llm, got {default_promoter}")
+    skill_path = _require_non_empty_string(
+        config_data.get("skill_path", "skills/atomize-knowledge-slice.md"),
+        "skill_path",
+    )
+    known_projects_file = _require_non_empty_string(
+        config_data.get("known_projects_file", "~/.agents/config/projects.yaml"),
+        "known_projects_file",
+    )
     
     # Build config object
     cfg = AtomizerConfig(
@@ -196,6 +302,12 @@ def load_config(
         phase_map=phase_map,
         default_artifact_kind=default_artifact_kind,
         default_phase=default_phase,
+        agent_exec_command=agent_exec_command,
+        agent_exec_timeout=agent_exec_timeout,
+        agent_exec_model=agent_exec_model,
+        default_promoter=default_promoter,
+        skill_path=skill_path,
+        known_projects_file=known_projects_file,
     )
     
     # Compute deterministic hash of effective config

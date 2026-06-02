@@ -21,3 +21,11 @@ phase_map:
   review: review
 default_artifact_kind: report
 default_phase: review
+agent_exec:
+  command:
+    - scripts/claude-gemma4
+  timeout_seconds: 600
+  model: gemma4-26b-a4b-nvfp4
+promoter: identity
+skill_path: skills/atomize-knowledge-slice.md
+known_projects_file: ~/.agents/config/projects.yaml

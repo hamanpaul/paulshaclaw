@@ -98,6 +98,7 @@ class TestRelationsLedger(unittest.TestCase):
             # Should deduplicate to one edge
             edges = relations.neighbors(root, "atom:a1")
             self.assertEqual(len(edges), 1)
+            self.assertEqual(len(relations.read_edges(root)), 1)
 
     def test_ts_uses_injected_now(self):
         """Test edge ts field equals provided now string."""
@@ -118,6 +119,35 @@ class TestRelationsLedger(unittest.TestCase):
             edges = relations.read_edges(root)
             self.assertEqual(len(edges), 1)
             self.assertEqual(edges[0]["ts"], now_str)
+
+    def test_semantic_edge_types_are_valid(self):
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            now_str = "2025-01-15T13:00:00Z"
+            config_hash = "mno345"
+
+            relations.append_edge(
+                root,
+                type="relates_to",
+                frm="slice:sl-1",
+                to="slice:sl-2",
+                now=now_str,
+                config_hash=config_hash,
+            )
+            relations.append_edge(
+                root,
+                type="mentions",
+                frm="slice:sl-1",
+                to="entity:MTK",
+                now=now_str,
+                config_hash=config_hash,
+            )
+
+            edges = relations.read_edges(root)
+            self.assertEqual(
+                [edge["type"] for edge in edges],
+                ["relates_to", "mentions"],
+            )
 
     def test_corrupt_line_fails_closed(self):
         """Test malformed JSON line raises RelationsLedgerError."""

@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from paulshaclaw.lifecycle.schema import ARTIFACT_KINDS
+from .config import is_safe_path_component
 
 _FENCED_BLOCK_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
 _JSON_DECODER = json.JSONDecoder()
 _EMBEDDED_JSON_PREFIXES = frozenset({":", ",", "[", "{", '"'})
 _EMBEDDED_JSON_SUFFIXES = frozenset({":", ",", "]", "}"})
+_OUTPUT_ARRAY_LABEL_RE = re.compile(r"output:", re.IGNORECASE)
 _PROPOSAL_KEYS = frozenset(
     {
         "title",
@@ -62,7 +64,10 @@ def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:
     previous_position = _previous_non_whitespace_index(raw, start)
     previous = raw[previous_position] if previous_position is not None else None
     if previous in _EMBEDDED_JSON_PREFIXES and not (
-        previous == ":" and "\n" in raw[previous_position + 1 : start]
+        previous == ":" and (
+            "\n" in raw[previous_position + 1 : start]
+            or _has_plaintext_array_label(raw, previous_position, start)
+        )
     ):
         return False
 
@@ -85,6 +90,12 @@ def _previous_non_whitespace(raw: str, index: int) -> str | None:
     if position is not None:
         return raw[position]
     return None
+
+
+def _has_plaintext_array_label(raw: str, previous_position: int, start: int) -> bool:
+    line_start = raw.rfind("\n", 0, previous_position) + 1
+    prefix = raw[line_start:start].strip()
+    return bool(_OUTPUT_ARRAY_LABEL_RE.fullmatch(prefix))
 
 
 def _next_non_whitespace(raw: str, index: int) -> str | None:
@@ -111,7 +122,7 @@ def _require_non_empty_string(item: dict[str, Any], key: str, index: int) -> str
     value = _require_field(item, key, index)
     if not isinstance(value, str) or not value.strip():
         raise LlmOutputError(f"proposal {index} {key} must be a non-empty string")
-    return value
+    return value.strip()
 
 
 def _require_string_list(item: dict[str, Any], key: str, index: int) -> tuple[str, ...]:
@@ -145,7 +156,7 @@ def _validate_relation(relation: Any, proposal_index: int, relation_index: int) 
             raise LlmOutputError(
                 f"proposal {proposal_index} relation {relation_index} target_title must be a non-empty string"
             )
-        return relation
+        return {"type": "relates_to", "target_title": target_title.strip()}
 
     if relation_type == "mentions":
         if set(relation) != {"type", "entity"}:
@@ -157,7 +168,7 @@ def _validate_relation(relation: Any, proposal_index: int, relation_index: int) 
             raise LlmOutputError(
                 f"proposal {proposal_index} relation {relation_index} entity must be a non-empty string"
             )
-        return relation
+        return {"type": "mentions", "entity": entity.strip()}
 
     raise LlmOutputError(f"proposal {proposal_index} relation {relation_index} has unsupported type: {relation_type}")
 
@@ -165,6 +176,8 @@ def _validate_relation(relation: Any, proposal_index: int, relation_index: int) 
 def _parse_proposals(data: Any, known_projects: list[str]) -> list[SliceProposal]:
     if not isinstance(data, list):
         raise LlmOutputError("agent output must be a JSON array")
+    if not data:
+        raise LlmOutputError("agent output must be a non-empty JSON array")
 
     allowed_projects = set(known_projects) | {"_unknown"}
     proposals: list[SliceProposal] = []
@@ -183,6 +196,8 @@ def _parse_proposals(data: Any, known_projects: list[str]) -> list[SliceProposal
         project = item.get("project")
         if project not in allowed_projects:
             raise LlmOutputError(f"proposal {index} has unknown project: {project}")
+        if not isinstance(project, str) or not is_safe_path_component(project):
+            raise LlmOutputError(f"proposal {index} has unsafe project path: {project}")
 
         title = _require_non_empty_string(item, "title", index)
         if title in seen_titles:

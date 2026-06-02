@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import io
 import shutil
+import sys
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from paulshaclaw.memory import cli as memory_cli
 from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.memory.atomizer import pipeline
+from paulshaclaw.memory.atomizer.agent_exec import FakeAgentClient
+from paulshaclaw.memory.atomizer.llm_promoter import LLMPromoter
 from paulshaclaw.memory.ledger import processing, relations
 from paulshaclaw.lifecycle.schema import parse_artifact_text, validate_frontmatter
 
@@ -97,6 +103,101 @@ class AtomizerE2ETests(unittest.TestCase):
                 raw = (root / "runtime" / "ledger" / name).read_text(encoding="utf-8")
                 self.assertNotIn("alpha body", raw)
                 self.assertNotIn("beta body", raw)
+
+    def test_llm_fake_run_writes_gate_valid_slices_without_raw_body_leakage(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed(root)
+            cfg, h = _cfg()
+            promoter = LLMPromoter(
+                FakeAgentClient(
+                    '[{"title":"alpha","artifact_kind":"report","project":"paulshaclaw","tags":["t1"],'
+                    '"body":"alpha distilled","source_fragment_indices":[0],'
+                    '"relations":[{"type":"mentions","entity":"MTK"}]},'
+                    '{"title":"beta","artifact_kind":"report","project":"paulshaclaw","tags":["t2"],'
+                    '"body":"beta distilled","source_fragment_indices":[1],'
+                    '"relations":[{"type":"relates_to","target_title":"alpha"}]}]'
+                ),
+                skill_text="LLM-FAKE-SKILL",
+                known_projects=["paulshaclaw"],
+                model="fake-llm",
+            )
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-05-31T03:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(result["summary"]["slices"], 2)
+            slice_paths = sorted((root / "knowledge" / "paulshaclaw").rglob("*.md"))
+            self.assertEqual(len(slice_paths), 2)
+            for slice_path in slice_paths:
+                doc = parse_artifact_text(slice_path.read_text(encoding="utf-8"))
+                gate = validate_frontmatter(frontmatter=doc.frontmatter, body=doc.body)
+                self.assertTrue(gate.ok, gate.errors)
+
+            edge_types = {edge["type"] for edge in relations.read_edges(root)}
+            self.assertIn("mentions", edge_types)
+            self.assertIn("relates_to", edge_types)
+
+            for name in ("processing.jsonl", "relations.jsonl"):
+                ledger = (root / "runtime" / "ledger" / name).read_text(encoding="utf-8")
+                self.assertNotIn("alpha body", ledger)
+                self.assertNotIn("beta body", ledger)
+
+    def test_llm_cli_stub_run_writes_gate_valid_slice_with_flow_through(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed(root)
+            projects = root / "projects.yaml"
+            projects.write_text("projects:\n  - paulshaclaw\n", encoding="utf-8")
+            override = root / "atomizer.override.yaml"
+            stub = Path(__file__).resolve().parent / "fixtures" / "atomizer" / "fake-agent.py"
+            override.write_text(
+                "\n".join(
+                    (
+                        'known_projects_file: "' + str(projects) + '"',
+                        "agent_exec:",
+                        "  command:",
+                        f"    - {sys.executable}",
+                        f"    - {stub}",
+                        "  timeout_seconds: 30",
+                        "  model: fake-agent",
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            buf = io.StringIO()
+
+            with redirect_stdout(buf):
+                rc = memory_cli.main(
+                    [
+                        "memory",
+                        "atomize",
+                        "--memory-root",
+                        str(root),
+                        "--now",
+                        "2026-05-31T03:00:00Z",
+                        "--promoter",
+                        "llm",
+                        "--override",
+                        str(override),
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertIn('"slices": 1', buf.getvalue())
+            self.assertEqual(processing.state_of(root, "claude:sess-e2e"), "promoted")
+            slice_path = next((root / "knowledge" / "paulshaclaw").rglob("*.md"))
+            doc = parse_artifact_text(slice_path.read_text(encoding="utf-8"))
+            gate = validate_frontmatter(frontmatter=doc.frontmatter, body=doc.body)
+            self.assertTrue(gate.ok, gate.errors)
+            self.assertEqual(doc.frontmatter["source_session"], "sess-e2e")
+            self.assertEqual(doc.frontmatter["distilled_from"], "claude:sess-e2e")
 
 
 if __name__ == "__main__":

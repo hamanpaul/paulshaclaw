@@ -117,8 +117,16 @@ def read_events(memory_root: Path) -> list[dict[str, Any]]:
 
 
 def fold_states(memory_root: Path) -> dict[str, str]:
+    return {
+        session_key: str(event["state"])
+        for session_key, event in fold_events(memory_root).items()
+        if event.get("state")
+    }
+
+
+def fold_events(memory_root: Path) -> dict[str, dict[str, Any]]:
     """
-    Fold events into current state map.
+    Fold events into latest-event map.
     
     Events are sorted by (ts, original_index) so latest timestamp wins
     deterministically if timestamps differ, otherwise file order wins.
@@ -127,7 +135,7 @@ def fold_states(memory_root: Path) -> dict[str, str]:
         memory_root: Root path for memory storage
     
     Returns:
-        Dictionary mapping session_key to current state
+        Dictionary mapping session_key to the latest event for that session
     """
     events = read_events(memory_root)
     
@@ -135,15 +143,14 @@ def fold_states(memory_root: Path) -> dict[str, str]:
     indexed_events = [(event, idx) for idx, event in enumerate(events)]
     indexed_events.sort(key=lambda x: (x[0].get("ts", ""), x[1]))
     
-    # Fold into state map
-    state_map = {}
+    # Fold into latest-event map
+    event_map = {}
     for event, _ in indexed_events:
         session_key = event.get("session_key")
-        state = event.get("state")
-        if session_key and state:
-            state_map[session_key] = state
+        if session_key:
+            event_map[session_key] = event
     
-    return state_map
+    return event_map
 
 
 def state_of(memory_root: Path, session_key: str) -> str | None:

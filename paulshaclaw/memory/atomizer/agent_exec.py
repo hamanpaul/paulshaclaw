@@ -53,15 +53,18 @@ class FakeAgentClient(AgentClient):
 
 
 class CachingAgentClient(AgentClient):
-    """Freeze raw output by prompt hash so reruns stay deterministic."""
+    """Freeze raw output so reruns stay deterministic."""
 
     def __init__(self, inner: AgentClient, cache_dir: Path) -> None:
         self._inner = inner
         self._cache_dir = cache_dir
 
+    def cache_path_for_key(self, cache_key: str) -> Path:
+        return self._cache_dir / f"{cache_key}.json"
+
     def cache_path_for(self, prompt: str) -> Path:
         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
-        return self._cache_dir / f"{prompt_hash}.txt"
+        return self.cache_path_for_key(prompt_hash)
 
     @staticmethod
     def _write_text_atomically(path: Path, text: str) -> None:
@@ -74,8 +77,8 @@ class CachingAgentClient(AgentClient):
             if tmp.exists():
                 tmp.unlink()
 
-    def run(self, prompt: str) -> str:
-        path = self.cache_path_for(prompt)
+    def run_cached(self, prompt: str, cache_key: str) -> str:
+        path = self.cache_path_for_key(cache_key)
         if path.exists():
             try:
                 cached = path.read_text(encoding="utf-8")
@@ -87,3 +90,13 @@ class CachingAgentClient(AgentClient):
         output = self._inner.run(prompt)
         self._write_text_atomically(path, output)
         return output
+
+    def run(self, prompt: str) -> str:
+        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        return self.run_cached(prompt, prompt_hash)
+
+    def clear_cache_key(self, cache_key: str) -> None:
+        try:
+            self.cache_path_for_key(cache_key).unlink()
+        except FileNotFoundError:
+            return

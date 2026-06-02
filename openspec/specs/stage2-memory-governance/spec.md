@@ -276,18 +276,46 @@ Stage 2 SHALL split each raw session document into fragments using deterministic
 - **WHEN** a structural fragment exceeds `split.max_fragment_chars`
 - **THEN** the splitter MUST further split it deterministically rather than emit an unbounded fragment
 
-### Requirement: Promoter interface and 1:1 MVP
+### Requirement: Per-session LLM semantic promoter
 
-Stage 2 SHALL define a `Promoter` interface that maps one fragment to one or more knowledge slices. The MVP implementation MUST be `IdentityPromoter`, producing exactly one knowledge slice per fragment with no semantic splitting, merging, relation inference, or tagging. The interface MUST be the only seam a future LLM promoter (T3.2) replaces; the splitter, ledgers, frontmatter builder, and flow-through MUST be reusable without change.
+Stage 2 SHALL define the `Promoter` interface at session scope: `promote(fragments, config) -> list[Slice]`. Stage 2 SHALL provide an `LLMPromoter` that may merge multiple fragments into one slice or split one fragment into several, while preserving the deterministic `IdentityPromoter` under the same per-session signature. The splitter, ledgers, frontmatter builder, and flow-through MUST remain reusable across both promoters.
 
-#### Scenario: MVP promotes one-to-one
+#### Scenario: IdentityPromoter remains 1:1 under per-session signature
 
-- **WHEN** `IdentityPromoter` promotes a fragment
-- **THEN** it MUST produce exactly one knowledge slice carrying `distilled_from` and `fragment_ref`
+- **WHEN** `IdentityPromoter.promote(fragments, config)` is called
+- **THEN** it MUST return exactly one slice per input fragment
+
+#### Scenario: LLM promoter may merge fragments
+
+- **WHEN** the LLM promoter promotes a session whose fragments describe one concept across two fragments
+- **THEN** it MAY return a single slice whose `source_fragment_indices` lists both fragments
+
+### Requirement: Configurable agent-exec backend
+
+Stage 2 SHALL drive the LLM promoter through a configurable `agent_exec` backend that invokes a one-shot subprocess command (default `scripts/claude-gemma4`, a local model). The backend MUST NOT require an API key or per-token billing; authentication, if any, is the invoked agent's responsibility. The agent command MUST be a configuration value and MUST be shareable with the paulshiabro `/agent` launcher configuration. The promoter MUST accept an injectable client so tests can substitute a fake without a real model.
+
+#### Scenario: Agent command is configurable
+
+- **WHEN** an operator sets `agent_exec.command` in `atomizer.yaml` or its override
+- **THEN** the promoter MUST invoke that command rather than a hardcoded one
+
+#### Scenario: Tests run without a real model
+
+- **WHEN** the promoter is constructed with a fake agent client
+- **THEN** promotion MUST complete deterministically using the fake's canned output, with no network or model dependency
+
+### Requirement: Seed atomization skill document
+
+Stage 2 SHALL ship a seed atomization skill document at `paulshaclaw/memory/atomizer/skills/atomize-knowledge-slice.md` that instructs the agent how to split, merge, tag, and relate session content into knowledge slices, and that declares the mandatory JSON output contract. Atomization behavior MUST live in this skill document, not be hardcoded in prompt assembly.
+
+#### Scenario: Skill declares the output contract
+
+- **WHEN** a reviewer reads the seed skill document
+- **THEN** it MUST describe the required JSON output schema the agent must emit, including `artifact_kind`, `project`, `tags`, `body`, `source_fragment_indices`, and `relations`
 
 ### Requirement: Knowledge slice frontmatter union contract
 
-Stage 2 SHALL produce knowledge slices whose frontmatter is the union of the Topic 4 janitor read contract and the Stage 3 frontmatter schema. Each slice frontmatter MUST pass `paulshaclaw.lifecycle.schema.validate_frontmatter` and MUST also expose the Topic 4 fields (`memory_layer=knowledge`, `source_agent`, `captured_at`, `provenance`, `supersedes`). The atomizer MUST assign `slice_id`, `artifact_kind`, `checksum`, and `supersedes` deterministically and MUST NOT extend or redefine the Stage 3 frontmatter schema. `checksum` MUST equal `sha256(slice body)`.
+Stage 2 SHALL produce knowledge slices whose frontmatter is the union of the Topic 4 janitor read contract and the Stage 3 frontmatter schema, plus a Stage-2-owned `tags` field. Each slice frontmatter MUST pass `paulshaclaw.lifecycle.schema.validate_frontmatter` and MUST also expose the Topic 4 fields (`memory_layer=knowledge`, `source_agent`, `captured_at`, `provenance`, `supersedes`). The atomizer MUST assign `slice_id`, `artifact_kind`, `checksum`, and `supersedes` deterministically and MUST NOT extend or redefine the Stage 3 required frontmatter schema. `checksum` MUST equal `sha256(slice body)`.
 
 #### Scenario: Slice passes Stage 3 gate
 
@@ -300,6 +328,16 @@ Stage 2 SHALL produce knowledge slices whose frontmatter is the union of the Top
 - **THEN** the slice MUST NOT be written to `knowledge/`
 - **THEN** the session MUST remain in `state=split` and a warning MUST be logged
 
+### Requirement: LLM output contract and slice assembly
+
+Stage 2 SHALL require the LLM promoter to return a JSON array of slice proposals, each with `title`, `artifact_kind` (a Stage 3 `ARTIFACT_KIND`), `project` (a known project or `_unknown`), `tags`, a non-empty `body`, `source_fragment_indices`, and `relations`. Stage 2 MUST parse and schema-validate this output and MUST fail closed on any violation. Each accepted proposal MUST become a slice whose frontmatter is the Topic 4 ∪ Stage 3 union plus `tags`, whose `checksum` equals `sha256(body)`, and whose `slice_id` is content-derived from the session identity and body.
+
+#### Scenario: Invalid output fails closed for the whole session
+
+- **WHEN** the agent returns malformed JSON, an out-of-range `artifact_kind`, an unknown `project`, or an empty `body`
+- **THEN** no knowledge slice MAY be written for that session
+- **THEN** the session MUST remain in `state=split` with a warning, for retry on the next run
+
 ### Requirement: Flow-through with archive retention
 
 Stage 2 SHALL keep working layers lean by moving consumed inputs out of the working layer into `archive/`, not by deleting them. After `split_pass`, the raw session MUST be moved to `archive/sessions/<YYYY-MM>/`. After `promote_pass`, the fragments MUST be moved to `archive/fragments/<YYYY-MM>/`. The raw layer MUST NOT retain processed sessions and `inbox/_slices/` MUST NOT retain promoted fragments, while the original content MUST remain recoverable under `archive/`.
@@ -310,9 +348,19 @@ Stage 2 SHALL keep working layers lean by moving consumed inputs out of the work
 - **THEN** the raw layer MUST NOT contain that session and `inbox/_slices/` MUST NOT contain its fragments
 - **THEN** `archive/sessions/` and `archive/fragments/` MUST contain the consumed inputs
 
+### Requirement: Semantic relations and tags
+
+Stage 2 SHALL record LLM-inferred semantic relations as new edge types in `runtime/ledger/relations.jsonl`: `relates_to` (slice to slice) and `mentions` (slice to `entity:<NAME>`), in addition to the deterministic derivation edges. A `relates_to` whose target cannot be resolved within the promotion batch MUST be skipped with a warning rather than failing the session. Slice tags MUST be stored in the Stage-2-owned `tags` frontmatter field and MUST NOT extend the Stage 3 required schema.
+
+#### Scenario: Dangling relation is skipped, not fatal
+
+- **WHEN** a proposal's `relates_to` target title does not match any slice in the same batch
+- **THEN** that edge MUST be skipped with a warning
+- **THEN** the remaining slices and edges MUST still be written
+
 ### Requirement: Processing ledger and relations
 
-Stage 2 SHALL record every processed session in an append-only processing ledger at `runtime/ledger/processing.jsonl` keyed by `<agent>:<session>`, with states `split` (deterministic analysis done, in process) and `promoted` (atomized, processed). A session with no ledger entry MUST be treated as not-yet-processed. Stage 2 SHALL also record derivation edges in an append-only `runtime/ledger/relations.jsonl` with edge types `fragment_of`, `promoted_to`, `distilled_from`, and `supersedes`, with nodes namespaced `session:`/`fragment:`/`slice:`. Both ledgers MUST stamp each record with the injected scan `now` (not wall-clock) and the `atomizer_config_hash`, MUST be append-only, and MUST NOT store raw record body content.
+Stage 2 SHALL record every processed session in an append-only processing ledger at `runtime/ledger/processing.jsonl` keyed by `<agent>:<session>`, with states `split` (deterministic analysis done, in process) and `promoted` (atomized, processed). A session with no ledger entry MUST be treated as not-yet-processed. Stage 2 SHALL also record derivation and semantic edges in an append-only `runtime/ledger/relations.jsonl` with edge types `fragment_of`, `promoted_to`, `distilled_from`, `supersedes`, `relates_to`, and `mentions`, with nodes namespaced `session:`/`fragment:`/`slice:`. Both ledgers MUST stamp each record with the injected scan `now` (not wall-clock) and the `atomizer_config_hash`, MUST be append-only, and MUST NOT store raw record body content. The `promoted` ledger record for LLM promotion MUST include `promoter`, `model`, and `skill_hash`.
 
 #### Scenario: Processing state is queryable
 
@@ -324,9 +372,23 @@ Stage 2 SHALL record every processed session in an append-only processing ledger
 - **WHEN** a knowledge slice exists
 - **THEN** `relations.jsonl` MUST contain a `distilled_from` edge from that slice to its origin `session:<agent>:<sid>`
 
+#### Scenario: Promoted record is traceable
+
+- **WHEN** the LLM promoter promotes a session
+- **THEN** the `processing.jsonl` `promoted` record MUST include `promoter`, `model`, and `skill_hash`
+
+### Requirement: Frozen LLM output and crash-resume determinism
+
+Stage 2 SHALL freeze a session's LLM output at first promotion so the non-deterministic step is idempotent on resume. The raw agent output MUST be cached at `runtime/cache/atomize/<session_key>__<fragments_hash>.json`; a subsequent promotion of the same session and fragments MUST reuse the cache rather than re-invoking the agent. A corrupt cache entry MUST be treated as a miss (re-invoke) and MUST NOT fail the run. Successful promotion MUST clear the session cache after archiving fragments.
+
+#### Scenario: Resume reuses cached output
+
+- **WHEN** a promotion is interrupted after the agent call but before the `promoted` ledger record
+- **THEN** the next run MUST reuse the cached agent output and MUST NOT call the agent again for that session
+
 ### Requirement: Deterministic atomizer execution and fail modes
 
-Stage 2 atomizer execution MUST be deterministic given `(records, ledgers, config, now)`: no LLM, no randomness, injected `now`, and a deterministic `atomizer_config_hash` over the effective config. Config load failure or unsupported `schema_version` MUST fail closed (abort, no writes). A corrupt `processing.jsonl` or `relations.jsonl` line MUST fail closed for the affected pass. A single unparseable raw session MUST be skipped with a warning without aborting the run.
+Stage 2 atomizer execution MUST be deterministic given `(records, ledgers, config, now)` once any LLM output for a session has been frozen in cache: no randomness beyond the first agent invocation, injected `now`, and a deterministic `atomizer_config_hash` over the effective config. Config load failure or unsupported `schema_version` MUST fail closed (abort, no writes). A corrupt `processing.jsonl` or `relations.jsonl` line MUST fail closed for the affected pass. A single unparseable raw session MUST be skipped with a warning without aborting the run. Any promoter failure or schema violation during promotion MUST leave the session in `state=split`.
 
 #### Scenario: Unsupported config version fails closed
 
@@ -338,3 +400,13 @@ Stage 2 atomizer execution MUST be deterministic given `(records, ledgers, confi
 - **WHEN** a single raw session document has unparseable frontmatter
 - **THEN** that session MUST be skipped with a warning
 - **THEN** other sessions MUST still be processed
+
+### Requirement: Redaction trust boundary for distilled output
+
+Stage 2 LLM promotion MUST treat its input fragments as already redacted at the Topic 8 `raw_to_distilled` boundary and MUST NOT re-scan slice bodies for secrets in this change. This limitation MUST be documented; a future `distilled_to_canonical` policy pass is the place to add output-side scanning. Logs MUST NOT contain raw agent output or session body content.
+
+#### Scenario: Logs never contain model output
+
+- **WHEN** the promoter logs a failure
+- **THEN** the log entry MUST NOT contain the raw agent output or any session body content
+- **THEN** it MUST contain only the failure category, `session_key`, and skill/config hashes

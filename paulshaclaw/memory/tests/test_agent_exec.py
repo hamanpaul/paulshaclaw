@@ -83,6 +83,20 @@ class AgentExecTests(unittest.TestCase):
         self.assertEqual(cached.run("p"), CANONICAL_FAKE_JSON)
         self.assertEqual(calls["n"], 1)
 
+    def test_caching_client_reuses_by_explicit_cache_key(self):
+        calls = {"n": 0}
+
+        class Counting(agent_exec.AgentClient):
+            def run(self, prompt: str) -> str:
+                calls["n"] += 1
+                return CANONICAL_FAKE_JSON
+
+        cache_dir = self.make_sandbox("cache-key-hit")
+        cached = agent_exec.CachingAgentClient(Counting(), cache_dir)
+        self.assertEqual(cached.run_cached("prompt one", "session__hash"), CANONICAL_FAKE_JSON)
+        self.assertEqual(cached.run_cached("prompt two", "session__hash"), CANONICAL_FAKE_JSON)
+        self.assertEqual(calls["n"], 1)
+
     def test_caching_client_corrupt_entry_is_miss(self):
         cache_dir = self.make_sandbox("cache-corrupt")
         cached = agent_exec.CachingAgentClient(
@@ -153,6 +167,20 @@ class AgentExecTests(unittest.TestCase):
         self.assertEqual(replace_calls, [(temp_path, cache_path)])
         self.assertFalse(temp_path.exists())
         self.assertEqual(cache_path.read_text(encoding="utf-8"), CANONICAL_FAKE_JSON)
+
+    def test_caching_client_clear_cache_key_removes_entry(self):
+        cache_dir = self.make_sandbox("cache-clear")
+        cached = agent_exec.CachingAgentClient(
+            agent_exec.FakeAgentClient(CANONICAL_FAKE_JSON),
+            cache_dir,
+        )
+        cache_path = cached.cache_path_for_key("session__hash")
+        cached.run_cached("p", "session__hash")
+        self.assertTrue(cache_path.exists())
+
+        cached.clear_cache_key("session__hash")
+
+        self.assertFalse(cache_path.exists())
 
 
 if __name__ == "__main__":

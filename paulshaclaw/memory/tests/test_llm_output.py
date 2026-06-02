@@ -26,6 +26,10 @@ class LlmOutputTests(unittest.TestCase):
         )
         self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
 
+    def test_empty_array_raises(self):
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "non-empty JSON array"):
+            llm_output.parse("[]", PROJECTS)
+
     def test_parses_bare_array_after_label_on_previous_line(self):
         raw = (
             "Output:\n"
@@ -33,6 +37,21 @@ class LlmOutputTests(unittest.TestCase):
             '"source_fragment_indices":[0],"relations":[]}]'
         )
         self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
+
+    def test_parses_bare_array_after_label_on_same_line(self):
+        raw = (
+            'Output: [{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]'
+        )
+        self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
+
+    def test_same_line_non_output_label_does_not_count_as_payload(self):
+        raw = (
+            'Example: [{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]'
+        )
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "no JSON array found"):
+            llm_output.parse(raw, PROJECTS)
 
     def test_malformed_json_raises(self):
         with self.assertRaises(llm_output.LlmOutputError):
@@ -53,6 +72,14 @@ class LlmOutputTests(unittest.TestCase):
         )
         with self.assertRaises(llm_output.LlmOutputError):
             llm_output.parse(raw, PROJECTS)
+
+    def test_unsafe_project_path_raises_even_if_known(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"../escaped","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]'
+        )
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "unsafe project path"):
+            llm_output.parse(raw, ["../escaped"])
 
     def test_empty_body_raises(self):
         raw = (
@@ -176,6 +203,23 @@ class LlmOutputTests(unittest.TestCase):
         )
         proposals = llm_output.parse(raw, PROJECTS)
         self.assertEqual(proposals[0].relations, ({"type": "relates_to", "target_title": "missing"},))
+
+    def test_parser_normalizes_whitespace_in_titles_and_relations(self):
+        raw = (
+            '[{"title":"  a  ","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":['
+            '{"type":"relates_to","target_title":"  other  "},'
+            '{"type":"mentions","entity":"  MTK  "}]}]'
+        )
+        proposals = llm_output.parse(raw, PROJECTS)
+        self.assertEqual(proposals[0].title, "a")
+        self.assertEqual(
+            proposals[0].relations,
+            (
+                {"type": "relates_to", "target_title": "other"},
+                {"type": "mentions", "entity": "MTK"},
+            ),
+        )
 
     def test_relates_to_relation_requires_non_empty_target_title(self):
         cases = (

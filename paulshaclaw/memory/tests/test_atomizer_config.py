@@ -9,6 +9,7 @@ from paulshaclaw.memory.atomizer.config import (
     AtomizerConfigError,
     _deep_merge,
     load_config,
+    resolve_command_argv,
 )
 
 
@@ -129,6 +130,44 @@ class TestAtomizerConfig(unittest.TestCase):
         self.assertEqual(base["split"]["max_fragment_chars"], 8000)
         self.assertEqual(base["phase_map"]["report"], "review")
         self.assertEqual(merged["split"]["max_fragment_chars"], 100)
+
+
+class AgentExecConfigTests(unittest.TestCase):
+    def test_agent_exec_and_promoter_defaults(self):
+        cfg, _ = load_config(override_path=None)
+
+        self.assertTrue(cfg.agent_exec_command)
+        self.assertGreater(cfg.agent_exec_timeout, 0)
+        self.assertIn(cfg.default_promoter, ("identity", "llm"))
+        self.assertTrue(cfg.skill_path)
+        self.assertTrue(cfg.known_projects_file)
+
+    def test_invalid_timeout_fails_closed_with_config_error(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            override_path = Path(f.name)
+            f.write("agent_exec:\n  timeout_seconds: nope\n")
+
+        try:
+            with self.assertRaises(AtomizerConfigError):
+                load_config(override_path=override_path)
+        finally:
+            override_path.unlink()
+
+    def test_float_timeout_fails_closed_with_config_error(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            override_path = Path(f.name)
+            f.write("agent_exec:\n  timeout_seconds: 1.5\n")
+
+        try:
+            with self.assertRaises(AtomizerConfigError):
+                load_config(override_path=override_path)
+        finally:
+            override_path.unlink()
+
+    def test_resolve_command_argv_expands_repo_relative_script(self):
+        resolved = resolve_command_argv(("scripts/claude-gemma4",))
+        self.assertTrue(Path(resolved[0]).is_absolute())
+        self.assertTrue(resolved[0].endswith("/scripts/claude-gemma4"))
 
 
 if __name__ == '__main__':

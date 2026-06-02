@@ -9,17 +9,15 @@ from .splitter import Fragment
 
 
 class Promoter(ABC):
-    """Maps one fragment to one or more knowledge slices.
-
-    The MVP IdentityPromoter is 1:1. A future LLM promoter (T3.2) replaces only
-    this seam to perform semantic split/merge, relation inference, and tagging.
-    """
+    """Maps one session's fragments to knowledge slices."""
 
     @abstractmethod
-    def promote(self, fragment: Fragment, config: AtomizerConfig) -> list[Slice]:
+    def promote(self, fragments: list[Fragment], config: AtomizerConfig) -> list[Slice]:
         ...
 
 
 class IdentityPromoter(Promoter):
-    def promote(self, fragment: Fragment, config: AtomizerConfig) -> list[Slice]:
-        return [slice_frontmatter.build(fragment, config)]
+    def promote(self, fragments: list[Fragment], config: AtomizerConfig) -> list[Slice]:
+        if isinstance(fragments, Fragment):
+            fragments = [fragments]
+        return [slice_frontmatter.build(fragment, config) for fragment in fragments]

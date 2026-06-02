@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import Any
 
 
-VALID_EDGE_TYPES = {"fragment_of", "promoted_to", "distilled_from", "supersedes"}
+VALID_EDGE_TYPES = {
+    "fragment_of",
+    "promoted_to",
+    "distilled_from",
+    "supersedes",
+    "relates_to",
+    "mentions",
+}
 
 
 class RelationsLedgerError(Exception):
@@ -70,9 +77,27 @@ def append_edge(
     }
 
     # Write with canonical JSON and exclusive lock
-    with open(ledger_path, "a") as f:
+    with open(ledger_path, "a+") as f:
         fcntl.flock(f.fileno(), fcntl.LOCK_EX)
         try:
+            f.seek(0)
+            for line_num, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    existing = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise RelationsLedgerError(
+                        f"malformed JSON at line {line_num}: {exc}"
+                    ) from exc
+                if (
+                    existing.get("type"),
+                    existing.get("from"),
+                    existing.get("to"),
+                ) == (type, frm, to):
+                    return
+            f.seek(0, os.SEEK_END)
             line = json.dumps(event, sort_keys=True, separators=(",", ":"))
             f.write(line + "\n")
             f.flush()
