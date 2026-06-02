@@ -72,7 +72,7 @@ triggers:
   - tag 應偏向檢索鍵，而不是句子或過長描述。
 - **Relation guidance**
   - `relates_to` 只能指向同一批輸出的另一個 slice，且 `target_title` 必須精確等於對方 `title`。
-  - `mentions` 使用 `{ \"type\": \"mentions\", \"entity\": \"NAME\" }`；entity 用穩定名稱，不加多餘敘述。
+  - `mentions` 使用 `{ "type": "mentions", "entity": "NAME" }`；entity 用穩定名稱，不加多餘敘述。
 
 ### 6. VALIDATE
 - 檢查是否真的做到 one-concept-per-slice。

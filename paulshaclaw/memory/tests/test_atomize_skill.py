@@ -84,7 +84,7 @@ class SkillDocTests(unittest.TestCase):
         self.assertIn("`tags` 先放全域 tag，再放概念 tag。", phase)
         self.assertIn("tag 應偏向檢索鍵，而不是句子或過長描述。", phase)
         self.assertIn("`relates_to` 只能指向同一批輸出的另一個 slice，且 `target_title` 必須精確等於對方 `title`。", phase)
-        self.assertIn("`mentions` 使用 `{ \\\"type\\\": \\\"mentions\\\", \\\"entity\\\": \\\"NAME\\\" }`；entity 用穩定名稱，不加多餘敘述。", phase)
+        self.assertIn("`mentions` 使用 `{ \"type\": \"mentions\", \"entity\": \"NAME\" }`；entity 用穩定名稱，不加多餘敘述。", phase)
 
     def test_skill_output_contract_locks_fields_unknown_fallback_and_relation_variants(self):
         _, body = self._read_skill()
