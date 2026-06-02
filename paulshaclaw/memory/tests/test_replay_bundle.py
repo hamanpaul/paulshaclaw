@@ -184,6 +184,72 @@ class ReplayBundleTests(unittest.TestCase):
             manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
             self.assertTrue(any("empty" in w for w in manifest.get("warnings", [])))
 
+    def test_cli_degrades_on_corrupt_lifecycle_ledger_in_selection(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            _slice(root, "sl-1")
+            out = root / "bundle-out"
+
+            lifecycle_path = root / "runtime" / "ledger" / "lifecycle.jsonl"
+            lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
+            lifecycle_path.write_text("{not-json}\n", encoding="utf-8")
+
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project="p",
+                tag=None,
+                entity=None,
+                include_decayed=False,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            stdout = io.StringIO()
+            with (
+                contextlib.redirect_stderr(stderr),
+                contextlib.redirect_stdout(stdout),
+            ):
+                code = cli.run(args)
+
+            self.assertEqual(code, 0)
+            err = stderr.getvalue().lower()
+            self.assertIn("active filtering", err)
+            self.assertIn(str(out), stdout.getvalue())
+
+    def test_cli_surfaces_manifest_warnings_to_stderr(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            _slice(root, "sl-1")
+            out = root / "bundle-out"
+
+            lifecycle_path = root / "runtime" / "ledger" / "lifecycle.jsonl"
+            lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
+            lifecycle_path.write_text("{not-json}\n", encoding="utf-8")
+
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project="p",
+                tag=None,
+                entity=None,
+                include_decayed=True,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            stdout = io.StringIO()
+            with (
+                contextlib.redirect_stderr(stderr),
+                contextlib.redirect_stdout(stdout),
+            ):
+                code = cli.run(args)
+
+            self.assertEqual(code, 0)
+            err = stderr.getvalue().lower()
+            self.assertIn("lifecycle ledger unreadable", err)
+            self.assertIn(str(out), stdout.getvalue())
+
     def test_cli_out_path_is_file_returns_clean_error(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)
