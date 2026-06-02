@@ -6,6 +6,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+from types import SimpleNamespace
 
 from paulshaclaw.memory import cli
 from paulshaclaw.memory.ledger import dream
@@ -39,7 +41,13 @@ class DreamCliTests(unittest.TestCase):
             root = Path(tmp)
             _seed(root)
             buf = io.StringIO()
-            with redirect_stdout(buf):
+            with patch(
+                "paulshaclaw.memory.dream.cli.atomizer_config.load_config",
+                return_value=(SimpleNamespace(default_promoter="identity"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ), patch(
+                "paulshaclaw.memory.dream.cli.janitor_config.load_config",
+                return_value=(SimpleNamespace(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ), redirect_stdout(buf):
                 rc = cli.main(
                     [
                         "memory",
@@ -65,7 +73,16 @@ class DreamCliTests(unittest.TestCase):
             root = Path(tmp)
             _seed(root)
             buf = io.StringIO()
-            with redirect_stdout(buf):
+            with patch(
+                "paulshaclaw.memory.dream.cli.atomizer_config.load_config",
+                return_value=(SimpleNamespace(default_promoter="identity"), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            ), patch(
+                "paulshaclaw.memory.dream.cli.janitor_config.load_config",
+                return_value=(SimpleNamespace(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            ), patch(
+                "paulshaclaw.memory.dream.cli.idle.is_idle",
+                return_value=False,
+            ), redirect_stdout(buf):
                 rc = cli.main(
                     [
                         "memory",
