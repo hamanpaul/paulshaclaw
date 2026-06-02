@@ -36,7 +36,7 @@ def _run_pass(
             summary = value
         warnings = result.get("warnings")
 
-    passes[name] = {"summary": summary}
+    passes[name] = summary
 
     clean = not warnings and not summary.get("skipped")
     return bool(clean)

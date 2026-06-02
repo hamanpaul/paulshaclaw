@@ -36,7 +36,12 @@ class TestDreamOrchestrator(unittest.TestCase):
             )
 
             self.assertEqual(calls, ["a", "j"])
-            self.assertEqual(dream.last_run(root)["status"], "ok")
+            record = dream.last_run(root)
+            self.assertIsNotNone(record)
+            self.assertEqual(record["run_id"], "dream-2026-06-02T00:00:00Z")
+            self.assertEqual(record["passes"]["atomize"], {"skipped": 0})
+            self.assertEqual(record["passes"]["janitor"], {"skipped": 0})
+            self.assertEqual(record["status"], "ok")
 
     def test_janitor_runs_even_if_atomize_raises(self):
         calls: list[str] = []
