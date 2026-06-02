@@ -53,6 +53,13 @@ class DreamIdleTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             idle.is_idle(probe=lambda: 0.5)
 
+    def test_probe_list_raises_typeerror(self):
+        """List probe results should be rejected; only tuples allowed."""
+        from paulshaclaw.memory.dream import idle
+
+        with self.assertRaises(TypeError):
+            idle.is_idle(probe=lambda: [0.2, 0.3, 0.4])
+
 
 if __name__ == "__main__":
     unittest.main()
