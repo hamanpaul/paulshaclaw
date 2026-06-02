@@ -98,6 +98,38 @@ class ReplayBundleTests(unittest.TestCase):
 
             self.assertFalse(out.exists())
 
+    def test_build_rejects_slice_id_with_path_separators_or_traversal(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s = _slice(root, "../../outside", filename="unsafe.md")
+            out = root / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+            self.assertFalse(out.exists())
+
+    def test_build_rejects_knowledge_markdown_missing_distilled_from(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s = root / "knowledge" / "p" / "missing-distilled-from.md"
+            s.parent.mkdir(parents=True, exist_ok=True)
+            s.write_text(
+                "---\n"
+                "slice_id: sl-missing\n"
+                "project: p\n"
+                "memory_layer: knowledge\n"
+                "---\n"
+                "NOT REALLY DISTILLED\n",
+                encoding="utf-8",
+            )
+            out = root / "bundle-out"
+
+            with self.assertRaises(bundle.BundleError):
+                bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+            self.assertFalse(out.exists())
+
     def test_build_writes_manifest_slices_ledger_and_excludes_raw(self):
         with _tmp_dir() as tmp:
             root = Path(tmp)

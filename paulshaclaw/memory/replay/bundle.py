@@ -85,7 +85,7 @@ def _frontmatter_yaml_or_raise(text: str, *, src: Path) -> dict[str, Any]:
     return data
 
 
-def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, str | None]:
+def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, str]:
     try:
         src_resolved = src.resolve(strict=True)
     except FileNotFoundError as exc:
@@ -112,11 +112,13 @@ def _validated_slice_info(knowledge_root: Path, src: Path) -> tuple[str, Path, s
     sid_str = str(sid).strip() if sid is not None else ""
     if not sid_str:
         raise BundleError(f"slice_id missing in frontmatter: {src}")
+    if Path(sid_str).name != sid_str or "\\" in sid_str:
+        raise BundleError(f"slice_id must be a safe single path component: {src}")
 
     session = fm.get("distilled_from")
-    session_str = str(session).strip() if session is not None else None
-    if session_str == "":
-        session_str = None
+    session_str = str(session).strip() if session is not None else ""
+    if not session_str:
+        raise BundleError(f"distilled_from missing in frontmatter: {src}")
 
     return sid_str, src_resolved, session_str
 
@@ -135,7 +137,7 @@ def build(
 ) -> Path:
     knowledge_root = (memory_root / "knowledge").resolve(strict=False)
 
-    slice_infos: list[tuple[str, Path, str | None]] = []
+    slice_infos: list[tuple[str, Path, str]] = []
     seen: dict[str, Path] = {}
     sessions: set[str] = set()
 
@@ -147,8 +149,7 @@ def build(
             )
         seen[sid] = src_resolved
         slice_infos.append((sid, src_resolved, session))
-        if session:
-            sessions.add(session)
+        sessions.add(session)
 
     warnings: list[str] = []
     if not slice_paths:
