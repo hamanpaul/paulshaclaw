@@ -82,6 +82,16 @@ def _build_parser() -> argparse.ArgumentParser:
     dream_status.add_argument("--memory-root", required=True)
     dream_status.set_defaults(func=_dream)
 
+    bundle_p = memory_subparsers.add_parser("bundle")
+    bundle_p.add_argument("--memory-root", required=True)
+    bundle_p.add_argument("--project", default=None)
+    bundle_p.add_argument("--tag", action="append", default=None)
+    bundle_p.add_argument("--entity", default=None)
+    bundle_p.add_argument("--include-decayed", action="store_true")
+    bundle_p.add_argument("--out", required=True)
+    bundle_p.add_argument("--now", default=None)
+    bundle_p.set_defaults(func=_bundle)
+
     return parser
 
 
@@ -149,6 +159,16 @@ def _dream(args: argparse.Namespace) -> int:
     if getattr(args, "now", None) is None:
         args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return dream_run(args)
+
+
+def _bundle(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from .replay.cli import run as bundle_run
+
+    if args.now is None:
+        args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return bundle_run(args)
 
 
 def _load_policy(override_path: str | None):
