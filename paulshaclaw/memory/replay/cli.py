@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from ..ledger.relations import RelationsLedgerError
+
 from . import bundle, selector
 
 
@@ -36,6 +38,8 @@ def run(args: argparse.Namespace) -> int:
                 entity=args.entity,
                 include_decayed=include_decayed,
             )
+        except RelationsLedgerError as exc:
+            raise selector.SelectorError(f"relations ledger unreadable: {exc}") from exc
         except ValueError:
             if include_decayed:
                 raise

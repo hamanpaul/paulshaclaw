@@ -19,16 +19,28 @@ def _tmp_dir():
     return TemporaryDirectory(dir=_REPO_ROOT)
 
 
-def _slice(root: Path, slice_id: str, *, filename: str | None = None) -> Path:
+def _slice(
+    root: Path,
+    slice_id: str,
+    *,
+    filename: str | None = None,
+    quote_slice_id: bool = False,
+    quote_distilled_from: bool = False,
+    distilled_from: str = "claude:s1",
+) -> Path:
     name = filename or f"{slice_id}.md"
     path = root / "knowledge" / "p" / name
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    sid = f"\"{slice_id}\"" if quote_slice_id else slice_id
+    session = f"\"{distilled_from}\"" if quote_distilled_from else distilled_from
+
     path.write_text(
         "---\n"
-        f"slice_id: {slice_id}\n"
+        f"slice_id: {sid}\n"
         "project: p\n"
         "memory_layer: knowledge\n"
-        "distilled_from: claude:s1\n"
+        f"distilled_from: {session}\n"
         "---\n"
         f"DISTILLED {slice_id}\n",
         encoding="utf-8",
@@ -153,6 +165,66 @@ class ReplayBundleTests(unittest.TestCase):
 
             with self.assertRaises(bundle.BundleError):
                 bundle.build(root, [s1, s2], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+    def test_build_parses_quoted_frontmatter_values_for_slice_id_and_distilled_from(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            s = _slice(root, "sl-q", quote_slice_id=True, quote_distilled_from=True)
+            out = root / "bundle-out"
+
+            lifecycle_path = root / "runtime" / "ledger" / "lifecycle.jsonl"
+            lifecycle_path.parent.mkdir(parents=True, exist_ok=True)
+            lifecycle_path.write_text(
+                json.dumps({"record_id": "sl-q"}) + "\n",
+                encoding="utf-8",
+            )
+
+            processing_path = root / "runtime" / "ledger" / "processing.jsonl"
+            processing_path.parent.mkdir(parents=True, exist_ok=True)
+            processing_path.write_text(
+                json.dumps({"session_key": "claude:s1"}) + "\n",
+                encoding="utf-8",
+            )
+
+            bundle.build(root, [s], out, selection={"project": "p"}, now="2026-06-02T06:00:00Z")
+
+            self.assertTrue((out / "slices" / "sl-q.md").exists())
+            manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["slice_ids"], ["sl-q"])
+
+            ledger_lines = (out / "ledger.jsonl").read_text(encoding="utf-8").splitlines()
+            events = [json.loads(line) for line in ledger_lines if line.strip()]
+            self.assertTrue(any(e.get("ledger") == "lifecycle" and e.get("record_id") == "sl-q" for e in events))
+            self.assertTrue(any(e.get("ledger") == "processing" and e.get("session_key") == "claude:s1" for e in events))
+
+    def test_cli_entity_selection_with_malformed_relations_ledger_returns_clean_error(self):
+        with _tmp_dir() as tmp:
+            root = Path(tmp)
+            _slice(root, "sl-1")
+            out = root / "bundle-out"
+
+            relations_path = root / "runtime" / "ledger" / "relations.jsonl"
+            relations_path.parent.mkdir(parents=True, exist_ok=True)
+            relations_path.write_text("{not-json}\n", encoding="utf-8")
+
+            args = argparse.Namespace(
+                memory_root=str(root),
+                project=None,
+                tag=None,
+                entity="e1",
+                include_decayed=False,
+                out=str(out),
+                now="2026-06-02T06:00:00Z",
+            )
+
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                code = cli.run(args)
+
+            self.assertNotEqual(code, 0)
+            msg = stderr.getvalue()
+            self.assertIn("selector error", msg)
+            self.assertNotIn("Traceback", msg)
 
     def test_cli_warns_but_succeeds_on_empty_selection(self):
         with _tmp_dir() as tmp:

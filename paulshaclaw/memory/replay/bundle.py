@@ -23,6 +23,25 @@ def _frontmatter_lines(text: str) -> list[str]:
     return lines[1:end]
 
 
+def _frontmatter_dict(text: str) -> dict[str, Any]:
+    lines = _frontmatter_lines(text)
+    if not lines:
+        return {}
+    block = "\n".join(lines)
+    if not block.strip():
+        return {}
+
+    try:
+        import yaml  # type: ignore
+
+        data = yaml.safe_load(block)
+        if isinstance(data, dict):
+            return data
+        return {}
+    except Exception:
+        return {}
+
+
 def _frontmatter_value(lines: Iterable[str], key: str) -> str | None:
     prefix = f"{key}:"
     for line in lines:
@@ -33,14 +52,28 @@ def _frontmatter_value(lines: Iterable[str], key: str) -> str | None:
 
 def _slice_id_of(path: Path) -> str:
     text = path.read_text(encoding="utf-8")
-    fm = _frontmatter_lines(text)
-    return _frontmatter_value(fm, "slice_id") or path.stem
+
+    fm = _frontmatter_dict(text)
+    sid = fm.get("slice_id")
+    if sid:
+        return str(sid)
+
+    # Fallback for environments without YAML parsing.
+    lines = _frontmatter_lines(text)
+    return _frontmatter_value(lines, "slice_id") or path.stem
 
 
 def _distilled_from(path: Path) -> str | None:
     text = path.read_text(encoding="utf-8")
-    fm = _frontmatter_lines(text)
-    return _frontmatter_value(fm, "distilled_from")
+
+    fm = _frontmatter_dict(text)
+    session = fm.get("distilled_from")
+    if session:
+        return str(session)
+
+    # Fallback for environments without YAML parsing.
+    lines = _frontmatter_lines(text)
+    return _frontmatter_value(lines, "distilled_from")
 
 
 def _canonical_jsonl_line(event: dict[str, Any]) -> str:
