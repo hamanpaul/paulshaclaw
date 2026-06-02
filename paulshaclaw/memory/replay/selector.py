@@ -16,23 +16,29 @@ class SelectorError(Exception):
 
 
 def _frontmatter(text: str) -> Dict[str, object]:
-    """Parse YAML frontmatter delimited by '---' into a dict.
+    """Parse YAML frontmatter delimited by '---' fence lines into a dict.
 
-    Use yaml.safe_load when PyYAML is available. If PyYAML is unavailable, return {}.
+    This matches the repository's record_source behavior: require the first
+    line to be '---' and the closing '---' to appear on its own line. Only the
+    block between those lines is fed to yaml.safe_load(). If parsing isn't
+    possible or PyYAML is unavailable, return an empty dict.
     """
     text = text or ""
-    if not text.startswith("---"):
+    lines = text.splitlines()
+    if not lines or lines[0] != "---":
         return {}
-    parts = text.split("---", 2)
-    if len(parts) < 3:
+    try:
+        end = lines.index("---", 1)
+    except ValueError:
         return {}
-    fm_text = parts[1].strip()
-    # Prefer real YAML parsing when available
+    block = "\n".join(lines[1:end])
+    if not block.strip():
+        return {}
     try:
         import yaml  # type: ignore
 
         try:
-            data = yaml.safe_load(fm_text)
+            data = yaml.safe_load(block)
             if isinstance(data, dict):
                 return data
             return {}
@@ -81,6 +87,9 @@ def select(
     slice_map: Dict[str, Path] = {}
     fm_map: Dict[str, Dict[str, object]] = {}
     for p in sorted(knowledge_root.rglob("*.md")):
+        # Skip symlinked files to match record_source behavior
+        if p.is_symlink():
+            continue
         try:
             text = p.read_text(encoding="utf-8")
         except Exception:

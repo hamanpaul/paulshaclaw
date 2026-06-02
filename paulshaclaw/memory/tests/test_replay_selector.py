@@ -74,6 +74,36 @@ class ReplaySelectorTests(unittest.TestCase):
             with self.assertRaises(selector.SelectorError):
                 selector.select(root)
 
+    def test_symlinked_files_ignored(self):
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            real = self._write_slice(root, "sl-real", project="p")
+            symlink = root / "knowledge" / "p" / "sl-link.md"
+            # create a symlink pointing to the real file
+            symlink.symlink_to(real)
+            got = selector.select(root, project="p")
+            # should only return the real file path, not the symlink
+            self.assertEqual([x.name for x in got], [real.name])
+
+    def test_frontmatter_requires_fence_lines(self):
+        with TemporaryDirectory() as td:
+            root = Path(td)
+            k = root / "knowledge" / "p"
+            k.mkdir(parents=True, exist_ok=True)
+            p = k / "sl-fence.md"
+            content = "\n".join([
+                "---",
+                "memory_layer: knowledge",
+                "slice_id: sl-fence",
+                "project: p",
+                "note: 'this --- is not a fence'",
+                "---",
+                "body",
+            ])
+            p.write_text(content, encoding="utf-8")
+            got = selector.select(root, project="p")
+            self.assertEqual([x.name for x in got], ["sl-fence.md"])
+
 
 if __name__ == "__main__":
     unittest.main()
