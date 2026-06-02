@@ -41,12 +41,12 @@ class SliceProposal:
 
 def _iter_json_arrays(raw: str):
     for fenced in _FENCED_BLOCK_RE.finditer(raw):
-        yield from _iter_json_array_candidates(fenced.group(1))
+        yield from _iter_json_array_candidates(fenced.group(1), offset=fenced.start(1))
 
-    yield from _iter_json_array_candidates(raw)
+    yield from _iter_json_array_candidates(raw, offset=0)
 
 
-def _iter_json_array_candidates(raw: str):
+def _iter_json_array_candidates(raw: str, offset: int):
     for start, character in enumerate(raw):
         if character != "[":
             continue
@@ -55,7 +55,7 @@ def _iter_json_array_candidates(raw: str):
         except json.JSONDecodeError:
             continue
         if isinstance(candidate, list) and _is_standalone_json_value(raw, start, end):
-            yield candidate
+            yield candidate, offset + start, offset + end
 
 
 def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:
@@ -209,11 +209,24 @@ def _parse_proposals(data: Any, known_projects: list[str]) -> list[SliceProposal
 
 def parse(raw: str, known_projects: list[str]) -> list[SliceProposal]:
     last_error: LlmOutputError | None = None
-    for data in _iter_json_arrays(raw):
+    valid_proposals: list[list[SliceProposal]] = []
+    seen_spans: set[tuple[int, int]] = set()
+
+    for data, start, end in _iter_json_arrays(raw):
+        span = (start, end)
+        if span in seen_spans:
+            continue
+        seen_spans.add(span)
         try:
-            return _parse_proposals(data, known_projects)
+            valid_proposals.append(_parse_proposals(data, known_projects))
         except LlmOutputError as exc:
             last_error = exc
+
+    if len(valid_proposals) > 1:
+        raise LlmOutputError("multiple valid JSON arrays found in agent output")
+
+    if valid_proposals:
+        return valid_proposals[0]
 
     if last_error is not None:
         raise last_error

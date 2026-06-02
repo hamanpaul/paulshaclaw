@@ -222,6 +222,16 @@ class LlmOutputTests(unittest.TestCase):
         self.assertEqual(len(proposals), 1)
         self.assertEqual(proposals[0].title, "a")
 
+    def test_multiple_valid_proposal_arrays_raise(self):
+        raw = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],"body":"b",'
+            '"source_fragment_indices":[0],"relations":[]}]\n'
+            '[{"title":"c","artifact_kind":"plan","project":"prplos-core","tags":[],"body":"d",'
+            '"source_fragment_indices":[1],"relations":[]}]'
+        )
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "multiple valid JSON arrays found"):
+            llm_output.parse(raw, PROJECTS)
+
 
 if __name__ == "__main__":
     unittest.main()
