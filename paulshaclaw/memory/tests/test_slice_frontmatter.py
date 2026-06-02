@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import unittest
 
 from paulshaclaw.lifecycle.schema import compute_checksum, parse_artifact_text, validate_frontmatter
 from paulshaclaw.memory.atomizer import slice_frontmatter
 from paulshaclaw.memory.atomizer.config import AtomizerConfig
+from paulshaclaw.memory.atomizer.llm_output import SliceProposal
 from paulshaclaw.memory.atomizer.splitter import Fragment
 
 CFG = AtomizerConfig(
@@ -19,6 +21,26 @@ def _frag(source_artifact="research", index=0, body="alpha"):
                     source_artifact=source_artifact, captured_at="2026-05-31T00:00:00Z",
                     provenance={"repo": "paulshaclaw", "commit": "c", "path": "docs/x.md"},
                     fragment_index=index, body=body)
+
+
+_SESSION_META = {
+    "source_agent": "claude",
+    "source_session": "s1",
+    "captured_at": "2026-06-02T00:00:00Z",
+    "provenance": {"repo": "r", "commit": "c", "path": "p"},
+}
+
+
+def _proposal(body="distilled body"):
+    return SliceProposal(
+        title="alpha",
+        artifact_kind="report",
+        project="prplos-core",
+        tags=("pwhm", "fsm"),
+        body=body,
+        source_fragment_indices=(0, 1),
+        relations=({"type": "mentions", "entity": "MTK"},),
+    )
 
 
 class SliceFrontmatterTests(unittest.TestCase):
@@ -68,6 +90,141 @@ class SliceFrontmatterTests(unittest.TestCase):
         fm = {"phase": "research"}  # missing everything
         errors = slice_frontmatter.validate(fm, "body")
         self.assertTrue(errors)
+
+
+class BuildFromProposalTests(unittest.TestCase):
+    def test_content_derived_slice_id(self):
+        built = slice_frontmatter.build_from_proposal(_proposal("X"), _SESSION_META)
+        expected = "sl-" + hashlib.sha256(
+            ("claude|s1|" + hashlib.sha256(b"X").hexdigest()).encode("utf-8")
+        ).hexdigest()[:16]
+        self.assertEqual(built.slice_id, expected)
+
+    def test_runtime_title_retained_without_storing_frontmatter_field(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        self.assertEqual(built.title, "alpha")
+        self.assertNotIn("title", built.frontmatter)
+
+    def test_union_frontmatter_with_tags(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        self.assertNotIn("title", built.frontmatter)
+        self.assertEqual(built.frontmatter["project"], "prplos-core")
+        self.assertEqual(built.frontmatter["artifact_kind"], "report")
+        self.assertEqual(built.frontmatter["tags"], ["pwhm", "fsm"])
+        self.assertEqual(built.frontmatter["memory_layer"], "knowledge")
+        self.assertEqual(built.frontmatter["source_fragments"], [0, 1])
+        self.assertEqual(built.frontmatter["checksum"], compute_checksum(built.body))
+
+    def test_passes_dual_validation(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        self.assertEqual(slice_frontmatter.validate(built.frontmatter, built.body), [])
+        self.assertTrue(validate_frontmatter(frontmatter=built.frontmatter, body=built.body).ok)
+
+    def test_relations_attached(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        self.assertEqual(built.relations[0]["entity"], "MTK")
+
+    def test_relations_tuple_is_reused_without_copy(self):
+        proposal = _proposal()
+        built = slice_frontmatter.build_from_proposal(proposal, _SESSION_META)
+        self.assertIs(built.relations, proposal.relations)
+
+    def test_proposal_phase_mapping_matches_plan(self):
+        cases = {
+            "research": "research",
+            "spec": "define",
+            "plan": "plan",
+            "report": "review",
+            "review": "review",
+            "task": "review",
+            "roadmap": "review",
+        }
+        for artifact_kind, expected_phase in cases.items():
+            with self.subTest(artifact_kind=artifact_kind):
+                built = slice_frontmatter.build_from_proposal(
+                    SliceProposal(
+                        title="alpha",
+                        artifact_kind=artifact_kind,
+                        project="prplos-core",
+                        tags=("pwhm",),
+                        body="distilled body",
+                        source_fragment_indices=(0,),
+                        relations=(),
+                    ),
+                    _SESSION_META,
+                )
+                self.assertEqual(built.frontmatter["phase"], expected_phase)
+
+    def test_render_serializes_list_fields_as_json_arrays(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        rendered = slice_frontmatter.render(built)
+        self.assertIn('tags: ["pwhm", "fsm"]', rendered)
+        self.assertIn("source_fragments: [0, 1]", rendered)
+        self.assertNotIn("title:", rendered)
+
+    def test_legacy_build_leaves_runtime_title_unset(self):
+        built = slice_frontmatter.build(_frag(), CFG)
+        self.assertIsNone(built.title)
+
+    def test_rendered_proposal_round_trip_preserves_list_fields(self):
+        built = slice_frontmatter.build_from_proposal(_proposal(), _SESSION_META)
+        parsed = parse_artifact_text(slice_frontmatter.render(built))
+        self.assertEqual(parsed.frontmatter["tags"], ["pwhm", "fsm"])
+        self.assertEqual(parsed.frontmatter["source_fragments"], [0, 1])
+
+    def test_rendered_proposal_round_trip_preserves_tag_punctuation(self):
+        proposal = SliceProposal(
+            title="alpha",
+            artifact_kind="report",
+            project="prplos-core",
+            tags=('router, wifi', 'quote"tag', "bracket[tag]"),
+            body="distilled body",
+            source_fragment_indices=(0, 1),
+            relations=(),
+        )
+        built = slice_frontmatter.build_from_proposal(proposal, _SESSION_META)
+        parsed = parse_artifact_text(slice_frontmatter.render(built))
+        self.assertEqual(parsed.frontmatter["tags"], ['router, wifi', 'quote"tag', "bracket[tag]"])
+
+    def test_parse_artifact_text_does_not_coerce_invalid_source_fragments(self):
+        text = (
+            "---\n"
+            "phase: review\n"
+            "project: paulshaclaw\n"
+            "slice_id: sl-1\n"
+            "artifact_kind: report\n"
+            "version: 1\n"
+            "created_at: 2026-06-02T00:00:00Z\n"
+            "created_by: claude\n"
+            "source_session: s1\n"
+            "gate_required: false\n"
+            "checksum: deadbeef\n"
+            "source_fragments: [2.9, true]\n"
+            "---\n"
+            "body"
+        )
+        parsed = parse_artifact_text(text)
+        self.assertEqual(parsed.frontmatter["source_fragments"], "[2.9, true]")
+
+    def test_parse_artifact_text_preserves_legacy_single_quoted_tags(self):
+        text = (
+            "---\n"
+            "phase: review\n"
+            "project: paulshaclaw\n"
+            "slice_id: sl-1\n"
+            "artifact_kind: report\n"
+            "version: 1\n"
+            "created_at: 2026-06-02T00:00:00Z\n"
+            "created_by: claude\n"
+            "source_session: s1\n"
+            "gate_required: false\n"
+            "checksum: deadbeef\n"
+            "tags: ['pwhm', 'fsm']\n"
+            "---\n"
+            "body"
+        )
+        parsed = parse_artifact_text(text)
+        self.assertEqual(parsed.frontmatter["tags"], ["pwhm", "fsm"])
 
 
 if __name__ == "__main__":

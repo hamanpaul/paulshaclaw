@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import unittest
+from argparse import Namespace
 from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from paulshaclaw.memory import cli
+from paulshaclaw.memory.atomizer import config as atomizer_config
+from paulshaclaw.memory.atomizer import cli as atomizer_cli
 
 _RAW = """---
 memory_layer: inbox
@@ -42,6 +47,82 @@ class AtomizeCliTests(unittest.TestCase):
             self.assertGreaterEqual(payload["summary"]["slices"], 1)
             self.assertTrue(raw.exists())
             self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
+
+
+class AtomizeCliLlmTests(unittest.TestCase):
+    def test_known_projects_missing_file_returns_empty_list(self):
+        self.assertEqual(
+            atomizer_cli._known_projects("/definitely/missing/projects.yaml"),
+            [],
+        )
+
+    def test_known_projects_unreadable_file_returns_empty_list(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "projects.yaml"
+            path.write_text("projects:\n  - paulshaclaw\n", encoding="utf-8")
+
+            with mock.patch("pathlib.Path.read_text", side_effect=OSError("boom")):
+                self.assertEqual(atomizer_cli._known_projects(str(path)), [])
+
+    def test_known_projects_ignores_unsafe_names(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "projects.yaml"
+            path.write_text("projects:\n  - paulshaclaw\n  - ../escaped\n", encoding="utf-8")
+
+            self.assertEqual(atomizer_cli._known_projects(str(path)), ["paulshaclaw"])
+
+    def test_agent_command_override_uses_shared_resolution(self):
+        cfg, _ = atomizer_config.load_config(override_path=None)
+        args = Namespace(promoter="llm", agent_command="scripts/claude-gemma4")
+
+        with TemporaryDirectory() as tmp:
+            with mock.patch.object(atomizer_cli, "AgentExecClient") as agent_exec_client:
+                atomizer_cli._build_promoter(args, cfg, Path(tmp))
+
+        command = agent_exec_client.call_args.args[0]
+        self.assertTrue(Path(command[0]).is_absolute())
+        self.assertTrue(str(command[0]).endswith("scripts/claude-gemma4"))
+
+    def test_promoter_llm_uses_stub_agent(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "inbox" / "research" / "claude" / "2026-06-02" / "s1.md"
+            raw.parent.mkdir(parents=True)
+            raw.write_text(_RAW, encoding="utf-8")
+            projects = root / "projects.yaml"
+            projects.write_text("projects:\n  - paulshaclaw\n", encoding="utf-8")
+            override = root / "atomizer.override.yaml"
+            override.write_text(f'known_projects_file: "{projects}"\n', encoding="utf-8")
+            stub = Path(__file__).resolve().parent / "fixtures" / "atomizer" / "fake-agent.py"
+            buf = io.StringIO()
+
+            with redirect_stdout(buf):
+                rc = cli.main(
+                    [
+                        "memory",
+                        "atomize",
+                        "--memory-root",
+                        str(root),
+                        "--now",
+                        "2026-06-02T03:00:00Z",
+                        "--promoter",
+                        "llm",
+                        "--override",
+                        str(override),
+                        "--agent-command",
+                        f"{sys.executable} {stub}",
+                    ]
+                )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(list((root / "knowledge").rglob("*.md")))
+
+    def test_cache_dir_is_shared_atomize_root(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache_dir = atomizer_cli._cache_dir(root)
+
+            self.assertEqual(cache_dir, root / "runtime" / "cache" / "atomize")
 
 
 if __name__ == "__main__":

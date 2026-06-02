@@ -13,6 +13,7 @@ from typing import Protocol
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_dispatcher import CommandDispatcher
 from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry
+from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.core.tmate import TmateManager
 
 
@@ -99,9 +100,29 @@ class PaulShiaBroDaemon:
         basenames = [Path(token).name for token in argv]
         if "claude-gemma4-proxy" in basenames:
             return False
-        if "claude-gemma4" in basenames:
+
+        use_legacy_wrapper_detection = True
+        try:
+            configured_launch = self._agent_launch_argv()
+        except ValueError:
+            configured_launch = []
+        else:
+            use_legacy_wrapper_detection = (
+                bool(configured_launch)
+                and Path(configured_launch[0]).name == "claude-gemma4"
+            )
+        if configured_launch:
+            if argv[: len(configured_launch)] == configured_launch:
+                return True
+            if argv[: len(configured_launch) + 1] == [*configured_launch, "-f"]:
+                return True
+        if use_legacy_wrapper_detection and "claude-gemma4" in basenames:
             return True
-        return basenames[:1] in (["claude"], ["claude.exe"]) and ".claude-gemma4/settings.json" in command
+        return (
+            use_legacy_wrapper_detection
+            and basenames[:1] in (["claude"], ["claude.exe"])
+            and ".claude-gemma4/settings.json" in command
+        )
 
     def _command_for_pid(self, pid: int) -> str | None:
         try:
@@ -184,8 +205,12 @@ class PaulShiaBroDaemon:
 
         return None
 
-    def _resolve_agent_script_path(self) -> Path:
-        return Path(__file__).resolve().parents[2] / "scripts" / "claude-gemma4"
+    def _agent_launch_argv(self) -> list[str]:
+        try:
+            config, _config_hash = atomizer_config.load_config()
+        except atomizer_config.AtomizerConfigError as exc:
+            raise ValueError(f"agent command unavailable: {exc}") from exc
+        return list(atomizer_config.resolve_command_argv(config.agent_exec_command))
 
     def _agent_status_payload(self, *, pane_id: str | None = None, pid: int | None = None) -> dict[str, object]:
         payload: dict[str, object] = {
@@ -298,7 +323,7 @@ class PaulShiaBroDaemon:
             if not cockpit_pane_id:
                 raise ValueError("cockpit pane unavailable")
 
-            launch_argv = [str(self._resolve_agent_script_path())]
+            launch_argv = self._agent_launch_argv()
             if action == "startf":
                 launch_argv.append("-f")
 

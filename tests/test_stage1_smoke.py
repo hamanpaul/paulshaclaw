@@ -1,15 +1,18 @@
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import load_config
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
+from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.tui.view import render_pane_task_view
 
 
@@ -90,6 +93,10 @@ def write_config_file() -> Path:
 
 
 class Stage1SmokeTest(unittest.TestCase):
+    def _default_agent_launch_command(self, *extra: str) -> str:
+        cfg, _ = atomizer_config.load_config(override_path=None)
+        return shlex.join([*atomizer_config.resolve_command_argv(cfg.agent_exec_command), *extra])
+
     def make_config_path(self) -> Path:
         config_path = write_config_file()
         self.addCleanup(config_path.unlink, missing_ok=True)
@@ -382,7 +389,7 @@ class Stage1SmokeTest(unittest.TestCase):
         def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             expected_prefix = ["tmux", "split-window", "-h", "-t", "%1", "-P", "-F", "#{pane_id}"]
             self.assertEqual(command[:8], expected_prefix)
-            self.assertTrue(command[8].endswith("claude-gemma4"))
+            self.assertEqual(command[8], self._default_agent_launch_command())
             return subprocess.CompletedProcess(command, 0, stdout="%9\n", stderr="")
 
         with (
@@ -404,7 +411,7 @@ class Stage1SmokeTest(unittest.TestCase):
 
         def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             self.assertEqual(command[:8], ["tmux", "split-window", "-h", "-t", "%1", "-P", "-F", "#{pane_id}"])
-            self.assertTrue(command[8].endswith("claude-gemma4 -f"))
+            self.assertEqual(command[8], self._default_agent_launch_command("-f"))
             return subprocess.CompletedProcess(command, 0, stdout="%10\n", stderr="")
 
         with (
@@ -605,6 +612,71 @@ class Stage1SmokeTest(unittest.TestCase):
             result = daemon._detect_agent_process()
 
         self.assertEqual(result, ("%1", 101))
+
+    def test_agent_start_sources_launch_command_from_atomizer_config(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._cockpit_pane_id = "%1"
+        shared_cfg, _ = atomizer_config.load_config(override_path=None)
+        custom_cfg = replace(shared_cfg, agent_exec_command=("python3", "-m", "demo.agent"))
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            self.assertEqual(command[8], "python3 -m demo.agent")
+            return subprocess.CompletedProcess(command, 0, stdout="%9\n", stderr="")
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=None),
+            mock.patch("paulshaclaw.core.daemon.atomizer_config.load_config", return_value=(custom_cfg, "cfg-hash")),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
+        ):
+            result = daemon.handle_command("/agent start")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["pane_id"], "%9")
+
+    def test_detect_agent_process_uses_shared_command_override(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        shared_cfg, _ = atomizer_config.load_config(override_path=None)
+        custom_cfg = replace(shared_cfg, agent_exec_command=("python3", "-m", "demo.agent"))
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
+                return subprocess.CompletedProcess(command, 0, stdout="%1 101\n", stderr="")
+            if command == ["ps", "-p", "101", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="python3 -m demo.agent\n", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with (
+            mock.patch("paulshaclaw.core.daemon.atomizer_config.load_config", return_value=(custom_cfg, "cfg-hash")),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
+        ):
+            result = daemon._detect_agent_process()
+
+        self.assertEqual(result, ("%1", 101))
+
+    def test_detect_agent_process_does_not_match_legacy_agent_when_command_is_overridden(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        shared_cfg, _ = atomizer_config.load_config(override_path=None)
+        custom_cfg = replace(shared_cfg, agent_exec_command=("python3", "-m", "demo.agent"))
+
+        def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
+                return subprocess.CompletedProcess(command, 0, stdout="%1 101\n", stderr="")
+            if command == ["ps", "-p", "101", "-o", "args="]:
+                return subprocess.CompletedProcess(command, 0, stdout="/repo/scripts/claude-gemma4 --project stage1\n", stderr="")
+            if command == ["pgrep", "-P", "101", "-a"]:
+                raise subprocess.CalledProcessError(1, command, output="", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with (
+            mock.patch("paulshaclaw.core.daemon.atomizer_config.load_config", return_value=(custom_cfg, "cfg-hash")),
+            mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
+        ):
+            result = daemon._detect_agent_process()
+
+        self.assertIsNone(result)
 
     def test_cli_entry_outputs_json_status(self) -> None:
         config_path = self.make_config_path()

@@ -62,6 +62,8 @@ def _build_parser() -> argparse.ArgumentParser:
     atomize.add_argument("--memory-root", required=True)
     atomize.add_argument("--now", default=None)
     atomize.add_argument("--override", default=None)
+    atomize.add_argument("--promoter", choices=["identity", "llm"], default=None)
+    atomize.add_argument("--agent-command", default=None)
     atomize.add_argument("--dry-run", action="store_true")
     atomize.set_defaults(func=_atomize)
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from paulshaclaw.lifecycle import schema as stage3
 from .config import AtomizerConfig
 from .splitter import Fragment
+
+if TYPE_CHECKING:
+    from .llm_output import SliceProposal
 
 _T4_FIELDS = ("memory_layer", "source_agent", "captured_at", "provenance", "supersedes")
 # Stage 3 ordered fields first, then T4 + provenance handled specially in render().
@@ -13,7 +18,7 @@ _SCALAR_ORDER = (
     "phase", "project", "slice_id", "artifact_kind", "version", "created_at",
     "created_by", "source_session", "gate_required", "checksum",
     "memory_layer", "source_agent", "captured_at", "supersedes",
-    "distilled_from", "fragment_ref",
+    "distilled_from", "fragment_ref", "tags", "source_fragments",
 )
 
 
@@ -22,6 +27,8 @@ class Slice:
     slice_id: str
     frontmatter: dict[str, object]
     body: str
+    title: str | None = None
+    relations: tuple[dict[str, object], ...] = ()
 
 
 def _slice_id(fragment: Fragment) -> str:
@@ -61,6 +68,53 @@ def build(fragment: Fragment, config: AtomizerConfig) -> Slice:
     return Slice(slice_id=slice_id, frontmatter=frontmatter, body=body)
 
 
+def _phase_for_artifact_kind(artifact_kind: str) -> str:
+    phase_map = {
+        "research": "research",
+        "spec": "define",
+        "plan": "plan",
+        "report": "review",
+        "review": "review",
+    }
+    return phase_map.get(artifact_kind, "review")
+
+
+def build_from_proposal(proposal: "SliceProposal", session_meta: dict[str, object]) -> Slice:
+    body = proposal.body
+    agent = str(session_meta["source_agent"])
+    session = str(session_meta["source_session"])
+    captured_at = str(session_meta["captured_at"])
+    body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    slice_id = "sl-" + hashlib.sha256(f"{agent}|{session}|{body_hash}".encode("utf-8")).hexdigest()[:16]
+    frontmatter: dict[str, object] = {
+        "phase": _phase_for_artifact_kind(proposal.artifact_kind),
+        "project": proposal.project,
+        "slice_id": slice_id,
+        "artifact_kind": proposal.artifact_kind,
+        "version": "1",
+        "created_at": captured_at,
+        "created_by": agent,
+        "source_session": session,
+        "gate_required": False,
+        "checksum": stage3.compute_checksum(body),
+        "memory_layer": "knowledge",
+        "source_agent": agent,
+        "captured_at": captured_at,
+        "provenance": dict(session_meta.get("provenance") or {}),
+        "supersedes": [],
+        "distilled_from": f"{agent}:{session}",
+        "tags": list(proposal.tags),
+        "source_fragments": list(proposal.source_fragment_indices),
+    }
+    return Slice(
+        slice_id=slice_id,
+        frontmatter=frontmatter,
+        body=body,
+        title=proposal.title,
+        relations=tuple(proposal.relations),
+    )
+
+
 def validate(frontmatter: dict[str, object], body: str) -> list[str]:
     result = stage3.validate_frontmatter(frontmatter=frontmatter, body=body)
     errors = list(result.errors)
@@ -76,7 +130,7 @@ def _scalar(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, list):
-        return "[" + ", ".join(str(v) for v in value) + "]"
+        return json.dumps(value, ensure_ascii=True)
     return str(value)
 
 

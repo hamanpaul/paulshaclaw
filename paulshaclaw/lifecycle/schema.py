@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from hashlib import sha256
+import json
 import re
 
 
@@ -75,7 +76,7 @@ def parse_artifact_text(text: str) -> ArtifactDocument:
         key = key.strip()
         if not key:
             raise ValueError("frontmatter key 不可為空")
-        frontmatter[key] = _parse_scalar(raw_value.strip())
+        frontmatter[key] = _parse_frontmatter_value(key, raw_value.strip())
     return ArtifactDocument(frontmatter=frontmatter, body=body)
 
 
@@ -123,6 +124,58 @@ def _parse_scalar(value: str) -> object:
     if lowered in ("null", "none"):
         return None
     if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+        return value[1:-1]
+    return value
+
+
+def _parse_frontmatter_value(key: str, value: str) -> object:
+    if key == "tags":
+        parsed = _parse_bracket_list(value)
+        if parsed is not None:
+            normalized: list[str] = []
+            for item in parsed:
+                if not isinstance(item, str):
+                    break
+                normalized.append(item)
+            else:
+                return normalized
+    if key == "source_fragments":
+        parsed = _parse_bracket_list(value)
+        if parsed is not None:
+            numbers: list[int] = []
+            for item in parsed:
+                if type(item) is int:
+                    numbers.append(item)
+                    continue
+                if isinstance(item, str):
+                    try:
+                        numbers.append(int(item))
+                    except ValueError:
+                        break
+                    continue
+                break
+            else:
+                return numbers
+    return _parse_scalar(value)
+
+
+def _parse_bracket_list(value: str) -> list[object] | None:
+    if not (value.startswith("[") and value.endswith("]")):
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return parsed
+    inner = value[1:-1].strip()
+    if not inner:
+        return []
+    return [_strip_legacy_quotes(part.strip()) for part in inner.split(",")]
+
+
+def _strip_legacy_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
         return value[1:-1]
     return value
 
