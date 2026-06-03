@@ -11,6 +11,11 @@ The system SHALL route Telegram non-command messages to the claude-gemma4 agent 
 - **WHEN** operator sends a non-command message to a running agent
 - **THEN** the text sent to the agent pane MUST include the Telegram user ID in the format `[bro:<user_id>]` so claude-gemma4 can use `--source-user-id` when replying via bro skill
 
+#### Scenario: Routed message carries an explicit reply directive
+- **WHEN** operator sends a non-command message to a running agent
+- **THEN** the routed text MUST append a single-line directive instructing the agent to reply via the `paulshiabro-telegram-reply` skill with `--source-user-id <user_id>`, so the small claude-gemma4 model actively triggers the reply instead of inferring intent from the tag
+- **AND** the directive MUST stay on one line (no embedded newline), because `tmux send-keys` delivers the text literally before a single submitting `Enter`
+
 ### Requirement: Fallback reply when agent is not running
 The system SHALL reply with a fallback message when an operator sends a non-command message and no claude-gemma4 process is detected.
 

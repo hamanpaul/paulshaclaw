@@ -208,7 +208,15 @@ class PaulShiaBroDaemon:
 
         pane_id, _pid = detected
         self._agent_pane_id = pane_id
-        self._send_to_pane(pane_id, f"[bro:{user_id}] {text}")
+        # Append an explicit reply directive so the small gemma4 model actively
+        # replies via Telegram instead of having to infer intent from the tag.
+        # Keep it on ONE line: _send_to_pane delivers the text literally and then
+        # submits with a single Enter, so an embedded newline would mis-submit.
+        directive = (
+            f"（完成後務必使用 paulshiabro-telegram-reply skill，"
+            f"以 --source-user-id {user_id} 將回覆送回 Telegram）"
+        )
+        self._send_to_pane(pane_id, f"[bro:{user_id}] {text} {directive}")
         return "…"
     def status_snapshot(self) -> dict[str, object]:
         return {
