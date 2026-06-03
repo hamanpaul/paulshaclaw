@@ -174,4 +174,16 @@ PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory bundle \
   --now "2026-06-02T06:00:00Z" >/dev/null
 grep -Fq '"raw_excluded": true' "$DREAM_ROOT/bundle/manifest.json"
 
+echo "[stage2] dream(moc) + search over fixtures"
+MOC_ROOT="$(mktemp -d "$TMP_BASE/moc-XXXXXX")"
+mkdir -p "$MOC_ROOT/inbox/research/claude/2026-06-03"
+cp "$ROOT_DIR/paulshaclaw/memory/tests/fixtures/atomizer/raw/s1.md" \
+   "$MOC_ROOT/inbox/research/claude/2026-06-03/s1.md"
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory dream run \
+  --memory-root "$MOC_ROOT" --now "2026-06-03T05:00:00Z" --promoter identity >/dev/null
+test -f "$MOC_ROOT/knowledge/wiki-moc.md"
+grep -Fq "memory_layer: moc" "$MOC_ROOT/knowledge/wiki-moc.md"
+PYTHONPATH="$ROOT_DIR" python3 -m paulshaclaw.memory.cli memory search alpha \
+  --memory-root "$MOC_ROOT" | grep -Fq '"results"'
+
 echo "[stage2] ok"
