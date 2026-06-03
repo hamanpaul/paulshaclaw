@@ -36,10 +36,12 @@ def _run_pass(
     summary: dict[str, Any] = {}
     warnings: Any = None
     if isinstance(result, dict):
+        warnings = result.get("warnings")
         value = result.get("summary")
         if isinstance(value, dict):
             summary = value
-        warnings = result.get("warnings")
+        else:
+            summary = {k: v for k, v in result.items() if k != "warnings"}
 
     passes[name] = summary
 

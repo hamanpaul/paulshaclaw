@@ -129,6 +129,25 @@ class TestDreamOrchestrator(unittest.TestCase):
 
             self.assertIsNone(dream.last_run(root))
 
+    def test_moc_warnings_produce_partial(self):
+        def atomize_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        def janitor_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        def moc_fn():
+            return {"indexed": True, "renamed": True, "warnings": ["moc warn"]}
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            record = orchestrator.run_dream(
+                root, atomize_fn=atomize_fn, janitor_fn=janitor_fn,
+                moc_fn=moc_fn, now="2026-06-02T00:00:00Z", config_hash="cfg")
+
+            self.assertEqual(record["status"], "partial")
+            self.assertIn("indexed", record["passes"]["moc"])
+
 
 if __name__ == "__main__":
     unittest.main()
