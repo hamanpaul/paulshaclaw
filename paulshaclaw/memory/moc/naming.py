@@ -7,99 +7,63 @@ from typing import Any
 from paulshaclaw.memory.moc import frontmatter_io
 
 
+_SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+
+
 def slugify(title: str) -> str:
     """Convert title to kebab-case slug."""
-    if not title or not title.strip():
-        return "untitled"
-    slug = title.lower()
-    slug = re.sub(r'[^\w\s-]', '', slug)
-    slug = re.sub(r'[\s_]+', '-', slug)
-    slug = slug.strip('-')
-    return slug if slug else "untitled"
+    slug = _SLUG_STRIP.sub("-", title.strip().lower()).strip("-")
+    return slug or "untitled"
 
 
 def _title(fm: dict[str, Any], body: str) -> str:
     """Extract title from frontmatter, markdown heading, or fallback."""
-    if "title" in fm and fm["title"]:
-        return str(fm["title"])
-    
-    lines = body.strip().split('\n')
-    for line in lines:
-        line = line.strip()
-        if line.startswith('#'):
-            heading = line.lstrip('#').strip()
+    title = fm.get("title")
+    if isinstance(title, str) and title.strip():
+        return title.strip()
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
             if heading:
                 return heading
-            break
-    
-    artifact_kind = fm.get("artifact_kind", "unknown")
-    project = fm.get("project", "unknown")
-    return f"{artifact_kind}-{project}"
+    return f"{fm.get('artifact_kind', 'note')}-{fm.get('project', 'unknown')}"
 
 
 def target_name(fm: dict[str, Any], body: str) -> str:
     """Generate target filename: <slug>--<slice_id>.md"""
-    title = _title(fm, body)
-    slug = slugify(title)
-    slice_id = fm.get("slice_id", "unknown")
-    return f"{slug}--{slice_id}.md"
+    return f"{slugify(_title(fm, body))}--{fm['slice_id']}.md"
 
 
 def reconcile(memory_root: Path) -> list[str]:
-    """Scan knowledge files, rename to target names, dedup by slice_id."""
+    """Rename slices to <title>--<slice_id>.md and dedup by slice_id. Returns warnings."""
+    knowledge = memory_root / "knowledge"
     warnings: list[str] = []
-    knowledge_dir = memory_root / "knowledge"
-    
-    if not knowledge_dir.exists():
+    if not knowledge.exists():
         return warnings
-    
-    slice_map: dict[str, list[Path]] = {}
-    
-    for md_file in knowledge_dir.rglob("*.md"):
-        try:
-            text = md_file.read_text(encoding="utf-8")
-            fm, body = frontmatter_io.read(text)
-            
-            if fm.get("memory_layer") != "knowledge":
-                continue
-            
-            slice_id = fm.get("slice_id")
-            if not slice_id:
-                warnings.append(f"No slice_id in {md_file}")
-                continue
-            
-            if slice_id not in slice_map:
-                slice_map[slice_id] = []
-            slice_map[slice_id].append(md_file)
-            
-        except Exception as e:
-            warnings.append(f"Error processing {md_file}: {e}")
-    
-    for slice_id, paths in slice_map.items():
-        if len(paths) > 1:
-            paths.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-            keep = paths[0]
-            for remove in paths[1:]:
-                remove.unlink()
-                warnings.append(f"Removed duplicate {remove}")
-            paths = [keep]
-        
-        if paths:
-            md_file = paths[0]
-            try:
-                text = md_file.read_text(encoding="utf-8")
-                fm, body = frontmatter_io.read(text)
-                
-                new_name = target_name(fm, body)
-                new_path = md_file.parent / new_name
-                
-                if md_file != new_path:
-                    if new_path.exists():
-                        warnings.append(f"Target {new_path} already exists, skipping rename")
-                    else:
-                        md_file.rename(new_path)
-                        
-            except Exception as e:
-                warnings.append(f"Error renaming {md_file}: {e}")
-    
+    seen: dict[str, Path] = {}
+    for path in sorted(knowledge.rglob("*.md")):
+        fm, body = frontmatter_io.read(path.read_text(encoding="utf-8"))
+        if fm.get("memory_layer") != "knowledge":
+            continue
+        slice_id = fm.get("slice_id")
+        if not slice_id:
+            warnings.append(f"{path}: missing slice_id; skipped")
+            continue
+        target = path.with_name(target_name(fm, body))
+        if path != target:
+            if target.exists():
+                target.unlink()
+            path.rename(target)
+            path = target
+        if slice_id in seen:
+            other = seen[slice_id]
+            if path.resolve() != other.resolve():
+                older = other if other.stat().st_mtime <= path.stat().st_mtime else path
+                newer = path if older is other else other
+                older.unlink()
+                seen[slice_id] = newer
+                warnings.append(f"duplicate slice_id {slice_id}; kept {newer.name}")
+        else:
+            seen[slice_id] = path
     return warnings
