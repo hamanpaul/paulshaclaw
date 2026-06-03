@@ -233,10 +233,14 @@ class PaulShiaBroDaemon:
 
         pane_id, _pid = detected
         self._agent_pane_id = pane_id
-        # Keep the routed message lean: the `[bro:<id>]` tag is itself the trigger.
-        # paulshiabro-telegram-reply's description tells the agent to parse the id
-        # and reply with --source-user-id, so no per-message directive is needed.
-        self._send_to_pane(pane_id, f"[bro:{user_id}] {text}")
+        # The small gemma4 model won't reliably auto-invoke a skill from a bare tag,
+        # so append a minimal one-line directive naming the `bro` skill and the source
+        # id to reply to. MUST stay single-line: _send_to_pane sends literally then
+        # submits with one Enter, so an embedded newline would mis-submit.
+        self._send_to_pane(
+            pane_id,
+            f"[bro:{user_id}] {text} ｜用 bro skill 回 --source-user-id {user_id}",
+        )
         return "…"
     def status_snapshot(self) -> dict[str, object]:
         return {
