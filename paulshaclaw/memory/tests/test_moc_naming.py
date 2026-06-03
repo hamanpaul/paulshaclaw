@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -57,6 +58,26 @@ class NamingTests(unittest.TestCase):
             moc.write_text("---\nmemory_layer: moc\nmoc_kind: wiki\n---\n# Wiki\n", encoding="utf-8")
             naming.reconcile(root)
             self.assertTrue(moc.exists())  # untouched
+
+    def test_rename_collision_keeps_newest_mtime(self):
+        """When file renames to existing target with same slice_id, keep newest by mtime."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kdir = root / "knowledge" / "paulshaclaw"
+            kdir.mkdir(parents=True)
+            # Older file needs to rename to target
+            older = kdir / "old-name--sl-9.md"
+            older.write_text("---\nslice_id: sl-9\nmemory_layer: knowledge\nproject: paulshaclaw\nartifact_kind: research\ntitle: target\n---\nOLD\n", encoding="utf-8")
+            time.sleep(0.01)
+            # Newer file already has target name
+            newer = kdir / "target--sl-9.md"
+            newer.write_text("---\nslice_id: sl-9\nmemory_layer: knowledge\nproject: paulshaclaw\nartifact_kind: research\ntitle: target\n---\nNEW\n", encoding="utf-8")
+            naming.reconcile(root)
+            target = kdir / "target--sl-9.md"
+            self.assertTrue(target.exists())
+            content = target.read_text(encoding="utf-8")
+            self.assertIn("NEW", content, "Should keep newer file's content")
+            self.assertNotIn("OLD", content)
 
 
 if __name__ == "__main__":

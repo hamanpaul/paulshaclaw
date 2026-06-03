@@ -53,6 +53,10 @@ def reconcile(memory_root: Path) -> list[str]:
         target = path.with_name(target_name(fm, body))
         if path != target:
             if target.exists():
+                # Only overwrite if current file is newer
+                if path.stat().st_mtime <= target.stat().st_mtime:
+                    path.unlink()
+                    continue
                 target.unlink()
             path.rename(target)
             path = target
