@@ -31,7 +31,7 @@
 - Create: `paulshaclaw/memory/moc/frontmatter_io.py`
 - Test: `paulshaclaw/memory/tests/test_moc_frontmatter_io.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_frontmatter_io.py
@@ -87,12 +87,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_frontmatter_io -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'paulshaclaw.memory.moc'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # paulshaclaw/memory/moc/__init__.py
@@ -175,12 +175,12 @@ def update(path: Path, updates: dict[str, Any]) -> None:
 
 > Note: `dump` re-emits nested `provenance:` and list fields in a flat-then-nested style compatible with both Stage 3's parser (which tolerates extra fields) and Topic 4's `yaml.safe_load`. Body is preserved byte-for-byte so `checksum = sha256(body)` is unchanged.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_frontmatter_io -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/moc/__init__.py paulshaclaw/memory/moc/frontmatter_io.py paulshaclaw/memory/tests/test_moc_frontmatter_io.py
@@ -195,7 +195,7 @@ git commit -m "feat(stage2): add moc frontmatter read/rewrite (body-preserving)"
 - Create: `paulshaclaw/memory/moc/naming.py`
 - Test: `paulshaclaw/memory/tests/test_moc_naming.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_naming.py
@@ -264,12 +264,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_naming -v`
 Expected: FAIL with `ImportError: cannot import name 'naming'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # paulshaclaw/memory/moc/naming.py
@@ -339,12 +339,12 @@ def reconcile(memory_root: Path) -> list[str]:
     return warnings
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_naming -v`
 Expected: PASS (5 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/moc/naming.py paulshaclaw/memory/tests/test_moc_naming.py
@@ -359,7 +359,7 @@ git commit -m "feat(stage2): add moc naming (readable filenames + dedup)"
 - Modify: `paulshaclaw/memory/atomizer/pipeline.py` (the `prepared_writes` loop knowledge_path)
 - Test: `paulshaclaw/memory/tests/test_atomizer_pipeline.py` (extend)
 
-- [ ] **Step 1: Write the failing test (append)**
+- [x] **Step 1: Write the failing test (append)**
 
 ```python
 # append to paulshaclaw/memory/tests/test_atomizer_pipeline.py
@@ -381,12 +381,12 @@ class ReimportOverwriteTests(unittest.TestCase):
             self.assertEqual(fresh.name, "sl-new.md")
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_atomizer_pipeline.ReimportOverwriteTests -v`
 Expected: FAIL (`_knowledge_path_for` not defined)
 
-- [ ] **Step 3: Modify `pipeline.py`**
+- [x] **Step 3: Modify `pipeline.py`**
 
 Add a resolver near the top-level helpers:
 
@@ -411,12 +411,12 @@ Replace the `knowledge_path = ( ... / f"{slice_.slice_id}.md" )` assignment in t
             _atomic_write(knowledge_path, slice_frontmatter.render(slice_))
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_atomizer_pipeline -v`
 Expected: PASS (existing + new)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/atomizer/pipeline.py paulshaclaw/memory/tests/test_atomizer_pipeline.py
@@ -431,7 +431,7 @@ git commit -m "fix(stage2): atomize overwrites slice by slice_id glob (no dup)"
 - Create: `paulshaclaw/memory/moc/linker.py`
 - Test: `paulshaclaw/memory/tests/test_moc_linker.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_linker.py
@@ -484,12 +484,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_linker -v`
 Expected: FAIL with `ImportError: cannot import name 'linker'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # paulshaclaw/memory/moc/linker.py
@@ -553,12 +553,12 @@ def materialize_links(memory_root: Path) -> dict[str, int]:
     return weights
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_linker -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/moc/linker.py paulshaclaw/memory/tests/test_moc_linker.py
@@ -574,7 +574,7 @@ git commit -m "feat(stage2): add moc linker (related: frontmatter, body-safe)"
 - Create: `paulshaclaw/memory/moc/faceout.py`
 - Test: `paulshaclaw/memory/tests/test_moc_builder.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_builder.py
@@ -633,12 +633,12 @@ if __name__ == "__main__":
 
 > Note: confirm the merged `lifecycle.append_event` signature (path/dir, record_id, event_type, source, reason, actor); adapt the decayed-seed line if it differs.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_builder -v`
 Expected: FAIL with `ImportError: cannot import name 'moc_builder'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # paulshaclaw/memory/moc/moc_builder.py
@@ -726,12 +726,12 @@ def mark_faceout(memory_root: Path) -> None:
         handle.write("\n".join(lines) + "\n")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_builder -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/moc/moc_builder.py paulshaclaw/memory/moc/faceout.py paulshaclaw/memory/tests/test_moc_builder.py
@@ -746,7 +746,7 @@ git commit -m "feat(stage2): add moc builder (3 MOCs) + faceout"
 - Create: `paulshaclaw/memory/moc/search.py`
 - Test: `paulshaclaw/memory/tests/test_moc_search.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_search.py
@@ -788,12 +788,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_search -v`
 Expected: FAIL with `ImportError: cannot import name 'search'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # paulshaclaw/memory/moc/search.py
@@ -874,12 +874,12 @@ def search(memory_root: Path, query: str, *, project: str | None, limit: int,
     return [{"slice_id": r[0], "project": r[1], "title": r[2], "score": r[3]} for r in ranked[:limit]]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_search -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/moc/search.py paulshaclaw/memory/tests/test_moc_search.py
@@ -895,7 +895,7 @@ git commit -m "feat(stage2): add moc FTS5 lexical search"
 - Modify: `paulshaclaw/memory/cli.py` (add `search`), `paulshaclaw/memory/dream/cli.py` (add moc pass)
 - Test: `paulshaclaw/memory/tests/test_moc_runner.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_runner.py
@@ -942,12 +942,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_runner -v`
 Expected: FAIL with `ImportError: cannot import name 'runner'`
 
-- [ ] **Step 3: Write minimal implementation**
+- [x] **Step 3: Write minimal implementation**
 
 ```python
 # paulshaclaw/memory/moc/runner.py
@@ -1038,12 +1038,12 @@ and pass `moc_fn=moc_fn` to `orchestrator.run_dream(...)`.
 
 > Confirm the merged `orchestrator.run_dream` signature and the `_run_pass` helper; add a `moc_fn` parameter and a third `_run_pass("moc", moc_fn, passes, errors)` call after janitor, keeping the same isolation/status logic.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_runner -v`
 Expected: PASS (2 tests)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/moc/runner.py paulshaclaw/memory/moc/cli.py paulshaclaw/memory/cli.py \
@@ -1059,7 +1059,7 @@ git commit -m "feat(stage2): add moc runner + dream pass + search CLI"
 - Test: `paulshaclaw/memory/tests/test_moc_conflicts.py`, `paulshaclaw/memory/tests/test_moc_e2e.py`
 - Modify: `paulshaclaw/memory/tests/stage2_integration_check.sh`, `paulshaclaw/memory/routing.md`
 
-- [ ] **Step 1: Write the conflict-regression + E2E tests**
+- [x] **Step 1: Write the conflict-regression + E2E tests**
 
 ```python
 # paulshaclaw/memory/tests/test_moc_conflicts.py
@@ -1166,12 +1166,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run the tests**
+- [x] **Step 2: Run the tests**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_moc_conflicts paulshaclaw.memory.tests.test_moc_e2e -v`
 Expected: PASS. Fix implementation (not tests) on failure.
 
-- [ ] **Step 3: Integration check + routing**
+- [x] **Step 3: Integration check + routing**
 
 Append to `paulshaclaw/memory/tests/stage2_integration_check.sh` before `echo "[stage2] ok"`:
 
@@ -1196,7 +1196,7 @@ Append to `paulshaclaw/memory/routing.md`:
 > **T7 已落地（2026-06）：** `paulsha-mem-moc`（dream 第三 pass）把 `knowledge/` 補成 Obsidian vault：relations → slice 的 `related:` frontmatter `[[..]]`、可讀檔名 `<title>--<slice_id>.md`、三類 MOC（`<project>-moc.md`/`common-sense-moc.md`/`wiki-moc.md`，`memory_layer: moc`）、faceout、FTS5 `psc memory search`。鏈結只進 frontmatter（保 checksum/slice_id）。設計見 `docs/superpowers/specs/2026-06-03-stage2-paulsha-mem-moc-design.md`。
 ```
 
-- [ ] **Step 4: Full regression**
+- [x] **Step 4: Full regression**
 
 Run: `python3 -m unittest discover -s paulshaclaw/memory/tests -v`
 Expected: PASS — all memory tests including T3.2/T4/T5 suites after the connected changes.
@@ -1207,7 +1207,7 @@ Expected: ends with `[stage2] ok`
 Run: `python3 -m unittest discover -s tests -v`
 Expected: only pre-existing unrelated failures (flaky `test_start_sh`, stage9 snapshot); no new T7 regressions.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add paulshaclaw/memory/tests/test_moc_conflicts.py paulshaclaw/memory/tests/test_moc_e2e.py \
@@ -1219,4 +1219,9 @@ git commit -m "test(stage2): add T7 moc conflict-regression, E2E, integration wi
 
 ## Verification Summary（實作完成後填）
 
-（填入：`test_moc_*` 聚焦結果、衝突回歸(C1/C2/C4)結果、`unittest discover -s paulshaclaw/memory/tests` 全套(含 T3.2/T4/T5 連動後)、`stage2_integration_check.sh` 輸出、`lifecycle.gate` 驗證、`tests/` 回歸狀態。）
+- `test_moc_*` 聚焦：`python3 -m unittest paulshaclaw.memory.tests.test_moc_frontmatter_io paulshaclaw.memory.tests.test_moc_naming paulshaclaw.memory.tests.test_moc_linker paulshaclaw.memory.tests.test_moc_builder paulshaclaw.memory.tests.test_moc_search paulshaclaw.memory.tests.test_moc_runner paulshaclaw.memory.tests.test_moc_conflicts paulshaclaw.memory.tests.test_moc_e2e -v` 全綠。
+- 衝突回歸：C1 由 `test_atomizer_pipeline.ReimportOverwriteTests` 驗證 renamed slice 會被 atomize 依 `slice_id` 覆寫不產重複；C2 由 `test_moc_linker` / `test_moc_e2e` 驗證 `[[..]]` 只進 frontmatter、body checksum 不變；C4 由 `test_moc_conflicts` 驗證 janitor `record_source` 與 replay `selector` 都跳過 `memory_layer: moc`。
+- 記憶套件全回歸：`python3 -m unittest discover -s paulshaclaw/memory/tests -v` 全綠（含 T3.2/T4/T5 連動後）。
+- 整合檢查：`bash paulshaclaw/memory/tests/stage2_integration_check.sh` 結尾為 `[stage2] ok`，新增 dream(moc)+search fixture check 通過。
+- lifecycle / gate：`test_moc_e2e` 逐檔驗證 renamed slices 的 checksum 仍等於 `sha256(body)`，且 `psc memory dream run` 後 `wiki-moc.md`、FTS5 index、`psc memory search` 皆可用。
+- top-level `tests/` 回歸：`python3 -m unittest discover -s tests -v` 全綠；本輪未出現 plan 註記的 pre-existing flaky/stage9 失敗。
