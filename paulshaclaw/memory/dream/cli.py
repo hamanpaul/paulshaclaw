@@ -63,7 +63,12 @@ def _run(args: argparse.Namespace) -> int:
     def moc_fn() -> dict[str, object]:
         if args.dry_run:
             return {"summary": {"skipped": "dry-run"}, "warnings": []}
-        return {"summary": moc_runner.run_moc(memory_root, now), "warnings": []}
+        result = moc_runner.run_moc(memory_root, now)
+        warnings = result.pop("warnings", [])
+        return {
+            "summary": result,
+            "warnings": warnings,
+        }
 
     result = orchestrator.run_dream(
         memory_root,
