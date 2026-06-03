@@ -130,6 +130,17 @@ def _prepare_slice_writes(
     return prepared
 
 
+def _knowledge_path_for(memory_root: Path, project: str, slice_id: str) -> Path:
+    project_dir = memory_root / "knowledge" / str(project)
+    if project_dir.exists():
+        for candidate in sorted(project_dir.glob(f"*--{slice_id}.md")):
+            return candidate
+        legacy = project_dir / f"{slice_id}.md"
+        if legacy.exists():
+            return legacy
+    return project_dir / f"{slice_id}.md"
+
+
 def _append_semantic_edges(
     memory_root: Path,
     *,
@@ -383,11 +394,8 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
             warnings.append(f"session {session_key}: {exc}; session {session_key} left in split")
             continue
         for slice_, referenced_fragments in prepared_writes:
-            knowledge_path = (
-                memory_root
-                / "knowledge"
-                / str(slice_.frontmatter["project"])
-                / f"{slice_.slice_id}.md"
+            knowledge_path = _knowledge_path_for(
+                memory_root, str(slice_.frontmatter["project"]), slice_.slice_id
             )
             _atomic_write(knowledge_path, slice_frontmatter.render(slice_))
             for frag_path, _ in referenced_fragments:
