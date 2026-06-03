@@ -36,10 +36,12 @@ def _run_pass(
     summary: dict[str, Any] = {}
     warnings: Any = None
     if isinstance(result, dict):
+        warnings = result.get("warnings")
         value = result.get("summary")
         if isinstance(value, dict):
             summary = value
-        warnings = result.get("warnings")
+        else:
+            summary = {k: v for k, v in result.items() if k != "warnings"}
 
     passes[name] = summary
 
@@ -52,6 +54,7 @@ def run_dream(
     *,
     atomize_fn: Callable[[], dict[str, Any]],
     janitor_fn: Callable[[], dict[str, Any]],
+    moc_fn: Callable[[], dict[str, Any]] | None = None,
     now: str,
     config_hash: str = "",
     dry_run: bool = False,
@@ -63,11 +66,14 @@ def run_dream(
 
     atomize_clean = _run_pass("atomize", atomize_fn, passes, errors)
     janitor_clean = _run_pass("janitor", janitor_fn, passes, errors)
+    moc_clean = True
+    if moc_fn is not None:
+        moc_clean = _run_pass("moc", moc_fn, passes, errors)
 
     if errors:
         status = "failed"
     else:
-        status = "ok" if (atomize_clean and janitor_clean) else "partial"
+        status = "ok" if (atomize_clean and janitor_clean and moc_clean) else "partial"
 
     record: dict[str, Any] = {
         "ts": now,

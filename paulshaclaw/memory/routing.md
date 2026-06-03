@@ -61,6 +61,8 @@ MVP 設計與驗證細節見：
 
 > **T5 已落地（2026-06）：** `psc memory dream run`（idle-gated systemd timer 範本 Mon..Fri 05:00）編排 atomize→janitor 並記 `runtime/ledger/dream.jsonl`;`psc memory dream status` 回最後 run + backlog。`psc memory bundle --project/--tag/--entity` 組 replay bundle（只含 distilled slices + ledger，`raw_excluded:true`）。proposal-first 框架於 `runtime/proposals/`。設計見 `docs/superpowers/specs/2026-06-02-stage2-dream-service-design.md`。
 
+> **T7 已落地（2026-06）：** `paulsha-mem-moc`（dream 第三 pass）把 `knowledge/` 補成 Obsidian vault：relations → slice 的 `related:` frontmatter `[[..]]`、可讀檔名 `<title>--<slice_id>.md`、三類 MOC（`<project>-moc.md`/`common-sense-moc.md`/`wiki-moc.md`，`memory_layer: moc`）、faceout、FTS5 `psc memory search`。鏈結只進 frontmatter（保 checksum/slice_id）。設計見 `docs/superpowers/specs/2026-06-03-stage2-paulsha-mem-moc-design.md`。
+
 ## 4. 驗證邊界
 
 Stage 2 integration gate 最少要覆蓋：

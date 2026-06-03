@@ -726,5 +726,23 @@ class PipelineTests(unittest.TestCase):
             )
 
 
+class ReimportOverwriteTests(unittest.TestCase):
+    def test_reimport_overwrites_renamed_file_no_duplicate(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kdir = root / "knowledge" / "paulshaclaw"
+            kdir.mkdir(parents=True)
+            # simulate a moc-renamed existing slice
+            existing = kdir / "alpha--sl-xyz.md"
+            existing.write_text("---\nslice_id: sl-xyz\nmemory_layer: knowledge\nproject: paulshaclaw\n---\nOLD\n", encoding="utf-8")
+            # atomize must resolve the write path for slice_id sl-xyz to the existing renamed file
+            from paulshaclaw.memory.atomizer import pipeline
+            resolved = pipeline._knowledge_path_for(root, "paulshaclaw", "sl-xyz")
+            self.assertEqual(resolved, existing)
+            # and for a brand-new slice_id it falls back to <slice_id>.md
+            fresh = pipeline._knowledge_path_for(root, "paulshaclaw", "sl-new")
+            self.assertEqual(fresh.name, "sl-new.md")
+
+
 if __name__ == "__main__":
     unittest.main()
