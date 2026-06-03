@@ -230,7 +230,11 @@ class Stage1SmokeTest(unittest.TestCase):
 
         self.assertEqual(result, "…")
         self.assertEqual(daemon._agent_pane_id, "%9")
-        send_mock.assert_called_once_with("%9", "[bro:1001] 請幫我整理狀態")
+        send_mock.assert_called_once_with(
+            "%9",
+            "[bro:1001] 請幫我整理狀態 （完成後務必使用 paulshiabro-telegram-reply skill，"
+            "以 --source-user-id 1001 將回覆送回 Telegram）",
+        )
 
     def test_daemon_route_to_agent_returns_fallback_when_agent_stopped(self) -> None:
         config_path = self.make_config_path()
