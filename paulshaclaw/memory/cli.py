@@ -92,6 +92,14 @@ def _build_parser() -> argparse.ArgumentParser:
     bundle_p.add_argument("--now", default=None)
     bundle_p.set_defaults(func=_bundle)
 
+    search_p = memory_subparsers.add_parser("search")
+    search_p.add_argument("query")
+    search_p.add_argument("--memory-root", required=True)
+    search_p.add_argument("--project", default=None)
+    search_p.add_argument("--limit", type=int, default=10)
+    search_p.add_argument("--include-decayed", action="store_true")
+    search_p.set_defaults(func=_search)
+
     return parser
 
 
@@ -169,6 +177,12 @@ def _bundle(args: argparse.Namespace) -> int:
     if args.now is None:
         args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return bundle_run(args)
+
+
+def _search(args: argparse.Namespace) -> int:
+    from .moc.cli import run as search_run
+
+    return search_run(args)
 
 
 def _load_policy(override_path: str | None):

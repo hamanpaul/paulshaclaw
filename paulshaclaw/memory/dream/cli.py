@@ -10,6 +10,7 @@ from ..atomizer import pipeline as atomizer_pipeline
 from ..janitor import config as janitor_config
 from ..janitor import scanner as janitor_scanner
 from ..ledger import dream as dream_ledger
+from ..moc import runner as moc_runner
 from . import idle, orchestrator
 
 
@@ -59,10 +60,16 @@ def _run(args: argparse.Namespace) -> int:
             source_path_exists=lambda record: None,
         )
 
+    def moc_fn() -> dict[str, object]:
+        if args.dry_run:
+            return {"summary": {"skipped": "dry-run"}, "warnings": []}
+        return {"summary": moc_runner.run_moc(memory_root, now), "warnings": []}
+
     result = orchestrator.run_dream(
         memory_root,
         atomize_fn=atomize_fn,
         janitor_fn=janitor_fn,
+        moc_fn=moc_fn,
         now=now,
         config_hash=f"{atom_hash[:8]}:{jan_hash[:8]}",
         dry_run=args.dry_run,
