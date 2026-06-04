@@ -37,3 +37,4 @@ tmp/
 # External reference repos (Stage 0)
 ref/
 .worktrees/
+.test-work/
