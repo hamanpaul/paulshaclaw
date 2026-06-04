@@ -48,10 +48,16 @@ def last_assistant_text(transcript_path: Path) -> str:
 
 
 def _send_via_bridge(user_id: int, text: str) -> None:
-    subprocess.run(
+    result = subprocess.run(
         [sys.executable, str(REPLY_BRIDGE), "--source-user-id", str(user_id), "--text", text],
+        capture_output=True,
+        text=True,
         check=False,
     )
+    if result.returncode != 0:
+        # The reply was lost (unauthorized user, missing binding, Telegram error,
+        # …). Record it — silent loss would defeat the relay's observability.
+        _log("send", RuntimeError(f"reply_bridge exit {result.returncode}: {(result.stderr or '').strip()[:500]}"))
 
 
 def handle(event: dict, state_dir: Path, sender=_send_via_bridge) -> bool:

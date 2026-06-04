@@ -84,6 +84,27 @@ class BroOutTests(unittest.TestCase):
         self.assertFalse(self.bro_out.handle({"session_id": "s1", "stop_hook_active": True}, self.state, sender=self._sender))
         self.assertEqual(self.sent, [])
 
+    def test_missing_transcript_path_sends_notice(self):
+        (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
+        self.bro_out.handle({"session_id": "s1"}, self.state, sender=self._sender)
+        self.assertEqual(self.sent, [(7, "（已完成，無文字輸出）")])
+
+    def test_bridge_nonzero_exit_is_logged(self):
+        import types
+
+        logged = []
+        fake_proc = types.SimpleNamespace(returncode=1, stderr="boom")
+        orig_run, orig_log = self.bro_out.subprocess.run, self.bro_out._log
+        self.bro_out.subprocess.run = lambda *a, **k: fake_proc
+        self.bro_out._log = lambda stage, exc: logged.append((stage, str(exc)))
+        try:
+            self.bro_out._send_via_bridge(7, "hi")
+        finally:
+            self.bro_out.subprocess.run, self.bro_out._log = orig_run, orig_log
+        self.assertEqual(len(logged), 1)
+        self.assertEqual(logged[0][0], "send")
+        self.assertIn("boom", logged[0][1])
+
 
 if __name__ == "__main__":
     unittest.main()
