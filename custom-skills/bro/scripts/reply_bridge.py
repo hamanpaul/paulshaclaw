@@ -15,7 +15,26 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.state.json"
 DEFAULT_SECRET_ENV_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.telegram.secret.env"
 DEFAULT_BINDINGS_PATH = Path.home() / ".agents/state/telegram-chat-bindings.json"
 
+TELEGRAM_TEXT_LIMIT = 4000
+
 OpenUrl = Callable[[urllib.request.Request, float], Any]
+
+
+def _chunk_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
+    """Split text into <=limit pieces, preferring newline boundaries."""
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    remaining = text
+    while len(remaining) > limit:
+        cut = remaining.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = limit
+        chunks.append(remaining[:cut])
+        remaining = remaining[cut:].lstrip("\n")
+    if remaining:
+        chunks.append(remaining)
+    return chunks
 
 
 @dataclass(frozen=True)
@@ -211,7 +230,8 @@ def send_reply(
         raise ValueError("PSC_TELEGRAM_BOT_TOKEN 未設定")
     client = TelegramApiClient(token, opener=opener, api_base=api_base)
     for target in targets:
-        client.send_message(chat_id=target.chat_id, text=text)
+        for chunk in _chunk_text(text):
+            client.send_message(chat_id=target.chat_id, text=chunk)
     return targets
 
 

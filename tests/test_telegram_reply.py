@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import io
 import json
 import os
 import tempfile
 import unittest
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from urllib.request import Request
 from unittest import mock
@@ -17,6 +19,18 @@ from paulshaclaw.bot.reply import (
     TelegramReplyBridge,
     ReplyTarget,
 )
+
+REPLY_BRIDGE = Path(__file__).resolve().parents[1] / "custom-skills" / "bro" / "scripts" / "reply_bridge.py"
+
+
+def load_reply_bridge():
+    import sys
+    loader = SourceFileLoader("reply_bridge", str(REPLY_BRIDGE))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["reply_bridge"] = module
+    loader.exec_module(module)
+    return module
 
 
 class FakeResponse:
@@ -127,6 +141,20 @@ class TelegramReplyBridgeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "找不到 source user 7 對應的 Telegram chat 綁定"):
                 bridge.reply(text="hello", source_user_id=7)
+
+
+class ReplyBridgeChunkTests(unittest.TestCase):
+    def test_chunk_text_splits_long_text_on_newline(self):
+        bridge = load_reply_bridge()
+        long_text = ("a" * 3000) + "\n" + ("b" * 3000)
+        chunks = bridge._chunk_text(long_text, limit=4000)
+        self.assertEqual(len(chunks), 2)
+        self.assertTrue(all(len(c) <= 4000 for c in chunks))
+        self.assertEqual("".join(chunks).replace("\n", ""), long_text.replace("\n", ""))
+
+    def test_chunk_text_keeps_short_text_single(self):
+        bridge = load_reply_bridge()
+        self.assertEqual(bridge._chunk_text("hi", limit=4000), ["hi"])
 
 
 class TelegramListenerBindingTests(unittest.TestCase):
