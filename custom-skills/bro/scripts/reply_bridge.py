@@ -29,9 +29,14 @@ def _chunk_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
     while len(remaining) > limit:
         cut = remaining.rfind("\n", 0, limit)
         if cut <= 0:
-            cut = limit
-        chunks.append(remaining[:cut])
-        remaining = remaining[cut:].lstrip("\n")
+            # No newline within the window: hard split, drop nothing.
+            chunks.append(remaining[:limit])
+            remaining = remaining[limit:]
+        else:
+            # Split on the newline; consume only that single delimiter newline,
+            # preserving any further blank lines in the next chunk.
+            chunks.append(remaining[:cut])
+            remaining = remaining[cut + 1:]
     if remaining:
         chunks.append(remaining)
     return chunks

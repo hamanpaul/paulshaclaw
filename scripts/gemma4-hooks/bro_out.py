@@ -50,7 +50,8 @@ def last_assistant_text(transcript_path: Path) -> str:
 def _send_via_bridge(user_id: int, text: str) -> None:
     result = subprocess.run(
         [sys.executable, str(REPLY_BRIDGE), "--source-user-id", str(user_id), "--text", text],
-        capture_output=True,
+        stdout=subprocess.DEVNULL,  # bridge echoes the full reply; we don't need it buffered
+        stderr=subprocess.PIPE,
         text=True,
         check=False,
     )

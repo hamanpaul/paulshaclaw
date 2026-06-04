@@ -156,6 +156,19 @@ class ReplyBridgeChunkTests(unittest.TestCase):
         bridge = load_reply_bridge()
         self.assertEqual(bridge._chunk_text("hi", limit=4000), ["hi"])
 
+    def test_chunk_text_preserves_blank_line_at_boundary(self):
+        # Only the single delimiter newline is consumed; a further blank line survives.
+        bridge = load_reply_bridge()
+        text = ("a" * 3999) + "\n\n" + ("b" * 10)
+        chunks = bridge._chunk_text(text, limit=4000)
+        self.assertEqual(chunks, ["a" * 3999, "\n" + "b" * 10])
+
+    def test_chunk_text_hard_split_loses_no_characters(self):
+        bridge = load_reply_bridge()
+        text = "x" * 9000  # no newline -> hard split
+        chunks = bridge._chunk_text(text, limit=4000)
+        self.assertEqual("".join(chunks), text)
+
 
 class TelegramListenerBindingTests(unittest.TestCase):
     def test_process_update_records_user_chat_binding(self) -> None:
