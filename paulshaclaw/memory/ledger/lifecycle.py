@@ -6,6 +6,7 @@ accessed, archived, deleted, etc.) for memory records with hash-chained integrit
 """
 
 import fcntl
+import os
 import hashlib
 import json
 import uuid
@@ -141,6 +142,13 @@ def append_event(
 
             f.seek(0, 2)
             f.write(json.dumps(event) + "\n")
+            # Flush the buffered write to the OS (and fsync to disk) BEFORE releasing
+            # the lock. Otherwise the data sits in Python's userspace buffer until the
+            # file is closed — which happens AFTER the unlock below — leaving a window
+            # where another writer can take the lock, read stale (pre-write) state, and
+            # reuse the same seq/prev_hash, breaking the hash chain.
+            f.flush()
+            os.fsync(f.fileno())
         finally:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
     
