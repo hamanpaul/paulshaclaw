@@ -82,6 +82,17 @@ def _build_parser() -> argparse.ArgumentParser:
     dream_status.add_argument("--memory-root", required=True)
     dream_status.set_defaults(func=_dream)
 
+    skillopt = memory_subparsers.add_parser("skillopt")
+    skillopt_subparsers = skillopt.add_subparsers(dest="skillopt_command", required=True)
+    skillopt_run = skillopt_subparsers.add_parser("run")
+    skillopt_run.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
+    skillopt_run.add_argument("--reference-root", default=str(Path.home() / "notes"))
+    skillopt_run.add_argument("--skill-path", default=None)
+    skillopt_run.add_argument("--budget", type=int, default=1)
+    skillopt_run.add_argument("--dry-run", action="store_true")
+    skillopt_run.add_argument("--now", default=None)
+    skillopt_run.set_defaults(func=_skillopt)
+
     bundle_p = memory_subparsers.add_parser("bundle")
     bundle_p.add_argument("--memory-root", required=True)
     bundle_p.add_argument("--project", default=None)
@@ -167,6 +178,12 @@ def _dream(args: argparse.Namespace) -> int:
     if getattr(args, "now", None) is None:
         args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return dream_run(args)
+
+
+def _skillopt(args: argparse.Namespace) -> int:
+    from .skillopt import cli as skillopt_cli
+
+    return skillopt_cli.run(args)
 
 
 def _bundle(args: argparse.Namespace) -> int:

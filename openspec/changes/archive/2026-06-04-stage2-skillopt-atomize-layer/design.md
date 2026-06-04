@@ -28,12 +28,13 @@ paulshaclaw/memory/skillopt/
 - LLM-judge scores atomization quality ONLY (granularity / concept boundary / one-concept-per-slice / relations). Project assignment is NOT a judge task.
 
 ## Data model
+- train item = generic `{"id": "<session_id>#<fragment_index>", "input": [Fragment...], "gold": {"project": slug}}`.
 - val item = generic `{"id": "<session_id>#<fragment_index>", "input": [Fragment...], "gold": {"project": slug, "reference_slices": [{title,body,tags}...]}}`.
-- gold = `~/notes` semantic content only (ignore Obsidian frontmatter); reference rubric, not a 1:1 target; empty when no domain match (judge falls back to skill principles).
+- validation-only `reference_slices` come from `~/notes` semantic content (ignore Obsidian frontmatter); they are judge rubric, not a 1:1 target; empty when no domain match (judge falls back to skill principles).
 - train/val split = per project, deterministic via `sha256("<session_id>#<fragment_index>")` mod → 20% val / 80% train; reproducible, no wall-clock, no RNG.
 
 ## Scorer
-- structural_score (deterministic): weighted granularity-proximity, concept coverage, one-concept-per-slice, relation presence. Used for train failure ranking.
+- structural_score (deterministic): weighted granularity balance, concept-boundary clarity, one-concept-per-slice, relation presence. Used for train failure ranking and does not depend on `~/notes`.
 - hybrid score = `α·structural + (1-α)·judge` (α default 0.4), used for the val gate. Absolute 0–1 per output → keeps the vendored loop's `score(output, gold)` contract unchanged (no pairwise).
 
 ## Guardrails (inherit generic G1–G6; add)

@@ -39,7 +39,7 @@
 - Create: `paulshaclaw/memory/skillopt/loop.py`, `optimizer_acp.py`, `codex_exec_acp_adapter.py`, `__init__.py`
 - Test: `paulshaclaw/memory/tests/test_skillopt_loop.py`
 
-- [ ] **Step 1: Write the failing test (loop parity)**
+- [x] **Step 1: Write the failing test (loop parity)**
 
 Mirror evolve's `test_skillopt.py`. Create `paulshaclaw/memory/tests/test_skillopt_loop.py`:
 
@@ -130,12 +130,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_loop -v`
 Expected: FAIL with `ModuleNotFoundError: paulshaclaw.memory.skillopt.loop`.
 
-- [ ] **Step 3: Vendor `loop.py` verbatim**
+- [x] **Step 3: Vendor `loop.py` verbatim**
 
 Copy `~/prj_pri/custom-skills/evolve/scripts/skillopt.py` to `paulshaclaw/memory/skillopt/loop.py` unchanged:
 
@@ -146,7 +146,7 @@ cp ~/prj_pri/custom-skills/evolve/scripts/skillopt.py \
 
 The file's public API is `optimize_skill`, `SkillOptError`, `_mean_score`, `_is_valid_skill` — keep all. No edits needed (it is stdlib-only and self-contained).
 
-- [ ] **Step 4: Vendor the optimizer + adapter, fix path constants**
+- [x] **Step 4: Vendor the optimizer + adapter, fix path constants**
 
 ```bash
 cp ~/prj_pri/custom-skills/evolve/scripts/skillopt_optimizer_acp.py \
@@ -162,7 +162,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 ```
 `_ADAPTER` is correct (adapter sits beside it). Verify `_REPO_ROOT` resolves to the paulshaclaw repo root from the new location `paulshaclaw/memory/skillopt/optimizer_acp.py` → `parents[2]` = repo root; if the package nesting differs, set it to the repo root that contains `scripts/`. Keep `make_acp_optimizer` and `_default_runner` otherwise unchanged.
 
-- [ ] **Step 5: Create `__init__.py`**
+- [x] **Step 5: Create `__init__.py`**
 
 ```python
 from .loop import optimize_skill, SkillOptError
@@ -171,7 +171,7 @@ from .optimizer_acp import make_acp_optimizer
 __all__ = ["optimize_skill", "SkillOptError", "make_acp_optimizer"]
 ```
 
-- [ ] **Step 6: Run the test to verify it passes**
+- [x] **Step 6: Run the test to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_loop -v`
 Expected: PASS (all 5 cases).
@@ -192,7 +192,7 @@ git commit -m "feat(skillopt): vendor generic SkillOpt loop into paulshaclaw"
 - Create: `paulshaclaw/memory/skillopt/rollout.py`
 - Test: `paulshaclaw/memory/tests/test_skillopt_rollout.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import unittest
@@ -232,12 +232,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_rollout -v`
 Expected: FAIL (`ModuleNotFoundError` / `make_atomize_rollout` undefined).
 
-- [ ] **Step 3: Implement `rollout.py`**
+- [x] **Step 3: Implement `rollout.py`**
 
 ```python
 from __future__ import annotations
@@ -272,7 +272,7 @@ def make_atomize_rollout(
 
 If `load_config()` requires arguments in this tree, pass the atomizer's default config path; the test constructs `config` is None → ensure `load_config` has a no-arg/default path or inject a config in the test instead. (If `load_config` is not no-arg, change the test to pass `config=load_config(<default path>)` and keep the signature.)
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_rollout -v`
 Expected: PASS.
@@ -294,7 +294,7 @@ git commit -m "feat(skillopt): atomize rollout injecting candidate skill_text"
 
 Output of rollout = `list[Slice]`. Gold = `{"project": str, "reference_slices": [{"title","body","tags"}, ...]}`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import unittest
@@ -351,12 +351,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_scorer -v`
 Expected: FAIL (module/functions undefined).
 
-- [ ] **Step 3: Implement `scorer.py`**
+- [x] **Step 3: Implement `scorer.py`**
 
 ```python
 from __future__ import annotations
@@ -368,35 +368,52 @@ _WORD = re.compile(r"[0-9a-z_]+", re.IGNORECASE)
 def _tokens(text: str) -> set[str]:
     return {w.lower() for w in _WORD.findall(text or "")}
 
-def _slice_title(s: Any) -> str:
-    return (getattr(s, "title", None) or "") + " " + (getattr(s, "body", "") or "")
-
-def _granularity_proximity(out: list, gold: dict) -> float:
-    n_out = len(out)
-    n_gold = max(1, len(gold.get("reference_slices", [])))
-    if n_out == 0:
+def _granularity_balance(out: list, gold: dict) -> float:
+    del gold
+    count = len(out)
+    if count == 0:
         return 0.0
-    return 1.0 - min(1.0, abs(n_out - n_gold) / n_gold)
+    if 2 <= count <= 6:
+        count_score = 1.0
+    elif count == 1:
+        count_score = 0.5
+    else:
+        count_score = max(0.0, 1.0 - ((count - 6) / 6.0))
+    mean_body_length = sum(len((getattr(s, "body", "") or "").strip()) for s in out) / count
+    if mean_body_length <= 0:
+        length_score = 0.0
+    elif mean_body_length < 80.0:
+        length_score = mean_body_length / 80.0
+    elif mean_body_length > 1600.0:
+        length_score = 1600.0 / mean_body_length
+    else:
+        length_score = 1.0
+    return 0.6 * count_score + 0.4 * length_score
 
-def _concept_coverage(out: list, gold: dict) -> float:
-    refs = gold.get("reference_slices", [])
-    if not refs:
-        return 1.0  # no reference for this domain → do not penalize
-    out_tokens = set().union(*[_tokens(_slice_title(s)) for s in out]) if out else set()
-    covered = 0
-    for r in refs:
-        rt = _tokens(str(r.get("title", "")))
-        if rt and (rt & out_tokens):
-            covered += 1
-    return covered / len(refs)
-
-def _one_concept_per_slice(out: list, gold: dict) -> float:
+def _concept_boundary_clarity(out: list, gold: dict) -> float:
+    del gold
     if not out:
         return 0.0
-    refs = gold.get("reference_slices", [])
-    ref_len = (sum(len(str(r.get("body", ""))) for r in refs) / len(refs)) if refs else 600.0
-    bound = max(1.0, ref_len * 3.0)
-    oks = sum(1 for s in out if len(getattr(s, "body", "") or "") <= bound)
+    token_sets = [_tokens((getattr(s, "title", None) or "") + " " + (getattr(s, "body", "") or "")) for s in out]
+    if len(token_sets) == 1:
+        return 0.5 if token_sets[0] else 0.0
+    overlaps = []
+    for i, left in enumerate(token_sets):
+        for right in token_sets[i + 1:]:
+            union = left | right
+            overlaps.append(1.0 if not union else len(left & right) / len(union))
+    return 1.0 if not overlaps else 1.0 - (sum(overlaps) / len(overlaps))
+
+def _one_concept_per_slice(out: list, gold: dict) -> float:
+    del gold
+    if not out:
+        return 0.0
+    oks = 0
+    for s in out:
+        title = (getattr(s, "title", None) or "").strip()
+        body = (getattr(s, "body", "") or "").strip()
+        if title and body and len(body) <= 1800:
+            oks += 1
     return oks / len(out)
 
 def _relation_presence(out: list, gold: dict) -> float:
@@ -405,12 +422,12 @@ def _relation_presence(out: list, gold: dict) -> float:
     with_rel = sum(1 for s in out if getattr(s, "relations", ()) )
     return with_rel / len(out)
 
-_WEIGHTS = {"granularity": 0.35, "coverage": 0.35, "one_concept": 0.20, "relation": 0.10}
+_WEIGHTS = {"granularity": 0.35, "boundary": 0.35, "one_concept": 0.20, "relation": 0.10}
 
 def structural_score(output: list, gold: dict) -> float:
     parts = {
-        "granularity": _granularity_proximity(output, gold),
-        "coverage": _concept_coverage(output, gold),
+        "granularity": _granularity_balance(output, gold),
+        "boundary": _concept_boundary_clarity(output, gold),
         "one_concept": _one_concept_per_slice(output, gold),
         "relation": _relation_presence(output, gold),
     }
@@ -456,7 +473,7 @@ def make_hybrid_score(judge_client: Any, *, alpha: float = 0.4) -> Callable[[lis
     return score
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_scorer -v`
 Expected: PASS.
@@ -476,7 +493,7 @@ git commit -m "feat(skillopt): structural + LLM-judge hybrid scorer"
 - Create: `paulshaclaw/memory/skillopt/valset.py`
 - Test: `paulshaclaw/memory/tests/test_skillopt_valset.py`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import unittest
@@ -541,12 +558,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_valset -v`
 Expected: FAIL (module undefined).
 
-- [ ] **Step 3: Implement `valset.py`**
+- [x] **Step 3: Implement `valset.py`**
 
 Reuse the atomizer's frontmatter parsing and splitter — do NOT write a new splitter.
 
@@ -669,7 +686,7 @@ def build_valset(*, inbox_root: Path, reference_root: Path,
     return {"train": train, "val": val}
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_valset -v`
 Expected: PASS. (If `load_config()` is not no-arg in this tree, give it the atomizer default config path.)
@@ -690,7 +707,7 @@ git commit -m "feat(skillopt): project-stratified val_set builder from inbox"
 - Test: `paulshaclaw/memory/tests/test_skillopt_cli.py`
 - Modify: the existing `psc memory` CLI entry to register the `skillopt` subcommand.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import unittest
@@ -748,12 +765,12 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_cli -v`
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `cli.py`**
+- [x] **Step 3: Implement `cli.py`**
 
 ```python
 from __future__ import annotations
@@ -842,12 +859,12 @@ if __name__ == "__main__":
 
 Note: `now` is computed at the CLI boundary only (so the core loop stays deterministic via injection). Tests pass `now` explicitly.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `python3 -m unittest paulshaclaw.memory.tests.test_skillopt_cli -v`
 Expected: PASS.
 
-- [ ] **Step 5: Register the subcommand on the `psc memory` entry**
+- [x] **Step 5: Register the subcommand on the `psc memory` entry**
 
 Find the existing `psc memory` dispatcher (grep for the `memory` subcommands, e.g. `importer`, `atomizer`, `dream`, `moc` registrations) and add a `skillopt` branch that calls `paulshaclaw.memory.skillopt.cli.main(remaining_argv)`. Mirror exactly how `moc`/`dream` are wired.
 
@@ -867,16 +884,16 @@ git commit -m "feat(skillopt): CLI driver and psc memory skillopt subcommand"
 **Files:**
 - Create: `paulshaclaw/memory/skillopt/README.md`
 
-- [ ] **Step 1: Write `README.md`**
+- [x] **Step 1: Write `README.md`**
 
 Document: the validation gate (worst case = unchanged), fail-closed on any model error, the module is offline and NOT wired into dream in this change, the LLM judge scores atomization quality only (project ownership belongs to the importer's `project_resolver`), and `~/notes` is read-only reference rubric (never gold, never written, PersonalVault excluded). Note model roles: rollout=gemma4, optimizer=codex ACP, judge=configurable agent.
 
-- [ ] **Step 2: Run the full memory suite**
+- [x] **Step 2: Run the full memory suite**
 
 Run: `python3 -m unittest discover -s paulshaclaw/memory/tests`
 Expected: all PASS (including the 5 new test modules).
 
-- [ ] **Step 3: Run the repo policy / lint gate**
+- [x] **Step 3: Run the repo policy / lint gate**
 
 Run the repo's policy check and frontmatter lint exactly as other Stage 2 changes do (see `paulshaclaw/memory/lint/` and the CI policy script). Expected: green. Branch name `feature/stage2-skillopt-atomize-layer` satisfies R-12 (no dots).
 
@@ -887,7 +904,7 @@ git add paulshaclaw/memory/skillopt/README.md
 git commit -m "docs(skillopt): module README (gate, fail-closed, judge scope)"
 ```
 
-- [ ] **Step 5: openspec-archive after merge**
+- [x] **Step 5: openspec-archive after merge**
 
 After the PR merges, archive the change: move `openspec/changes/stage2-skillopt-atomize-layer/` into `openspec/changes/archive/` per the repo's archive convention (mirror the most recent archived stage2 change).
 
