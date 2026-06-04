@@ -60,6 +60,30 @@ class TestOptimizeSkill(unittest.TestCase):
         self.assertTrue(rec["accepted"])
         self.assertNotIn("input", rec)
 
+    def test_record_append_failure_after_accept_rolls_back_skill(self) -> None:
+        # Durability gate (vendored evolve behavior): an accepted candidate is written
+        # ONLY if its record durably appends; if the record append raises afterwards,
+        # the skill MUST be rolled back so the ledger never claims an unrecorded change.
+        with mock.patch(
+            "paulshaclaw.memory.skillopt.loop._append_record",
+            side_effect=OSError("disk full"),
+        ):
+            res = optimize_skill(
+                self.skill,
+                rollout=self._rollout,
+                score=lambda out, gold: 1.0 if out == BETTER else 0.0,
+                train_set=self.train,
+                val_set=self.val,
+                optimizer=lambda text, failures: BETTER,
+                budget=1,
+                now="2026-06-04T00:00:00Z",
+                record_path=self.root / "rec.jsonl",
+            )
+        self.assertEqual(res["reason"], "error")
+        self.assertFalse(res["accepted"])
+        self.assertNotIn("rollback_failed", res)
+        self.assertEqual(self.skill.read_text(encoding="utf-8"), VALID)
+
     def test_reject_no_improvement_leaves_skill_unchanged(self) -> None:
         res = optimize_skill(
             self.skill,
@@ -119,7 +143,11 @@ class TestOptimizeSkill(unittest.TestCase):
         self.assertIsNone(res["baseline_score"])
         self.assertEqual(self.skill.read_text(encoding="utf-8"), VALID)
 
-    def test_accepted_candidate_stays_unchanged_when_record_append_and_restore_both_fail(self) -> None:
+    def test_record_append_and_restore_both_fail_flags_rollback_failed(self) -> None:
+        # Vendored evolve contract: an accepted candidate is written first; if the
+        # record append fails AND the restore also fails, the skill is left mutated
+        # (best_text) and the result is flagged rollback_failed=True so the unrecorded
+        # mutation is surfaced rather than hidden.
         with (
             mock.patch("paulshaclaw.memory.skillopt.loop._append_record", side_effect=RuntimeError("ledger down")),
             mock.patch("paulshaclaw.memory.skillopt.loop._restore_original_skill", side_effect=RuntimeError("restore down")),
@@ -137,8 +165,8 @@ class TestOptimizeSkill(unittest.TestCase):
             )
 
         self.assertEqual(res["reason"], "error")
-        self.assertNotIn("rollback_failed", res)
-        self.assertEqual(self.skill.read_text(encoding="utf-8"), VALID)
+        self.assertTrue(res["rollback_failed"])
+        self.assertEqual(self.skill.read_text(encoding="utf-8"), BETTER)
 
     def test_vendored_acp_adapter_handles_initialize_and_session_new_from_isolated_copy(self) -> None:
         isolated_adapter = self.root / "isolated" / "codex_exec_acp_adapter.py"

@@ -181,9 +181,11 @@ def optimize_skill(
         accepted = best_score > baseline_score + accept_threshold
         result["accepted"] = accepted
 
+        skill_written = False
         backup_path: Path | None = None
 
         if accepted:
+
             ts_safe = now.replace(":", "-")
             backup_path = (
                 skill_path.parent
@@ -191,6 +193,10 @@ def optimize_skill(
                 / skill_path.stem
                 / f"{ts_safe}.md"
             )
+            backup_path.parent.mkdir(parents=True, exist_ok=True)
+            backup_path.write_text(current_text, encoding="utf-8")
+            _atomic_write(skill_path, best_text)
+            skill_written = True
 
             result.update(
                 {
@@ -217,13 +223,20 @@ def optimize_skill(
         try:
             _append_record(record_path, _record(result))
         except Exception:
-            _sanitize_error_result(result)
-            return result
+            # Fail-closed: never leave the skill mutated without a durable record.
+            rollback_failed = False
+            if accepted and skill_written:
+                try:
+                    _restore_original_skill(
+                        skill_path, backup_path=backup_path, original_text=current_text
+                    )
+                except Exception:
+                    rollback_failed = True
 
-        if accepted:
-            backup_path.parent.mkdir(parents=True, exist_ok=True)
-            backup_path.write_text(current_text, encoding="utf-8")
-            _atomic_write(skill_path, best_text)
+            _sanitize_error_result(result)
+            if rollback_failed:
+                result["rollback_failed"] = True
+            return result
 
         return result
 
