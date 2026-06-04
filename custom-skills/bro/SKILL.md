@@ -1,6 +1,6 @@
 ---
 name: bro
-description: Use whenever the user wants the answer sent through PaulShiaBro / bro / Telegram, especially when the current workspace is unrelated to paulshaclaw and the reply flow must not depend on the active source tree or repo venv. ALSO trigger automatically when an incoming message is prefixed with [bro:<user_id>] (routed from the PaulShiaBro daemon): parse <user_id>, complete the request, then reply via this skill with --source-user-id <user_id>.
+description: Use whenever the user wants the answer sent through PaulShiaBro / bro / Telegram, especially when the current workspace is unrelated to paulshaclaw and the reply flow must not depend on the active source tree or repo venv.
 ---
 
 # PaulShiaBro Telegram Reply
@@ -11,7 +11,6 @@ This skill now carries its own skill-local tool, so it does **not** depend on th
 
 ## When to use
 
-- **An incoming message is prefixed with `[bro:<user_id>]`** (routed from the PaulShiaBro daemon). Treat this as a request to reply to that Telegram user: parse `<user_id>`, complete the work, then reply via this skill passing `--source-user-id <user_id>`. This is the primary automatic trigger.
 - The user explicitly asks for a reply "以bro" or "以paulshiabro" 回覆
 - The user wants the answer sent via PaulShiaBro / bro / Telegram instead of only shown inline
 - The user wants the same reply both sent to Telegram and shown back in the terminal
