@@ -86,6 +86,19 @@ config.projects[cwd].projectOnboardingSeenCount ??= 1;
 fs.writeFileSync(file, JSON.stringify(config, null, 2) + '\n');
 NODE
 
+# Idempotently ensure the gemma4 bro hooks are wired into settings.json
+# (repo = runtime; absolute paths resolved from this launcher's SCRIPT_DIR).
+node - "$GEMMA_SETTINGS" "$SCRIPT_DIR/gemma4-hooks/bro_in.py" "$SCRIPT_DIR/gemma4-hooks/bro_out.py" <<'NODE'
+const fs = require('fs');
+const [file, broIn, broOut] = process.argv.slice(2);
+let cfg = {};
+try { cfg = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+cfg.hooks = cfg.hooks || {};
+cfg.hooks.UserPromptSubmit = [{ hooks: [{ type: 'command', command: `python3 ${broIn}` }] }];
+cfg.hooks.Stop = [{ hooks: [{ type: 'command', command: `python3 ${broOut}` }] }];
+fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
+NODE
+
 unset CLAUDE_CODE_USE_VERTEX
 unset ANTHROPIC_VERTEX_PROJECT_ID
 unset CLOUD_ML_REGION
