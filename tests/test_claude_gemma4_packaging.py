@@ -318,6 +318,21 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertEqual(handler.sent_headers.count(("Content-Length", "999")), 0)
         self.assertEqual(handler.sent_headers.count(("Content-Length", "2")), 1)
 
+    def test_launcher_injects_bro_hooks(self) -> None:
+        script_text = CLAUDE_GEMMA4.read_text(encoding="utf-8")
+        self.assertIn("gemma4-hooks/bro_in.py", script_text)
+        self.assertIn("gemma4-hooks/bro_out.py", script_text)
+        self.assertIn("UserPromptSubmit", script_text)
+        self.assertIn("Stop", script_text)
+
+    def test_bro_hook_scripts_packaged(self) -> None:
+        for name in ("bro_in.py", "bro_out.py"):
+            p = PROJECT_ROOT / "scripts" / "gemma4-hooks" / name
+            self.assertTrue(p.exists(), f"{name} should exist")
+            self.assertTrue(os.access(p, os.X_OK), f"{name} should be executable")
+            r = subprocess.run(["python3", "-m", "py_compile", str(p)], capture_output=True, text=True, timeout=5)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
     def test_bootstrap_secret_template_includes_dedicated_claude_api_key(self) -> None:
         template_path = PROJECT_ROOT / "paulshaclaw" / "deploy" / "templates" / "secret" / "bootstrap" / "__INSTANCE__.telegram.secret.env.tmpl"
 
