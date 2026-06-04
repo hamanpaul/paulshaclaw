@@ -77,40 +77,51 @@ class LifecycleLedgerTest(unittest.TestCase):
         self.assertEqual(events[1]["prev_hash"], events[0]["event_hash"])
 
     def test_append_event_serializes_read_and_write_for_hash_chain(self):
-        original_read_events = lifecycle.read_events
-        concurrent_reads = threading.Barrier(2)
+        # Concurrent appenders must serialize their read-modify-write so seq stays
+        # contiguous and prev_hash forms an unbroken chain. A real threading.Barrier
+        # releases all appenders into append_event simultaneously to maximize
+        # contention. Repeated over many rounds (each on a fresh ledger) so a
+        # regression — e.g. releasing the lock before the write is flushed, which
+        # lets a second writer read stale state and reuse a seq — is caught reliably,
+        # not just probabilistically.
+        thread_count = 6
+        rounds = 30
 
-        def synchronized_read_events(path):
-            events = original_read_events(path)
-            concurrent_reads.wait(timeout=5)
-            return events
+        for round_index in range(rounds):
+            ledger_path = self.root / f"chain-{round_index}.jsonl"
+            release = threading.Barrier(thread_count)
+            errors = []
 
-        lifecycle.read_events = synchronized_read_events
-        errors = []
+            def append_record(record_id):
+                try:
+                    release.wait(timeout=5)
+                    append_event(ledger_path, record_id, "created", "test", "concurrent", "unittest")
+                except Exception as exc:  # pragma: no cover - asserted below
+                    errors.append(exc)
 
-        def append_record(record_id):
-            try:
-                append_event(self.ledger_path, record_id, "created", "test", "concurrent", "unittest")
-            except Exception as exc:  # pragma: no cover - asserted below
-                errors.append(exc)
-
-        try:
             threads = [
                 threading.Thread(target=append_record, args=(f"rec-{index}",))
-                for index in range(2)
+                for index in range(thread_count)
             ]
             for thread in threads:
                 thread.start()
             for thread in threads:
                 thread.join(timeout=5)
-        finally:
-            lifecycle.read_events = original_read_events
 
-        self.assertEqual(errors, [])
-        events = read_events(self.ledger_path)
-        self.assertEqual([event["seq"] for event in events], [1, 2])
-        self.assertIsNone(events[0]["prev_hash"])
-        self.assertEqual(events[1]["prev_hash"], events[0]["event_hash"])
+            self.assertEqual(errors, [], f"round {round_index} raised: {errors}")
+            events = read_events(ledger_path)
+            self.assertEqual(
+                sorted(event["seq"] for event in events),
+                list(range(1, thread_count + 1)),
+                f"round {round_index} seq not contiguous: {[e['seq'] for e in events]}",
+            )
+            self.assertIsNone(events[0]["prev_hash"])
+            for previous, current in zip(events, events[1:]):
+                self.assertEqual(
+                    current["prev_hash"],
+                    previous["event_hash"],
+                    f"round {round_index} broken hash chain",
+                )
 
     def test_append_event_with_metadata_and_run_id(self):
         metadata = {"key": "value", "count": 42}
