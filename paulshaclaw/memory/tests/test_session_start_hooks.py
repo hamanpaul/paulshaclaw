@@ -74,8 +74,9 @@ class SessionStartHooksTest(unittest.TestCase):
         # Config goes in parent of memory_root / "config" / "projects.yaml"
         config_path = self.memory_root.parent / "config" / "projects.yaml"
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        # Use mapping form expected by parser
         config_path.write_text(
-            "version: 1\nprojects:\n  - slug: test\n    roots:\n      - /repo/test\n",
+            "version: 1\nprojects:\n  test:\n    slug: test\n    roots:\n      - /repo/test\n",
             encoding="utf-8"
         )
 
@@ -90,6 +91,14 @@ class SessionStartHooksTest(unittest.TestCase):
     def test_claude_session_start_exits_zero_on_invalid_json(self):
         result = _run_hook("claude_session_start.py", "bad{json", extra_env=self._env())
         self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # Should still print valid JSON with empty additionalContext
+        try:
+            output = json.loads(result.stdout) if result.stdout.strip() else {}
+        except Exception as exc:
+            self.fail(f"stdout not valid JSON: {exc}: {result.stdout}")
+        hso = output.get("hookSpecificOutput", {})
+        self.assertIn("hookSpecificOutput", output)
+        self.assertEqual(hso.get("additionalContext", None), "")
 
     def test_claude_session_start_returns_structured_output_shape(self):
         """Claude SessionStart hook must return hookSpecificOutput with hookEventName."""
@@ -105,7 +114,7 @@ class SessionStartHooksTest(unittest.TestCase):
         self.assertEqual(output["hookSpecificOutput"]["hookEventName"], "SessionStart")
 
     def test_claude_session_start_includes_brief_in_additional_context(self):
-        """Hook can generate brief when project resolved (may be empty if no slices)."""
+        """Hook can generate brief when project resolved (should include wake-up markers)."""
         self._write_projects_config()
         self._write_minimal_moc("test")
         payload = {"session_id": "test-002", "cwd": "/repo/test"}
@@ -114,11 +123,15 @@ class SessionStartHooksTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         output = json.loads(result.stdout)
-        # Verify structure exists - brief content is tested in wakeup builder tests
+        # Verify structure exists
         self.assertIn("hookSpecificOutput", output)
         self.assertIn("additionalContext", output["hookSpecificOutput"])
-        # Brief may be empty or populated depending on slice/lifecycle state
-        self.assertIsInstance(output["hookSpecificOutput"]["additionalContext"], str)
+        brief = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIsInstance(brief, str)
+        # When MOC and slices are present, brief should be non-empty and include wake-up header and MOC text
+        self.assertTrue(len(brief) > 0, "expected non-empty brief when MOC/slices present")
+        self.assertIn("Memory wake-up", brief)
+        self.assertIn("Test MOC content", brief)
 
     def test_claude_session_start_quiet_when_project_unresolved(self):
         """No output when project is _unknown or empty."""
@@ -144,6 +157,13 @@ class SessionStartHooksTest(unittest.TestCase):
     def test_copilot_session_start_exits_zero_on_invalid_json(self):
         result = _run_hook("copilot_session_start.py", "not-json", extra_env=self._env())
         self.assertEqual(result.returncode, 0, msg=result.stderr)
+        # Should still print valid JSON (empty additionalContext)
+        try:
+            output = json.loads(result.stdout) if result.stdout.strip() else {}
+        except Exception as exc:
+            self.fail(f"stdout not valid JSON: {exc}: {result.stdout}")
+        self.assertIn("additionalContext", output)
+        self.assertEqual(output.get("additionalContext", None), "")
 
     def test_copilot_session_start_returns_additional_context_shape(self):
         """Copilot sessionStart hook returns additionalContext directly."""
@@ -159,7 +179,7 @@ class SessionStartHooksTest(unittest.TestCase):
         self.assertIsInstance(output["additionalContext"], str)
 
     def test_copilot_session_start_includes_brief_in_output(self):
-        """Hook can generate brief when project resolved (may be empty if no slices)."""
+        """Hook can generate brief when project resolved (should include wake-up markers)."""
         self._write_projects_config()
         self._write_minimal_moc("test")
         payload = {"sessionId": "test-005", "cwd": "/repo/test"}
@@ -168,10 +188,13 @@ class SessionStartHooksTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         output = json.loads(result.stdout)
-        # Verify structure exists - brief content is tested in wakeup builder tests
+        # Verify structure exists
         self.assertIn("additionalContext", output)
-        # Brief may be empty or populated depending on slice/lifecycle state
-        self.assertIsInstance(output["additionalContext"], str)
+        brief = output["additionalContext"]
+        self.assertIsInstance(brief, str)
+        self.assertTrue(len(brief) > 0, "expected non-empty brief when MOC/slices present")
+        self.assertIn("Memory wake-up", brief)
+        self.assertIn("Test MOC content", brief)
 
     def test_copilot_session_start_quiet_when_project_unresolved(self):
         """No output when project is _unknown or empty."""

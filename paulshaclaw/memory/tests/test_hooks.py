@@ -399,6 +399,12 @@ class InstallerTest(unittest.TestCase):
             "claude_session_end.py",
             "codex_session_end.py",
             "copilot_session_end.py",
+            # Session-start and precompact related scripts
+            "_wakeup_common.py",
+            "claude_session_start.py",
+            "copilot_session_start.py",
+            "claude_precompact.py",
+            "copilot_precompact.py",
         ):
             deployed = self.memory_root / "hooks" / script
             self.assertTrue(deployed.exists(), f"{script} not deployed")
@@ -434,6 +440,49 @@ class InstallerTest(unittest.TestCase):
             any(f"PSC_CONFIG_ROOT={self.config_root}" in cmd for cmd in commands),
             f"PSC_CONFIG_ROOT override missing from Claude hook commands: {commands}",
         )
+
+    def test_full_install_writes_claude_sessionstart_and_precompact_entries(self):
+        """Assert SessionStart and PreCompact managed entries are present for Claude."""
+        result = _run_install(self.base_args)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        settings_path = self.config_root / ".claude" / "settings.json"
+        self.assertTrue(settings_path.exists(), "claude settings.json not created")
+        settings = json.loads(settings_path.read_text())
+        session_start_hooks = settings.get("hooks", {}).get("SessionStart", [])
+        precompact_hooks = settings.get("hooks", {}).get("PreCompact", [])
+        self.assertTrue(len(session_start_hooks) > 0, "No SessionStart hook entries")
+        self.assertTrue(len(precompact_hooks) > 0, "No PreCompact hook entries")
+
+        # Extract commands
+        start_commands = [h["command"] for entry in session_start_hooks for h in entry.get("hooks", []) if "command" in h]
+        pre_commands = [h["command"] for entry in precompact_hooks for h in entry.get("hooks", []) if "command" in h]
+
+        self.assertTrue(any("claude_session_start.py" in c for c in start_commands), f"claude_session_start.py not found: {start_commands}")
+        self.assertTrue(any("claude_precompact.py" in c for c in pre_commands), f"claude_precompact.py not found: {pre_commands}")
+        self.assertTrue(any(f"PSC_MEMORY_ROOT={self.memory_root}" in c for c in start_commands), f"PSC_MEMORY_ROOT missing in SessionStart: {start_commands}")
+        self.assertTrue(any(f"PSC_CONFIG_ROOT={self.config_root}" in c for c in start_commands), f"PSC_CONFIG_ROOT missing in SessionStart: {start_commands}")
+
+    def test_full_install_writes_copilot_sessionstart_and_precompact_arrays(self):
+        """Assert Copilot config contains sessionStart and preCompact arrays."""
+        result = _run_install(self.base_args)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        hook_path = self.config_root / ".copilot" / "hooks" / "paulsha-memory.json"
+        self.assertTrue(hook_path.exists(), "copilot paulsha-memory.json not created")
+        config = json.loads(hook_path.read_text())
+
+        self.assertIn("sessionStart", config.get("hooks", {}))
+        self.assertIn("preCompact", config.get("hooks", {}))
+
+        session_start = config.get("hooks", {}).get("sessionStart", [])
+        precompact = config.get("hooks", {}).get("preCompact", [])
+
+        bash_cmds_start = [e.get("bash", "") for e in session_start]
+        bash_cmds_pre = [e.get("bash", "") for e in precompact]
+
+        self.assertTrue(any("copilot_session_start.py" in c for c in bash_cmds_start), f"copilot_session_start.py not in sessionStart: {bash_cmds_start}")
+        self.assertTrue(any("copilot_precompact.py" in c for c in bash_cmds_pre), f"copilot_precompact.py not in preCompact: {bash_cmds_pre}")
 
     def test_full_install_preserves_existing_claude_settings_non_hook_keys(self):
         """Should not clobber existing keys outside 'hooks' in settings.json."""
@@ -938,6 +987,30 @@ class InstallerTest(unittest.TestCase):
             any("claude_session_end.py" in c for c in commands),
             f"claude hook not removed: {commands}",
         )
+
+    def test_uninstall_removes_managed_claude_sessionstart_and_precompact_entries(self):
+        """Uninstall should remove managed SessionStart and PreCompact entries for Claude."""
+        _run_install(self.base_args)
+        settings_path = self.config_root / ".claude" / "settings.json"
+        self.assertTrue(settings_path.exists())
+
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", str(self.config_root),
+        ])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        settings = json.loads(settings_path.read_text())
+        # Collect all commands across SessionStart and PreCompact
+        cmds = []
+        for ev in ("SessionStart", "PreCompact"):
+            for entry in settings.get("hooks", {}).get(ev, []):
+                for h in entry.get("hooks", []):
+                    if "command" in h:
+                        cmds.append(h["command"])
+
+        self.assertFalse(any("claude_session_start.py" in c for c in cmds), f"claude_session_start.py not removed: {cmds}")
+        self.assertFalse(any("claude_precompact.py" in c for c in cmds), f"claude_precompact.py not removed: {cmds}")
 
     def test_uninstall_preserves_unrelated_claude_hooks_in_same_entry(self):
         settings_path = self.config_root / ".claude" / "settings.json"
