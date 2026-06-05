@@ -1,5 +1,9 @@
-## ADDED Requirements
+# stage11-operator-cockpit Specification
 
+## Purpose
+Stage 11 operator cockpit: multi-session tmux pane listing, cockpit-session active-slot selection, Enter-to-swap across sessions, and hotkey help.
+
+## Requirements
 ### Requirement: Cockpit lists panes from all local tmux sessions
 The Stage 11 cockpit SHALL enumerate panes from every local tmux session visible to the tmux server. Each pane record MUST include the pane ID, session name, window index, title, command, geometry, active flag, and preview data needed by the existing cockpit UI.
 

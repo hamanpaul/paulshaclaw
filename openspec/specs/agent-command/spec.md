@@ -1,5 +1,9 @@
-## ADDED Requirements
+# agent-command Specification
 
+## Purpose
+Operator `/agent` commands (start, startf, stop, status) that manage the claude-gemma4 agent tmux pane via the PaulShiaBro Telegram daemon.
+
+## Requirements
 ### Requirement: Agent start creates tmux pane and launches claude-gemma4
 The system SHALL create a new tmux pane by horizontally splitting the cockpit pane (`tmux split-window -h`) and execute `claude-gemma4` in the new pane when the operator sends `/agent start`.
 
