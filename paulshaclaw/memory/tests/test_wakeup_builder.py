@@ -57,20 +57,30 @@ class WakeupBuilderTests(unittest.TestCase):
             self.assertEqual(build_brief(root, "", now="2026-06-03T00:00:00Z"), "")
 
     def test_project_with_no_slices_returns_empty(self):
+        # Updated: MOC-only should yield a brief with Map section, not empty
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _moc(root, "p", "MOC BODY\n")
             # no slices
-            self.assertEqual(build_brief(root, "p", now="2026-06-03T00:00:00Z"), "")
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            # should not be empty, should have Map section
+            self.assertNotEqual(out, "")
+            self.assertIn("## Map", out)
+            self.assertIn("MOC BODY", out)
 
     def test_decayed_slice_excluded(self):
+        # Updated: MOC-only should yield a brief with Map section, not empty
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _moc(root, "p", "MOC BODY\n")
             _slice(root, "sl-1", "p", "alpha")
             lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
                                    record_id="sl-1", event_type="decayed", source="janitor", reason="ttl", actor="janitor", ts="2026-04-01T00:00:00Z")
-            self.assertEqual(build_brief(root, "p", now="2026-06-03T00:00:00Z"), "")
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            # should not be empty, should have Map section (decayed slice excluded from Recent)
+            self.assertNotEqual(out, "")
+            self.assertIn("## Map", out)
+            self.assertIn("MOC BODY", out)
 
     def test_char_budget_truncates_map_tail_but_keeps_recent(self):
         with TemporaryDirectory() as tmp:
@@ -88,6 +98,7 @@ class WakeupBuilderTests(unittest.TestCase):
 
     def test_recent_summary_comes_from_body(self):
         # New TDD: ensure summary uses first non-empty line from the slice body, not title
+        # Updated: wikilink now uses file stem
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _moc(root, "p", "MOC\n")
@@ -97,7 +108,7 @@ class WakeupBuilderTests(unittest.TestCase):
             out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
             # expect the recent entry to show the body-derived summary and enriched format
             self.assertIn("sl-1", out)
-            self.assertIn("[[meta-title]]", out)
+            self.assertIn("[[meta-title--sl-1]]", out)  # Updated: now uses file stem
             self.assertIn("First line summary", out)
             self.assertIn("(2026-05-01T00:00:00Z)", out)
             self.assertNotIn("sl-1: meta-title", out)
@@ -155,6 +166,57 @@ class WakeupBuilderTests(unittest.TestCase):
             a = build_brief(root, "p", now="2026-06-03T00:00:00Z")
             b = build_brief(root, "p", now="2026-06-03T00:00:00Z")
             self.assertEqual(a, b)
+
+    def test_moc_only_yields_map_section(self):
+        # Issue 1: MOC-only data should yield a brief with Map section
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC BODY\n")
+            # no slices
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            # should not be empty, should have Map section
+            self.assertNotEqual(out, "")
+            self.assertIn("# Memory wake-up — p", out)
+            self.assertIn("## Map", out)
+            self.assertIn("MOC BODY", out)
+            # should not have Recent section (or empty Recent section is acceptable)
+
+    def test_recent_only_yields_recent_section(self):
+        # Issue 1: Recent-only data should yield a brief with Recent section
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # no MOC
+            _slice(root, "sl-1", "p", "alpha")
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            # should not be empty, should have Recent section
+            self.assertNotEqual(out, "")
+            self.assertIn("# Memory wake-up — p", out)
+            self.assertIn("## Recent", out)
+            self.assertIn("sl-1", out)
+            # should not have Map section (or empty Map section is acceptable)
+
+    def test_neither_moc_nor_active_slices_returns_empty(self):
+        # Issue 1: truly empty project (no MOC, no slices) should return empty
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # no MOC, no slices
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            self.assertEqual(out, "")
+
+    def test_recent_wikilink_uses_slice_stem_not_title(self):
+        # Issue 2: Recent entries should use the actual slice stem for the wikilink
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            _slice(root, "sl-1", "p", "meta-title", body="First line summary\n")
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            # expect the wikilink to be [[meta-title--sl-1]] not [[meta-title]]
+            self.assertIn("[[meta-title--sl-1]]", out)
+            self.assertNotIn("[[meta-title]]", out)
 
 
 if __name__ == "__main__":

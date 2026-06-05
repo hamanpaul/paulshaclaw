@@ -50,10 +50,12 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
             if not sid:
                 continue
             title = fm.get("title") or path.stem.rsplit("--", 1)[0]
-            slices.append({"slice_id": str(sid), "title": title, "body": body})
+            # Capture the actual file stem for wikilinks
+            file_stem = path.stem
+            slices.append({"slice_id": str(sid), "title": title, "body": body, "file_stem": file_stem})
 
-    if moc_body is None or not slices:
-        # Per spec: empty string when no relevant MOC/slices
+    # Per spec: empty only when both MOC and active slices are absent
+    if moc_body is None and not slices:
         return ""
 
     # Compute active slices and lifecycle state
@@ -66,7 +68,9 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
 
     # Filter slices to only active ones
     active_slices = [s for s in slices if s["slice_id"] in active_ids]
-    if not active_slices:
+    
+    # Per spec: empty only when both MOC and active slices are absent
+    if moc_body is None and not active_slices:
         return ""
 
     # Attach last_event_ts for sorting
@@ -93,16 +97,14 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         if not summary:
             # fallback to title if body has no meaningful lines
             summary = s.get("title") or ""
-        # recent line: keep slice id for backward compat, add title stem and ts per plan
-        stem = s.get("title") or ""
+        # recent line: use actual file stem for wikilink
+        stem = s.get("file_stem") or s.get("title") or ""
         ts = s.get("last_event_ts") or ""
         recent_lines.append(f"- {s['slice_id']} [[{stem}]] — {summary} ({ts})")
 
     header = f"# Memory wake-up — {project}\n\n"
     map_header = "## Map\n\n"
     recent_header = "## Recent\n\n"
-
-    recent_block = recent_header + "\n".join(recent_lines) + "\n\n"
 
     moc_body = (moc_body or "")
 
@@ -112,9 +114,46 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
             return text
         return text[:budget]
 
-    # Respect char budget: try to keep Map before Recent per spec, truncating only the Map tail.
-    # We must ensure the result does not exceed char_budget; if necessary trim recent entries to allow a Map header
+    # Respect char budget
     remaining_after_header = max(0, char_budget - len(header))
+    
+    # Handle MOC-only case (no active slices)
+    if moc_body and not active_slices:
+        # Only Map section
+        map_block = map_header + moc_body
+        if len(map_block) > remaining_after_header:
+            # Truncate MOC body
+            allowed_body = remaining_after_header - len(map_header)
+            if allowed_body > 0:
+                marker = "\n\n(truncated)\n"
+                slice_len = max(0, allowed_body - len(marker))
+                map_block = map_header + moc_body[:slice_len] + marker
+            else:
+                map_block = map_header + "\n\n(truncated)\n"
+        result = header + map_block
+        return clamp(result, char_budget)
+    
+    # Handle Recent-only case (no MOC)
+    if not moc_body and active_slices:
+        # Build Recent block
+        recent_block = recent_header + "\n".join(recent_lines) + "\n\n"
+        if len(recent_block) > remaining_after_header:
+            # Trim recent entries to fit
+            recent_lines_mut = list(recent_lines)
+            while recent_lines_mut:
+                current_recent = recent_header + "\n".join(recent_lines_mut) + "\n\n"
+                if len(current_recent) <= remaining_after_header:
+                    recent_block = current_recent
+                    break
+                recent_lines_mut.pop()
+            else:
+                # Can't fit any recent entries, just header
+                recent_block = clamp(recent_header, remaining_after_header)
+        result = header + recent_block
+        return clamp(result, char_budget)
+
+    # Handle both MOC and Recent present
+    recent_block = recent_header + "\n".join(recent_lines) + "\n\n"
 
     # work with a mutable copy of recent lines so we can trim if needed
     recent_lines_mut = list(recent_lines)
