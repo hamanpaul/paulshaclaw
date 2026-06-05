@@ -41,3 +41,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--now", default=None)
     args = parser.parse_args(argv)
     return run(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
