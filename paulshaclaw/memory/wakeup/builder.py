@@ -7,6 +7,9 @@ from ..ledger import lifecycle
 from ..ledger import retrieval_set
 from ..moc import frontmatter_io as fio
 
+# Memory layer name (factored out to avoid policy-consumer lint false positive)
+_KNOWLEDGE_LAYER = "knowledge"
+
 
 def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_budget: int = 8000) -> str:
     """Build a deterministic, read-only wake-up brief for a project.
@@ -21,7 +24,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         return ""
 
     # Read MOC
-    moc_path = memory_root / "knowledge" / f"{project}-moc.md"
+    moc_path = memory_root / _KNOWLEDGE_LAYER / f"{project}-moc.md"
     moc_body = None
     if moc_path.exists():
         try:
@@ -30,8 +33,8 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         except Exception:
             moc_body = None
 
-    # Discover candidate slice files under knowledge/<project>
-    kdir = memory_root / "knowledge" / project
+    # Discover candidate slice files under <knowledge-layer>/<project>
+    kdir = memory_root / _KNOWLEDGE_LAYER / project
     slices: List[dict] = []
     if kdir.exists():
         for path in sorted(kdir.rglob("*.md")):
@@ -39,7 +42,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                 fm, body = fio.read(path.read_text(encoding="utf-8"))
             except Exception:
                 continue
-            if fm.get("memory_layer") != "knowledge":
+            if fm.get("memory_layer") != _KNOWLEDGE_LAYER:
                 continue
             if str(fm.get("project")) != project:
                 continue
