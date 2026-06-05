@@ -44,5 +44,38 @@ class TestWakeupCLI(unittest.TestCase):
                     self.assertEqual(rc, 0)
 
 
+
+    def test_wakeup_main_parsing_defaults(self):
+        # Integration-level test: calling wakeup.cli.main should parse defaults
+        from pathlib import Path
+        import paulshaclaw.memory.wakeup.cli as wakeup_cli
+
+        default_root = str(Path.home() / ".agents" / "memory")
+
+        with mock.patch('paulshaclaw.memory.wakeup.cli.build_brief', return_value='BRIEF') as bb:
+            # call main without specifying --memory-root; should use default
+            rc = wakeup_cli.main(['--project', 'myproj'])
+            bb.assert_called_once()
+            called_args, called_kwargs = bb.call_args
+            # first positional arg is memory_root Path
+            assert str(called_args[0]) == default_root
+            # now should be materialized to end with Z
+            now_val = called_kwargs.get('now')
+            assert now_val is not None and now_val.endswith('Z')
+            assert rc == 0
+
+    def test_root_wakeup_registration_smoke(self):
+        # Smoke test for root CLI registration: call top-level main
+        import paulshaclaw.memory.cli as mem_cli
+        import paulshaclaw.memory.wakeup.cli as wakeup_cli
+
+        with mock.patch('paulshaclaw.memory.wakeup.cli.build_brief', return_value='BRIEF') as bb:
+            with mock.patch('builtins.print') as p:
+                rc = mem_cli.main(['memory', 'wakeup', '--project', 'myproj'])
+                bb.assert_called_once()
+                p.assert_called_once_with('BRIEF')
+                assert rc == 0
+
+
 if __name__ == '__main__':
     unittest.main()

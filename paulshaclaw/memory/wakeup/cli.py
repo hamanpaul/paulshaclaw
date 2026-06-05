@@ -6,6 +6,7 @@ from typing import Sequence
 
 from ..importer.project_resolver import resolve_project
 from .builder import build_brief
+from datetime import datetime, timezone
 
 
 def run(args: argparse.Namespace) -> int:
@@ -19,6 +20,10 @@ def run(args: argparse.Namespace) -> int:
         else:
             project = "_unknown"
 
+    # materialize 'now' if missing to UTC ISO8601 ending with Z
+    if getattr(args, "now", None) is None:
+        args.now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
     # call build_brief
     brief = build_brief(Path(getattr(args, "memory_root")), project, now=getattr(args, "now", None), k=getattr(args, "k", 8), char_budget=getattr(args, "char_budget", 8000))
     if brief:
@@ -28,7 +33,7 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="psc memory wakeup")
-    parser.add_argument("--memory-root", required=True)
+    parser.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
     parser.add_argument("--project", default=None)
     parser.add_argument("--cwd", default=None)
     parser.add_argument("--k", type=int, default=8)

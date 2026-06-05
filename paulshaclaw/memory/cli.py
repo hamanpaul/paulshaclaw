@@ -112,7 +112,7 @@ def _build_parser() -> argparse.ArgumentParser:
     search_p.set_defaults(func=_search)
 
     wakeup_p = memory_subparsers.add_parser("wakeup")
-    wakeup_p.add_argument("--memory-root", required=True)
+    wakeup_p.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
     wakeup_p.add_argument("--project", default=None)
     wakeup_p.add_argument("--cwd", default=None)
     wakeup_p.add_argument("--k", type=int, default=8)
