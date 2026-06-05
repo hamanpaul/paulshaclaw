@@ -103,6 +103,12 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
 
     moc_body = (moc_body or "")
 
+    def clamp(text: str, budget: int) -> str:
+        # return a prefix of text that does not exceed budget characters
+        if len(text) <= budget:
+            return text
+        return text[:budget]
+
     # Respect char budget: try to keep Map before Recent per spec, truncating only the Map tail.
     # We must ensure the result does not exceed char_budget; if necessary trim recent entries to allow a Map header
     remaining_after_header = max(0, char_budget - len(header))
@@ -111,22 +117,25 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     recent_lines_mut = list(recent_lines)
 
     while True:
-        # rebuild recent block for current lines
+        # rebuild recent block for current lines (do not rstrip — we account exactly for bytes)
         current_recent_block = recent_header + "\n".join(recent_lines_mut) + "\n\n"
         # minimal required for map (header only)
         needed_for_map_header_and_recent = len(map_header) + len(current_recent_block)
         if needed_for_map_header_and_recent > remaining_after_header:
-            # not enough room: trim the last recent line and retry
+            # not enough room: trim the last recent line and retry (prefer Map header per spec)
             if recent_lines_mut:
                 recent_lines_mut.pop()
                 continue
             else:
-                # no recent lines left; try to include minimal map marker
+                # no recent lines left; try to include minimal map marker first
                 minimal_map_section = map_header + "\n\n(truncated)\n"
                 if len(minimal_map_section) <= remaining_after_header:
-                    return header + minimal_map_section
-                # as an extreme fallback, return header truncated to budget
-                return header[:char_budget].rstrip() + "\n"
+                    return clamp(header + minimal_map_section, char_budget)
+                # if minimal map doesn't fit, prefer keeping Recent header for continuity if possible
+                if len(recent_header) <= remaining_after_header:
+                    return clamp(header + recent_header, char_budget)
+                # as an extreme fallback, return a clamped header (do not append newlines that could re-grow)
+                return clamp(header, char_budget)
         else:
             # we have room for map header and current recent block; allocate remaining to map body
             allowed_body = remaining_after_header - len(current_recent_block) - len(map_header)
@@ -138,7 +147,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                     marker = "\n\n(truncated)\n"
                     # reserve room for marker within allowed_body
                     slice_len = max(0, allowed_body - len(marker))
-                    truncated_body = moc_body[:slice_len].rstrip() + marker
+                    truncated_body = moc_body[:slice_len] + marker
                 else:
                     truncated_body = moc_body
                 map_block = map_header + truncated_body
@@ -150,5 +159,5 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                     recent_lines_mut.pop()
                     continue
                 # as last resort, truncate the result to budget
-                return result[:char_budget].rstrip() + "\n"
+                return clamp(result, char_budget)
             return result

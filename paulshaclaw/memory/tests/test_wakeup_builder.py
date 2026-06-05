@@ -118,6 +118,33 @@ class WakeupBuilderTests(unittest.TestCase):
             self.assertIn("## Map", out)
             self.assertIn("(truncated)", out)
 
+    def test_strict_budget_never_exceeds(self):
+        # ensure no code path can return more than the provided char_budget
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC BODY\n")
+            _slice(root, "sl-1", "p", "alpha")
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+            # extremely tight budget intended to exercise extreme fallback
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=5)
+            self.assertLessEqual(len(out), 5)
+
+    def test_preserve_recent_over_map_in_extreme_fallback(self):
+        # prefer preserving Recent continuity when budget forces a hard choice
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC BODY\n")
+            _slice(root, "sl-1", "p", "alpha")
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+            # small budget that should allow Recent but not a full Map body
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=40)
+            self.assertLessEqual(len(out), 40)
+            self.assertIn("## Recent", out)
+            # Map may be absent in this extreme case; if present it should show truncated marker
+            self.assertTrue(("## Map" not in out) or ("(truncated)" in out))
+
     def test_deterministic_repeated_calls(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
