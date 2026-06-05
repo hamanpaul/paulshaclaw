@@ -16,7 +16,8 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     """
     memory_root = Path(memory_root)
 
-    if project == "_unknown":
+    # guard empty or unknown project
+    if project in ("_unknown", ""):
         return ""
 
     # Read MOC
@@ -89,7 +90,10 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         if not summary:
             # fallback to title if body has no meaningful lines
             summary = s.get("title") or ""
-        recent_lines.append(f"- {s['slice_id']}: {summary}")
+        # recent line: keep slice id for backward compat, add title stem and ts per plan
+        stem = s.get("title") or ""
+        ts = s.get("last_event_ts") or ""
+        recent_lines.append(f"- {s['slice_id']} [[{stem}]] — {summary} ({ts})")
 
     header = f"# Memory wake-up — {project}\n\n"
     map_header = "## Map\n\n"
@@ -97,13 +101,12 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
 
     recent_block = recent_header + "\n".join(recent_lines) + "\n\n"
 
-    map_block = map_header + (moc_body or "")
+    moc_body = (moc_body or "")
 
     # Respect char budget: try to keep Map before Recent per spec, truncating only the Map tail.
     # We must ensure the result does not exceed char_budget; if necessary trim recent entries to allow a Map header
     remaining_after_header = max(0, char_budget - len(header))
 
-    moc_body = (moc_body or "")
     # work with a mutable copy of recent lines so we can trim if needed
     recent_lines_mut = list(recent_lines)
 
@@ -132,8 +135,20 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                 map_block = map_header + "\n\n(truncated)\n"
             else:
                 if len(moc_body) > allowed_body:
-                    truncated_body = moc_body[:allowed_body].rstrip() + "\n\n(truncated)\n"
+                    marker = "\n\n(truncated)\n"
+                    # reserve room for marker within allowed_body
+                    slice_len = max(0, allowed_body - len(marker))
+                    truncated_body = moc_body[:slice_len].rstrip() + marker
                 else:
                     truncated_body = moc_body
                 map_block = map_header + truncated_body
-            return header + map_block + current_recent_block
+            result = header + map_block + current_recent_block
+            # defensive: ensure we never exceed char_budget
+            if len(result) > char_budget:
+                # try to shrink recent block further if possible
+                if recent_lines_mut:
+                    recent_lines_mut.pop()
+                    continue
+                # as last resort, truncate the result to budget
+                return result[:char_budget].rstrip() + "\n"
+            return result

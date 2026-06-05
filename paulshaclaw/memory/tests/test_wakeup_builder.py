@@ -51,6 +51,11 @@ class WakeupBuilderTests(unittest.TestCase):
             root = Path(tmp)
             self.assertEqual(build_brief(root, "_unknown", now="2026-06-03T00:00:00Z"), "")
 
+    def test_empty_project_returns_empty(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(build_brief(root, "", now="2026-06-03T00:00:00Z"), "")
+
     def test_project_with_no_slices_returns_empty(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -76,6 +81,8 @@ class WakeupBuilderTests(unittest.TestCase):
             lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
                                    record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
             out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=200)
+            # budget contract: never exceed the provided char_budget
+            self.assertLessEqual(len(out), 200)
             self.assertIn("## Recent", out)
             self.assertIn("(truncated)", out)
 
@@ -88,8 +95,11 @@ class WakeupBuilderTests(unittest.TestCase):
             lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
                                    record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
             out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
-            # expect the recent entry to show the body-derived summary
-            self.assertIn("sl-1: First line summary", out)
+            # expect the recent entry to show the body-derived summary and enriched format
+            self.assertIn("sl-1", out)
+            self.assertIn("[[meta-title]]", out)
+            self.assertIn("First line summary", out)
+            self.assertIn("(2026-05-01T00:00:00Z)", out)
             self.assertNotIn("sl-1: meta-title", out)
 
     def test_map_header_present_even_under_tight_budget(self):
@@ -103,6 +113,8 @@ class WakeupBuilderTests(unittest.TestCase):
                                    record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
             # very small budget to force tight behavior
             out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=80)
+            # budget contract
+            self.assertLessEqual(len(out), 80)
             self.assertIn("## Map", out)
             self.assertIn("(truncated)", out)
 
