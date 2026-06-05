@@ -1,15 +1,9 @@
-## REMOVED Requirements
+# stage1 Specification
 
-### Requirement: OpenAI-compatible chat backend
-**Reason**: Replaced by claude-gemma4 agent pane routing. The stateless HTTP chat backend is superseded by an interactive Claude Code session with context memory.
-**Migration**: Non-command messages now route to the claude-gemma4 tmux pane. The `paulshaclaw/chat/` module (openai.py, config.py, backend.py) is deleted. Runtime API keys now flow through `PSC_CLAUDE_GEMMA4_API_KEY` with `OPENAI_API_KEY` kept as a compatibility fallback, and the old `OPENAI_BASE_URL`/`OPENAI_MODEL` provider settings are no longer needed.
+## Purpose
+Stage 1 Telegram command router handling of non-command messages: route them to the claude-gemma4 agent pane (replacing the former HTTP chat backend).
 
-### Requirement: Chat backend conversation logging
-**Reason**: The IN/OUT logging tied to the chat backend reply cycle is removed. claude-gemma4 has its own session logs.
-**Migration**: Remove chat-specific IN/OUT log lines from listener.py. Standard Telegram message receipt logging remains.
-
-## MODIFIED Requirements
-
+## Requirements
 ### Requirement: TelegramCommandRouter handles non-command messages
 The TelegramCommandRouter SHALL route non-command messages through agent pane detection and tmux send-keys instead of invoking a ChatBackend. When no agent is running, it SHALL return a fallback message. The `chat_backend` constructor parameter is removed.
 
