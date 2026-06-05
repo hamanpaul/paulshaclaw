@@ -164,7 +164,10 @@ fi
 # ------------------------------------------------------------------
 hooks_src_dir="${repo_root}/paulshaclaw/memory/hooks"
 
-for script in install.sh uninstall.sh claude_session_end.py codex_session_end.py copilot_session_end.py; do
+for script in install.sh uninstall.sh \
+  claude_session_end.py codex_session_end.py copilot_session_end.py \
+  _wakeup_common.py claude_session_start.py copilot_session_start.py \
+  claude_precompact.py copilot_precompact.py; do
   src="${hooks_src_dir}/${script}"
   dst="${memory_root}/hooks/${script}"
   if [[ -f "$src" ]]; then
@@ -186,13 +189,15 @@ hook_dir="${memory_root}/hooks"
 hook_env_prefix="PSC_MEMORY_ROOT=${memory_root} PSC_CONFIG_ROOT=${config_root}"
 
 # ------------------------------------------------------------------
-# Step 4: Claude settings.json — merge SessionEnd hook entry
+# Step 4: Claude settings.json — merge SessionEnd, SessionStart, PreCompact hook entries
 # ------------------------------------------------------------------
 claude_settings="${config_root}/.claude/settings.json"
 install -d -m 700 "$(dirname "$claude_settings")"
 
-# Build the hook entry we manage (use a sentinel comment-free marker in command)
-claude_hook_command="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_session_end.py"
+# Build the hook commands we manage
+claude_session_end_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_session_end.py"
+claude_session_start_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_session_start.py"
+claude_precompact_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_precompact.py"
 
 # Read existing JSON or start fresh
 if [[ -f "$claude_settings" ]]; then
@@ -201,12 +206,15 @@ else
   existing_claude="{}"
 fi
 
-python3 - "$claude_settings" "$existing_claude" "$claude_hook_command" <<'PYEOF'
+python3 - "$claude_settings" "$existing_claude" \
+  "$claude_session_end_cmd" "$claude_session_start_cmd" "$claude_precompact_cmd" <<'PYEOF'
 import json, sys
 
 settings_path = sys.argv[1]
 existing_json = sys.argv[2]
-hook_command = sys.argv[3]
+session_end_cmd = sys.argv[3]
+session_start_cmd = sys.argv[4]
+precompact_cmd = sys.argv[5]
 
 try:
     settings = json.loads(existing_json)
@@ -218,12 +226,6 @@ if not isinstance(settings, dict):
     sys.exit(1)
 
 hooks = settings.setdefault("hooks", {})
-session_end_list = hooks.setdefault("SessionEnd", [])
-if not isinstance(session_end_list, list):
-    print(f"install.sh: hooks.SessionEnd must be a list in {settings_path}", file=sys.stderr)
-    sys.exit(1)
-
-managed_marker = "claude_session_end.py"
 
 def _command_parts(command):
     parts = command.strip().split()
@@ -234,7 +236,8 @@ def _command_parts(command):
         parts = parts[1:]
     return parts
 
-def _is_managed_claude_hook(hook):
+def _is_managed_claude_hook(hook, script_markers):
+    """Check if hook is managed by paulsha-memory for any of the given script names."""
     if not isinstance(hook, dict):
         return False
     if hook.get("managedBy") == "paulsha-memory":
@@ -245,48 +248,58 @@ def _is_managed_claude_hook(hook):
     if not isinstance(command, str):
         return False
     parts = _command_parts(command)
-    return (
-        len(parts) == 2
-        and parts[0].endswith("/hooks/.venv/bin/python")
-        and parts[1].endswith(f"/hooks/{managed_marker}")
+    if len(parts) != 2 or not parts[0].endswith("/hooks/.venv/bin/python"):
+        return False
+    return any(parts[1].endswith(f"/hooks/{marker}") for marker in script_markers)
+
+def _reconcile_event(event_name, hook_command, script_marker):
+    """Reconcile a Claude hook event, removing old managed entries and adding the new one."""
+    event_list = hooks.setdefault(event_name, [])
+    if not isinstance(event_list, list):
+        print(f"install.sh: hooks.{event_name} must be a list in {settings_path}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Remove old managed entries for this script
+    updated_entries = []
+    target_entry = None
+    for entry in event_list:
+        if not isinstance(entry, dict):
+            updated_entries.append(entry)
+            continue
+        hooks_list = entry.get("hooks", [])
+        if not isinstance(hooks_list, list):
+            hooks_list = []
+        kept_hooks = [
+            hook
+            for hook in hooks_list
+            if not _is_managed_claude_hook(hook, [script_marker])
+        ]
+        updated_entry = dict(entry)
+        updated_entry["hooks"] = kept_hooks
+        if updated_entry.get("matcher", "") == "" and target_entry is None:
+            target_entry = updated_entry
+        if kept_hooks:
+            updated_entries.append(updated_entry)
+    
+    if target_entry is None:
+        target_entry = {"matcher": "", "hooks": []}
+        updated_entries.append(target_entry)
+    
+    target_entry["hooks"].append(
+        {
+            "type": "command",
+            "command": hook_command,
+            "timeout": 10,
+            "managedBy": "paulsha-memory",
+        }
     )
+    if target_entry not in updated_entries:
+        updated_entries.append(target_entry)
+    hooks[event_name] = updated_entries
 
-updated_entries = []
-target_entry = None
-for entry in session_end_list:
-    if not isinstance(entry, dict):
-        updated_entries.append(entry)
-        continue
-    hooks_list = entry.get("hooks", [])
-    if not isinstance(hooks_list, list):
-        hooks_list = []
-    kept_hooks = [
-        hook
-        for hook in hooks_list
-        if not _is_managed_claude_hook(hook)
-    ]
-    updated_entry = dict(entry)
-    updated_entry["hooks"] = kept_hooks
-    if updated_entry.get("matcher", "") == "" and target_entry is None:
-        target_entry = updated_entry
-    if kept_hooks:
-        updated_entries.append(updated_entry)
-
-if target_entry is None:
-    target_entry = {"matcher": "", "hooks": []}
-    updated_entries.append(target_entry)
-
-target_entry["hooks"].append(
-    {
-        "type": "command",
-        "command": hook_command,
-        "timeout": 10,
-        "managedBy": "paulsha-memory",
-    }
-)
-if target_entry not in updated_entries:
-    updated_entries.append(target_entry)
-settings["hooks"]["SessionEnd"] = updated_entries
+_reconcile_event("SessionEnd", session_end_cmd, "claude_session_end.py")
+_reconcile_event("SessionStart", session_start_cmd, "claude_session_start.py")
+_reconcile_event("PreCompact", precompact_cmd, "claude_precompact.py")
 
 with open(settings_path, "w", encoding="utf-8") as f:
     json.dump(settings, f, indent=2, sort_keys=True)
@@ -413,13 +426,18 @@ PYEOF
 copilot_hook="${config_root}/.copilot/hooks/paulsha-memory.json"
 install -d -m 700 "$(dirname "$copilot_hook")"
 
-copilot_command="${hook_env_prefix} ${venv_python} ${hook_dir}/copilot_session_end.py"
+copilot_session_end_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/copilot_session_end.py"
+copilot_session_start_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/copilot_session_start.py"
+copilot_precompact_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/copilot_precompact.py"
 
-python3 - "$copilot_hook" "$copilot_command" <<'PYEOF'
+python3 - "$copilot_hook" \
+  "$copilot_session_end_cmd" "$copilot_session_start_cmd" "$copilot_precompact_cmd" <<'PYEOF'
 import json, sys
 
 hook_path = sys.argv[1]
-bash_command = sys.argv[2]
+session_end_cmd = sys.argv[2]
+session_start_cmd = sys.argv[3]
+precompact_cmd = sys.argv[4]
 
 config = {
     "version": 1,
@@ -427,7 +445,23 @@ config = {
         "sessionEnd": [
             {
                 "type": "command",
-                "bash": bash_command,
+                "bash": session_end_cmd,
+                "powershell": "Write-Host 'paulsha-memory: powershell path not supported in MVP'",
+                "timeoutSec": 10,
+            }
+        ],
+        "sessionStart": [
+            {
+                "type": "command",
+                "bash": session_start_cmd,
+                "powershell": "Write-Host 'paulsha-memory: powershell path not supported in MVP'",
+                "timeoutSec": 10,
+            }
+        ],
+        "preCompact": [
+            {
+                "type": "command",
+                "bash": precompact_cmd,
                 "powershell": "Write-Host 'paulsha-memory: powershell path not supported in MVP'",
                 "timeoutSec": 10,
             }

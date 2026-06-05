@@ -60,7 +60,7 @@ if [[ "$config_root" =~ [[:space:]] ]]; then
 fi
 
 # ------------------------------------------------------------------
-# Remove managed Claude SessionEnd hook entry
+# Remove managed Claude SessionEnd, SessionStart, PreCompact hook entries
 # ------------------------------------------------------------------
 claude_settings="${config_root}/.claude/settings.json"
 
@@ -75,7 +75,7 @@ try:
 except Exception:
     sys.exit(0)
 
-managed_marker = "claude_session_end.py"
+script_markers = ["claude_session_end.py", "claude_session_start.py", "claude_precompact.py"]
 
 def _command_parts(command):
     parts = command.strip().split()
@@ -97,31 +97,34 @@ def _is_managed_claude_hook(hook):
     if not isinstance(command, str):
         return False
     parts = _command_parts(command)
-    return (
-        len(parts) == 2
-        and parts[0].endswith("/hooks/.venv/bin/python")
-        and parts[1].endswith(f"/hooks/{managed_marker}")
-    )
+    if len(parts) != 2 or not parts[0].endswith("/hooks/.venv/bin/python"):
+        return False
+    return any(parts[1].endswith(f"/hooks/{marker}") for marker in script_markers)
 
-session_end_list = settings.get("hooks", {}).get("SessionEnd", [])
-filtered = []
-for entry in session_end_list:
-    if not isinstance(entry, dict):
-        filtered.append(entry)
-        continue
-    hooks_list = entry.get("hooks", [])
-    if not isinstance(hooks_list, list):
-        hooks_list = []
-    kept_hooks = [
-        hook
-        for hook in hooks_list
-        if not _is_managed_claude_hook(hook)
-    ]
-    if kept_hooks:
-        updated_entry = dict(entry)
-        updated_entry["hooks"] = kept_hooks
-        filtered.append(updated_entry)
-settings.setdefault("hooks", {})["SessionEnd"] = filtered
+def _filter_event(event_name):
+    event_list = settings.get("hooks", {}).get(event_name, [])
+    filtered = []
+    for entry in event_list:
+        if not isinstance(entry, dict):
+            filtered.append(entry)
+            continue
+        hooks_list = entry.get("hooks", [])
+        if not isinstance(hooks_list, list):
+            hooks_list = []
+        kept_hooks = [
+            hook
+            for hook in hooks_list
+            if not _is_managed_claude_hook(hook)
+        ]
+        if kept_hooks:
+            updated_entry = dict(entry)
+            updated_entry["hooks"] = kept_hooks
+            filtered.append(updated_entry)
+    return filtered
+
+settings.setdefault("hooks", {})
+for event_name in ["SessionEnd", "SessionStart", "PreCompact"]:
+    settings["hooks"][event_name] = _filter_event(event_name)
 
 with open(settings_path, "w", encoding="utf-8") as f:
     json.dump(settings, f, indent=2, sort_keys=True)
