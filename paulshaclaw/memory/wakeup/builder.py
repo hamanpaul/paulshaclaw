@@ -75,15 +75,20 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     active_slices.sort(key=lambda x: ((x.get("last_event_ts") or ""), x["slice_id"]))
     active_slices = list(reversed(active_slices))
 
-    # Build Recent block (one-line summaries)
+    # Build Recent block (one-line summaries) - summary must come from the slice body per spec
     recent_lines: List[str] = []
     for s in active_slices[:k]:
+        body = (s.get("body") or "")
+        # find first meaningful (non-empty) line from body
         summary = ""
-        # Use title if present, else first line of body
-        if s.get("title"):
-            summary = s["title"]
-        else:
-            summary = (s.get("body") or "").splitlines()[0] if (s.get("body") or "") else ""
+        for line in body.splitlines():
+            line = line.strip()
+            if line:
+                summary = line
+                break
+        if not summary:
+            # fallback to title if body has no meaningful lines
+            summary = s.get("title") or ""
         recent_lines.append(f"- {s['slice_id']}: {summary}")
 
     header = f"# Memory wake-up — {project}\n\n"
@@ -94,31 +99,41 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
 
     map_block = map_header + (moc_body or "")
 
-    # Respect char budget: preserve header + recent first, truncate map tail if necessary
-    full_without_trunc = header + map_block + recent_block
-    if len(full_without_trunc) <= char_budget:
-        # Place Map before Recent per spec
-        return header + map_block + recent_block
+    # Respect char budget: try to keep Map before Recent per spec, truncating only the Map tail.
+    # We must ensure the result does not exceed char_budget; if necessary trim recent entries to allow a Map header
+    remaining_after_header = max(0, char_budget - len(header))
 
-    # Otherwise, ensure header+recent preserved and truncate map
-    preserved = header + recent_block
-    allowed_for_map = max(0, char_budget - len(preserved))
-    if allowed_for_map <= 0:
-        # No room for map; return header + recent only
-        return preserved.rstrip() + "\n"
+    moc_body = (moc_body or "")
+    # work with a mutable copy of recent lines so we can trim if needed
+    recent_lines_mut = list(recent_lines)
 
-    # Truncate map body to allowed_for_map length
-    # Ensure we include the map header in the budget
-    map_body_only = (moc_body or "")
-    # If allowed includes map_header length, subtract it when slicing body
-    map_header_len = len(map_header)
-    if allowed_for_map <= map_header_len:
-        # Not enough room even for map header text; omit map and mark truncated
-        return preserved.rstrip() + "\n"
-    allowed_body = allowed_for_map - map_header_len
-    if len(map_body_only) > allowed_body:
-        truncated_body = map_body_only[:allowed_body].rstrip() + "\n\n(truncated)\n"
-    else:
-        truncated_body = map_body_only
-    map_block = map_header + truncated_body
-    return header + map_block + recent_block
+    while True:
+        # rebuild recent block for current lines
+        current_recent_block = recent_header + "\n".join(recent_lines_mut) + "\n\n"
+        # minimal required for map (header only)
+        needed_for_map_header_and_recent = len(map_header) + len(current_recent_block)
+        if needed_for_map_header_and_recent > remaining_after_header:
+            # not enough room: trim the last recent line and retry
+            if recent_lines_mut:
+                recent_lines_mut.pop()
+                continue
+            else:
+                # no recent lines left; try to include minimal map marker
+                minimal_map_section = map_header + "\n\n(truncated)\n"
+                if len(minimal_map_section) <= remaining_after_header:
+                    return header + minimal_map_section
+                # as an extreme fallback, return header truncated to budget
+                return header[:char_budget].rstrip() + "\n"
+        else:
+            # we have room for map header and current recent block; allocate remaining to map body
+            allowed_body = remaining_after_header - len(current_recent_block) - len(map_header)
+            if allowed_body <= 0:
+                # include map header and truncated marker
+                map_block = map_header + "\n\n(truncated)\n"
+            else:
+                if len(moc_body) > allowed_body:
+                    truncated_body = moc_body[:allowed_body].rstrip() + "\n\n(truncated)\n"
+                else:
+                    truncated_body = moc_body
+                map_block = map_header + truncated_body
+            return header + map_block + current_recent_block

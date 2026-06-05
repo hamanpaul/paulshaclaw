@@ -79,6 +79,33 @@ class WakeupBuilderTests(unittest.TestCase):
             self.assertIn("## Recent", out)
             self.assertIn("(truncated)", out)
 
+    def test_recent_summary_comes_from_body(self):
+        # New TDD: ensure summary uses first non-empty line from the slice body, not title
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            _slice(root, "sl-1", "p", "meta-title", body="First line summary\nSecond line\n")
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+            # expect the recent entry to show the body-derived summary
+            self.assertIn("sl-1: First line summary", out)
+            self.assertNotIn("sl-1: meta-title", out)
+
+    def test_map_header_present_even_under_tight_budget(self):
+        # New TDD: when char budget is very tight, Map header must still be present and show (truncated)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            big = "".join([f"Line {i}\n" for i in range(1000)])
+            _moc(root, "p", big)
+            _slice(root, "sl-1", "p", "alpha")
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+            # very small budget to force tight behavior
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=80)
+            self.assertIn("## Map", out)
+            self.assertIn("(truncated)", out)
+
     def test_deterministic_repeated_calls(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
