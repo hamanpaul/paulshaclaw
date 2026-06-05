@@ -92,8 +92,11 @@ def write_queue_payload(
     session_id: str,
     payload: dict,
     capture_scope: str,
-) -> None:
-    """Write an atomic queue payload to runtime/queue/<tool>__<sid>.json."""
+) -> Path | None:
+    """Write an atomic queue payload to runtime/queue/<tool>__<sid>.json.
+
+    Returns Path on success, or None on failure.
+    """
     try:
         queue_payload = dict(payload)
         queue_payload["tool"] = tool
