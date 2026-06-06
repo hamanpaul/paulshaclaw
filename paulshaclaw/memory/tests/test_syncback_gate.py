@@ -1,6 +1,8 @@
 import unittest
 from typing import get_type_hints
 from unittest.mock import patch
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from paulshaclaw.lifecycle import schema as lifecycle_schema
 from paulshaclaw.memory.syncback import gate
@@ -70,6 +72,71 @@ class SchemaConditionTest(unittest.TestCase):
         self.assertTrue(gate.ConditionResult.__dataclass_params__.frozen)
         self.assertTrue(gate.GateVerdict.__dataclass_params__.frozen)
         self.assertIs(get_type_hints(gate.GateVerdict)["ts"], str)
+
+
+class FileConditionTest(unittest.TestCase):
+    def test_check_evidence_present_passes_when_files_exist_and_nonempty(self):
+        with TemporaryDirectory() as td:
+            repo_root = Path(td)
+            evidence_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory" / "evidence"
+            evidence_dir.mkdir(parents=True)
+            (evidence_dir / "README.md").write_text("evidence")
+            (evidence_dir / "stage2-integration-template.md").write_text("template")
+
+            res = gate._check_evidence_present(repo_root)
+            self.assertEqual(res.id, 'evidence_present')
+            self.assertTrue(res.passed)
+
+    def test_check_evidence_present_fails_when_missing_or_empty(self):
+        with TemporaryDirectory() as td:
+            repo_root = Path(td)
+            # missing files
+            res = gate._check_evidence_present(repo_root)
+            self.assertFalse(res.passed)
+            self.assertIn('missing', res.detail)
+
+            # empty file
+            evidence_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory" / "evidence"
+            evidence_dir.mkdir(parents=True)
+            (evidence_dir / "README.md").write_text("")
+            (evidence_dir / "stage2-integration-template.md").write_text("\n")
+            res2 = gate._check_evidence_present(repo_root)
+            self.assertFalse(res2.passed)
+            self.assertIn('empty', res2.detail)
+
+    def test_check_review_clear_passes_for_mergeable_conclusion(self):
+        with TemporaryDirectory() as td:
+            repo_root = Path(td)
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text('# review\n\n## 結論\n\n- 結論：可合併。\n')
+
+            res = gate._check_review_clear(repo_root)
+            self.assertEqual(res.id, 'review_clear')
+            self.assertTrue(res.passed)
+
+    def test_check_review_clear_fails_on_blocking_or_missing(self):
+        with TemporaryDirectory() as td:
+            repo_root = Path(td)
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+
+            # missing file
+            res = gate._check_review_clear(repo_root)
+            self.assertFalse(res.passed)
+            self.assertIn('missing', res.detail)
+
+            # present but missing conclusion section
+            (docs_dir / "review.md").write_text('# review\n\nNo conclusion here\n')
+            res2 = gate._check_review_clear(repo_root)
+            self.assertFalse(res2.passed)
+            self.assertIn('结論', res2.detail or '結論')
+
+            # blocking conclusion
+            (docs_dir / "review.md").write_text('# review\n\n## 結論\n\n- 結論：不可合併。\n')
+            res3 = gate._check_review_clear(repo_root)
+            self.assertFalse(res3.passed)
+            self.assertIn('不可', res3.detail)
 
 
 if __name__ == '__main__':
