@@ -163,6 +163,32 @@ class FileConditionTest(unittest.TestCase):
             self.assertFalse(res.passed)
             self.assertIn('unrecognized', res.detail)
 
+    def test_check_review_clear_fails_closed_for_invalid_utf8_review(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_bytes(b"## \xe7\xb5\x90\xe8\xab\x96\n\n- \xff\xfe\xfa\n")
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertFalse(res.passed)
+            self.assertIn('unreadable', res.detail)
+
+    def test_check_review_clear_fails_closed_for_unreadable_review(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            review_path = docs_dir / "review.md"
+            review_path.write_text('# review\n\n## 結論\n\n- 結論：可合併。\n')
+            review_path.chmod(0)
+            try:
+                res = gate._check_review_clear(repo_root)
+            finally:
+                review_path.chmod(0o644)
+
+            self.assertFalse(res.passed)
+            self.assertIn('unreadable', res.detail)
+
     def test_check_review_clear_fails_for_english_negated_merge_phrases(self):
         phrases = (
             'do not merge',
@@ -188,6 +214,18 @@ class FileConditionTest(unittest.TestCase):
             (docs_dir / "review.md").write_text(
                 '# review\n\n## Notes\n\n- Reviewer note: do not merge until conclusion is updated.\n\n'
                 '## Conclusion\n\n- Conclusion: mergeable. No blocking issues.\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertTrue(res.passed)
+
+    def test_check_review_clear_passes_when_failing_word_is_non_blocking_context(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## Conclusion\n\n- Conclusion: mergeable. No failing tests in reviewed scope.\n'
             )
 
             res = gate._check_review_clear(repo_root)

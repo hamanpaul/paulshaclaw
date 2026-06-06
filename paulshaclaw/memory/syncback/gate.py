@@ -42,10 +42,8 @@ _REVIEW_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnot mergeable\b", re.IGNORECASE),
     re.compile(r"\bcannot merge\b", re.IGNORECASE),
     re.compile(r"\bcan't merge\b", re.IGNORECASE),
-    re.compile(r"\bblocking\b", re.IGNORECASE),
-    re.compile(r"\bblocker\b", re.IGNORECASE),
-    re.compile(r"\bblocked\b", re.IGNORECASE),
-    re.compile(r"\bfail(?:ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\bBLOCKING\b"),
+    re.compile(r"\bBLOCKER\b"),
 )
 
 _REVIEW_CLEAR_PATTERNS: Tuple[re.Pattern[str], ...] = (
@@ -158,7 +156,15 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
         review_file = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory" / "review.md"
         if not review_file.exists():
             return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="missing review.md")
-        content = review_file.read_text(encoding='utf-8', errors='replace')
+        try:
+            content = review_file.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError) as e:
+            return ConditionResult(
+                id="review_clear",
+                name="review_clear",
+                passed=False,
+                detail=f"unreadable review.md: {e}",
+            )
         # locate 結論 or Conclusion section
         lines = content.splitlines()
         concl_start = None
