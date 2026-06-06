@@ -312,6 +312,19 @@ class FileConditionTest(unittest.TestCase):
 
             self.assertTrue(res.passed)
 
+    def test_check_review_clear_fails_for_positive_blocked_wording(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## Conclusion\n\n- Conclusion: Blocked on issue #123.\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertFalse(res.passed)
+            self.assertIn('Blocked', res.detail)
+
 
 if __name__ == '__main__':
     unittest.main()

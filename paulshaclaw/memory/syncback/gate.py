@@ -42,6 +42,7 @@ _REVIEW_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnot mergeable\b", re.IGNORECASE),
     re.compile(r"\bcannot merge\b", re.IGNORECASE),
     re.compile(r"\bcan't merge\b", re.IGNORECASE),
+    re.compile(r"\bblocked\b", re.IGNORECASE),
     re.compile(r"\bblock(?:er|ers|ing)\b", re.IGNORECASE),
 )
 
