@@ -356,5 +356,127 @@ class FileConditionTest(unittest.TestCase):
             self.assertIn('Blocked', res.detail)
 
 
+def _write_syncback_gate_artifacts(repo_root: Path, *, review_heading: str = "## 結論", review_body: str = "- 結論：可合併。\n") -> None:
+    evidence_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory" / "evidence"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    (evidence_dir / "README.md").write_text("evidence\n")
+    (evidence_dir / "stage2-integration-template.md").write_text("template\n")
+
+    docs_dir = evidence_dir.parent
+    (docs_dir / "review.md").write_text(f"# review\n\n{review_heading}\n\n{review_body}")
+
+
+class EvaluateGateTest(unittest.TestCase):
+    def test_evaluate_gate_returns_ok_manifest_and_expected_conditions_when_all_checks_pass(self):
+        with _repo_tempdir() as repo_root:
+            _write_syncback_gate_artifacts(repo_root)
+            calls = []
+
+            def fake_runner(modules):
+                calls.append(tuple(modules))
+                return True
+
+            verdict = gate.evaluate_gate(
+                repo_root,
+                now="2026-06-06T00:00:00Z",
+                test_runner=fake_runner,
+            )
+
+            self.assertTrue(verdict.ok)
+            self.assertEqual(verdict.ts, "2026-06-06T00:00:00Z")
+            self.assertEqual(verdict.sync_manifest, gate.SYNC_MANIFEST)
+            self.assertEqual(
+                {condition.id for condition in verdict.conditions},
+                {"tests", "decay_evidence", "evidence_present", "review_clear", "schema_unextended"},
+            )
+            self.assertTrue(all(condition.passed for condition in verdict.conditions))
+            self.assertEqual(calls, [gate.TESTS_CORE, gate.TESTS_DECAY])
+
+    def test_evaluate_gate_returns_empty_manifest_when_test_runner_reports_failure(self):
+        with _repo_tempdir() as repo_root:
+            _write_syncback_gate_artifacts(repo_root)
+
+            verdict = gate.evaluate_gate(
+                repo_root,
+                now="2026-06-06T00:00:00Z",
+                test_runner=lambda modules: False,
+            )
+
+            self.assertFalse(verdict.ok)
+            self.assertEqual(verdict.sync_manifest, ())
+            by_id = {condition.id: condition for condition in verdict.conditions}
+            self.assertFalse(by_id["tests"].passed)
+            self.assertFalse(by_id["decay_evidence"].passed)
+            self.assertTrue(by_id["evidence_present"].passed)
+            self.assertTrue(by_id["review_clear"].passed)
+            self.assertTrue(by_id["schema_unextended"].passed)
+
+    def test_evaluate_gate_fails_closed_when_runner_raises_for_core_tests(self):
+        with _repo_tempdir() as repo_root:
+            _write_syncback_gate_artifacts(repo_root)
+
+            def fake_runner(modules):
+                if tuple(modules) == gate.TESTS_CORE:
+                    raise RuntimeError("runner exploded")
+                return True
+
+            verdict = gate.evaluate_gate(
+                repo_root,
+                now="2026-06-06T00:00:00Z",
+                test_runner=fake_runner,
+            )
+
+            by_id = {condition.id: condition for condition in verdict.conditions}
+            self.assertFalse(verdict.ok)
+            self.assertEqual(verdict.sync_manifest, ())
+            self.assertFalse(by_id["tests"].passed)
+            self.assertIn("runner exploded", by_id["tests"].detail)
+            self.assertTrue(by_id["decay_evidence"].passed)
+
+    def test_evaluate_gate_fails_closed_when_runner_raises_for_decay_tests(self):
+        with _repo_tempdir() as repo_root:
+            _write_syncback_gate_artifacts(repo_root)
+
+            def fake_runner(modules):
+                if tuple(modules) == gate.TESTS_DECAY:
+                    raise RuntimeError("decay runner exploded")
+                return True
+
+            verdict = gate.evaluate_gate(
+                repo_root,
+                now="2026-06-06T00:00:00Z",
+                test_runner=fake_runner,
+            )
+
+            by_id = {condition.id: condition for condition in verdict.conditions}
+            self.assertFalse(verdict.ok)
+            self.assertEqual(verdict.sync_manifest, ())
+            self.assertTrue(by_id["tests"].passed)
+            self.assertFalse(by_id["decay_evidence"].passed)
+            self.assertIn("decay runner exploded", by_id["decay_evidence"].detail)
+
+    def test_evaluate_gate_fails_test_conditions_without_running_tests_when_disabled(self):
+        with _repo_tempdir() as repo_root:
+            _write_syncback_gate_artifacts(repo_root)
+
+            def fake_runner(_modules):
+                raise AssertionError("test runner should not be called when run_tests=False")
+
+            verdict = gate.evaluate_gate(
+                repo_root,
+                now="2026-06-06T00:00:00Z",
+                run_tests=False,
+                test_runner=fake_runner,
+            )
+
+            by_id = {condition.id: condition for condition in verdict.conditions}
+            self.assertFalse(verdict.ok)
+            self.assertEqual(verdict.sync_manifest, ())
+            self.assertFalse(by_id["tests"].passed)
+            self.assertFalse(by_id["decay_evidence"].passed)
+            self.assertIn("disabled", by_id["tests"].detail.lower())
+            self.assertIn("disabled", by_id["decay_evidence"].detail.lower())
+
+
 if __name__ == '__main__':
     unittest.main()

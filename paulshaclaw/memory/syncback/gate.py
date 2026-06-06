@@ -1,6 +1,8 @@
 from dataclasses import dataclass
+import io
 import re
-from typing import Tuple
+from typing import Callable, Tuple
+import unittest
 
 
 @dataclass(frozen=True)
@@ -26,6 +28,21 @@ SYNC_MANIFEST: Tuple[str, ...] = (
     "paulshaclaw/memory/hooks/install.sh",
     "paulshaclaw/memory/hooks/uninstall.sh",
 )
+
+TESTS_CORE: Tuple[str, ...] = (
+    'paulshaclaw.memory.tests.test_importer_cli',
+    'paulshaclaw.memory.tests.test_classifier',
+    'paulshaclaw.memory.tests.test_replay_selector',
+    'paulshaclaw.memory.tests.test_replay_bundle',
+)
+
+TESTS_DECAY: Tuple[str, ...] = (
+    'paulshaclaw.memory.tests.test_ledger_lifecycle',
+    'paulshaclaw.memory.tests.test_janitor_scanner',
+    'paulshaclaw.memory.tests.test_janitor_rules',
+)
+
+TestRunner = Callable[[Tuple[str, ...]], bool]
 
 
 from pathlib import Path
@@ -217,3 +234,77 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
         return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="unrecognized 結論 wording")
     except Exception as e:
         return ConditionResult(id="review_clear", name="review_clear", passed=False, detail=f"error: {e}")
+
+
+def _default_test_runner(modules: Tuple[str, ...]) -> bool:
+    suite = unittest.defaultTestLoader.loadTestsFromNames(list(modules))
+    stream = io.StringIO()
+    result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
+    return result.wasSuccessful()
+
+
+def _check_tests(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult:
+    if not run_tests:
+        return ConditionResult(
+            id="tests",
+            name="tests",
+            passed=False,
+            detail="test execution disabled",
+        )
+    try:
+        passed = bool(test_runner(TESTS_CORE))
+    except Exception as e:
+        return ConditionResult(id="tests", name="tests", passed=False, detail=f"runner error: {e}")
+    if passed:
+        return ConditionResult(id="tests", name="tests", passed=True, detail="")
+    return ConditionResult(id="tests", name="tests", passed=False, detail="core tests failed")
+
+
+def _check_decay_evidence(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult:
+    if not run_tests:
+        return ConditionResult(
+            id="decay_evidence",
+            name="decay_evidence",
+            passed=False,
+            detail="test execution disabled",
+        )
+    try:
+        passed = bool(test_runner(TESTS_DECAY))
+    except Exception as e:
+        return ConditionResult(
+            id="decay_evidence",
+            name="decay_evidence",
+            passed=False,
+            detail=f"runner error: {e}",
+        )
+    if passed:
+        return ConditionResult(id="decay_evidence", name="decay_evidence", passed=True, detail="")
+    return ConditionResult(
+        id="decay_evidence",
+        name="decay_evidence",
+        passed=False,
+        detail="decay evidence tests failed",
+    )
+
+
+def evaluate_gate(
+    repo_root: Path,
+    *,
+    now: str,
+    run_tests: bool = True,
+    test_runner: TestRunner = _default_test_runner,
+) -> GateVerdict:
+    conditions = (
+        _check_tests(run_tests=run_tests, test_runner=test_runner),
+        _check_decay_evidence(run_tests=run_tests, test_runner=test_runner),
+        _check_evidence_present(repo_root),
+        _check_review_clear(repo_root),
+        _check_schema_unextended(),
+    )
+    ok = all(condition.passed for condition in conditions)
+    return GateVerdict(
+        ok=ok,
+        ts=now,
+        conditions=conditions,
+        sync_manifest=SYNC_MANIFEST if ok else (),
+    )
