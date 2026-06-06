@@ -42,8 +42,8 @@ _REVIEW_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnot mergeable\b", re.IGNORECASE),
     re.compile(r"\bcannot merge\b", re.IGNORECASE),
     re.compile(r"\bcan't merge\b", re.IGNORECASE),
-    re.compile(r"\bBLOCKING\b"),
-    re.compile(r"\bBLOCKER\b"),
+    re.compile(r"\bblocking\b", re.IGNORECASE),
+    re.compile(r"\bblocker\b", re.IGNORECASE),
 )
 
 _REVIEW_CLEAR_PATTERNS: Tuple[re.Pattern[str], ...] = (
@@ -62,6 +62,8 @@ _REVIEW_NEGATED_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bno blockers?\b", re.IGNORECASE),
     re.compile(r"\bno blocked items?\b", re.IGNORECASE),
 )
+
+_REVIEW_CONCLUSION_HEADING = re.compile(r"^##\s+(結論|Conclusion)\s*$")
 
 
 def _is_negated_review_match(text: str, match: re.Match[str]) -> bool:
@@ -165,11 +167,11 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
                 passed=False,
                 detail=f"unreadable review.md: {e}",
             )
-        # locate 結論 or Conclusion section
+        # locate canonical 結論 / Conclusion section
         lines = content.splitlines()
         concl_start = None
         for i, line in enumerate(lines):
-            if line.strip().startswith('##') and ('結論' in line or 'Conclusion' in line):
+            if _REVIEW_CONCLUSION_HEADING.fullmatch(line.strip()):
                 concl_start = i + 1
                 break
         if concl_start is None:

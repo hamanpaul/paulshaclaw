@@ -150,6 +150,21 @@ class FileConditionTest(unittest.TestCase):
             self.assertFalse(res3.passed)
             self.assertIn('不可', res3.detail)
 
+    def test_check_review_clear_rejects_noncanonical_conclusion_headings(self):
+        for heading in ("## Conclusion Draft", "## 結論草稿"):
+            with self.subTest(heading=heading):
+                with _repo_tempdir() as repo_root:
+                    docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+                    docs_dir.mkdir(parents=True)
+                    (docs_dir / "review.md").write_text(
+                        f'# review\n\n{heading}\n\n- Conclusion: mergeable.\n'
+                    )
+
+                    res = gate._check_review_clear(repo_root)
+
+                    self.assertFalse(res.passed)
+                    self.assertIn('missing', res.detail)
+
     def test_check_review_clear_fails_closed_for_ambiguous_conclusion(self):
         with _repo_tempdir() as repo_root:
             docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
@@ -252,6 +267,21 @@ class FileConditionTest(unittest.TestCase):
                     docs_dir.mkdir(parents=True)
                     (docs_dir / "review.md").write_text(
                         f'# review\n\n## Conclusion\n\n- Conclusion: mergeable.\n- {marker}\n'
+                    )
+
+                    res = gate._check_review_clear(repo_root)
+
+                    self.assertFalse(res.passed)
+                    self.assertIn(marker, res.detail)
+
+    def test_check_review_clear_fails_for_lowercase_blocking_markers(self):
+        for marker in ("blocking", "blocker"):
+            with self.subTest(marker=marker):
+                with _repo_tempdir() as repo_root:
+                    docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+                    docs_dir.mkdir(parents=True)
+                    (docs_dir / "review.md").write_text(
+                        f'# review\n\n## Conclusion\n\n- Conclusion: mergeable.\n- {marker} issue remains.\n'
                     )
 
                     res = gate._check_review_clear(repo_root)
