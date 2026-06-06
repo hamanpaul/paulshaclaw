@@ -111,6 +111,15 @@ def _build_parser() -> argparse.ArgumentParser:
     search_p.add_argument("--include-decayed", action="store_true")
     search_p.set_defaults(func=_search)
 
+    wakeup_p = memory_subparsers.add_parser("wakeup")
+    wakeup_p.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
+    wakeup_p.add_argument("--project", default=None)
+    wakeup_p.add_argument("--cwd", default=None)
+    wakeup_p.add_argument("--k", type=int, default=8)
+    wakeup_p.add_argument("--char-budget", type=int, default=8000)
+    wakeup_p.add_argument("--now", default=None)
+    wakeup_p.set_defaults(func=_wakeup)
+
     return parser
 
 
@@ -200,6 +209,12 @@ def _search(args: argparse.Namespace) -> int:
     from .moc.cli import run as search_run
 
     return search_run(args)
+
+
+def _wakeup(args: argparse.Namespace) -> int:
+    from .wakeup import cli as wakeup_cli
+
+    return wakeup_cli.run(args)
 
 
 def _load_policy(override_path: str | None):

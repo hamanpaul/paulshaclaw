@@ -19,7 +19,7 @@ from .classifier import classify_session
 from .frontmatter import render_markdown
 from .project_resolver import resolve_project
 
-_SCOPE_RANK = {"turn": 0, "subagent": 0, "session_end": 1, "watcher_final": 2}
+_SCOPE_RANK = {"turn": 0, "subagent": 0, "pre_compact": 0, "session_end": 1, "watcher_final": 2}
 _TERMINAL_STATUSES = {"written", "updated", "hash-duplicate", "stale-skip"}
 _LEDGER_THREAD_LOCKS: dict[str, threading.Lock] = {}
 _LEDGER_THREAD_LOCKS_GUARD = threading.Lock()
