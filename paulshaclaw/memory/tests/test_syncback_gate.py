@@ -454,7 +454,7 @@ class EvaluateGateTest(unittest.TestCase):
             self.assertFalse(verdict.ok)
             self.assertEqual(verdict.sync_manifest, ())
             self.assertFalse(by_id["tests"].passed)
-            self.assertIn("runner exploded", by_id["tests"].detail)
+            self.assertEqual(by_id["tests"].detail, "test runner raised")
             self.assertTrue(by_id["decay_evidence"].passed)
 
     def test_evaluate_gate_fails_closed_when_runner_raises_for_decay_tests(self):
@@ -477,7 +477,7 @@ class EvaluateGateTest(unittest.TestCase):
             self.assertEqual(verdict.sync_manifest, ())
             self.assertTrue(by_id["tests"].passed)
             self.assertFalse(by_id["decay_evidence"].passed)
-            self.assertIn("decay runner exploded", by_id["decay_evidence"].detail)
+            self.assertEqual(by_id["decay_evidence"].detail, "runner raised")
 
     def test_evaluate_gate_fails_test_conditions_without_running_tests_when_disabled(self):
         with _repo_tempdir() as repo_root:

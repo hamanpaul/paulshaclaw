@@ -255,8 +255,8 @@ def _check_tests(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult
         )
     try:
         passed = bool(test_runner(TESTS_CORE))
-    except Exception as e:
-        return ConditionResult(id="tests", name="tests", passed=False, detail=f"runner error: {e}")
+    except Exception:
+        return ConditionResult(id="tests", name="tests", passed=False, detail="test runner raised")
     if passed:
         return ConditionResult(id="tests", name="tests", passed=True, detail="")
     return ConditionResult(id="tests", name="tests", passed=False, detail="core tests failed")
@@ -279,9 +279,9 @@ def _check_decay_evidence(
 
     try:
         tests_passed = bool(test_runner(TESTS_DECAY))
-    except Exception as e:
+    except Exception:
         tests_passed = False
-        test_detail = f"runner error: {e}"
+        test_detail = "runner raised"
     else:
         test_detail = ""
 
