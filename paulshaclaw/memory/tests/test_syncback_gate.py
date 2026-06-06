@@ -246,6 +246,21 @@ class FileConditionTest(unittest.TestCase):
 
             self.assertTrue(res.passed)
 
+    def test_check_review_clear_fails_when_english_negated_blocker_is_followed_by_positive_blocker(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## Conclusion\n\n'
+                '- Conclusion: mergeable. No blockers in the resolved comments.\n'
+                '- However, blocker: migration rollback is still unverified.\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertFalse(res.passed)
+            self.assertIn('blocker', res.detail.lower())
+
     def test_check_review_clear_passes_when_failing_word_is_non_blocking_context(self):
         with _repo_tempdir() as repo_root:
             docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
@@ -257,6 +272,21 @@ class FileConditionTest(unittest.TestCase):
             res = gate._check_review_clear(repo_root)
 
             self.assertTrue(res.passed)
+
+    def test_check_review_clear_fails_when_zh_tw_negated_blocker_is_followed_by_positive_blocker(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## 結論\n\n'
+                '- 結論：可合併，無阻斷性問題。\n'
+                '- 但仍有阻斷項目：需補齊回滾驗證。\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertFalse(res.passed)
+            self.assertIn('阻斷', res.detail)
 
     def test_check_review_clear_passes_for_zh_tw_canonical_pass_wording(self):
         with _repo_tempdir() as repo_root:

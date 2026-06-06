@@ -201,17 +201,15 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
                 detail=f"blocking: {match.group(0)}",
             )
         for pattern in _REVIEW_BLOCKING_PATTERNS:
-            match = pattern.search(concl_text)
-            if not match:
-                continue
-            if _is_negated_review_match(concl_text, match):
-                continue
-            return ConditionResult(
-                id="review_clear",
-                name="review_clear",
-                passed=False,
-                detail=f"blocking: {match.group(0)}",
-            )
+            for match in pattern.finditer(concl_text):
+                if _is_negated_review_match(concl_text, match):
+                    continue
+                return ConditionResult(
+                    id="review_clear",
+                    name="review_clear",
+                    passed=False,
+                    detail=f"blocking: {match.group(0)}",
+                )
         for pattern in _REVIEW_CLEAR_PATTERNS:
             if pattern.search(concl_text):
                 return ConditionResult(id="review_clear", name="review_clear", passed=True, detail="")
