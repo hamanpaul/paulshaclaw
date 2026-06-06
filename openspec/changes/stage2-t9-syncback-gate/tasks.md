@@ -20,8 +20,8 @@
 
 ## 5. Docs, suite, real-run, gate, archive
 
-- [ ] 5.1 Write `syncback/README.md` (fail-closed, read-only, deterministic, 5 conditions, installable-package entity).
-- [ ] 5.2 Full suite `python3 -m unittest discover -s paulshaclaw/memory/tests` green.
-- [ ] 5.3 Real-run sanity: `python3 -m paulshaclaw.memory.cli memory syncback check --repo-root .` runs the real modules and prints per-condition status (adjust `TESTS_*` tuples if any module name differs).
-- [ ] 5.4 Repo policy / lint gate green.
+- [x] 5.1 Write `syncback/README.md` (fail-closed, read-only, deterministic, 5 conditions, installable-package entity).
+- [x] 5.2 Full suite `python3 -m unittest discover -s paulshaclaw/memory/tests` green.
+- [x] 5.3 Real-run sanity: `python3 -m paulshaclaw.memory.cli memory syncback check --repo-root .` runs the real modules and prints per-condition status (adjust `TESTS_*` tuples if any module name differs).
+- [x] 5.4 Repo policy / lint gate green.
 - [ ] 5.5 openspec-archive after merge + sync spec delta into `openspec/specs/stage2-memory-governance/spec.md`; tick T9 in roadmap §5.4.
