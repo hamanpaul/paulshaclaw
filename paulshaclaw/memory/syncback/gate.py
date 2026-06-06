@@ -36,25 +36,43 @@ _REVIEW_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"不合併"),
     re.compile(r"阻斷"),
     re.compile(r"阻擋"),
-    re.compile(r"\bdo not merge\b"),
-    re.compile(r"\bdon't merge\b"),
-    re.compile(r"\bnot ready to merge\b"),
-    re.compile(r"\bnot mergeable\b"),
-    re.compile(r"\bcannot merge\b"),
-    re.compile(r"\bcan't merge\b"),
-    re.compile(r"\bblocking issues?\b"),
-    re.compile(r"\bblocked\b"),
-    re.compile(r"\bfail(?:ed|ing)?\b"),
+    re.compile(r"\bdo not merge\b", re.IGNORECASE),
+    re.compile(r"\bdon't merge\b", re.IGNORECASE),
+    re.compile(r"\bnot ready to merge\b", re.IGNORECASE),
+    re.compile(r"\bnot mergeable\b", re.IGNORECASE),
+    re.compile(r"\bcannot merge\b", re.IGNORECASE),
+    re.compile(r"\bcan't merge\b", re.IGNORECASE),
+    re.compile(r"\bblocking\b", re.IGNORECASE),
+    re.compile(r"\bblocker\b", re.IGNORECASE),
+    re.compile(r"\bblocked\b", re.IGNORECASE),
+    re.compile(r"\bfail(?:ed|ing)?\b", re.IGNORECASE),
 )
 
 _REVIEW_CLEAR_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"可\s*合併"),
     re.compile(r"可以合併"),
-    re.compile(r"\bmergeable\b"),
-    re.compile(r"\bready to merge\b"),
-    re.compile(r"\bok to merge\b"),
-    re.compile(r"\bapproved for merge\b"),
+    re.compile(r"\bmergeable\b", re.IGNORECASE),
+    re.compile(r"\bready to merge\b", re.IGNORECASE),
+    re.compile(r"\bok to merge\b", re.IGNORECASE),
+    re.compile(r"\bapproved for merge\b", re.IGNORECASE),
 )
+
+_REVIEW_NEGATED_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"無阻斷性問題"),
+    re.compile(r"無阻擋性問題"),
+    re.compile(r"\bno blocking\b", re.IGNORECASE),
+    re.compile(r"\bno blockers?\b", re.IGNORECASE),
+    re.compile(r"\bno blocked items?\b", re.IGNORECASE),
+)
+
+
+def _is_negated_review_match(text: str, match: re.Match[str]) -> bool:
+    start, end = match.span()
+    for pattern in _REVIEW_NEGATED_BLOCKING_PATTERNS:
+        for negated in pattern.finditer(text):
+            if negated.start() <= start and end <= negated.end():
+                return True
+    return False
 
 
 def _check_schema_unextended() -> ConditionResult:
@@ -160,12 +178,11 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
         concl_text = '\n'.join(concl_lines)
         if not concl_text.strip():
             return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="empty 結論 section")
-        lower = concl_text.lower()
         for pattern in _REVIEW_BLOCKING_PATTERNS:
-            match = pattern.search(lower if "\\b" in pattern.pattern else concl_text)
+            match = pattern.search(concl_text)
             if not match:
                 continue
-            if pattern.pattern == r"\bblocking issues?\b" and re.search(r"\bno blocking issues?\b", lower):
+            if _is_negated_review_match(concl_text, match):
                 continue
             return ConditionResult(
                 id="review_clear",
@@ -174,8 +191,7 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
                 detail=f"blocking: {match.group(0)}",
             )
         for pattern in _REVIEW_CLEAR_PATTERNS:
-            haystack = lower if "\\b" in pattern.pattern else concl_text
-            if pattern.search(haystack):
+            if pattern.search(concl_text):
                 return ConditionResult(id="review_clear", name="review_clear", passed=True, detail="")
         # default fail-closed
         return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="unrecognized 結論 wording")

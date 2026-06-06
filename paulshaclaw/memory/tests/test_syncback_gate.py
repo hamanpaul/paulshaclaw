@@ -1,8 +1,10 @@
 import unittest
 from typing import get_type_hints
 from unittest.mock import patch
+from contextlib import contextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
+import shutil
+import uuid
 
 from paulshaclaw.lifecycle import schema as lifecycle_schema
 from paulshaclaw.memory.syncback import gate
@@ -21,6 +23,20 @@ CANONICAL_STAGE3_REQUIRED_FIELDS = {
     "supersedes",
     "checksum",
 }
+
+
+@contextmanager
+def _repo_tempdir():
+    root = (
+        Path(__file__).resolve().parents[3]
+        / ".scratch_task2"
+        / f"test-syncback-gate-{uuid.uuid4().hex}"
+    )
+    root.mkdir(parents=True, exist_ok=False)
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 class SchemaConditionTest(unittest.TestCase):
@@ -76,8 +92,7 @@ class SchemaConditionTest(unittest.TestCase):
 
 class FileConditionTest(unittest.TestCase):
     def test_check_evidence_present_passes_when_files_exist_and_nonempty(self):
-        with TemporaryDirectory() as td:
-            repo_root = Path(td)
+        with _repo_tempdir() as repo_root:
             evidence_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory" / "evidence"
             evidence_dir.mkdir(parents=True)
             (evidence_dir / "README.md").write_text("evidence")
@@ -88,8 +103,7 @@ class FileConditionTest(unittest.TestCase):
             self.assertTrue(res.passed)
 
     def test_check_evidence_present_fails_when_missing_or_empty(self):
-        with TemporaryDirectory() as td:
-            repo_root = Path(td)
+        with _repo_tempdir() as repo_root:
             # missing files
             res = gate._check_evidence_present(repo_root)
             self.assertFalse(res.passed)
@@ -105,8 +119,7 @@ class FileConditionTest(unittest.TestCase):
             self.assertIn('empty', res2.detail)
 
     def test_check_review_clear_passes_for_mergeable_conclusion(self):
-        with TemporaryDirectory() as td:
-            repo_root = Path(td)
+        with _repo_tempdir() as repo_root:
             docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
             docs_dir.mkdir(parents=True)
             (docs_dir / "review.md").write_text('# review\n\n## 結論\n\n- 結論：可合併。\n')
@@ -116,8 +129,7 @@ class FileConditionTest(unittest.TestCase):
             self.assertTrue(res.passed)
 
     def test_check_review_clear_fails_on_blocking_or_missing(self):
-        with TemporaryDirectory() as td:
-            repo_root = Path(td)
+        with _repo_tempdir() as repo_root:
             docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
             docs_dir.mkdir(parents=True)
 
@@ -139,8 +151,7 @@ class FileConditionTest(unittest.TestCase):
             self.assertIn('不可', res3.detail)
 
     def test_check_review_clear_fails_closed_for_ambiguous_conclusion(self):
-        with TemporaryDirectory() as td:
-            repo_root = Path(td)
+        with _repo_tempdir() as repo_root:
             docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
             docs_dir.mkdir(parents=True)
             (docs_dir / "review.md").write_text(
@@ -160,8 +171,7 @@ class FileConditionTest(unittest.TestCase):
 
         for phrase in phrases:
             with self.subTest(phrase=phrase):
-                with TemporaryDirectory() as td:
-                    repo_root = Path(td)
+                with _repo_tempdir() as repo_root:
                     docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
                     docs_dir.mkdir(parents=True)
                     (docs_dir / "review.md").write_text(
@@ -171,15 +181,52 @@ class FileConditionTest(unittest.TestCase):
                     res = gate._check_review_clear(repo_root)
 
                     self.assertFalse(res.passed)
-
     def test_check_review_clear_passes_for_mergeable_conclusion_with_no_blocking_issues(self):
-        with TemporaryDirectory() as td:
-            repo_root = Path(td)
+        with _repo_tempdir() as repo_root:
             docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
             docs_dir.mkdir(parents=True)
             (docs_dir / "review.md").write_text(
                 '# review\n\n## Notes\n\n- Reviewer note: do not merge until conclusion is updated.\n\n'
                 '## Conclusion\n\n- Conclusion: mergeable. No blocking issues.\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertTrue(res.passed)
+
+    def test_check_review_clear_passes_for_zh_tw_canonical_pass_wording(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## 結論\n\n- 結論：可合併，無阻斷性問題。\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertTrue(res.passed)
+
+    def test_check_review_clear_fails_for_mixed_mergeable_and_blocking_markers(self):
+        for marker in ("BLOCKING", "BLOCKER"):
+            with self.subTest(marker=marker):
+                with _repo_tempdir() as repo_root:
+                    docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+                    docs_dir.mkdir(parents=True)
+                    (docs_dir / "review.md").write_text(
+                        f'# review\n\n## Conclusion\n\n- Conclusion: mergeable.\n- {marker}\n'
+                    )
+
+                    res = gate._check_review_clear(repo_root)
+
+                    self.assertFalse(res.passed)
+                    self.assertIn(marker, res.detail)
+
+    def test_check_review_clear_passes_for_negated_blocked_wording(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## Conclusion\n\n- Conclusion: No blocked items. Mergeable.\n'
             )
 
             res = gate._check_review_clear(repo_root)
