@@ -1,6 +1,7 @@
 from dataclasses import dataclass
-import io
 import re
+import subprocess
+import sys
 from typing import Callable, Tuple
 import unittest
 
@@ -237,10 +238,11 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
 
 
 def _default_test_runner(modules: Tuple[str, ...]) -> bool:
-    suite = unittest.defaultTestLoader.loadTestsFromNames(list(modules))
-    stream = io.StringIO()
-    result = unittest.TextTestRunner(stream=stream, verbosity=0).run(suite)
-    return result.wasSuccessful()
+    result = subprocess.run(
+        [sys.executable, "-m", "unittest", *modules],
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def _check_tests(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult:
@@ -260,7 +262,20 @@ def _check_tests(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult
     return ConditionResult(id="tests", name="tests", passed=False, detail="core tests failed")
 
 
-def _check_decay_evidence(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult:
+def _check_decay_evidence(
+    repo_root: Path,
+    *,
+    run_tests: bool,
+    test_runner: TestRunner,
+) -> ConditionResult:
+    evidence = _check_evidence_present(repo_root)
+    if not evidence.passed:
+        return ConditionResult(
+            id="decay_evidence",
+            name="decay_evidence",
+            passed=False,
+            detail=f"missing decay evidence: {evidence.detail}",
+        )
     if not run_tests:
         return ConditionResult(
             id="decay_evidence",
@@ -296,7 +311,7 @@ def evaluate_gate(
 ) -> GateVerdict:
     conditions = (
         _check_tests(run_tests=run_tests, test_runner=test_runner),
-        _check_decay_evidence(run_tests=run_tests, test_runner=test_runner),
+        _check_decay_evidence(repo_root, run_tests=run_tests, test_runner=test_runner),
         _check_evidence_present(repo_root),
         _check_review_clear(repo_root),
         _check_schema_unextended(),

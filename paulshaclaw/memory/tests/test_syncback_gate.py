@@ -3,7 +3,9 @@ from typing import get_type_hints
 from unittest.mock import patch
 from contextlib import contextmanager
 from pathlib import Path
+import subprocess
 import shutil
+import sys
 import uuid
 
 from paulshaclaw.lifecycle import schema as lifecycle_schema
@@ -367,6 +369,28 @@ def _write_syncback_gate_artifacts(repo_root: Path, *, review_heading: str = "##
 
 
 class EvaluateGateTest(unittest.TestCase):
+    def test_default_test_runner_invokes_unittest_via_subprocess(self):
+        modules = (
+            "paulshaclaw.memory.tests.test_importer_cli",
+            "paulshaclaw.memory.tests.test_classifier",
+        )
+
+        with patch(
+            "paulshaclaw.memory.syncback.gate.subprocess.run",
+            return_value=subprocess.CompletedProcess(args=[], returncode=0),
+            create=True,
+        ) as run, patch(
+            "paulshaclaw.memory.syncback.gate.unittest.defaultTestLoader.loadTestsFromNames",
+            side_effect=AssertionError("in-process loader must not be used"),
+        ):
+            ok = gate._default_test_runner(modules)
+
+        self.assertTrue(ok)
+        run.assert_called_once_with(
+            [sys.executable, "-m", "unittest", *modules],
+            check=False,
+        )
+
     def test_evaluate_gate_returns_ok_manifest_and_expected_conditions_when_all_checks_pass(self):
         with _repo_tempdir() as repo_root:
             _write_syncback_gate_artifacts(repo_root)
@@ -476,6 +500,31 @@ class EvaluateGateTest(unittest.TestCase):
             self.assertFalse(by_id["decay_evidence"].passed)
             self.assertIn("disabled", by_id["tests"].detail.lower())
             self.assertIn("disabled", by_id["decay_evidence"].detail.lower())
+
+    def test_evaluate_gate_fails_decay_evidence_when_decay_tests_pass_without_evidence(self):
+        with _repo_tempdir() as repo_root:
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True, exist_ok=True)
+            (docs_dir / "review.md").write_text("# review\n\n## 結論\n\n- 結論：可合併。\n")
+            calls = []
+
+            def fake_runner(modules):
+                calls.append(tuple(modules))
+                return True
+
+            verdict = gate.evaluate_gate(
+                repo_root,
+                now="2026-06-06T00:00:00Z",
+                test_runner=fake_runner,
+            )
+
+            by_id = {condition.id: condition for condition in verdict.conditions}
+            self.assertFalse(verdict.ok)
+            self.assertEqual(calls, [gate.TESTS_CORE])
+            self.assertTrue(by_id["tests"].passed)
+            self.assertFalse(by_id["decay_evidence"].passed)
+            self.assertIn("evidence", by_id["decay_evidence"].detail.lower())
+            self.assertFalse(by_id["evidence_present"].passed)
 
 
 if __name__ == '__main__':
