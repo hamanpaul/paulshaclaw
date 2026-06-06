@@ -120,6 +120,15 @@ def _build_parser() -> argparse.ArgumentParser:
     wakeup_p.add_argument("--now", default=None)
     wakeup_p.set_defaults(func=_wakeup)
 
+    syncback = memory_subparsers.add_parser("syncback")
+    syncback_subparsers = syncback.add_subparsers(dest="syncback_command", required=True)
+    syncback_check = syncback_subparsers.add_parser("check")
+    syncback_check.add_argument("--repo-root", default=".")
+    syncback_check.add_argument("--no-run-tests", action="store_true")
+    syncback_check.add_argument("--json", action="store_true")
+    syncback_check.add_argument("--now", default=None)
+    syncback_check.set_defaults(func=_syncback)
+
     return parser
 
 
@@ -215,6 +224,12 @@ def _wakeup(args: argparse.Namespace) -> int:
     from .wakeup import cli as wakeup_cli
 
     return wakeup_cli.run(args)
+
+
+def _syncback(args: argparse.Namespace) -> int:
+    from .syncback import cli as syncback_cli
+
+    return syncback_cli.run(args)
 
 
 def _load_policy(override_path: str | None):
