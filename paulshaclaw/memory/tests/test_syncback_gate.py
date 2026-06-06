@@ -218,6 +218,7 @@ class FileConditionTest(unittest.TestCase):
         phrases = (
             'do not merge',
             'not ready to merge',
+            'not approved for merge',
         )
 
         for phrase in phrases:
@@ -285,7 +286,7 @@ class FileConditionTest(unittest.TestCase):
                     self.assertIn(marker, res.detail)
 
     def test_check_review_clear_fails_for_lowercase_blocking_markers(self):
-        for marker in ("blocking", "blocker"):
+        for marker in ("blocking", "blocker", "blockers"):
             with self.subTest(marker=marker):
                 with _repo_tempdir() as repo_root:
                     docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"

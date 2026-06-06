@@ -42,8 +42,11 @@ _REVIEW_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bnot mergeable\b", re.IGNORECASE),
     re.compile(r"\bcannot merge\b", re.IGNORECASE),
     re.compile(r"\bcan't merge\b", re.IGNORECASE),
-    re.compile(r"\bblocking\b", re.IGNORECASE),
-    re.compile(r"\bblocker\b", re.IGNORECASE),
+    re.compile(r"\bblock(?:er|ers|ing)\b", re.IGNORECASE),
+)
+
+_REVIEW_NEGATIVE_APPROVAL_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bnot approved for merge\b", re.IGNORECASE),
 )
 
 _REVIEW_CLEAR_PATTERNS: Tuple[re.Pattern[str], ...] = (
@@ -186,6 +189,16 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
         concl_text = '\n'.join(concl_lines)
         if not concl_text.strip():
             return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="empty 結論 section")
+        for pattern in _REVIEW_NEGATIVE_APPROVAL_PATTERNS:
+            match = pattern.search(concl_text)
+            if not match:
+                continue
+            return ConditionResult(
+                id="review_clear",
+                name="review_clear",
+                passed=False,
+                detail=f"blocking: {match.group(0)}",
+            )
         for pattern in _REVIEW_BLOCKING_PATTERNS:
             match = pattern.search(concl_text)
             if not match:
