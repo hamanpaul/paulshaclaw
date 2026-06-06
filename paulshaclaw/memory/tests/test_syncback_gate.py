@@ -119,14 +119,19 @@ class FileConditionTest(unittest.TestCase):
             self.assertIn('empty', res2.detail)
 
     def test_check_review_clear_passes_for_mergeable_conclusion(self):
-        with _repo_tempdir() as repo_root:
-            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
-            docs_dir.mkdir(parents=True)
-            (docs_dir / "review.md").write_text('# review\n\n## 結論\n\n- 結論：可合併。\n')
+        for heading in ("### Conclusion", "### 結論"):
+            with self.subTest(heading=heading):
+                with _repo_tempdir() as repo_root:
+                    docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+                    docs_dir.mkdir(parents=True)
+                    (docs_dir / "review.md").write_text(
+                        f'# review\n\n{heading}\n\n- 結論：可合併。\n'
+                    )
 
-            res = gate._check_review_clear(repo_root)
-            self.assertEqual(res.id, 'review_clear')
-            self.assertTrue(res.passed)
+                    res = gate._check_review_clear(repo_root)
+
+                    self.assertEqual(res.id, 'review_clear')
+                    self.assertTrue(res.passed)
 
     def test_check_review_clear_fails_on_blocking_or_missing(self):
         with _repo_tempdir() as repo_root:
@@ -151,7 +156,12 @@ class FileConditionTest(unittest.TestCase):
             self.assertIn('不可', res3.detail)
 
     def test_check_review_clear_rejects_noncanonical_conclusion_headings(self):
-        for heading in ("## Conclusion Draft", "## 結論草稿"):
+        for heading in (
+            "## Conclusion Draft",
+            "### Conclusion Draft",
+            "## 結論草稿",
+            "### 結論草稿",
+        ):
             with self.subTest(heading=heading):
                 with _repo_tempdir() as repo_root:
                     docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"

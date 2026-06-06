@@ -63,7 +63,7 @@ _REVIEW_NEGATED_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"\bno blocked items?\b", re.IGNORECASE),
 )
 
-_REVIEW_CONCLUSION_HEADING = re.compile(r"^##\s+(結論|Conclusion)\s*$")
+_REVIEW_CONCLUSION_HEADING = re.compile(r"^#{1,6}\s+(結論|Conclusion)\s*$")
 
 
 def _is_negated_review_match(text: str, match: re.Match[str]) -> bool:
