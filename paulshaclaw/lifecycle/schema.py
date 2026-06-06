@@ -41,7 +41,6 @@ REQUIRED_FRONTMATTER_FIELDS = (
     "created_by",
     "source_session",
     "gate_required",
-    "supersedes",
     "checksum",
 )
 

@@ -22,7 +22,6 @@ CANONICAL_STAGE3_REQUIRED_FIELDS = {
     "created_by",
     "source_session",
     "gate_required",
-    "supersedes",
     "checksum",
 }
 

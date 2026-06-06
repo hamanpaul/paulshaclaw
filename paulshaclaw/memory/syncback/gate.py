@@ -100,6 +100,13 @@ def _is_negated_review_match(text: str, match: re.Match[str]) -> bool:
 
 
 def _check_schema_unextended() -> ConditionResult:
+    # Stage 3-owned baseline of REQUIRED frontmatter fields (the actual implemented
+    # set in paulshaclaw/lifecycle/schema.py). Condition 5 = Stage 2 did NOT extend
+    # this set. NOTE: the sync-back spec also names `supersedes` as a canonical
+    # field, but the implemented Stage 3 schema does not list it as required — that
+    # is a Stage 3 spec/impl discrepancy to reconcile separately. T9 (a Stage 2
+    # change) MUST NOT mutate the Stage 3 schema to satisfy its own gate; it checks
+    # the schema as-is.
     canonical = {
         "phase",
         "project",
@@ -110,7 +117,6 @@ def _check_schema_unextended() -> ConditionResult:
         "created_by",
         "source_session",
         "gate_required",
-        "supersedes",
         "checksum",
     }
     try:
