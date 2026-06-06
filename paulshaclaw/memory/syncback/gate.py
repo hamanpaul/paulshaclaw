@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 from typing import Tuple
 
 
@@ -28,6 +29,32 @@ SYNC_MANIFEST: Tuple[str, ...] = (
 
 
 from pathlib import Path
+
+
+_REVIEW_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"不可合併"),
+    re.compile(r"不合併"),
+    re.compile(r"阻斷"),
+    re.compile(r"阻擋"),
+    re.compile(r"\bdo not merge\b"),
+    re.compile(r"\bdon't merge\b"),
+    re.compile(r"\bnot ready to merge\b"),
+    re.compile(r"\bnot mergeable\b"),
+    re.compile(r"\bcannot merge\b"),
+    re.compile(r"\bcan't merge\b"),
+    re.compile(r"\bblocking issues?\b"),
+    re.compile(r"\bblocked\b"),
+    re.compile(r"\bfail(?:ed|ing)?\b"),
+)
+
+_REVIEW_CLEAR_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"可\s*合併"),
+    re.compile(r"可以合併"),
+    re.compile(r"\bmergeable\b"),
+    re.compile(r"\bready to merge\b"),
+    re.compile(r"\bok to merge\b"),
+    re.compile(r"\bapproved for merge\b"),
+)
 
 
 def _check_schema_unextended() -> ConditionResult:
@@ -134,15 +161,21 @@ def _check_review_clear(repo_root: Path) -> ConditionResult:
         if not concl_text.strip():
             return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="empty 結論 section")
         lower = concl_text.lower()
-        # blocking keywords
-        blocking = ['不可合併', '不可', '不合併', '阻斷', '阻擋', 'blocking', 'fail']
-        for b in blocking:
-            if b in concl_text or b in lower:
-                return ConditionResult(id="review_clear", name="review_clear", passed=False, detail=f"blocking: {b}")
-        # permissive keywords
-        ok_words = ['可合併', 'merge', '可 合併', '可以合併']
-        for ok in ok_words:
-            if ok in concl_text or ok in lower:
+        for pattern in _REVIEW_BLOCKING_PATTERNS:
+            match = pattern.search(lower if "\\b" in pattern.pattern else concl_text)
+            if not match:
+                continue
+            if pattern.pattern == r"\bblocking issues?\b" and re.search(r"\bno blocking issues?\b", lower):
+                continue
+            return ConditionResult(
+                id="review_clear",
+                name="review_clear",
+                passed=False,
+                detail=f"blocking: {match.group(0)}",
+            )
+        for pattern in _REVIEW_CLEAR_PATTERNS:
+            haystack = lower if "\\b" in pattern.pattern else concl_text
+            if pattern.search(haystack):
                 return ConditionResult(id="review_clear", name="review_clear", passed=True, detail="")
         # default fail-closed
         return ConditionResult(id="review_clear", name="review_clear", passed=False, detail="unrecognized 結論 wording")

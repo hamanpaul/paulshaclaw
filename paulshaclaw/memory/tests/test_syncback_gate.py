@@ -138,6 +138,54 @@ class FileConditionTest(unittest.TestCase):
             self.assertFalse(res3.passed)
             self.assertIn('不可', res3.detail)
 
+    def test_check_review_clear_fails_closed_for_ambiguous_conclusion(self):
+        with TemporaryDirectory() as td:
+            repo_root = Path(td)
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## Conclusion\n\n- Conclusion: needs follow-up discussion.\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertFalse(res.passed)
+            self.assertIn('unrecognized', res.detail)
+
+    def test_check_review_clear_fails_for_english_negated_merge_phrases(self):
+        phrases = (
+            'do not merge',
+            'not ready to merge',
+        )
+
+        for phrase in phrases:
+            with self.subTest(phrase=phrase):
+                with TemporaryDirectory() as td:
+                    repo_root = Path(td)
+                    docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+                    docs_dir.mkdir(parents=True)
+                    (docs_dir / "review.md").write_text(
+                        f'# review\n\n## Conclusion\n\n- Conclusion: {phrase}.\n'
+                    )
+
+                    res = gate._check_review_clear(repo_root)
+
+                    self.assertFalse(res.passed)
+
+    def test_check_review_clear_passes_for_mergeable_conclusion_with_no_blocking_issues(self):
+        with TemporaryDirectory() as td:
+            repo_root = Path(td)
+            docs_dir = repo_root / "docs" / "superpowers" / "workstreams" / "stage2-paulsha-memory"
+            docs_dir.mkdir(parents=True)
+            (docs_dir / "review.md").write_text(
+                '# review\n\n## Notes\n\n- Reviewer note: do not merge until conclusion is updated.\n\n'
+                '## Conclusion\n\n- Conclusion: mergeable. No blocking issues.\n'
+            )
+
+            res = gate._check_review_clear(repo_root)
+
+            self.assertTrue(res.passed)
+
 
 if __name__ == '__main__':
     unittest.main()
