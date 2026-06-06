@@ -42,19 +42,39 @@ Stage 2 SHALL treat `decayed` and `reactivation` as first-class ledger events, n
 - **WHEN** a reviewer reads `openspec/specs/stage2/scope.md` §3
 - **THEN** the document MUST contain the literal string `decayed/reactivation` and describe the trigger + action for each event
 
-### Requirement: Sync-back gate to custom-skills
+### Requirement: Executable sync-back gate to custom-skills
 
-Stage 2 SHALL declare a sync-back gate that governs when the project-tuned `paulsha-memory` skill may be pushed back to `hamanpaul/custom-skills`. The gate MUST require all of: (a) importer / classifier / replay passed Stage 2 tests, (b) `decayed/reactivation` rules documented with test evidence, (c) evidence files stored under `docs/superpowers/workstreams/stage2-paulsha-memory/evidence/`, (d) `review.md` contains no blocking finding, (e) Stage 2 MUST NOT extend the Stage 3 frontmatter schema — the canonical required fields `slice_id / artifact_kind / supersedes / checksum` remain owned by Stage 3.
+Stage 2 SHALL provide an executable sync-back gate in `paulshaclaw/memory/syncback/` that governs when the project-tuned `paulsha-memory` package may be synced back to `hamanpaul/custom-skills`. The gate MUST evaluate all of: (a) importer / classifier / replay tests pass, (b) decayed/reactivation tests pass and evidence is present, (c) evidence files under `docs/superpowers/workstreams/stage2-paulsha-memory/evidence/` exist and are non-empty, (d) `review.md` contains a mergeable conclusion with no live blocking marker, (e) `lifecycle.schema.REQUIRED_FRONTMATTER_FIELDS` exactly matches the Stage 3 canonical required set `{phase, project, slice_id, artifact_kind, version, created_at, created_by, source_session, gate_required, supersedes, checksum}`. The verdict MUST report each condition's pass/fail with non-sensitive detail and an overall `ok` that is true only when all conditions pass. The gate MUST be exposed as `psc memory syncback check`, return exit 0 on pass and non-zero otherwise, and remain read-only: it MUST NOT copy the package into `custom-skills/paulsha-memory/` nor push to `hamanpaul/custom-skills`.
 
-#### Scenario: Gate lists five conditions
+#### Scenario: All conditions pass yields exit zero and a sync manifest
 
-- **WHEN** a reviewer reads `custom-skills/paulsha-memory/README.md`
-- **THEN** the document MUST enumerate five numbered sync-back gate conditions covering importer/classifier/replay pass, decayed/reactivation evidence retention, evidence location, non-blocking review, and non-extension of Stage 3 frontmatter schema
+- **WHEN** all five conditions hold and an operator runs `psc memory syncback check`
+- **THEN** the verdict `ok` MUST be true and the command MUST exit zero
+- **THEN** a sync manifest listing the installable package paths MUST be reported for manual follow-up only
 
-#### Scenario: Stage 3 frontmatter fields are named explicitly
+#### Scenario: Any failing condition blocks the gate
 
-- **WHEN** a reviewer reads `openspec/specs/stage2/scope.md` §5 item 4
-- **THEN** the document MUST name `slice_id`, `artifact_kind`, `supersedes`, and `checksum` as the Stage 3-owned required fields that Stage 2 MUST NOT extend
+- **WHEN** any one of the five conditions fails
+- **THEN** the verdict `ok` MUST be false, the command MUST exit non-zero, and the sync manifest MUST be empty
+
+### Requirement: Sync-back gate is fail-closed and deterministic
+
+The sync-back gate MUST be fail-closed: a missing or unreadable file, an invalid UTF-8 review artifact, a test runner that raises, an all-skipped required suite, a disabled test run, or a `review.md` lacking a canonical `結論` / `Conclusion` section MUST cause the corresponding condition to fail and therefore the gate to fail — never a default pass. The gate MUST be deterministic: the timestamp MUST be injected rather than read from the wall clock inside the evaluator, and the test runner MUST be injectable so the gate's own unit tests do not invoke the real suite. Condition details MUST NOT contain secrets or raw exception text.
+
+#### Scenario: Test runner failure fails closed
+
+- **WHEN** the injected test runner raises or reports failure
+- **THEN** the corresponding test condition MUST fail and the gate MUST fail
+
+#### Scenario: Skipping tests is not a pass
+
+- **WHEN** the gate is run with test execution disabled, or a required suite reports only skipped tests
+- **THEN** the affected test condition MUST be reported as failed
+
+#### Scenario: Missing review conclusion fails closed
+
+- **WHEN** `review.md` has no canonical `結論` / `Conclusion` section
+- **THEN** the review condition MUST fail
 
 ### Requirement: Stage 2 integration check
 
