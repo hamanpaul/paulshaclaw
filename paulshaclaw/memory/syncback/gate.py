@@ -269,13 +269,6 @@ def _check_decay_evidence(
     test_runner: TestRunner,
 ) -> ConditionResult:
     evidence = _check_evidence_present(repo_root)
-    if not evidence.passed:
-        return ConditionResult(
-            id="decay_evidence",
-            name="decay_evidence",
-            passed=False,
-            detail=f"missing decay evidence: {evidence.detail}",
-        )
     if not run_tests:
         return ConditionResult(
             id="decay_evidence",
@@ -283,22 +276,31 @@ def _check_decay_evidence(
             passed=False,
             detail="test execution disabled",
         )
+
     try:
-        passed = bool(test_runner(TESTS_DECAY))
+        tests_passed = bool(test_runner(TESTS_DECAY))
     except Exception as e:
-        return ConditionResult(
-            id="decay_evidence",
-            name="decay_evidence",
-            passed=False,
-            detail=f"runner error: {e}",
-        )
-    if passed:
+        tests_passed = False
+        test_detail = f"runner error: {e}"
+    else:
+        test_detail = ""
+
+    if evidence.passed and tests_passed:
         return ConditionResult(id="decay_evidence", name="decay_evidence", passed=True, detail="")
+
+    details = []
+    if not evidence.passed:
+        details.append(f"missing decay evidence: {evidence.detail}")
+    if test_detail:
+        details.append(test_detail)
+    elif not tests_passed:
+        details.append("decay evidence tests failed")
+
     return ConditionResult(
         id="decay_evidence",
         name="decay_evidence",
         passed=False,
-        detail="decay evidence tests failed",
+        detail="; ".join(details),
     )
 
 

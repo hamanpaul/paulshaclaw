@@ -520,7 +520,7 @@ class EvaluateGateTest(unittest.TestCase):
 
             by_id = {condition.id: condition for condition in verdict.conditions}
             self.assertFalse(verdict.ok)
-            self.assertEqual(calls, [gate.TESTS_CORE])
+            self.assertEqual(calls, [gate.TESTS_CORE, gate.TESTS_DECAY])
             self.assertTrue(by_id["tests"].passed)
             self.assertFalse(by_id["decay_evidence"].passed)
             self.assertIn("evidence", by_id["decay_evidence"].detail.lower())
