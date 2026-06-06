@@ -389,7 +389,43 @@ class EvaluateGateTest(unittest.TestCase):
         run.assert_called_once_with(
             [sys.executable, "-m", "unittest", *modules],
             check=False,
+            capture_output=True,
+            text=True,
         )
+
+    def test_default_test_runner_fails_closed_when_unittest_reports_all_skipped(self):
+        modules = ("paulshaclaw.memory.tests.test_importer_cli",)
+
+        with patch(
+            "paulshaclaw.memory.syncback.gate.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="s\n----------------------------------------------------------------------\nRan 1 test in 0.000s\n\nOK (skipped=1)\n",
+                stderr="",
+            ),
+            create=True,
+        ):
+            ok = gate._default_test_runner(modules)
+
+        self.assertFalse(ok)
+
+    def test_default_test_runner_passes_when_unittest_runs_non_skipped_tests(self):
+        modules = ("paulshaclaw.memory.tests.test_importer_cli",)
+
+        with patch(
+            "paulshaclaw.memory.syncback.gate.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout=".s\n----------------------------------------------------------------------\nRan 2 tests in 0.000s\n\nOK (skipped=1)\n",
+                stderr="",
+            ),
+            create=True,
+        ):
+            ok = gate._default_test_runner(modules)
+
+        self.assertTrue(ok)
 
     def test_evaluate_gate_returns_ok_manifest_and_expected_conditions_when_all_checks_pass(self):
         with _repo_tempdir() as repo_root:

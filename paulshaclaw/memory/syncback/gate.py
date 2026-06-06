@@ -86,6 +86,8 @@ _REVIEW_NEGATED_BLOCKING_PATTERNS: Tuple[re.Pattern[str], ...] = (
 )
 
 _REVIEW_CONCLUSION_HEADING = re.compile(r"^#{1,6}\s+(結論|Conclusion)\s*$")
+_UNITTEST_RAN_PATTERN = re.compile(r"\bRan\s+(\d+)\s+tests?\b")
+_UNITTEST_SKIPPED_PATTERN = re.compile(r"\bskipped=(\d+)\b")
 
 
 def _is_negated_review_match(text: str, match: re.Match[str]) -> bool:
@@ -241,8 +243,20 @@ def _default_test_runner(modules: Tuple[str, ...]) -> bool:
     result = subprocess.run(
         [sys.executable, "-m", "unittest", *modules],
         check=False,
+        capture_output=True,
+        text=True,
     )
-    return result.returncode == 0
+    if result.returncode != 0:
+        return False
+
+    output = "\n".join(
+        part for part in (result.stdout, result.stderr) if isinstance(part, str) and part
+    )
+    ran_match = _UNITTEST_RAN_PATTERN.search(output)
+    skipped_match = _UNITTEST_SKIPPED_PATTERN.search(output)
+    if ran_match and skipped_match and int(ran_match.group(1)) == int(skipped_match.group(1)):
+        return False
+    return True
 
 
 def _check_tests(*, run_tests: bool, test_runner: TestRunner) -> ConditionResult:
