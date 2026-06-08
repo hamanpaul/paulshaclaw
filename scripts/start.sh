@@ -48,13 +48,13 @@ cleanup() {
   CLEANED_UP=1
   trap - EXIT INT TERM
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${COCKPIT_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${COCKPIT_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       wait "$pid" 2>/dev/null || true
     fi
@@ -127,6 +127,37 @@ apply_stage8_footer() {
 
 apply_stage8_footer
 
+# Stage 2: memory dream loop (atomize + janitor + moc), idle-gated.
+# Lifecycle is bound to start.sh — launched here, torn down by cleanup() with
+# the other background services. Disable with PSC_DREAM_DISABLED=1; tune cadence
+# with PSC_DREAM_INTERVAL_SECONDS (default 3600).
+start_dream_loop() {
+  if [[ "${PSC_DREAM_DISABLED:-0}" == "1" ]]; then
+    echo "dream loop disabled (PSC_DREAM_DISABLED=1)"
+    return 0
+  fi
+  local dream_root="${PSC_MEMORY_ROOT:-$HOME/.agents/memory}"
+  if [[ ! -e "$dream_root" ]]; then
+    echo "dream loop skipped: memory root not found ($dream_root)" >&2
+    return 0
+  fi
+  local interval="${PSC_DREAM_INTERVAL_SECONDS:-3600}"
+  if [[ ! "$interval" =~ ^[0-9]+$ ]]; then
+    interval=3600
+  fi
+  local dream_log="$HOME/.agents/log/dream.log"
+  (
+    while true; do
+      PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
+        --memory-root "$dream_root" --require-idle --promoter identity \
+        >>"$dream_log" 2>&1 || true
+      sleep "$interval"
+    done
+  ) &
+  DREAM_PID=$!
+  echo "dream pid=$DREAM_PID (interval=${interval}s, root=$dream_root)"
+}
+
 
 # Telegram listener (background when config is present)
 telegram_token_present=0
@@ -161,6 +192,9 @@ if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   echo "monitor exited before startup" >&2
   exit 1
 fi
+
+# Stage 2: memory dream loop (bound to this start.sh lifecycle)
+start_dream_loop
 
 if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
