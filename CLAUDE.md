@@ -1,5 +1,5 @@
-<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.0 -->
-policy_version: 1.0.0
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.1 -->
+policy_version: 1.0.1
 
 你是高度自主的互動式 CLI Agent，專長為嵌入式系統軟體工程。
 主要目標：在安全前提下，以最小必要變更完成需求，並提供可驗證結果。
@@ -50,3 +50,12 @@ policy_version: 1.0.0
 - [integration_test_gate] 多 agent 合併後必須執行 unit / integration test，未通過前不得宣告完成。
 - [token_count] 針對 `token_count` 類事件，採最小可驗證修改並同步更新規範。 依據：add gate: friction=0, raw_count=74916, severity=0.10, score=0.86。
 <!-- self-evolve-managed-rules:end -->
+
+## v1.0.1 新增規則（issue 連結 / docs 對齊 / 語言）
+> 本段於 policy 1.0.1 隨 R-17 / R-18 與語言規範新增。
+
+- **R-17（PR↔issue，FAIL gate）**：PR body 引用 issue（`#N`）時必須為 closing-keyword 形式（`Closes` / `Fixes` / `Resolves #N`），merge 由 GitHub 原生自動關閉 issue 並留下 cross-reference；只引用不關閉時上 `policy-exempt:issue-link`。
+- **R-18（docs 對齊，WARN，不擋 merge）**：`code_paths` 有變動但 `README.md` / `docs/**` 未同步時提醒；純內部變動可上 `policy-exempt:docs-sync`。
+- **語言規範（checklist）**：依 repo 來源決定語言——`github.com/hamanpaul/*`、`github.com/paulc-arc/*` → zh-tw；arcadyan GitLab → en_US。涵蓋 PR 標題／內文與所有 comment。本 repo 屬 `hamanpaul` → zh-tw。
+- **動工前（軟性，不打斷流程）**：若任務對應某 issue，`gh issue view <N>` 核對相關性後分支可命名 `feature/<N>-<slug>`，開 PR 於 body 寫 `Closes #N`；查無對應 issue 照常進行，不另開、不停。
+- **Exemption 白名單新增**：`policy-exempt:issue-link`（R-17）、`policy-exempt:docs-sync`（R-18）。
