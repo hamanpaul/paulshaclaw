@@ -76,10 +76,20 @@ def _account_level(provider: ProviderSnapshot, account: CopilotAccountUsage) -> 
     return classify_usage(percent)
 
 
+def _abbrev_count(value: int) -> str:
+    # Keep the footer narrow: premium-request counts stay small, but AI-credit
+    # (AIU) totals run to tens of thousands, so abbreviate large values.
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 10_000:
+        return f"{value / 1_000:.1f}k"
+    return str(value)
+
+
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
     parts = [_provider_label(name, provider)]
     for account in provider.accounts:
-        used = "--" if account.used_requests is None else str(account.used_requests)
+        used = "--" if account.used_requests is None else _abbrev_count(account.used_requests)
         parts.append(_wrap(f"{account.label}:{used}", _account_level(provider, account), use_tmux_style))
     return " ".join(parts)
 

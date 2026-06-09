@@ -671,17 +671,61 @@ def _read_local_observed_total(year: int | None = None, month: int | None = None
     return total
 
 
+def _read_local_observed_aiu(year: int | None = None, month: int | None = None) -> int:
+    """Sum Copilot AI Credits (AIU) from local session-shutdown events.
+
+    Copilot CLI pre-computes the per-session credits as `data.totalNanoAiu`
+    (1 AI credit = 1e9 nanoAiu = $0.01); we just sum and divide. AIU only exists
+    after the 2026-06-01 usage-based-billing migration (older months are 0)."""
+    root = Path.home() / ".copilot" / "session-state"
+    if not root.exists():
+        return 0
+
+    total_nano = 0
+    should_filter_month = year is not None and month is not None
+    for event_path in root.rglob("events.jsonl"):
+        try:
+            with event_path.open("r", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    try:
+                        payload = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(payload, dict) or payload.get("type") != "session.shutdown":
+                        continue
+                    if should_filter_month and _event_month(payload) != (year, month):
+                        continue
+                    data = payload.get("data")
+                    if not isinstance(data, dict):
+                        continue
+                    try:
+                        total_nano += int(data.get("totalNanoAiu") or 0)
+                    except (TypeError, ValueError):
+                        continue
+        except OSError:
+            continue
+    return round(total_nano / 1_000_000_000)
+
+
+# Attribution is metric-based per the operator's rule (see the project-usage-assess
+# skill): premium requests -> hamanpaul, AI credits (AIU) -> paulc-arc. events.jsonl
+# does not record the logged-in account, so we do NOT gate on the active gh login.
+_COPILOT_PREMIUM_ACCOUNT = "hamanpaul"
+_COPILOT_AIU_ACCOUNT = "paulc-arc"
+
+
 def _collect_local_observed_usage(allowed_accounts: set[str] | None = None) -> dict[str, int]:
-    active_account = _get_active_github_login()
-    if not active_account:
-        return {}
-    if allowed_accounts is not None and active_account not in allowed_accounts:
-        return {}
     year, month = _current_month_utc()
-    total = _read_local_observed_total(year=year, month=month)
-    if total <= 0:
-        return {}
-    return {active_account: total}
+    usage: dict[str, int] = {}
+    premium = _read_local_observed_total(year=year, month=month)
+    if premium > 0:
+        usage[_COPILOT_PREMIUM_ACCOUNT] = premium
+    aiu = _read_local_observed_aiu(year=year, month=month)
+    if aiu > 0:
+        usage[_COPILOT_AIU_ACCOUNT] = aiu
+    if allowed_accounts is not None:
+        usage = {key: value for key, value in usage.items() if key in allowed_accounts}
+    return usage
 
 
 def collect_copilot(

@@ -40,6 +40,7 @@ from paulshaclaw.cost.models import (
 from paulshaclaw.cost.providers import (
     _claude_message_token_total,
     _read_local_observed_total,
+    _read_local_observed_aiu,
     collect_all,
     collect_claude,
     collect_codex,
@@ -708,7 +709,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIsNone(provider.accounts[0].used_requests)
         local_mock.assert_called_once_with({"hamanpaul"})
 
-    def test_collect_copilot_marks_unknown_when_gh_is_missing_during_local_fallback(self) -> None:
+    def test_collect_copilot_marks_unknown_when_no_local_usage(self) -> None:
         cfg = CostConfig(
             copilot_accounts=(
                 cost_config_module.CopilotAccountConfig(
@@ -722,13 +723,39 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         with (
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
-            patch("paulshaclaw.cost.providers.subprocess.run", side_effect=FileNotFoundError("gh")),
+            patch("paulshaclaw.cost.providers._read_local_observed_total", return_value=0),
+            patch("paulshaclaw.cost.providers._read_local_observed_aiu", return_value=0),
         ):
             provider = collect_copilot(cfg)
 
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.accounts[0].source, "unknown")
         self.assertIsNone(provider.accounts[0].used_requests)
+
+    def test_collect_copilot_attributes_aiu_to_arc_and_premium_to_haman(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul", label="haman", kind="personal", monthly_allowance=1500,
+                ),
+                cost_config_module.CopilotAccountConfig(
+                    account_id="paulc-arc", label="arc", kind="company", monthly_allowance=300,
+                ),
+            )
+        )
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch("paulshaclaw.cost.providers._read_local_observed_total", return_value=1323),
+            patch("paulshaclaw.cost.providers._read_local_observed_aiu", return_value=55818),
+        ):
+            provider = collect_copilot(cfg)
+
+        by_label = {a.label: a for a in provider.accounts}
+        self.assertEqual(by_label["haman"].used_requests, 1323)
+        self.assertEqual(by_label["haman"].source, "local_observed")
+        self.assertEqual(by_label["arc"].used_requests, 55818)  # AI credits (AIU)
+        self.assertEqual(by_label["arc"].source, "local_observed")
 
     def test_read_local_observed_total_counts_current_month_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -768,6 +795,36 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                 total = _read_local_observed_total(year=2026, month=5)
 
         self.assertEqual(total, 12)
+
+    def test_read_local_observed_aiu_sums_credits_for_month(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir) / ".copilot" / "session-state" / "s1"
+            root.mkdir(parents=True)
+            (root / "events.jsonl").write_text(
+                "\n".join(
+                    [
+                        json.dumps({"type": "session.shutdown", "timestamp": "2026-05-20T12:00:00Z",
+                                    "data": {"totalNanoAiu": 40_000_000_000}}),  # 40 credits
+                        json.dumps({"type": "session.shutdown", "timestamp": "2026-05-21T12:00:00Z",
+                                    "data": {"totalNanoAiu": 16_000_000_000}}),  # 16 credits
+                        json.dumps({"type": "session.shutdown", "timestamp": "2026-04-30T23:59:00Z",
+                                    "data": {"totalNanoAiu": 99_000_000_000}}),  # other month, excluded
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=Path(tmpdir)):
+                credits = _read_local_observed_aiu(year=2026, month=5)
+
+        self.assertEqual(credits, 56)  # (40e9 + 16e9) / 1e9
+
+    def test_footer_abbreviates_large_copilot_credits(self) -> None:
+        from paulshaclaw.cost.formatter import _abbrev_count
+
+        self.assertEqual(_abbrev_count(1323), "1323")
+        self.assertEqual(_abbrev_count(55818), "55.8k")
+        self.assertEqual(_abbrev_count(1_200_000), "1.2M")
 
     def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
         with self.scratch_tempdir() as tmpdir:
