@@ -6,12 +6,18 @@ import datetime
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 DEFAULT_STATE_DIR = Path.home() / ".agents" / "state" / "bro-hook"
 REPLY_BRIDGE = Path.home() / ".agents" / "skills" / "bro" / "scripts" / "reply_bridge.py"
 LOG = Path.home() / ".agents" / "log" / "bro-hook.log"
 EMPTY_NOTICE = "（已完成，無文字輸出）"
+# At Stop-hook time the current turn's assistant record may not be flushed to the
+# transcript yet. Poll briefly for it rather than grabbing the previous turn's
+# reply (the "回到前一次的回覆" off-by-one).
+REPLY_WAIT_SECONDS = 5.0
+REPLY_POLL_INTERVAL = 0.2
 
 
 def _log(stage: str, exc: Exception) -> None:
@@ -23,8 +29,27 @@ def _log(stage: str, exc: Exception) -> None:
         pass
 
 
-def last_assistant_text(transcript_path: Path) -> str:
-    text = ""
+def _assistant_text(rec: dict) -> str:
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        return "".join(
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+        )
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+def current_turn_reply(transcript_path: Path) -> tuple[bool, str]:
+    """Return (has_reply, text) for the CURRENT turn — the assistant text that
+    appears AFTER the last user-role record.
+
+    `has_reply` is False when no assistant record has been written past the last
+    user message yet (this turn's reply hasn't been flushed to the transcript),
+    letting callers wait instead of sending the previous turn's reply. Scanning
+    after the last user record also handles tool turns (the final answer follows
+    the last tool_result, which is itself a user-role record)."""
+    records = []
     for line in transcript_path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = line.strip()
         if not line.startswith("{"):
@@ -33,18 +58,15 @@ def last_assistant_text(transcript_path: Path) -> str:
             rec = json.loads(line)
         except Exception:
             continue
-        if rec.get("type") != "assistant":
-            continue
-        content = (rec.get("message") or {}).get("content")
-        if isinstance(content, list):
-            joined = "".join(
-                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-            ).strip()
-            if joined:
-                text = joined
-        elif isinstance(content, str) and content.strip():
-            text = content.strip()
-    return text
+        if rec.get("type") in ("user", "assistant"):
+            records.append(rec)
+    last_user = -1
+    for index, rec in enumerate(records):
+        if rec.get("type") == "user":
+            last_user = index
+    after = [rec for rec in records[last_user + 1:] if rec.get("type") == "assistant"]
+    text = "".join(_assistant_text(rec) for rec in after).strip()
+    return bool(after), text
 
 
 def _send_via_bridge(user_id: int, text: str) -> None:
@@ -61,7 +83,7 @@ def _send_via_bridge(user_id: int, text: str) -> None:
         _log("send", RuntimeError(f"reply_bridge exit {result.returncode}: {(result.stderr or '').strip()[:500]}"))
 
 
-def handle(event: dict, state_dir: Path, sender=_send_via_bridge) -> bool:
+def handle(event: dict, state_dir: Path, sender=_send_via_bridge, wait_seconds: float = REPLY_WAIT_SECONDS) -> bool:
     if event.get("stop_hook_active"):
         return False
     session_id = str(event.get("session_id") or "").strip()
@@ -79,10 +101,17 @@ def handle(event: dict, state_dir: Path, sender=_send_via_bridge) -> bool:
     tp = event.get("transcript_path")
     text = ""
     if tp and Path(tp).exists():
-        try:
-            text = last_assistant_text(Path(tp))
-        except Exception as exc:
-            _log("transcript", exc)
+        transcript = Path(tp)
+        deadline = time.monotonic() + max(0.0, wait_seconds)
+        while True:
+            try:
+                has_reply, text = current_turn_reply(transcript)
+            except Exception as exc:
+                _log("transcript", exc)
+                break
+            if has_reply or time.monotonic() >= deadline:
+                break
+            time.sleep(REPLY_POLL_INTERVAL)
     try:
         sender(user_id, text or EMPTY_NOTICE)
     except Exception as exc:

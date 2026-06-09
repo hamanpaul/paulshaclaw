@@ -66,6 +66,32 @@ class BroOutTests(unittest.TestCase):
         self.assertEqual(self.sent, [(7, "final answer")])
         self.assertFalse((self.state / "s1.json").exists())
 
+    def test_sends_current_turn_reply_not_previous(self):
+        (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
+        t = self._transcript([
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "PREVIOUS"}]}},
+            {"type": "user", "message": {"content": [{"type": "text", "text": "[bro:7] new question"}]}},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "CURRENT"}]}},
+        ])
+        self.bro_out.handle(
+            {"session_id": "s1", "transcript_path": str(t)}, self.state, sender=self._sender, wait_seconds=0
+        )
+        self.assertEqual(self.sent, [(7, "CURRENT")])
+
+    def test_does_not_send_previous_reply_when_current_not_flushed(self):
+        # Transcript ends with the just-submitted user prompt; this turn's
+        # assistant record hasn't been written yet. Must NOT fall back to the
+        # previous turn's reply (the off-by-one). With no wait it sends the notice.
+        (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
+        t = self._transcript([
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "PREVIOUS"}]}},
+            {"type": "user", "message": {"content": [{"type": "text", "text": "[bro:7] new question"}]}},
+        ])
+        self.bro_out.handle(
+            {"session_id": "s1", "transcript_path": str(t)}, self.state, sender=self._sender, wait_seconds=0
+        )
+        self.assertEqual(self.sent, [(7, "（已完成，無文字輸出）")])
+
     def test_empty_final_text_sends_notice(self):
         (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
         t = self._transcript([
