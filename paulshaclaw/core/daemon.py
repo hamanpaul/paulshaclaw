@@ -17,6 +17,13 @@ from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.core.tmate import TmateManager
 
 
+# Foreground commands that mark a tmux pane as an idle shell `/agent start` may
+# reuse. Anything else (claude, minicom, vim, …) means the pane is occupied.
+_IDLE_SHELL_COMMANDS = frozenset(
+    {"bash", "sh", "zsh", "fish", "dash", "ash", "ksh", "tcsh", "csh", "login"}
+)
+
+
 class CoordinatorClient(Protocol):
     def create_job(self, *, phase: str, scope: str, payload: dict[str, object]) -> dict[str, object]:
         """Create a minimal coordinator job."""
@@ -88,6 +95,33 @@ class PaulShiaBroDaemon:
         except FileNotFoundError as exc:
             raise ValueError("tmux not found") from exc
         return {"ok": True, "pane_id": pane_id, "sent": message}
+
+    def _pane_current_command(self, pane_id: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["tmux", "display-message", "-p", "-t", pane_id, "#{pane_current_command}"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+        return result.stdout.strip() or None
+
+    def _assert_pane_is_idle_shell(self, pane_id: str) -> None:
+        """Reject a target pane that is missing or busy with a non-shell program.
+
+        Guards `/agent start` so it never types the launch command into a pane
+        already running claude, minicom, an editor, …—where it would either be
+        swallowed or clobber the running program.
+        """
+        command = self._pane_current_command(pane_id)
+        if command is None:
+            raise ValueError(f"pane {pane_id} 不存在或無法存取，請確認 agent_pane_id")
+        if command.lstrip("-").lower() not in _IDLE_SHELL_COMMANDS:
+            raise ValueError(
+                f"pane {pane_id} 正在執行 {command}（非 idle shell），請先釋放或改用其他 pane"
+            )
 
     def _is_agent_command(self, command: str) -> bool:
         if not command:
@@ -299,10 +333,12 @@ class PaulShiaBroDaemon:
         raise ValueError("/tmate 只接受 status/start/stop")
 
     def _handle_agent_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
-        if len(args) > 1:
-            raise ValueError("/agent 只接受 start/startf/stop/status")
-
         action = args[0] if args else "status"
+        extra = args[1:]
+        if action in {"status", "stop"} and extra:
+            raise ValueError(f"/agent {action} 不接受參數")
+        if action in {"start", "startf"} and len(extra) > 1:
+            raise ValueError("/agent start 只接受一個 pane id（例如 /agent start %7）")
         if action == "status":
             detected = self._detect_agent_process()
             if detected is None:
@@ -321,41 +357,24 @@ class PaulShiaBroDaemon:
                 payload["already_running"] = True
                 return payload
 
-            cockpit_pane_id = self._cockpit_pane_id
-            if not cockpit_pane_id:
-                raise ValueError("cockpit pane unavailable")
+            target_pane_id = extra[0] if extra else None
+            if not target_pane_id:
+                raise ValueError("請指定要啟動 agent 的 pane id，例如 /agent start %7")
+            if not target_pane_id.startswith("%"):
+                raise ValueError(f"pane id 需以 % 開頭（例如 %7），收到：{target_pane_id}")
+
+            # Run the agent in the caller-specified, already-existing pane instead
+            # of splitting a fresh one. Verify it is an idle shell first so we
+            # never clobber a running program (claude/minicom/…).
+            self._assert_pane_is_idle_shell(target_pane_id)
 
             launch_argv = self._agent_launch_argv()
             if action == "startf":
                 launch_argv.append("-f")
 
-            try:
-                result = subprocess.run(
-                    [
-                        "tmux",
-                        "split-window",
-                        "-h",
-                        "-t",
-                        cockpit_pane_id,
-                        "-P",
-                        "-F",
-                        "#{pane_id}",
-                        shlex.join(launch_argv),
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                )
-            except subprocess.CalledProcessError as exc:
-                raise ValueError((exc.stderr or "").strip() or "tmux split-window failed") from exc
-            except FileNotFoundError as exc:
-                raise ValueError("tmux unavailable") from exc
-
-            pane_id = result.stdout.strip()
-            if not pane_id:
-                raise ValueError("tmux split-window did not return pane id")
-            self._agent_pane_id = pane_id
-            payload = self._agent_status_payload(pane_id=pane_id)
+            self._send_to_pane(target_pane_id, shlex.join(launch_argv))
+            self._agent_pane_id = target_pane_id
+            payload = self._agent_status_payload(pane_id=target_pane_id)
             payload["started"] = True
             return payload
 

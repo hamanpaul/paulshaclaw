@@ -63,7 +63,7 @@
     },
     {
       "name": "/agent",
-      "usage": "/agent [start|startf|stop|status]",
+      "usage": "/agent [start %pane|startf %pane|stop|status]",
       "summary": "管理 claude-gemma4 agent session",
       "telegram_menu": {
         "command": "agent",
