@@ -97,12 +97,12 @@ python3 -m paulshaclaw.cost --once
 python3 -m paulshaclaw.cost.status --plain
 ```
 
-`scripts/start.sh` applies the Stage 8 footer to the current tmux session with the configured `status-interval` from `tmux_refresh_seconds` (default `30`). If `PAULSHACLAW_CONFIG` is set when `start.sh` runs, the same config path is passed into the tmux footer command. Copilot accounts are read from config; `accounts[].label` is the short footer alias (for example `haman`, `arc`). If no runtime config file exists, Stage 8 falls back to the bundled sample config.
+`scripts/start.sh` applies the Stage 8 footer to the current tmux session with the configured `status-interval` from `tmux_refresh_seconds` (default `30`), and widens `status-right-length` so the full line is not clipped. The tmux footer renders with `--no-refresh` (cheap, cache-only); a lifecycle-bound **cost refresh loop** rebuilds the snapshot on the same cadence (disable with `PSC_COST_REFRESH_DISABLED=1`). Keeping the heavy collect off the per-interval tmux render is what stops it from piling up and OOM-ing the WSL VM. If `PAULSHACLAW_CONFIG` is set when `start.sh` runs, the same config path is passed into the tmux footer command. Copilot accounts are read from config; `accounts[].label` is the short footer alias (for example `haman`, `arc`). If no runtime config file exists, Stage 8 falls back to the bundled sample config.
 
 > **footer 用量資料來源備註**
-> - `cpt`（Copilot）顯示的 `haman` / `arc` 這類字樣，來自 `cost.providers.copilot.accounts[].label`。
+> - `cpt`（Copilot）顯示 plan 用量百分比（如 `haman:21%`，無上限的 business/enterprise 顯示 `arc:∞`），來自 `/copilot_internal/user` 的 `quota_snapshots.premium_interactions`（與 Copilot CLI statusline 同源，單次 HTTP GET、不掃本地 log）。label 來自 `cost.providers.copilot.accounts[].label`；若 quota 取不到，後備為本地 `events.jsonl` 的計數（已加 mtime／檔案大小邊界，避免掃描歸檔大檔當機）。
 > - `cc`（Claude Code）trusted source 是 `~/.agents/state/cost/claude_rate_limits.json` sidecar；若沒有這個檔案，就只會顯示 `--` 或 estimated fallback。
-> - `cdx`（Codex）trusted source 預設已啟用，使用 `~/.codex/auth.json` 的現有登入資訊查 `https://chatgpt.com/api/codex/usage`；不是 repo 內另外要開的 feature flag。
+> - `cdx`（Codex）trusted source 預設已啟用，優先讀本地最新 session 的 `payload.rate_limits`（network endpoint 常回 403），顯示 5h／weekly 用量。
 
 ### 查閱設計文件
 

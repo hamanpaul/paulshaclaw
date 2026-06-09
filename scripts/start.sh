@@ -48,13 +48,13 @@ cleanup() {
   CLEANED_UP=1
   trap - EXIT INT TERM
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       wait "$pid" 2>/dev/null || true
     fi
@@ -91,7 +91,7 @@ apply_stage8_footer() {
   if [[ -n "${PAULSHACLAW_CONFIG:-}" ]]; then
     printf -v footer_env 'PAULSHACLAW_CONFIG=%q ' "${PAULSHACLAW_CONFIG}"
   fi
-  footer_cmd="#(PYTHONPATH=${REPO} ${footer_env}${PY} -m paulshaclaw.cost.status)"
+  footer_cmd="#(PYTHONPATH=${REPO} ${footer_env}${PY} -m paulshaclaw.cost.status --no-refresh)"
   existing_right="$(tmux show-option -qv status-right 2>/dev/null || true)"
   refresh_seconds="$(load_stage8_tmux_refresh_seconds | tr -d '\r' | tail -n 1)"
   if [[ ! "${refresh_seconds}" =~ ^[0-9]+$ ]]; then
@@ -99,6 +99,9 @@ apply_stage8_footer() {
   fi
 
   tmux set-option status-interval "${refresh_seconds}"
+  # tmux defaults status-right-length to 40, which clips the footer mid-segment
+  # (e.g. "cc~ 5h:82%"). Widen it so the full cdx/cc/cpt line is visible.
+  tmux set-option status-right-length 200
   case "${existing_right}" in
     "${footer_cmd}"*)
       # 完全匹配當前 footer_cmd，無需更新
@@ -125,7 +128,39 @@ apply_stage8_footer() {
   esac
 }
 
+# Stage 8: cost-snapshot refresh loop. The tmux footer renders with --no-refresh
+# (cheap, only reads the cache), so this throttled background loop owns the
+# actual rebuild. Keeping the heavy collect out of the per-interval tmux #()
+# render is what stops it from piling up and OOM-ing the WSL VM. Bound to the
+# start.sh lifecycle; disable with PSC_COST_REFRESH_DISABLED=1.
+start_cost_refresh_loop() {
+  if [[ -z "${TMUX:-}" ]]; then
+    return 0
+  fi
+  if [[ "${PSC_COST_REFRESH_DISABLED:-0}" == "1" ]]; then
+    echo "cost refresh loop disabled (PSC_COST_REFRESH_DISABLED=1)"
+    return 0
+  fi
+  local interval
+  interval="$(load_stage8_tmux_refresh_seconds | tr -d '\r' | tail -n 1)"
+  if [[ ! "${interval}" =~ ^[0-9]+$ ]]; then
+    interval=30
+  fi
+  local cost_log="$HOME/.agents/log/cost.log"
+  # Redirect the whole subshell (including sleep) to the log so no child keeps
+  # the parent's stdout pipe open after start.sh exits.
+  (
+    while true; do
+      PYTHONPATH="$REPO" "$PY" -m paulshaclaw.cost --once || true
+      sleep "$interval"
+    done
+  ) >>"$cost_log" 2>&1 &
+  COST_REFRESH_PID=$!
+  echo "cost refresh pid=$COST_REFRESH_PID (interval=${interval}s)"
+}
+
 apply_stage8_footer
+start_cost_refresh_loop
 
 # Stage 2: memory dream loop (atomize + janitor + moc), idle-gated.
 # Lifecycle is bound to start.sh — launched here, torn down by cleanup() with

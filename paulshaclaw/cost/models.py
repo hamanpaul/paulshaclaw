@@ -27,9 +27,14 @@ class CopilotAccountUsage:
     used_requests: int | None
     monthly_allowance: int | None
     source: str
+    # Plan-quota view (preferred footer display): the % of the monthly premium
+    # quota already consumed, mirroring what the Copilot CLI statusline shows.
+    # `unlimited` flags business/enterprise seats whose premium quota is uncapped.
+    percent_used: int | None = None
+    unlimited: bool = False
 
     def to_jsonable(self) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "id": self.account_id,
             "label": self.label,
             "kind": self.kind,
@@ -37,6 +42,11 @@ class CopilotAccountUsage:
             "monthly_allowance": self.monthly_allowance,
             "source": self.source,
         }
+        if self.percent_used is not None:
+            payload["percent_used"] = self.percent_used
+        if self.unlimited:
+            payload["unlimited"] = True
+        return payload
 
 
 @dataclass(frozen=True)

@@ -39,6 +39,8 @@ from paulshaclaw.cost.models import (
 )
 from paulshaclaw.cost.providers import (
     _claude_message_token_total,
+    _fetch_copilot_quota,
+    _read_local_observed_metrics,
     _read_local_observed_total,
     _read_local_observed_aiu,
     collect_all,
@@ -588,6 +590,10 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         cfg = load_cost_config(config_path=path)
 
         with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
             patch("paulshaclaw.cost.providers._get_github_token", return_value="secret-token") as token_mock,
             patch(
                 "paulshaclaw.cost.providers._fetch_json",
@@ -628,6 +634,10 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         cfg = load_cost_config(config_path=path)
 
         with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
             patch(
                 "paulshaclaw.cost.providers._collect_local_observed_usage",
@@ -661,6 +671,10 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         cfg = load_cost_config(config_path=path)
 
         with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
             patch("paulshaclaw.cost.providers._get_github_token", return_value="secret-token") as token_mock,
             patch(
                 "paulshaclaw.cost.providers._fetch_json",
@@ -696,6 +710,10 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         cfg = load_cost_config(config_path=path)
 
         with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
             patch(
                 "paulshaclaw.cost.providers._collect_local_observed_usage",
@@ -722,9 +740,12 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         )
 
         with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
-            patch("paulshaclaw.cost.providers._read_local_observed_total", return_value=0),
-            patch("paulshaclaw.cost.providers._read_local_observed_aiu", return_value=0),
+            patch("paulshaclaw.cost.providers._read_local_observed_metrics", return_value=(0, 0)),
         ):
             provider = collect_copilot(cfg)
 
@@ -745,9 +766,12 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         )
 
         with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
             patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
-            patch("paulshaclaw.cost.providers._read_local_observed_total", return_value=1323),
-            patch("paulshaclaw.cost.providers._read_local_observed_aiu", return_value=55818),
+            patch("paulshaclaw.cost.providers._read_local_observed_metrics", return_value=(1323, 55818)),
         ):
             provider = collect_copilot(cfg)
 
@@ -756,6 +780,139 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(by_label["haman"].source, "local_observed")
         self.assertEqual(by_label["arc"].used_requests, 55818)  # AI credits (AIU)
         self.assertEqual(by_label["arc"].source, "local_observed")
+
+    def test_fetch_copilot_quota_parses_percent_used(self) -> None:
+        account = cost_config_module.CopilotAccountConfig(
+            account_id="hamanpaul", label="haman", kind="personal", monthly_allowance=1500,
+        )
+        payload = {
+            "copilot_plan": "individual_pro",
+            "quota_snapshots": {
+                "premium_interactions": {"unlimited": False, "percent_remaining": 78.6},
+            },
+        }
+        with (
+            patch("paulshaclaw.cost.providers._get_github_token", return_value="tok") as token_mock,
+            patch("paulshaclaw.cost.providers._fetch_json", return_value=payload) as fetch_mock,
+        ):
+            percent_used, unlimited = _fetch_copilot_quota(account)
+
+        self.assertEqual(percent_used, 21)  # round(100 - 78.6)
+        self.assertFalse(unlimited)
+        token_mock.assert_called_once_with("hamanpaul")
+        self.assertIn("copilot_internal/user", fetch_mock.call_args.args[0])
+
+    def test_fetch_copilot_quota_reports_unlimited(self) -> None:
+        account = cost_config_module.CopilotAccountConfig(
+            account_id="paulc-arc", label="arc", kind="company", monthly_allowance=300,
+        )
+        payload = {
+            "copilot_plan": "business",
+            "quota_snapshots": {"premium_interactions": {"unlimited": True, "percent_remaining": 100.0}},
+        }
+        with (
+            patch("paulshaclaw.cost.providers._get_github_token", return_value="tok"),
+            patch("paulshaclaw.cost.providers._fetch_json", return_value=payload),
+        ):
+            percent_used, unlimited = _fetch_copilot_quota(account)
+
+        self.assertIsNone(percent_used)
+        self.assertTrue(unlimited)
+
+    def test_collect_copilot_uses_plan_quota_as_primary(self) -> None:
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul", label="haman", kind="personal", monthly_allowance=1500,
+                ),
+                cost_config_module.CopilotAccountConfig(
+                    account_id="paulc-arc", label="arc", kind="company", monthly_allowance=300,
+                ),
+            )
+        )
+
+        def fake_quota(account):
+            if account.account_id == "hamanpaul":
+                return 21, False
+            return None, True
+
+        with (
+            patch("paulshaclaw.cost.providers._fetch_copilot_quota", side_effect=fake_quota),
+            patch(
+                "paulshaclaw.cost.providers._fetch_account_usage",
+                side_effect=AssertionError("billing must not be reached when quota succeeds"),
+            ),
+            patch(
+                "paulshaclaw.cost.providers._read_local_observed_metrics",
+                side_effect=AssertionError("local scan must not run when quota succeeds"),
+            ),
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(provider.source_status, "fresh")
+        by_label = {a.label: a for a in provider.accounts}
+        self.assertEqual(by_label["haman"].percent_used, 21)
+        self.assertFalse(by_label["haman"].unlimited)
+        self.assertEqual(by_label["haman"].source, "github_copilot_quota")
+        self.assertIsNone(by_label["arc"].percent_used)
+        self.assertTrue(by_label["arc"].unlimited)
+
+    def test_read_local_observed_metrics_skips_pre_month_files_by_mtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            root = home / ".copilot" / "session-state"
+            # Archived (pre-month) session whose mtime predates the target month;
+            # it must be skipped wholesale even though it carries a June event.
+            old = root / "old"
+            old.mkdir(parents=True)
+            (old / "events.jsonl").write_text(
+                json.dumps({
+                    "type": "session.shutdown",
+                    "timestamp": "2026-06-03T00:00:00Z",
+                    "data": {"totalPremiumRequests": 999, "totalNanoAiu": 0},
+                }) + "\n",
+                encoding="utf-8",
+            )
+            may = datetime(2026, 5, 15, tzinfo=ZoneInfo("UTC")).timestamp()
+            os.utime(old / "events.jsonl", (may, may))
+            # Current-month session, read normally.
+            cur = root / "cur"
+            cur.mkdir(parents=True)
+            (cur / "events.jsonl").write_text(
+                json.dumps({
+                    "type": "session.shutdown",
+                    "timestamp": "2026-06-05T00:00:00Z",
+                    "data": {"totalPremiumRequests": 7, "totalNanoAiu": 2_000_000_000},
+                }) + "\n",
+                encoding="utf-8",
+            )
+            with patch("paulshaclaw.cost.providers.Path.home", return_value=home):
+                premium, aiu = _read_local_observed_metrics(year=2026, month=6)
+
+        self.assertEqual(premium, 7)  # 999 from the pre-month file is excluded
+        self.assertEqual(aiu, 2)
+
+    def test_read_local_observed_metrics_skips_oversized_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            root = home / ".copilot" / "session-state" / "big"
+            root.mkdir(parents=True)
+            event = json.dumps({
+                "type": "session.shutdown",
+                "timestamp": "2026-06-05T00:00:00Z",
+                "data": {"totalPremiumRequests": 42, "totalNanoAiu": 0},
+            })
+            (root / "events.jsonl").write_text(event + "\n", encoding="utf-8")
+            now = datetime(2026, 6, 5, tzinfo=ZoneInfo("UTC")).timestamp()
+            os.utime(root / "events.jsonl", (now, now))
+            with (
+                patch("paulshaclaw.cost.providers.Path.home", return_value=home),
+                patch("paulshaclaw.cost.providers._COPILOT_EVENT_FILE_MAX_BYTES", 4),
+            ):
+                premium, aiu = _read_local_observed_metrics(year=2026, month=6)
+
+        self.assertEqual(premium, 0)  # file exceeds the size cap, so it is skipped
+        self.assertEqual(aiu, 0)
 
     def test_read_local_observed_total_counts_current_month_only(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -825,6 +982,37 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(_abbrev_count(1323), "1323")
         self.assertEqual(_abbrev_count(55818), "55.8k")
         self.assertEqual(_abbrev_count(1_200_000), "1.2M")
+
+    def test_footer_renders_copilot_plan_percent_and_unlimited(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 6, 9, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "cpt": ProviderSnapshot(
+                    source_status="fresh",
+                    accounts=(
+                        CopilotAccountUsage(
+                            account_id="hamanpaul", label="haman", kind="personal",
+                            used_requests=None, monthly_allowance=1500,
+                            source="github_copilot_quota", percent_used=21, unlimited=False,
+                        ),
+                        CopilotAccountUsage(
+                            account_id="paulc-arc", label="arc", kind="company",
+                            used_requests=None, monthly_allowance=300,
+                            source="github_copilot_quota", percent_used=None, unlimited=True,
+                        ),
+                    ),
+                ),
+            },
+        )
+
+        plain = format_footer(snapshot, use_tmux_style=False)
+        self.assertIn("cpt haman:21% arc:∞", plain)
+
+        styled = format_footer(snapshot, use_tmux_style=True)
+        self.assertIn("#[fg=green]haman:21%#[default]", styled)  # 21% -> low/green
+        self.assertIn("#[fg=green]arc:∞#[default]", styled)  # unlimited -> green
 
     def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
         with self.scratch_tempdir() as tmpdir:
@@ -1901,6 +2089,38 @@ class Stage8CacheTests(unittest.TestCase):
 
         self.assertEqual(snapshot.providers["cc"].note, "ghp_xxx")
 
+    def test_load_snapshot_payload_round_trips_copilot_plan_quota(self) -> None:
+        payload = {
+            "generated_at": "2026-06-09T15:00:00+08:00",
+            "timezone": "Asia/Taipei",
+            "cache_status": "fresh",
+            "providers": {
+                "cpt": {
+                    "source_status": "fresh",
+                    "accounts": [
+                        {
+                            "id": "hamanpaul", "label": "haman", "kind": "personal",
+                            "used_requests": None, "monthly_allowance": 1500,
+                            "source": "github_copilot_quota", "percent_used": 21,
+                        },
+                        {
+                            "id": "paulc-arc", "label": "arc", "kind": "company",
+                            "used_requests": None, "monthly_allowance": 300,
+                            "source": "github_copilot_quota", "unlimited": True,
+                        },
+                    ],
+                }
+            },
+        }
+
+        snapshot = load_snapshot_payload(payload)
+
+        by_label = {a.label: a for a in snapshot.providers["cpt"].accounts}
+        self.assertEqual(by_label["haman"].percent_used, 21)
+        self.assertFalse(by_label["haman"].unlimited)
+        self.assertIsNone(by_label["arc"].percent_used)
+        self.assertTrue(by_label["arc"].unlimited)
+
 
 class Stage8CliTests(unittest.TestCase):
     def _snapshot(self, *, source_status: str = "fresh") -> CostSnapshot:
@@ -2119,6 +2339,65 @@ class Stage8CliTests(unittest.TestCase):
         cache.lock.assert_not_called()
         build_current_snapshot.assert_not_called()
         format_footer.assert_called_once_with(snapshot, use_tmux_style=False)
+
+    def test_status_main_no_refresh_uses_stale_cache_without_rebuild(self) -> None:
+        config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
+        previous_snapshot = self._snapshot(source_status="fresh")
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = previous_snapshot
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", return_value="stale-footer") as format_footer,
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain", "--no-refresh"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "stale-footer")
+        cache.read_if_fresh.assert_called_once_with()
+        cache.read_stale.assert_called_once_with()
+        cache.lock.assert_not_called()
+        build_current_snapshot.assert_not_called()
+        rendered_snapshot = format_footer.call_args.args[0]
+        self.assertEqual(rendered_snapshot.cache_status, "stale")
+        self.assertEqual(rendered_snapshot.providers["cdx"].source_status, "stale")
+
+    def test_status_main_no_refresh_degrades_without_cache(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    monthly_allowance=1500,
+                ),
+            ),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain", "--no-refresh"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("cpt haman:--", stdout.getvalue())
+        cache.lock.assert_not_called()
+        build_current_snapshot.assert_not_called()
 
     def test_status_main_uses_stale_cache_when_lock_unavailable(self) -> None:
         config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)

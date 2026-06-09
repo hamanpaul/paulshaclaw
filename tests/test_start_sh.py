@@ -73,6 +73,11 @@ FAKE_PYTHON = textwrap.dedent(
             print("cdx 5h:$12.34 wk:$56.78")
             return 0
 
+        if module == "paulshaclaw.cost":
+            # Stage 8 cost-snapshot refresh loop invokes `-m paulshaclaw.cost
+            # --once`; treat it as a cheap no-op success in the harness.
+            return 0
+
         if module == "paulshaclaw.cockpit":
             Path(os.environ["FAKE_COCKPIT_STARTED"]).write_text("started", encoding="utf-8")
             Path(os.environ["FAKE_COCKPIT_PIDFILE"]).write_text(str(os.getpid()), encoding="utf-8")
@@ -523,13 +528,16 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             calls = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
             self.assertIn(["show-option", "-qv", "status-right"], calls)
             self.assertIn(["set-option", "status-interval", "45"], calls)
+            self.assertIn(["set-option", "status-right-length", "200"], calls)
             self.assertNotIn(["set-option", "-g", "status-interval", "45"], calls)
+            self.assertIn("cost refresh pid=", completed.stdout)
 
             status_right_calls = [call for call in calls if call[:2] == ["set-option", "status-right"]]
             self.assertEqual(len(status_right_calls), 1)
             status_right = status_right_calls[0][2]
             self.assertIn("#[fg=green]existing", status_right)
             self.assertIn("paulshaclaw.cost.status", status_right)
+            self.assertIn("--no-refresh", status_right)
             self.assertNotIn("set-option -g", "\n".join(" ".join(call) for call in calls))
             self.assertFalse((home_dir / ".tmux.conf").exists())
 
@@ -597,6 +605,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             status_right = status_right_calls[0][2]
             self.assertIn(f"PAULSHACLAW_CONFIG={config_path}", status_right)
             self.assertIn("paulshaclaw.cost.status", status_right)
+            self.assertIn("--no-refresh", status_right)
 
     def test_start_script_falls_back_to_default_tmux_interval_when_config_load_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

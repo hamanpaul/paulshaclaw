@@ -20,6 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--config", default=None, help="path to paulshaclaw.yaml")
     parser.add_argument("--plain", action="store_true", help="disable tmux formatting")
+    parser.add_argument(
+        "--no-refresh",
+        action="store_true",
+        help="render only cached/degraded data; do not rebuild the snapshot",
+    )
     return parser
 
 
@@ -85,25 +90,32 @@ def main(argv: list[str] | None = None) -> int:
         snapshot = cache.read_if_fresh()
         if snapshot is None:
             previous_snapshot = cache.read_stale()
-            with cache.lock() as acquired:
-                if acquired:
-                    try:
-                        snapshot = build_current_snapshot(config_path)
-                    except Exception as error:
-                        degraded_error = error
+            if args.no_refresh:
+                snapshot = (
+                    _mark_snapshot_stale(previous_snapshot)
+                    if previous_snapshot is not None
+                    else _build_degraded_snapshot(config)
+                )
+            else:
+                with cache.lock() as acquired:
+                    if acquired:
+                        try:
+                            snapshot = build_current_snapshot(config_path)
+                        except Exception as error:
+                            degraded_error = error
+                            snapshot = (
+                                _mark_snapshot_stale(previous_snapshot)
+                                if previous_snapshot is not None
+                                else _build_degraded_snapshot(config)
+                            )
+                    else:
                         snapshot = (
                             _mark_snapshot_stale(previous_snapshot)
                             if previous_snapshot is not None
                             else _build_degraded_snapshot(config)
                         )
-                else:
-                    snapshot = (
-                        _mark_snapshot_stale(previous_snapshot)
-                        if previous_snapshot is not None
-                        else _build_degraded_snapshot(config)
-                    )
         if snapshot is None:
-            snapshot = build_current_snapshot(config_path)
+            snapshot = _build_degraded_snapshot(config) if args.no_refresh else build_current_snapshot(config_path)
     except Exception as error:
         degraded_error = error
         snapshot = (

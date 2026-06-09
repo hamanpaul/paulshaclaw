@@ -66,6 +66,10 @@ def _format_window_provider(name: str, provider: ProviderSnapshot, use_tmux_styl
 
 
 def _account_level(provider: ProviderSnapshot, account: CopilotAccountUsage) -> str:
+    if account.unlimited:
+        return "low"
+    if account.percent_used is not None:
+        return classify_usage(account.percent_used)
     if (
         provider.source_status == "estimated" or account.source == "local_observed"
     ) and account.used_requests is not None:
@@ -86,11 +90,23 @@ def _abbrev_count(value: int) -> str:
     return str(value)
 
 
+def _account_value(account: CopilotAccountUsage) -> str:
+    # Prefer the plan-quota view (matches the Copilot CLI statusline); fall back
+    # to a raw request count only when the quota endpoint was unavailable.
+    if account.unlimited:
+        return "∞"
+    if account.percent_used is not None:
+        return f"{account.percent_used}%"
+    if account.used_requests is None:
+        return "--"
+    return _abbrev_count(account.used_requests)
+
+
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
     parts = [_provider_label(name, provider)]
     for account in provider.accounts:
-        used = "--" if account.used_requests is None else _abbrev_count(account.used_requests)
-        parts.append(_wrap(f"{account.label}:{used}", _account_level(provider, account), use_tmux_style))
+        value = _account_value(account)
+        parts.append(_wrap(f"{account.label}:{value}", _account_level(provider, account), use_tmux_style))
     return " ".join(parts)
 
 
