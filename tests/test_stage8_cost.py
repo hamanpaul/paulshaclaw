@@ -1050,6 +1050,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         provider = collect_codex(
             enabled=True,
+            codex_home=Path("/nonexistent-codex"),  # isolate: no local rate-limit source
             auth_path=Path("/tmp/auth.json"),
             usage_url="https://chatgpt.com/api/codex/usage",
             fetcher=lambda url, headers: payload,
@@ -1063,6 +1064,62 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["weekly"].used_percent, 41)
         self.assertEqual(provider.windows["weekly"].display_reset, "3d")
 
+    def test_collect_codex_reads_trusted_local_rate_limits_without_network(self) -> None:
+        now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        record = {
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 61.0, "resets_at": epoch + 3600},
+                    "secondary": {"used_percent": 10.0, "resets_at": epoch + 7 * 86400},
+                },
+            },
+        }
+
+        def boom(url, headers):  # network must not be used when local quota exists
+            raise AssertionError("network should not be called when local rate limits exist")
+
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions" / "2026" / "04"
+            sessions.mkdir(parents=True)
+            (sessions / "rollout.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            provider = collect_codex(
+                enabled=True,
+                codex_home=Path(tmpdir),
+                fetcher=boom,
+                token_reader=lambda path: ("token", "account"),
+                now=now,
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 61)
+        self.assertEqual(provider.windows["weekly"].used_percent, 10)
+
+    def test_collect_codex_drops_already_reset_local_window(self) -> None:
+        now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        record = {
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    # primary already reset (past) -> dropped; secondary still valid.
+                    "primary": {"used_percent": 61.0, "resets_at": epoch - 60},
+                    "secondary": {"used_percent": 10.0, "resets_at": epoch + 7 * 86400},
+                },
+            },
+        }
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "s.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            provider = collect_codex(enabled=True, codex_home=Path(tmpdir), now=now)
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertNotIn("five_hour", provider.windows)
+        self.assertEqual(provider.windows["weekly"].used_percent, 10)
+
     def test_collect_codex_rejects_trusted_payload_missing_secondary_window(self) -> None:
         payload = {
             "rate_limit": {
@@ -1075,6 +1132,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         provider = collect_codex(
             enabled=True,
+            codex_home=Path("/nonexistent-codex"),  # isolate: no local rate-limit source
             auth_path=Path("missing-auth.json"),
             usage_url="https://chatgpt.com/api/codex/usage",
             fetcher=lambda url, headers: payload,
@@ -1118,6 +1176,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
             provider = collect_codex(
                 enabled=True,
+                codex_home=Path("/nonexistent-codex"),  # isolate: no local rate-limit source
                 auth_path=auth,
                 usage_url="https://chatgpt.com/api/codex/usage",
                 fetcher=fetcher,
@@ -1240,6 +1299,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                 token_reader = Mock(return_value=("auth-file-token", "auth-file-account"))
                 provider = collect_codex(
                     enabled=True,
+                    codex_home=Path("/nonexistent-codex"),  # isolate: no local rate-limit source
                     auth_path=Path("unused-auth.json"),
                     usage_url=usage_url,
                     fetcher=fetcher,
@@ -1270,6 +1330,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             ) as fetch_mock:
                 provider = collect_codex(
                     enabled=True,
+                    codex_home=Path("/nonexistent-codex"),  # isolate: no local rate-limit source
                     auth_path=auth,
                     usage_url="https://example.com/api/codex/usage",
                 )
