@@ -98,7 +98,7 @@ class CommandRegistryTests(unittest.TestCase):
         registry = load_default_command_registry()
         help_text = registry.render_help()
         self.assertIn("/help [command] - 列出可用命令，或顯示單一命令用法", help_text)
-        self.assertIn("/agent [start|startf|stop|status] - 管理 claude-gemma4 agent session", help_text)
+        self.assertIn("/agent [start %pane|startf %pane|stop|status] - 管理 claude-gemma4 agent session", help_text)
         self.assertIn("/tmate [status|start|stop]", registry.render_help("/tmate"))
         self.assertEqual(registry.render_help("tmate"), registry.render_help("/tmate"))
 
