@@ -61,12 +61,34 @@ fi
 # cleanup does not drop it the way it would a whole-dir symlink.
 GEMMA_SKILLS="$GEMMA_CONFIG_DIR/skills"
 SRC_SKILLS="${PSC_CLAUDE_GEMMA4_SKILLS_SRC:-$HOME/.agents/skills}"
+# Flat-link a single skill dir (one that holds SKILL.md) into GEMMA_SKILLS,
+# skipping if the name is already taken.
+link_gemma_skill() {
+  local src dest
+  src="$1"
+  dest="$GEMMA_SKILLS/$(basename "$src")"
+  if [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
+    ln -s "$src" "$dest"
+  fi
+}
 if [ -d "$SRC_SKILLS" ]; then
   mkdir -p "$GEMMA_SKILLS"
   for s in "$SRC_SKILLS"/*; do
     [ -e "$s" ] || continue
-    dest="$GEMMA_SKILLS/$(basename "$s")"
-    [ -e "$dest" ] || [ -L "$dest" ] || ln -s "$s" "$dest"
+    if [ -f "$s/SKILL.md" ]; then
+      # Flat skill (e.g. bro): link as-is.
+      link_gemma_skill "$s"
+    elif [ -d "$s" ]; then
+      # Container dir (e.g. superpowers → brainstorming/, systematic-debugging/…).
+      # Claude Code only loads skills/<name>/SKILL.md, so flatten one level so each
+      # nested skill is a directly-loadable user skill instead of an unreadable
+      # whole-container entry.
+      for c in "$s"/*; do
+        if [ -f "$c/SKILL.md" ]; then
+          link_gemma_skill "$c"
+        fi
+      done
+    fi
   done
 fi
 

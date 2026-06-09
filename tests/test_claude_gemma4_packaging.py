@@ -102,7 +102,8 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         # manual runtime artifact that cleanup keeps wiping.
         self.assertIn('GEMMA_SKILLS="$GEMMA_CONFIG_DIR/skills"', script_text)
         self.assertIn('${PSC_CLAUDE_GEMMA4_SKILLS_SRC:-$HOME/.agents/skills}', script_text)
-        self.assertIn('ln -s "$s" "$dest"', script_text)
+        self.assertIn('link_gemma_skill', script_text)
+        self.assertIn('ln -s "$src" "$dest"', script_text)
 
     def test_launcher_skill_mirror_creates_per_skill_symlinks(self) -> None:
         # Exercise the mirror block in isolation: a real dir + per-skill symlinks,
@@ -112,19 +113,43 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             'GEMMA_CONFIG_DIR="$1"\n'
             'GEMMA_SKILLS="$GEMMA_CONFIG_DIR/skills"\n'
             'SRC_SKILLS="${PSC_CLAUDE_GEMMA4_SKILLS_SRC:-$HOME/.agents/skills}"\n'
+            'link_gemma_skill() {\n'
+            '  local src dest\n'
+            '  src="$1"\n'
+            '  dest="$GEMMA_SKILLS/$(basename "$src")"\n'
+            '  if [ ! -e "$dest" ] && [ ! -L "$dest" ]; then\n'
+            '    ln -s "$src" "$dest"\n'
+            '  fi\n'
+            '}\n'
             'if [ -d "$SRC_SKILLS" ]; then\n'
             '  mkdir -p "$GEMMA_SKILLS"\n'
             '  for s in "$SRC_SKILLS"/*; do\n'
             '    [ -e "$s" ] || continue\n'
-            '    dest="$GEMMA_SKILLS/$(basename "$s")"\n'
-            '    [ -e "$dest" ] || [ -L "$dest" ] || ln -s "$s" "$dest"\n'
+            '    if [ -f "$s/SKILL.md" ]; then\n'
+            '      link_gemma_skill "$s"\n'
+            '    elif [ -d "$s" ]; then\n'
+            '      for c in "$s"/*; do\n'
+            '        if [ -f "$c/SKILL.md" ]; then\n'
+            '          link_gemma_skill "$c"\n'
+            '        fi\n'
+            '      done\n'
+            '    fi\n'
             '  done\n'
             'fi\n'
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             src = Path(tmpdir) / "src-skills"
+            # Flat skills (SKILL.md at top level) link as-is.
             (src / "alpha").mkdir(parents=True)
+            (src / "alpha" / "SKILL.md").write_text("---\nname: alpha\n---\n", encoding="utf-8")
             (src / "beta").mkdir()
+            (src / "beta" / "SKILL.md").write_text("---\nname: beta\n---\n", encoding="utf-8")
+            # Container dir (no top-level SKILL.md) flattens one level: each nested
+            # skill becomes a directly-loadable user skill; the container is not linked.
+            (src / "pack" / "sub1").mkdir(parents=True)
+            (src / "pack" / "sub1" / "SKILL.md").write_text("---\nname: sub1\n---\n", encoding="utf-8")
+            (src / "pack" / "sub2").mkdir(parents=True)
+            (src / "pack" / "sub2" / "SKILL.md").write_text("---\nname: sub2\n---\n", encoding="utf-8")
             cfg = Path(tmpdir) / "gemma-config"
             env = dict(os.environ, PSC_CLAUDE_GEMMA4_SKILLS_SRC=str(src))
             for _ in range(2):  # idempotent: a second run must not error or duplicate
@@ -138,6 +163,12 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
             self.assertTrue((skills / "alpha").is_symlink())
             self.assertEqual((skills / "alpha").resolve(), (src / "alpha").resolve())
             self.assertTrue((skills / "beta").is_symlink())
+            # nested skills flattened to top level
+            self.assertTrue((skills / "sub1").is_symlink())
+            self.assertEqual((skills / "sub1").resolve(), (src / "pack" / "sub1").resolve())
+            self.assertTrue((skills / "sub2").is_symlink())
+            # the container itself is not mirrored as a (unloadable) skill
+            self.assertFalse((skills / "pack").exists())
 
     def test_proxy_script_is_packaged_and_executable(self) -> None:
         self.assertTrue(CLAUDE_GEMMA4_PROXY.exists(), "scripts/claude-gemma4-proxy should exist")
