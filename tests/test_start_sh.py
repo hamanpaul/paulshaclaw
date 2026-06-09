@@ -260,6 +260,13 @@ class StartScriptLifecycleTests(unittest.TestCase):
             fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
             fake_python.chmod(0o755)
 
+            # Isolate tmux: a fake tmux on PATH + a private TMUX socket so the
+            # real start.sh's apply_stage8_footer cannot clobber the developer's
+            # live tmux status-right when the suite runs inside a tmux session.
+            fake_tmux = fake_bin / "tmux"
+            fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
+            fake_tmux.chmod(0o755)
+
             start_sh = fake_scripts / "start.sh"
             start_sh_text = START_SH.read_text(encoding="utf-8")
             self.assertIn('BASH_SOURCE[0]', start_sh_text)
@@ -271,6 +278,9 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["TMUX_PANE"] = "%0"
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            env["FAKE_TMUX_LOG"] = str(tmpdir_path / "tmux.log")
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_MONITOR_MODE"] = monitor_mode
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)

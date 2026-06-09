@@ -206,8 +206,12 @@ def _read_codex_token(auth_path: Path) -> tuple[str, str]:
     payload = json.loads(auth_path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise ValueError("invalid Codex auth payload")
-    access_token = payload.get("access_token")
-    account_id = payload.get("account_id")
+    # Codex CLI (auth_mode=chatgpt) nests the OAuth credentials under "tokens";
+    # fall back to top-level keys for older/flat auth files.
+    nested = payload.get("tokens")
+    source = nested if isinstance(nested, dict) else payload
+    access_token = source.get("access_token")
+    account_id = source.get("account_id")
     if not isinstance(access_token, str) or not access_token:
         raise ValueError("missing Codex access token")
     if not isinstance(account_id, str) or not account_id:
@@ -248,7 +252,7 @@ def _codex_window(raw: Any, now: datetime) -> UsageWindow | None:
         return None
 
     reset_at = _parse_epoch(
-        raw.get("reset_at", raw.get("resetsAt")),
+        raw.get("reset_at", raw.get("resetsAt", raw.get("resets_at"))),
         now.tzinfo or ZoneInfo("Asia/Taipei"),
     )
     if reset_at is None:
@@ -295,7 +299,13 @@ def _codex_local_token_total(codex_home: Path) -> int:
                         continue
                     if payload.get("type") != "token_count":
                         continue
+                    # Newer Codex sessions nest usage under info.total_token_usage;
+                    # older ones put total_token_usage / total_tokens on the payload.
                     total_usage = payload.get("total_token_usage")
+                    if not isinstance(total_usage, Mapping):
+                        info = payload.get("info")
+                        if isinstance(info, Mapping):
+                            total_usage = info.get("total_token_usage")
                     if isinstance(total_usage, Mapping):
                         raw_total = total_usage.get("total_tokens")
                     else:
@@ -308,6 +318,53 @@ def _codex_local_token_total(codex_home: Path) -> int:
             continue
         observed += session_observed
     return observed
+
+
+def _codex_local_rate_limits(codex_home: Path, now: datetime) -> dict[str, UsageWindow] | None:
+    """Read the trusted quota Codex already wrote to its latest local session.
+
+    Each `token_count` record carries `payload.rate_limits.{primary,secondary}`
+    (used_percent + resets_at), so the real 5h/weekly quota is available without
+    the (often 403) network endpoint. Only windows that have not yet reset are
+    returned, so stale readings are dropped rather than shown as current."""
+    sessions = codex_home / "sessions"
+    if not sessions.exists():
+        return None
+    try:
+        latest = max(sessions.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, default=None)
+    except (OSError, ValueError):
+        return None
+    if latest is None:
+        return None
+
+    rate_limits: Mapping[str, Any] | None = None
+    try:
+        with latest.open("r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                payload = _codex_token_count_payload(record)
+                if not isinstance(payload, Mapping) or payload.get("type") != "token_count":
+                    continue
+                candidate = payload.get("rate_limits")
+                if isinstance(candidate, Mapping):
+                    rate_limits = candidate  # keep the most recent in-file reading
+    except OSError:
+        return None
+
+    if not isinstance(rate_limits, Mapping):
+        return None
+
+    windows: dict[str, UsageWindow] = {}
+    for key, raw in (("five_hour", rate_limits.get("primary")), ("weekly", rate_limits.get("secondary"))):
+        window = _codex_window(raw, now)
+        if window is not None and window.reset_at is not None and window.reset_at > now:
+            windows[key] = window
+    return windows or None
 
 
 def collect_codex(
@@ -330,6 +387,12 @@ def collect_codex(
     resolved_auth_path = auth_path or Path("~/.codex/auth.json").expanduser()
     resolved_fetcher = fetcher or _fetch_codex_usage
     resolved_token_reader = token_reader or _read_codex_token
+
+    # Prefer the trusted quota Codex already wrote locally (correct, no network);
+    # the live usage endpoint is often 403 for non-OAuth/team plans.
+    local_windows = _codex_local_rate_limits(codex_home or Path("~/.codex").expanduser(), resolved_now)
+    if local_windows:
+        return ProviderSnapshot(source_status="fresh", windows=local_windows)
 
     try:
         if not _is_safe_codex_usage_url(usage_url):
