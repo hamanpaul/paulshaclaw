@@ -1,15 +1,23 @@
 import os
+import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from paulshaclaw.memory.importer.config import default_projects_path, load_projects_config
+from paulshaclaw.memory.importer.config import ProjectsConfig, default_projects_path, load_projects_config
 from paulshaclaw.memory.importer.project_resolver import resolve_project
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+_EMPTY = ProjectsConfig()
+
+
+def _init_repo(path: Path, remote: str | None = None) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    if remote:
+        subprocess.run(["git", "-C", str(path), "remote", "add", "origin", remote], check=True)
 
 
 class ProjectResolverTest(unittest.TestCase):
@@ -312,6 +320,58 @@ class ProjectResolverTest(unittest.TestCase):
         self.assertEqual(config.aliases["shared"], "paulshaclaw")
         self.assertEqual(config.aliases["obs-moc"], "obs-auto-moc")
         self.assertIn("shared", "\n".join(captured.output))
+
+
+class ResolveAutoDetectTests(unittest.TestCase):
+    def test_repo_with_remote_resolves_owner_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "paulshaclaw"
+            repo.mkdir()
+            _init_repo(repo, "git@github.com:hamanpaul/paulshaclaw.git")
+
+            self.assertEqual(resolve_project(cwd=str(repo), projects=_EMPTY), "github.com/hamanpaul/paulshaclaw")
+
+    def test_repo_without_remote_resolves_dir_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "solo"
+            repo.mkdir()
+            _init_repo(repo)
+
+            self.assertEqual(resolve_project(cwd=str(repo), projects=_EMPTY), "solo")
+
+    def test_not_a_repo_resolves_working_folder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "scratchpad"
+            folder.mkdir()
+
+            self.assertEqual(resolve_project(cwd=str(folder), projects=_EMPTY), "scratchpad")
+
+    def test_multi_repo_workspace_resolves_tree_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp) / "arc_prj"
+            workspace.mkdir()
+            repo_a = workspace / "serialwrap"
+            repo_a.mkdir()
+            _init_repo(repo_a)
+            repo_b = workspace / "other"
+            repo_b.mkdir()
+            _init_repo(repo_b)
+
+            self.assertEqual(resolve_project(cwd=str(repo_a), projects=_EMPTY), "arc_prj/serialwrap")
+
+    def test_truly_unresolvable_is_unknown(self):
+        self.assertEqual(resolve_project(cwd=None, projects=_EMPTY), "_unknown")
+
+    def test_git_detection_failure_degrades_to_folder_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "detached"
+            folder.mkdir()
+
+            with mock.patch(
+                "paulshaclaw.memory.importer.project_resolver._git.git_toplevel",
+                side_effect=OSError("git unavailable"),
+            ):
+                self.assertEqual(resolve_project(cwd=str(folder), projects=_EMPTY), "detached")
 
 
 if __name__ == "__main__":
