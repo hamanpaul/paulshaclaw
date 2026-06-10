@@ -77,9 +77,12 @@ def _minicom_summary(tty: str) -> str | None:
     bounded, short-timeout ``ps`` so this stays cheap on every refresh."""
     if not tty:
         return None
+    # tmux #{pane_tty} is like "/dev/pts/2"; `ps -t` wants the bare tty name
+    # ("pts/2"), so strip the /dev/ prefix to keep the lookup portable.
+    tty_name = tty[len("/dev/"):] if tty.startswith("/dev/") else tty
     try:
         completed = subprocess.run(
-            ["ps", "-t", tty, "-o", "args="],
+            ["ps", "-t", tty_name, "-o", "args="],
             check=False,
             capture_output=True,
             text=True,

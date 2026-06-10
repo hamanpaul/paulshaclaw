@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 try:
@@ -128,10 +129,11 @@ class CockpitApp(App[None]):
     def on_mount(self) -> None:
         self._refresh_widgets()
         # Keep the work list live: re-read panes on a fixed interval (bounded
-        # work — see REFRESH_INTERVAL_SECONDS). Guarded for the textual stub.
+        # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
+        # set_interval; only that absence is tolerated, real errors surface.
         try:
             self.set_interval(REFRESH_INTERVAL_SECONDS, self._on_refresh_tick)
-        except Exception:
+        except AttributeError:
             pass
         # Ensure a focusable widget is focused so Pilot key presses reach the app
         try:
@@ -198,23 +200,29 @@ class CockpitApp(App[None]):
     def _reconcile_state(self, *, light: bool = False) -> None:
         if self.pane_loader is None:
             return
-        # The periodic (light) reload skips per-pane preview captures; the detail
-        # view captures the selected pane's preview on demand instead, so a tick
-        # is one list-panes call regardless of how many panes exist.
-        try:
-            if light:
-                panes = self.pane_loader(
-                    cockpit_pane_id=self.state.cockpit_pane_id, capture_previews=False
-                )
-            else:
-                panes = self.pane_loader(cockpit_pane_id=self.state.cockpit_pane_id)
-        except TypeError:
-            panes = self.pane_loader(cockpit_pane_id=self.state.cockpit_pane_id)
+        # The periodic (light) reload skips per-pane preview captures (the detail
+        # view captures the selected pane's preview on demand instead). A tick is
+        # then one `list-panes` plus a tiny `ps` per title-less minicom pane — no
+        # large or per-pane preview reads. Only pass capture_previews when the
+        # loader actually accepts it, so we never mask a real TypeError from it.
+        kwargs: dict[str, object] = {"cockpit_pane_id": self.state.cockpit_pane_id}
+        if light and self._loader_accepts_capture_previews():
+            kwargs["capture_previews"] = False
+        panes = self.pane_loader(**kwargs)
         self.state = self.state.refresh(panes)
         try:
             self._refresh_widgets()
         except Exception:
             pass
+
+    def _loader_accepts_capture_previews(self) -> bool:
+        try:
+            params = inspect.signature(self.pane_loader).parameters
+        except (TypeError, ValueError):
+            return False
+        return "capture_previews" in params or any(
+            param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
+        )
 
     def _selected_preview(self, pane: PaneRecord) -> tuple[str, ...]:
         if self.preview_loader is not None and pane.pane_id != self.state.cockpit_pane_id:
