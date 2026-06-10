@@ -43,6 +43,7 @@ from paulshaclaw.cost.providers import (
     _read_local_observed_metrics,
     _read_local_observed_total,
     _read_local_observed_aiu,
+    carry_forward_degraded,
     collect_all,
     collect_claude,
     collect_codex,
@@ -1012,7 +1013,68 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         styled = format_footer(snapshot, use_tmux_style=True)
         self.assertIn("haman:#[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
-        self.assertIn("arc:#[fg=colour245]∞#[default]", styled)  # ∞ -> neutral/dim (not a usage level)
+        self.assertIn("arc:#[fg=colour33]∞#[default]", styled)  # ∞ -> blue (stands out)
+
+    def test_footer_marks_carried_forward_stale_values_with_green_background(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 6, 9, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="stale",
+            providers={
+                "cc": ProviderSnapshot(
+                    source_status="stale",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=61,
+                            reset_at=datetime(2026, 6, 9, 17, 40, tzinfo=ZoneInfo("Asia/Taipei")),
+                            display_reset="17:40",
+                        ),
+                    },
+                ),
+            },
+        )
+
+        styled = format_footer(snapshot, use_tmux_style=True)
+        # kept value carries the stale (light-green) background; reset time too.
+        self.assertIn("cc~", styled)
+        self.assertIn("#[fg=colour33,bg=colour157]61%#[default]", styled)
+        self.assertIn("#[fg=colour245,bg=colour157](17:40)#[default]", styled)
+
+    def test_carry_forward_degraded_keeps_previous_values_marked_stale(self) -> None:
+        old = {
+            "cc": ProviderSnapshot(
+                source_status="fresh",
+                windows={
+                    "five_hour": UsageWindow(used_percent=61, reset_at=None, display_reset="17:40"),
+                },
+            ),
+        }
+        # this cycle cc came back empty (e.g. sidecar went stale)
+        new = {"cc": ProviderSnapshot(source_status="unknown", windows={})}
+
+        merged = carry_forward_degraded(new, old)
+
+        self.assertEqual(merged["cc"].source_status, "stale")
+        self.assertEqual(merged["cc"].windows["five_hour"].used_percent, 61)
+
+    def test_carry_forward_degraded_prefers_fresh_data_when_available(self) -> None:
+        old = {
+            "cc": ProviderSnapshot(
+                source_status="stale",
+                windows={"five_hour": UsageWindow(used_percent=61, reset_at=None, display_reset="17:40")},
+            ),
+        }
+        new = {
+            "cc": ProviderSnapshot(
+                source_status="fresh",
+                windows={"five_hour": UsageWindow(used_percent=12, reset_at=None, display_reset="18:10")},
+            ),
+        }
+
+        merged = carry_forward_degraded(new, old)
+
+        self.assertEqual(merged["cc"].source_status, "fresh")
+        self.assertEqual(merged["cc"].windows["five_hour"].used_percent, 12)
 
     def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
         with self.scratch_tempdir() as tmpdir:

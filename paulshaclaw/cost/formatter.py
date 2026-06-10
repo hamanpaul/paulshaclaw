@@ -11,7 +11,11 @@ TMUX_COLOR_BY_LEVEL = {
     "critical": "fg=red",       # red
     "neutral": "fg=colour245",
     "estimated": "fg=magenta",
+    "separator": "fg=colour250",  # light grey: low-chroma, high contrast on green
 }
+# Carried-forward (stale) values get a light-green background until fresh data
+# returns, so kept-but-unconfirmed numbers are visually distinct.
+_STALE_BG = "bg=colour157"
 
 
 def classify_usage(value: int | None) -> str:
@@ -35,10 +39,13 @@ def _provider_label(name: str, provider: ProviderSnapshot) -> str:
     return name
 
 
-def _wrap(text: str, level: str, use_tmux_style: bool) -> str:
+def _wrap(text: str, level: str, use_tmux_style: bool, *, stale: bool = False) -> str:
     if not use_tmux_style:
         return text
-    return f"#[{TMUX_COLOR_BY_LEVEL[level]}]{text}#[default]"
+    style = TMUX_COLOR_BY_LEVEL[level]
+    if stale:
+        style = f"{style},{_STALE_BG}"
+    return f"#[{style}]{text}#[default]"
 
 
 def _provider_window_level(provider: ProviderSnapshot, value: int | None) -> str:
@@ -53,16 +60,18 @@ def _format_window(
     *,
     provider: ProviderSnapshot,
 ) -> str:
+    stale = provider.source_status == "stale"
     if window is None or window.used_percent is None or not window.display_reset:
-        return _wrap("--", "neutral", use_tmux_style)
+        return _wrap("--", "neutral", use_tmux_style, stale=stale)
     # Colour only the percentage (the usage signal); keep the reset time dim so
     # it reads as context rather than a usage level.
     percent = _wrap(
         f"{window.used_percent}%",
         _provider_window_level(provider, window.used_percent),
         use_tmux_style,
+        stale=stale,
     )
-    reset = _wrap(f"({window.display_reset})", "neutral", use_tmux_style)
+    reset = _wrap(f"({window.display_reset})", "neutral", use_tmux_style, stale=stale)
     return f"{percent}{reset}"
 
 
@@ -113,13 +122,14 @@ def _account_value(account: CopilotAccountUsage) -> str:
 
 
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
+    stale = provider.source_status == "stale"
     parts = [_provider_label(name, provider)]
     for account in provider.accounts:
         value = _account_value(account)
-        # Colour only the value; the label stays default. `∞` (no limit) is dim,
-        # since it is not a usage level.
-        level = "neutral" if account.unlimited else _account_level(provider, account)
-        parts.append(f"{account.label}:{_wrap(value, level, use_tmux_style)}")
+        # Colour only the value; the label stays default. `∞` (no limit) is blue
+        # like a healthy usage level, to stand out from the dim reset times.
+        level = "low" if account.unlimited else _account_level(provider, account)
+        parts.append(f"{account.label}:{_wrap(value, level, use_tmux_style, stale=stale)}")
     return " ".join(parts)
 
 
@@ -136,6 +146,6 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
 
     # Divider between cdx / cc / cpt so the segments don't blur together, plus a
     # trailing space so the line doesn't sit flush against the terminal edge.
-    separator = _wrap("|", "neutral", use_tmux_style)
+    separator = _wrap("|", "separator", use_tmux_style)
     joined = f" {separator} ".join(segments)
     return f"{joined} " if joined else joined

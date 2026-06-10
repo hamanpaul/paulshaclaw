@@ -889,3 +889,39 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     if copilot.accounts:
         providers["cpt"] = copilot
     return providers
+
+
+def _provider_has_data(provider: ProviderSnapshot) -> bool:
+    if provider.accounts:
+        return any(
+            account.percent_used is not None
+            or account.used_requests is not None
+            or account.unlimited
+            for account in provider.accounts
+        )
+    return any(window.used_percent is not None for window in provider.windows.values())
+
+
+def carry_forward_degraded(
+    new_providers: dict[str, ProviderSnapshot],
+    old_providers: Mapping[str, ProviderSnapshot],
+) -> dict[str, ProviderSnapshot]:
+    """Keep showing the previous values when a provider returns nothing usable.
+
+    When a fetch fails this cycle (e.g. Claude sidecar gone stale, Copilot quota
+    network blip), reuse the previous snapshot's values — marked ``stale`` so the
+    footer tints them — instead of dropping to ``--``. Fresh data the next cycle
+    replaces them and clears the stale marker."""
+    result: dict[str, ProviderSnapshot] = {}
+    for name, provider in new_providers.items():
+        old = old_providers.get(name)
+        if old is not None and not _provider_has_data(provider) and _provider_has_data(old):
+            result[name] = ProviderSnapshot(
+                source_status="stale",
+                windows=dict(old.windows),
+                accounts=tuple(old.accounts),
+                note=old.note,
+            )
+        else:
+            result[name] = provider
+    return result
