@@ -60,9 +60,9 @@ def sibling_repo_count(toplevel: str | Path | None) -> int:
         for child in parent.iterdir():
             if not child.is_dir():
                 continue
-            # quick check: try to get the repo top-level from the child dir
-            top = _run_git(["rev-parse", "--show-toplevel"], cwd=child)
-            if top:
+            # Prefer fast, local check: count children that have a .git entry (dir or file)
+            git_marker = child / ".git"
+            if git_marker.exists():
                 count += 1
         return count
     except Exception:

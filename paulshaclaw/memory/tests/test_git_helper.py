@@ -49,3 +49,23 @@ class GitHelperTests(unittest.TestCase):
             _init_repo(repo)
             missing = Path(tmp) / "nope"
             self.assertEqual(_git.sibling_repo_count(str(missing)), 0)
+
+    def test_nested_outer_repo_does_not_inherit(self) -> None:
+        # An outer repo should not cause plain sibling dirs to be counted.
+        with TemporaryDirectory() as tmp:
+            outer = Path(tmp) / "outer"
+            outer.mkdir()
+            # init outer repo
+            _init_repo(outer)
+            workspace = outer / "workspace"
+            workspace.mkdir()
+            a = workspace / "a"
+            plain = workspace / "plain"
+            a.mkdir()
+            plain.mkdir()
+            # init a as its own git repo (so it has its own .git)
+            _init_repo(a)
+
+            # sibling_repo_count for 'a' should only count actual sibling repos (none), so 1 (a itself?)
+            # The function counts siblings in the same parent, so 'a' has one sibling 'plain' which is not a repo.
+            self.assertEqual(_git.sibling_repo_count(str(a)), 1)
