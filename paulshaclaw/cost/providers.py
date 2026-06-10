@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode, urlparse
@@ -20,7 +20,14 @@ JsonFetcher = Callable[[str, Mapping[str, str]], dict[str, Any]]
 CodexTokenReader = Callable[[Path], tuple[str, str]]
 _GITHUB_API_ROOT = "https://api.github.com"
 _CODEX_USAGE_URL = "https://chatgpt.com/api/codex/usage"
+# Copilot plan-quota endpoint — the same one the Copilot CLI statusline reads.
+# Returns quota_snapshots.premium_interactions.{percent_remaining, unlimited}.
+_COPILOT_USER_URL = f"{_GITHUB_API_ROOT}/copilot_internal/user"
 _ACCOUNT_RE = re.compile(r"account\s+([A-Za-z0-9-]+)")
+# Cap the events.jsonl fallback scan so a runaway session log can never OOM the
+# host (the original unbounded 3.3GB scan crashed the WSL2 VM). Files larger
+# than this are skipped; the primary plan-quota path reads no local files.
+_COPILOT_EVENT_FILE_MAX_BYTES = 64 * 1024 * 1024
 
 
 def _unknown_codex() -> ProviderSnapshot:
@@ -257,6 +264,22 @@ def _codex_window(raw: Any, now: datetime) -> UsageWindow | None:
     )
     if reset_at is None:
         return None
+
+    # If the window already reset (no fresh reading since Codex was last used),
+    # the budget has rolled over to a new, unused window. Roll the reset time
+    # forward by the window length and report 0% used — so the footer shows a
+    # live `0%` instead of a bare `--` or the now-obsolete used_percent.
+    if reset_at <= now:
+        window_minutes = raw.get("window_minutes")
+        try:
+            step = timedelta(minutes=int(window_minutes))
+        except (TypeError, ValueError):
+            step = timedelta()
+        if step.total_seconds() <= 0:
+            return None
+        while reset_at <= now:
+            reset_at += step
+        used_percent = 0
 
     return UsageWindow(
         used_percent=used_percent,
@@ -585,6 +608,36 @@ def _fetch_account_usage(account: CopilotAccountConfig) -> tuple[int, str]:
     return _extract_usage_items_total(payload), source
 
 
+def _fetch_copilot_quota(account: CopilotAccountConfig) -> tuple[int | None, bool]:
+    """Return (percent_used, unlimited) from the Copilot plan-quota endpoint.
+
+    `quota_snapshots.premium_interactions` carries `percent_remaining` (and an
+    `unlimited` flag for business/enterprise seats). This is the same source the
+    Copilot CLI statusline shows, and it is a single cheap HTTP GET — no local
+    log scanning — so it is safe to call on every refresh."""
+    token = _get_github_token(account.account_id)
+    payload = _fetch_json(
+        _COPILOT_USER_URL,
+        {
+            "Accept": "application/json",
+            "Authorization": f"token {token}",
+        },
+    )
+    snapshots = payload.get("quota_snapshots")
+    if not isinstance(snapshots, Mapping):
+        raise ValueError("quota_snapshots missing")
+    premium = snapshots.get("premium_interactions")
+    if not isinstance(premium, Mapping):
+        raise ValueError("premium_interactions missing")
+    if premium.get("unlimited"):
+        return None, True
+    raw_remaining = premium.get("percent_remaining")
+    if raw_remaining is None:
+        raise ValueError("percent_remaining missing")
+    percent_used = max(0, min(100, int(round(100 - float(raw_remaining)))))
+    return percent_used, False
+
+
 def _get_active_github_login() -> str | None:
     try:
         completed = subprocess.run(
@@ -637,14 +690,31 @@ def _event_month(payload: Mapping[str, Any]) -> tuple[int, int] | None:
     return None
 
 
-def _read_local_observed_total(year: int | None = None, month: int | None = None) -> int:
+def _read_local_observed_metrics(year: int | None = None, month: int | None = None) -> tuple[int, int]:
     root = Path.home() / ".copilot" / "session-state"
     if not root.exists():
-        return 0
+        return 0, 0
 
-    total = 0
+    premium_total = 0
+    total_nano_aiu = 0
     should_filter_month = year is not None and month is not None
+    # When scoped to a month, a file last modified before that month cannot hold
+    # any of its events — skip it by mtime so the scan never touches the huge
+    # archived logs from earlier months. Also skip any single file above the
+    # size cap. Together these bound memory/time so this fallback can't OOM the
+    # host the way the original unbounded scan did.
+    min_mtime: float | None = None
+    if should_filter_month:
+        min_mtime = datetime(year, month, 1, tzinfo=timezone.utc).timestamp()
     for event_path in root.rglob("events.jsonl"):
+        try:
+            stat_result = event_path.stat()
+        except OSError:
+            continue
+        if min_mtime is not None and stat_result.st_mtime < min_mtime:
+            continue
+        if stat_result.st_size > _COPILOT_EVENT_FILE_MAX_BYTES:
+            continue
         try:
             with event_path.open("r", encoding="utf-8", errors="ignore") as handle:
                 for line in handle:
@@ -661,27 +731,52 @@ def _read_local_observed_total(year: int | None = None, month: int | None = None
                     data = payload.get("data")
                     if not isinstance(data, dict):
                         continue
-                    value = data.get("totalPremiumRequests")
                     try:
-                        total += int(value)
+                        premium_total += int(data.get("totalPremiumRequests") or 0)
                     except (TypeError, ValueError):
-                        continue
+                        pass
+                    try:
+                        total_nano_aiu += int(data.get("totalNanoAiu") or 0)
+                    except (TypeError, ValueError):
+                        pass
         except OSError:
             continue
-    return total
+    return premium_total, round(total_nano_aiu / 1_000_000_000)
+
+
+def _read_local_observed_total(year: int | None = None, month: int | None = None) -> int:
+    premium_total, _ = _read_local_observed_metrics(year=year, month=month)
+    return premium_total
+
+
+def _read_local_observed_aiu(year: int | None = None, month: int | None = None) -> int:
+    """Sum Copilot AI Credits (AIU) from local session-shutdown events.
+
+    Copilot CLI pre-computes the per-session credits as `data.totalNanoAiu`
+    (1 AI credit = 1e9 nanoAiu = $0.01); we just sum and divide. AIU only exists
+    after the 2026-06-01 usage-based-billing migration (older months are 0)."""
+    _, aiu_total = _read_local_observed_metrics(year=year, month=month)
+    return aiu_total
+
+
+# Attribution is metric-based per the operator's rule (see the project-usage-assess
+# skill): premium requests -> hamanpaul, AI credits (AIU) -> paulc-arc. events.jsonl
+# does not record the logged-in account, so we do NOT gate on the active gh login.
+_COPILOT_PREMIUM_ACCOUNT = "hamanpaul"
+_COPILOT_AIU_ACCOUNT = "paulc-arc"
 
 
 def _collect_local_observed_usage(allowed_accounts: set[str] | None = None) -> dict[str, int]:
-    active_account = _get_active_github_login()
-    if not active_account:
-        return {}
-    if allowed_accounts is not None and active_account not in allowed_accounts:
-        return {}
     year, month = _current_month_utc()
-    total = _read_local_observed_total(year=year, month=month)
-    if total <= 0:
-        return {}
-    return {active_account: total}
+    usage: dict[str, int] = {}
+    premium, aiu = _read_local_observed_metrics(year=year, month=month)
+    if premium > 0:
+        usage[_COPILOT_PREMIUM_ACCOUNT] = premium
+    if aiu > 0:
+        usage[_COPILOT_AIU_ACCOUNT] = aiu
+    if allowed_accounts is not None:
+        usage = {key: value for key, value in usage.items() if key in allowed_accounts}
+    return usage
 
 
 def collect_copilot(
@@ -700,42 +795,49 @@ def collect_copilot(
     allowed_account_ids = {account.account_id for account in config.copilot_accounts}
 
     for account in config.copilot_accounts:
-        if fetcher is not None:
+        # Primary (production): the plan-quota endpoint — the % the Copilot CLI
+        # statusline shows, via one cheap HTTP GET and no local log scanning.
+        # An injected `fetcher` (tests / legacy billing override) bypasses this.
+        if fetcher is None:
             try:
-                used_requests, source = fetcher(account)
+                percent_used, unlimited = _fetch_copilot_quota(account)
             except Exception:
-                used_requests = source = None
+                pass
             else:
                 accounts.append(
                     CopilotAccountUsage(
                         account_id=account.account_id,
                         label=account.label,
                         kind=account.kind,
-                        used_requests=int(used_requests),
+                        used_requests=None,
                         monthly_allowance=account.monthly_allowance,
-                        source=str(source),
+                        source="github_copilot_quota",
+                        percent_used=percent_used,
+                        unlimited=unlimited,
                     )
                 )
                 has_fresh = True
                 continue
+
+        # Fallback: premium-request billing count (often 403 for team plans).
+        billing_fetcher = fetcher or _fetch_account_usage
+        try:
+            used_requests, source = billing_fetcher(account)
+        except Exception:
+            used_requests = source = None
         else:
-            try:
-                used_requests, source = _fetch_account_usage(account)
-            except Exception:
-                used_requests = source = None
-            else:
-                accounts.append(
-                    CopilotAccountUsage(
-                        account_id=account.account_id,
-                        label=account.label,
-                        kind=account.kind,
-                        used_requests=int(used_requests),
-                        monthly_allowance=account.monthly_allowance,
-                        source=str(source),
-                    )
+            accounts.append(
+                CopilotAccountUsage(
+                    account_id=account.account_id,
+                    label=account.label,
+                    kind=account.kind,
+                    used_requests=int(used_requests),
+                    monthly_allowance=account.monthly_allowance,
+                    source=str(source),
                 )
-                has_fresh = True
-                continue
+            )
+            has_fresh = True
+            continue
 
         if resolved_local_observed is None and fetcher is None:
             resolved_local_observed = _collect_local_observed_usage(allowed_account_ids)
@@ -787,3 +889,39 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     if copilot.accounts:
         providers["cpt"] = copilot
     return providers
+
+
+def _provider_has_data(provider: ProviderSnapshot) -> bool:
+    if provider.accounts:
+        return any(
+            account.percent_used is not None
+            or account.used_requests is not None
+            or account.unlimited
+            for account in provider.accounts
+        )
+    return any(window.used_percent is not None for window in provider.windows.values())
+
+
+def carry_forward_degraded(
+    new_providers: dict[str, ProviderSnapshot],
+    old_providers: Mapping[str, ProviderSnapshot],
+) -> dict[str, ProviderSnapshot]:
+    """Keep showing the previous values when a provider returns nothing usable.
+
+    When a fetch fails this cycle (e.g. Claude sidecar gone stale, Copilot quota
+    network blip), reuse the previous snapshot's values — marked ``stale`` so the
+    footer tints them — instead of dropping to ``--``. Fresh data the next cycle
+    replaces them and clears the stale marker."""
+    result: dict[str, ProviderSnapshot] = {}
+    for name, provider in new_providers.items():
+        old = old_providers.get(name)
+        if old is not None and not _provider_has_data(provider) and _provider_has_data(old):
+            result[name] = ProviderSnapshot(
+                source_status="stale",
+                windows=dict(old.windows),
+                accounts=tuple(old.accounts),
+                note=old.note,
+            )
+        else:
+            result[name] = provider
+    return result

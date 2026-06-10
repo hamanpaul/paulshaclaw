@@ -112,6 +112,13 @@ def _load_account(raw: Any) -> CopilotAccountUsage | None:
     if not isinstance(source, str) or not source:
         source = "unknown"
 
+    percent_used = raw.get("percent_used")
+    if percent_used is not None:
+        try:
+            percent_used = int(percent_used)
+        except (TypeError, ValueError):
+            percent_used = None
+
     return CopilotAccountUsage(
         account_id=account_id,
         label=label,
@@ -119,6 +126,8 @@ def _load_account(raw: Any) -> CopilotAccountUsage | None:
         used_requests=used_requests,
         monthly_allowance=monthly_allowance,
         source=source,
+        percent_used=percent_used,
+        unlimited=bool(raw.get("unlimited", False)),
     )
 
 
