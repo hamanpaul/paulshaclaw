@@ -21,11 +21,11 @@ except Exception:  # ModuleNotFoundError or other import-time issues
 
 from paulshaclaw.cockpit.actions import LayoutActionService
 from paulshaclaw.cockpit import __main__ as cockpit_main
-from paulshaclaw.cockpit.app import CockpitApp, pane_display_label
+from paulshaclaw.cockpit.app import REFRESH_INTERVAL_SECONDS, CockpitApp, pane_display_label
 from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
-from paulshaclaw.cockpit.tmux import TmuxClient, parse_list_panes
+from paulshaclaw.cockpit.tmux import TmuxClient, derive_summary, parse_list_panes
 
 
 def pane_record(
@@ -148,6 +148,75 @@ class Stage11StateTests(unittest.TestCase):
         pane = pane_record("%12", session_name="work", window_index="2", title="pytest")
 
         self.assertEqual(pane_display_label(pane), "work:2 %12 pytest")
+
+    def test_pane_display_label_falls_back_to_derived_summary(self) -> None:
+        pane = PaneRecord(
+            pane_id="%0", session_name="main", window_index="0", title="", command="minicom",
+            left=0, top=0, width=80, height=24, active=False, preview=(),
+            pane_tty="/dev/pts/2", summary="minicom COM0",
+        )
+
+        self.assertEqual(pane_display_label(pane), "main:0 %0 minicom COM0")
+
+    def test_derive_summary_minicom_reads_com_from_process(self) -> None:
+        pane = pane_record("%0", title="", command="minicom")
+        pane = PaneRecord(**{**pane.__dict__, "pane_tty": "/dev/pts/2"})
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="  minicom -D /dev/pts/17 --color=on -C /home/x/b-log/mini_COM0_260610.log\n",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(derive_summary(pane), "minicom COM0")
+
+    def test_derive_summary_non_minicom_empty_title_uses_command(self) -> None:
+        pane = pane_record("%9", title="", command="node")
+        self.assertEqual(derive_summary(pane), "[node]")
+
+    def test_derive_summary_prefers_pane_title(self) -> None:
+        pane = pane_record("%3", title="Debug thing", command="claude")
+        self.assertEqual(derive_summary(pane), "Debug thing")
+
+    def test_parse_list_panes_reads_pane_tty(self) -> None:
+        raw = "%0\tmain\t0\t\tminicom\t0\t0\t120\t40\t1\t/dev/pts/7\n"
+        panes = parse_list_panes(raw)
+        self.assertEqual(panes[0].pane_tty, "/dev/pts/7")
+        self.assertEqual(panes[0].command, "minicom")
+
+    def test_on_mount_schedules_periodic_refresh(self) -> None:
+        app = self._minimal_app()
+        with patch.object(app, "_refresh_widgets"), patch.object(app, "set_interval") as set_interval:
+            app.on_mount()
+        set_interval.assert_called_once()
+        self.assertEqual(set_interval.call_args.args[0], REFRESH_INTERVAL_SECONDS)
+        self.assertEqual(set_interval.call_args.args[1], app._on_refresh_tick)
+
+    def test_light_refresh_reloads_panes_without_previews(self) -> None:
+        seen: dict[str, object] = {}
+
+        def loader(*, cockpit_pane_id: str, capture_previews: bool = True):
+            seen["capture_previews"] = capture_previews
+            return self._minimal_panes()
+
+        app = self._minimal_app(pane_loader=loader)
+        with patch.object(app, "_refresh_widgets"):
+            app._reconcile_state(light=True)
+        self.assertIs(seen["capture_previews"], False)
+
+    def _minimal_panes(self) -> tuple[PaneRecord, ...]:
+        return (
+            pane_record("%0", session_name="main", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", title="ssh", command="bash", left=120, top=0, width=120, height=40),
+        )
+
+    def _minimal_app(self, *, pane_loader=None) -> CockpitApp:
+        return CockpitApp.from_snapshot(
+            panes=self._minimal_panes(),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=LayoutActionService(),
+            pane_loader=pane_loader,
+        )
 
     def test_list_panes_uses_dash_a_flag(self) -> None:
         client = TmuxClient()

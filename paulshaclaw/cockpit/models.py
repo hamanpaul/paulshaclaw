@@ -24,6 +24,14 @@ class PaneRecord:
     height: int
     active: bool
     preview: tuple[str, ...]
+    pane_tty: str = ""
+    # Human label for the work list: the pane title when set, otherwise a
+    # derived fallback (e.g. "minicom COM0" / "[node]"). Empty until enriched.
+    summary: str = ""
+
+    @property
+    def display_summary(self) -> str:
+        return self.summary or self.title
 
     @property
     def area(self) -> int:
