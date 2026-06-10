@@ -76,9 +76,11 @@ def render_markdown(
     classifier_bucket: str | None = "session",
     captured_at: str | None = None,
     memory_layer: str = "inbox",
+    provenance_repo: str | None = None,
 ) -> str:
     source_artifact = _artifact_name(classifier_bucket)
     captured = captured_at or session.get("ended_at") or session.get("started_at") or "_unknown"
+    repo_value = session.get("repo") if provenance_repo is None else provenance_repo
     lines = [
         "---",
         f"memory_layer: {_frontmatter_value(memory_layer)}",
@@ -88,7 +90,7 @@ def render_markdown(
         f"source_artifact: {_frontmatter_value(source_artifact)}",
         f"captured_at: {_frontmatter_value(captured)}",
         "provenance:",
-        f"  repo: {_required_frontmatter_value(session.get('repo'))}",
+        f"  repo: {_required_frontmatter_value(repo_value)}",
         f"  commit: {_required_frontmatter_value(session.get('commit'))}",
         f"  path: {_required_frontmatter_value(session.get('raw_payload_pointer'))}",
         "---",
