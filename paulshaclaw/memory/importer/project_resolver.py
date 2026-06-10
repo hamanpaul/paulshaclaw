@@ -117,5 +117,5 @@ def resolve_project(
             return name
 
     if cwd:
-        return Path(cwd).name
+        return Path(cwd).name or "_unknown"
     return "_unknown"

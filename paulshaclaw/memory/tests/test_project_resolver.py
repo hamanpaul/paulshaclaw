@@ -368,6 +368,15 @@ class ResolveAutoDetectTests(unittest.TestCase):
     def test_truly_unresolvable_is_unknown(self):
         self.assertEqual(resolve_project(cwd=None, projects=_EMPTY), "_unknown")
 
+    def test_root_and_dot_like_cwd_fall_back_to_unknown(self):
+        with mock.patch(
+            "paulshaclaw.memory.importer.project_resolver._git.git_toplevel",
+            return_value=None,
+        ):
+            for cwd in ("/", "."):
+                with self.subTest(cwd=cwd):
+                    self.assertEqual(resolve_project(cwd=cwd, projects=_EMPTY), "_unknown")
+
     def test_git_detection_failure_degrades_to_folder_name(self):
         with _tempdir() as tmp:
             folder = Path(tmp) / "detached"
