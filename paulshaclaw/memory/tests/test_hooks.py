@@ -403,6 +403,7 @@ class InstallerTest(unittest.TestCase):
             "_wakeup_common.py",
             "_bootstrap.py",
             "claude_session_start.py",
+            "codex_session_start.py",
             "copilot_session_start.py",
             "claude_precompact.py",
             "copilot_precompact.py",
@@ -691,6 +692,62 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(
             any("--subagent" in c for c in subagent_commands),
             f"--subagent not in SubagentStop commands: {subagent_commands}",
+        )
+
+    def test_full_install_writes_codex_sessionstart_entry(self):
+        result = _run_install(self.base_args)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        deployed = self.memory_root / "hooks" / "codex_session_start.py"
+        self.assertTrue(deployed.exists(), "codex_session_start.py not deployed")
+
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text())
+        session_start = hooks.get("hooks", {}).get("SessionStart", [])
+        self.assertTrue(len(session_start) > 0, "No SessionStart entries")
+
+        matchers = [entry.get("matcher") for entry in session_start]
+        self.assertIn(
+            "startup|clear|compact", matchers,
+            f"SessionStart matcher startup|clear|compact missing: {matchers}",
+        )
+
+        start_commands = [
+            h["command"]
+            for entry in session_start
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertTrue(
+            any("codex_session_start.py" in c for c in start_commands),
+            f"codex_session_start.py not in SessionStart hooks: {start_commands}",
+        )
+        self.assertTrue(
+            any(f"PSC_MEMORY_ROOT={self.memory_root}" in c for c in start_commands),
+            f"PSC_MEMORY_ROOT override missing from SessionStart hooks: {start_commands}",
+        )
+        managed_by = [
+            h.get("managedBy")
+            for entry in session_start
+            for h in entry.get("hooks", [])
+        ]
+        self.assertIn("paulsha-memory", managed_by)
+
+    def test_full_install_does_not_duplicate_codex_sessionstart_entry(self):
+        _run_install(self.base_args)
+        _run_install(self.base_args)
+
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text())
+        start_commands = [
+            h["command"]
+            for entry in hooks["hooks"]["SessionStart"]
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        matching = [c for c in start_commands if "codex_session_start.py" in c]
+        self.assertEqual(
+            len(matching), 1, f"Duplicate codex SessionStart entries: {matching}"
         )
 
     def test_full_install_does_not_duplicate_codex_hook_entries(self):
@@ -1098,6 +1155,28 @@ class InstallerTest(unittest.TestCase):
         self.assertFalse(
             any("codex_session_end.py" in c for c in stop_commands),
             f"codex hook not removed: {stop_commands}",
+        )
+
+    def test_uninstall_removes_managed_codex_sessionstart_entry(self):
+        _run_install(self.base_args)
+
+        result = _run_uninstall([
+            "--memory-root", str(self.memory_root),
+            "--config-root", str(self.config_root),
+        ])
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+        hooks_path = self.config_root / ".codex" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text())
+        start_commands = [
+            h["command"]
+            for entry in hooks.get("hooks", {}).get("SessionStart", [])
+            for h in entry.get("hooks", [])
+            if "command" in h
+        ]
+        self.assertFalse(
+            any("codex_session_start.py" in c for c in start_commands),
+            f"codex SessionStart hook not removed: {start_commands}",
         )
 
     def test_uninstall_preserves_unrelated_codex_hooks_in_same_entry(self):

@@ -166,8 +166,8 @@ hooks_src_dir="${repo_root}/paulshaclaw/memory/hooks"
 
 for script in install.sh uninstall.sh \
   claude_session_end.py codex_session_end.py copilot_session_end.py \
-  _wakeup_common.py _bootstrap.py claude_session_start.py copilot_session_start.py \
-  claude_precompact.py copilot_precompact.py; do
+  _wakeup_common.py _bootstrap.py claude_session_start.py codex_session_start.py \
+  copilot_session_start.py claude_precompact.py copilot_precompact.py; do
   src="${hooks_src_dir}/${script}"
   dst="${memory_root}/hooks/${script}"
   if [[ -f "$src" ]]; then
@@ -307,13 +307,14 @@ with open(settings_path, "w", encoding="utf-8") as f:
 PYEOF
 
 # ------------------------------------------------------------------
-# Step 5: Codex hooks.json — merge Stop / SubagentStop entries
+# Step 5: Codex hooks.json — merge Stop / SubagentStop / SessionStart entries
 # ------------------------------------------------------------------
 codex_hooks="${config_root}/.codex/hooks.json"
 install -d -m 700 "$(dirname "$codex_hooks")"
 
 codex_stop_command="${hook_env_prefix} ${venv_python} ${hook_dir}/codex_session_end.py"
 codex_subagent_command="${hook_env_prefix} ${venv_python} ${hook_dir}/codex_session_end.py --subagent"
+codex_session_start_command="${hook_env_prefix} ${venv_python} ${hook_dir}/codex_session_start.py"
 
 if [[ -f "$codex_hooks" ]]; then
   existing_codex="$(cat "$codex_hooks")"
@@ -321,13 +322,15 @@ else
   existing_codex="{}"
 fi
 
-python3 - "$codex_hooks" "$existing_codex" "$codex_stop_command" "$codex_subagent_command" <<'PYEOF'
+python3 - "$codex_hooks" "$existing_codex" "$codex_stop_command" "$codex_subagent_command" \
+  "$codex_session_start_command" <<'PYEOF'
 import json, sys
 
 codex_path = sys.argv[1]
 existing_json = sys.argv[2]
 stop_command = sys.argv[3]
 subagent_command = sys.argv[4]
+session_start_command = sys.argv[5]
 
 try:
     data = json.loads(existing_json)
@@ -339,7 +342,6 @@ if not isinstance(data, dict):
     sys.exit(1)
 
 hooks = data.setdefault("hooks", {})
-managed_marker = "codex_session_end.py"
 
 def _command_parts(command):
     parts = command.strip().split()
@@ -358,7 +360,7 @@ def _managed_hook(command, status_msg):
         "managedBy": "paulsha-memory",
     }
 
-def _is_managed_codex_hook(hook):
+def _is_managed_codex_hook(hook, managed_marker):
     if not isinstance(hook, dict):
         return False
     if hook.get("managedBy") == "paulsha-memory":
@@ -379,7 +381,7 @@ def _is_managed_codex_hook(hook):
         and (len(parts) == 2 or parts[2] == "--subagent")
     )
 
-def _reconcile_event(name, command, status_msg):
+def _reconcile_event(name, command, status_msg, managed_marker, matcher=".*"):
     event_list = hooks.setdefault(name, [])
     if not isinstance(event_list, list):
         print(f"install.sh: hooks.{name} must be a list in {codex_path}", file=sys.stderr)
@@ -396,24 +398,28 @@ def _reconcile_event(name, command, status_msg):
         kept_hooks = [
             hook
             for hook in hooks_list
-            if not _is_managed_codex_hook(hook)
+            if not _is_managed_codex_hook(hook, managed_marker)
         ]
         updated_entry = dict(entry)
         updated_entry["hooks"] = kept_hooks
-        if updated_entry.get("matcher", ".*") == ".*" and target_entry is None:
+        if updated_entry.get("matcher", ".*") == matcher and target_entry is None:
             target_entry = updated_entry
         if kept_hooks:
             updated_entries.append(updated_entry)
     if target_entry is None:
-        target_entry = {"matcher": ".*", "hooks": []}
+        target_entry = {"matcher": matcher, "hooks": []}
         updated_entries.append(target_entry)
     target_entry["hooks"].append(_managed_hook(command, status_msg))
     if target_entry not in updated_entries:
         updated_entries.append(target_entry)
     hooks[name] = updated_entries
 
-_reconcile_event("Stop", stop_command, "paulsha-memory: capturing turn snapshot")
-_reconcile_event("SubagentStop", subagent_command, "paulsha-memory: capturing subagent snapshot")
+_reconcile_event("Stop", stop_command, "paulsha-memory: capturing turn snapshot", "codex_session_end.py")
+_reconcile_event("SubagentStop", subagent_command, "paulsha-memory: capturing subagent snapshot", "codex_session_end.py")
+_reconcile_event(
+    "SessionStart", session_start_command, "paulsha-memory: injecting wake-up brief",
+    "codex_session_start.py", matcher="startup|clear|compact",
+)
 
 with open(codex_path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2, sort_keys=True)
