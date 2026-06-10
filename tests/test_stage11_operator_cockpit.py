@@ -4,7 +4,7 @@ import sys
 import unittest
 from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 # textual is an optional dev/test dependency. Guard imports so the repository's
 # baseline tests (python -m unittest discover) can run under system Python
@@ -189,6 +189,30 @@ class Stage11StateTests(unittest.TestCase):
         set_interval.assert_called_once()
         self.assertEqual(set_interval.call_args.args[0], REFRESH_INTERVAL_SECONDS)
         self.assertEqual(set_interval.call_args.args[1], app._on_refresh_tick)
+
+    def test_refresh_skips_work_list_rebuild_when_content_unchanged(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", title="cockpit", command="python", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", title="active", command="bash", left=120, top=0, width=120, height=40),
+            pane_record("%1", session_name="main", title="a1", command="node", left=0, top=40, width=80, height=20),
+            pane_record("%2", session_name="main", title="a2", command="node", left=80, top=40, width=80, height=20),
+        )
+        app = CockpitApp.from_snapshot(
+            panes=panes, cockpit_pane_id="%0", cockpit_session_name="main",
+            jobs_by_pane={}, actions=LayoutActionService(),
+        )
+        widgets = {key: Mock() for key in ("#active-slot", "#work-list", "#pane-detail", "#global-jobs")}
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+            app._refresh_widgets()  # identical content -> list not rebuilt again
+            self.assertEqual(widgets["#work-list"].clear.call_count, 1)
+            # detail keeps updating every refresh even when the list is unchanged
+            self.assertGreaterEqual(widgets["#pane-detail"].update.call_count, 2)
+
+            app.state = app.state.move_selection(1)  # cursor moves to a different candidate
+            app._refresh_widgets()
+            self.assertEqual(widgets["#work-list"].clear.call_count, 2)
 
     def test_light_refresh_reloads_panes_without_previews(self) -> None:
         seen: dict[str, object] = {}

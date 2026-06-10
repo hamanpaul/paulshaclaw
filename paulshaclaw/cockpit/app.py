@@ -59,10 +59,11 @@ def pane_display_label(pane: PaneRecord) -> str:
 
 
 # How often the cockpit re-reads the tmux pane list so the work summary stays
-# live. Each tick is bounded (one `list-panes`, a tiny `ps` only for title-less
-# minicom panes, and one preview capture for the selected pane) — no large or
-# growing reads, so it can't pile up the way an unbounded scan would.
-REFRESH_INTERVAL_SECONDS = 3.0
+# live. Kept at 30s so the periodic redraw isn't a visible flicker; each tick is
+# bounded anyway (one `list-panes`, a tiny `ps` only for title-less minicom
+# panes, and one preview capture for the selected pane) — no large or growing
+# reads, so it can't pile up the way an unbounded scan would.
+REFRESH_INTERVAL_SECONDS = 30.0
 
 
 class CockpitApp(App[None]):
@@ -90,6 +91,9 @@ class CockpitApp(App[None]):
         self.actions = actions
         self.pane_loader = pane_loader
         self.preview_loader = preview_loader
+        # Last-rendered work-list content, so we skip rebuilding (and flickering)
+        # the list on refreshes that didn't change it.
+        self._last_work_items: tuple[str, ...] | None = None
 
     @classmethod
     def from_snapshot(
@@ -232,6 +236,16 @@ class CockpitApp(App[None]):
                 return pane.preview
         return pane.preview
 
+    def _work_list_items(self, active: PaneRecord | None) -> tuple[str, ...]:
+        items: list[str] = []
+        if active is not None:
+            items.append(f"[ACTIVE] {pane_display_label(active)}")
+        selected = self.state.selected_pane
+        for pane in self.state.candidate_section:
+            prefix = ">" if selected and pane.pane_id == selected.pane_id else " "
+            items.append(f"{prefix} {pane_display_label(pane)}")
+        return tuple(items)
+
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane
         active_text = (
@@ -241,13 +255,16 @@ class CockpitApp(App[None]):
         )
         self.query_one("#active-slot", Static).update(active_text)
 
-        work_list = self.query_one("#work-list", ListView)
-        work_list.clear()
-        if active is not None:
-            work_list.append(ListItem(Static(f"[ACTIVE] {pane_display_label(active)}")))
-        for pane in self.state.candidate_section:
-            prefix = ">" if self.state.selected_pane and pane.pane_id == self.state.selected_pane.pane_id else " "
-            work_list.append(ListItem(Static(f"{prefix} {pane_display_label(pane)}")))
+        # Only rebuild the work list when its content (labels + selection marker)
+        # actually changed, so an idle periodic refresh doesn't visibly flicker
+        # the list. The detail/preview below still updates every refresh.
+        items = self._work_list_items(active)
+        if items != self._last_work_items:
+            self._last_work_items = items
+            work_list = self.query_one("#work-list", ListView)
+            work_list.clear()
+            for line in items:
+                work_list.append(ListItem(Static(line)))
 
         selected = self.state.selected_pane
         if selected is None:
