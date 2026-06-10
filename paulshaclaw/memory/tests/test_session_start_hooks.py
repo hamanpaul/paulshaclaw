@@ -294,8 +294,8 @@ class SessionStartHooksTest(unittest.TestCase):
         self.assertIn("Memory wake-up", brief)
         self.assertIn("Test MOC content", brief)
 
-    def test_codex_session_start_exits_zero_on_invalid_json(self):
-        result = _run_hook("codex_session_start.py", "not-json", extra_env=self._env())
+    def test_codex_session_start_exits_zero_on_non_object_json(self):
+        result = _run_hook("codex_session_start.py", [], extra_env=self._env())
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         try:
             output = json.loads(result.stdout) if result.stdout.strip() else {}
@@ -303,6 +303,9 @@ class SessionStartHooksTest(unittest.TestCase):
             self.fail(f"stdout not valid JSON: {exc}: {result.stdout}")
         hso = output.get("hookSpecificOutput", {})
         self.assertEqual(hso.get("additionalContext", None), "")
+        log_path = self.memory_root / "log" / "hooks.log"
+        self.assertTrue(log_path.exists(), "expected hook warning log to be written")
+        self.assertIn("WARN codex: failed to build output", log_path.read_text(encoding="utf-8"))
 
 if __name__ == "__main__":
     unittest.main()
