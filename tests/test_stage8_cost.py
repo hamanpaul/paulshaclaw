@@ -219,7 +219,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cpt?", footer)
         self.assertIn("#[fg=magenta]haman:724#[default]", footer)
-        self.assertNotIn("#[fg=black]haman:724#[default]", footer)
+        self.assertNotIn("#[fg=colour33]haman:724#[default]", footer)
 
     def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
         snapshot = CostSnapshot(
@@ -254,9 +254,9 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         footer = format_footer(snapshot)
 
         self.assertIn("cpt?", footer)
-        self.assertIn("#[fg=black]fresh:42#[default]", footer)
+        self.assertIn("#[fg=colour33]fresh:42#[default]", footer)
         self.assertIn("#[fg=magenta]local:724#[default]", footer)
-        self.assertNotIn("#[fg=black]local:724#[default]", footer)
+        self.assertNotIn("#[fg=colour33]local:724#[default]", footer)
 
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
@@ -291,10 +291,10 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("#[fg=black]18%(15:21)#[default]", footer)
+        self.assertIn("#[fg=colour33]18%(15:21)#[default]", footer)
         self.assertIn("#[fg=red]91%(3d)#[default]", footer)
         self.assertIn("#[fg=colour245]--#[default]", footer)
-        self.assertIn("#[fg=yellow]haman:1200#[default]", footer)
+        self.assertIn("#[fg=colour208]haman:1200#[default]", footer)
 
     def test_footer_omits_empty_copilot_provider(self) -> None:
         snapshot = CostSnapshot(
@@ -315,8 +315,8 @@ class Stage8ModelFormatterTests(unittest.TestCase):
     def test_threshold_boundaries(self) -> None:
         self.assertEqual(classify_usage(69), "low")
         self.assertEqual(classify_usage(70), "warning")
-        self.assertEqual(classify_usage(89), "warning")
-        self.assertEqual(classify_usage(90), "critical")
+        self.assertEqual(classify_usage(84), "warning")
+        self.assertEqual(classify_usage(85), "critical")
         self.assertEqual(classify_usage(None), "neutral")
 
 
@@ -1011,8 +1011,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIn("cpt haman:21% arc:∞", plain)
 
         styled = format_footer(snapshot, use_tmux_style=True)
-        self.assertIn("#[fg=black]haman:21%#[default]", styled)  # 21% -> low -> black (visible on green bar)
-        self.assertIn("#[fg=black]arc:∞#[default]", styled)  # unlimited -> low -> black
+        self.assertIn("#[fg=colour33]haman:21%#[default]", styled)  # 21% -> low -> blue
+        self.assertIn("#[fg=colour33]arc:∞#[default]", styled)  # unlimited -> low -> blue
 
     def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
         with self.scratch_tempdir() as tmpdir:
@@ -1349,7 +1349,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             "payload": {
                 "type": "token_count",
                 "rate_limits": {
-                    # primary already reset (past) -> dropped; secondary still valid.
+                    # primary reset (past) and no window_minutes -> can't roll
+                    # forward, so it is dropped; secondary still valid.
                     "primary": {"used_percent": 61.0, "resets_at": epoch - 60},
                     "secondary": {"used_percent": 10.0, "resets_at": epoch + 7 * 86400},
                 },
@@ -1364,6 +1365,33 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "fresh")
         self.assertNotIn("five_hour", provider.windows)
         self.assertEqual(provider.windows["weekly"].used_percent, 10)
+
+    def test_collect_codex_rolls_reset_window_forward_to_zero(self) -> None:
+        # Real Codex readings carry window_minutes: when the 5h window has reset
+        # (Codex unused for a while) we report a live 0% with the next boundary,
+        # rather than dropping it to `--`.
+        now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        record = {
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 47.0, "window_minutes": 300, "resets_at": epoch - 7200},
+                    "secondary": {"used_percent": 17.0, "window_minutes": 10080, "resets_at": epoch + 7 * 86400},
+                },
+            },
+        }
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "s.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            provider = collect_codex(enabled=True, codex_home=Path(tmpdir), now=now)
+
+        self.assertEqual(provider.source_status, "fresh")
+        five = provider.windows["five_hour"]
+        self.assertEqual(five.used_percent, 0)  # reset -> unused budget
+        self.assertGreater(five.reset_at, now)  # next 5h boundary, in the future
+        self.assertEqual(provider.windows["weekly"].used_percent, 17)
 
     def test_collect_codex_rejects_trusted_payload_missing_secondary_window(self) -> None:
         payload = {
@@ -2244,7 +2272,7 @@ class Stage8CliTests(unittest.TestCase):
             exit_code = cost_status_cli.main([])
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(stdout.getvalue().strip(), "cdx 5h:-- wk:--  cc 5h:-- wk:--")
+        self.assertEqual(stdout.getvalue().strip(), "cdx 5h:-- wk:-- | cc 5h:-- wk:--")
         self.assertIn("stage8 cost status degraded: cache unavailable", stderr.getvalue())
 
     def test_status_main_preserves_previous_snapshot_when_refresh_fails(self) -> None:

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot, UsageWindow
 
-# tmux's default status bar is bg=green, so a green "low/healthy" foreground is
-# invisible (green-on-green). Use black for low instead — readable on the green
-# bar — and keep yellow/red for warning/critical, which contrast fine on green.
+# Usage colours (all readable on tmux's default bg=green status bar):
+# <70% blue, 70–85% orange, >85% red. (A green "low" foreground would be
+# invisible green-on-green, which is why low is blue rather than green.)
 TMUX_COLOR_BY_LEVEL = {
-    "low": "fg=black",
-    "warning": "fg=yellow",
-    "critical": "fg=red",
+    "low": "fg=colour33",       # blue
+    "warning": "fg=colour208",  # orange
+    "critical": "fg=red",       # red
     "neutral": "fg=colour245",
     "estimated": "fg=magenta",
 }
@@ -19,7 +19,7 @@ def classify_usage(value: int | None) -> str:
         return "neutral"
     if value < 70:
         return "low"
-    if value < 90:
+    if value < 85:
         return "warning"
     return "critical"
 
@@ -124,4 +124,6 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
     if provider is not None and provider.accounts:
         segments.append(_format_copilot_provider("cpt", provider, use_tmux_style))
 
-    return "  ".join(segments)
+    # Divider between cdx / cc / cpt so the segments don't blur together.
+    separator = _wrap("|", "neutral", use_tmux_style)
+    return f" {separator} ".join(segments)

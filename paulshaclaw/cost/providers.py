@@ -5,7 +5,7 @@ import re
 import subprocess
 import time
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlencode, urlparse
@@ -264,6 +264,22 @@ def _codex_window(raw: Any, now: datetime) -> UsageWindow | None:
     )
     if reset_at is None:
         return None
+
+    # If the window already reset (no fresh reading since Codex was last used),
+    # the budget has rolled over to a new, unused window. Roll the reset time
+    # forward by the window length and report 0% used — so the footer shows a
+    # live `0%` instead of a bare `--` or the now-obsolete used_percent.
+    if reset_at <= now:
+        window_minutes = raw.get("window_minutes")
+        try:
+            step = timedelta(minutes=int(window_minutes))
+        except (TypeError, ValueError):
+            step = timedelta()
+        if step.total_seconds() <= 0:
+            return None
+        while reset_at <= now:
+            reset_at += step
+        used_percent = 0
 
     return UsageWindow(
         used_percent=used_percent,

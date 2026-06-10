@@ -10,7 +10,7 @@ from .config import load_cost_config
 from .formatter import format_footer
 from .models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot
 
-_FALLBACK_LINE = "cdx 5h:-- wk:--  cc 5h:-- wk:--"
+_FALLBACK_LINE = "cdx 5h:-- wk:-- | cc 5h:-- wk:--"
 
 
 def build_parser() -> argparse.ArgumentParser:
