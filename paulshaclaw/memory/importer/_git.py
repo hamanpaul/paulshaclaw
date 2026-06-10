@@ -16,30 +16,38 @@ def _run_git(args: list[str], cwd: str | Path | None = None, timeout: int = _DEF
         return None
 
 
-def git_toplevel(cwd: str | Path) -> Optional[str]:
+def git_toplevel(cwd: str | Path | None) -> Optional[str]:
     """Return repository top-level path for cwd, or None on failure.
 
     Best-effort, bounded by a short timeout and never raises.
     """
+    # Guard against falsy inputs: do not probe current working directory
+    if not cwd:
+        return None
     try:
         return _run_git(["rev-parse", "--show-toplevel"], cwd=cwd)
     except Exception:
         return None
 
 
-def git_remote(toplevel: str | Path) -> Optional[str]:
+def git_remote(toplevel: str | Path | None) -> Optional[str]:
     """Return origin remote URL for the given repository top-level, or None."""
+    if not toplevel:
+        return None
     try:
         return _run_git(["remote", "get-url", "origin"], cwd=toplevel)
     except Exception:
         return None
 
 
-def sibling_repo_count(toplevel: str | Path) -> int:
+def sibling_repo_count(toplevel: str | Path | None) -> int:
     """Count immediate sibling directories of the given toplevel that are git repos.
 
     Returns 0 on any failure.
     """
+    # Guard against falsy inputs: avoid probing parent of current dir
+    if not toplevel:
+        return 0
     try:
         p = Path(toplevel)
         parent = p.parent

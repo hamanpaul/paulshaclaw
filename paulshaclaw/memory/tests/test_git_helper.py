@@ -33,3 +33,9 @@ class GitHelperTests(unittest.TestCase):
             _init_repo(Path(tmp) / "a")
             _init_repo(Path(tmp) / "b")
             self.assertEqual(_git.sibling_repo_count(str(Path(tmp) / "a")), 2)
+
+    def test_falsy_inputs(self) -> None:
+        # None or empty inputs must be treated as non-repo / safe fallback
+        self.assertIsNone(_git.git_toplevel(None))
+        self.assertIsNone(_git.git_remote(None))
+        self.assertEqual(_git.sibling_repo_count(''), 0)
