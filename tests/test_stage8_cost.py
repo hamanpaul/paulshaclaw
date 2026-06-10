@@ -190,8 +190,8 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         footer = format_footer(snapshot)
 
         self.assertIn("cdx?", footer)
-        self.assertIn("#[fg=magenta]91%(1h)#[default]", footer)
-        self.assertNotIn("#[fg=red]91%(1h)#[default]", footer)
+        self.assertIn("#[fg=magenta]91%#[default]#[fg=colour245](1h)#[default]", footer)
+        self.assertNotIn("#[fg=red]91%#[default]", footer)
 
     def test_footer_uses_estimated_tmux_style_for_copilot_account(self) -> None:
         snapshot = CostSnapshot(
@@ -218,8 +218,8 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         footer = format_footer(snapshot)
 
         self.assertIn("cpt?", footer)
-        self.assertIn("#[fg=magenta]haman:724#[default]", footer)
-        self.assertNotIn("#[fg=colour33]haman:724#[default]", footer)
+        self.assertIn("haman:#[fg=magenta]724#[default]", footer)
+        self.assertNotIn("haman:#[fg=colour33]724#[default]", footer)
 
     def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
         snapshot = CostSnapshot(
@@ -254,9 +254,9 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         footer = format_footer(snapshot)
 
         self.assertIn("cpt?", footer)
-        self.assertIn("#[fg=colour33]fresh:42#[default]", footer)
-        self.assertIn("#[fg=magenta]local:724#[default]", footer)
-        self.assertNotIn("#[fg=colour33]local:724#[default]", footer)
+        self.assertIn("fresh:#[fg=colour33]42#[default]", footer)
+        self.assertIn("local:#[fg=magenta]724#[default]", footer)
+        self.assertNotIn("local:#[fg=colour33]724#[default]", footer)
 
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
@@ -291,10 +291,10 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("#[fg=colour33]18%(15:21)#[default]", footer)
-        self.assertIn("#[fg=red]91%(3d)#[default]", footer)
+        self.assertIn("#[fg=colour33]18%#[default]#[fg=colour245](15:21)#[default]", footer)
+        self.assertIn("#[fg=red]91%#[default]#[fg=colour245](3d)#[default]", footer)
         self.assertIn("#[fg=colour245]--#[default]", footer)
-        self.assertIn("#[fg=colour208]haman:1200#[default]", footer)
+        self.assertIn("haman:#[fg=colour208]1200#[default]", footer)
 
     def test_footer_omits_empty_copilot_provider(self) -> None:
         snapshot = CostSnapshot(
@@ -310,7 +310,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         footer = format_footer(snapshot, use_tmux_style=False)
 
         self.assertNotIn("cpt", footer)
-        self.assertEqual(footer, "cdx 5h:-- wk:--")
+        self.assertEqual(footer, "cdx 5h:-- wk:-- ")
 
     def test_threshold_boundaries(self) -> None:
         self.assertEqual(classify_usage(69), "low")
@@ -1011,8 +1011,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIn("cpt haman:21% arc:∞", plain)
 
         styled = format_footer(snapshot, use_tmux_style=True)
-        self.assertIn("#[fg=colour33]haman:21%#[default]", styled)  # 21% -> low -> blue
-        self.assertIn("#[fg=colour33]arc:∞#[default]", styled)  # unlimited -> low -> blue
+        self.assertIn("haman:#[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
+        self.assertIn("arc:#[fg=colour245]∞#[default]", styled)  # ∞ -> neutral/dim (not a usage level)
 
     def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
         with self.scratch_tempdir() as tmpdir:

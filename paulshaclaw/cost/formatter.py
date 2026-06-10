@@ -55,8 +55,15 @@ def _format_window(
 ) -> str:
     if window is None or window.used_percent is None or not window.display_reset:
         return _wrap("--", "neutral", use_tmux_style)
-    text = f"{window.used_percent}%({window.display_reset})"
-    return _wrap(text, _provider_window_level(provider, window.used_percent), use_tmux_style)
+    # Colour only the percentage (the usage signal); keep the reset time dim so
+    # it reads as context rather than a usage level.
+    percent = _wrap(
+        f"{window.used_percent}%",
+        _provider_window_level(provider, window.used_percent),
+        use_tmux_style,
+    )
+    reset = _wrap(f"({window.display_reset})", "neutral", use_tmux_style)
+    return f"{percent}{reset}"
 
 
 def _format_window_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
@@ -109,7 +116,10 @@ def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_sty
     parts = [_provider_label(name, provider)]
     for account in provider.accounts:
         value = _account_value(account)
-        parts.append(_wrap(f"{account.label}:{value}", _account_level(provider, account), use_tmux_style))
+        # Colour only the value; the label stays default. `∞` (no limit) is dim,
+        # since it is not a usage level.
+        level = "neutral" if account.unlimited else _account_level(provider, account)
+        parts.append(f"{account.label}:{_wrap(value, level, use_tmux_style)}")
     return " ".join(parts)
 
 
@@ -124,6 +134,8 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
     if provider is not None and provider.accounts:
         segments.append(_format_copilot_provider("cpt", provider, use_tmux_style))
 
-    # Divider between cdx / cc / cpt so the segments don't blur together.
+    # Divider between cdx / cc / cpt so the segments don't blur together, plus a
+    # trailing space so the line doesn't sit flush against the terminal edge.
     separator = _wrap("|", "neutral", use_tmux_style)
-    return f" {separator} ".join(segments)
+    joined = f" {separator} ".join(segments)
+    return f"{joined} " if joined else joined
