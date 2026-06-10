@@ -12,12 +12,18 @@ from paulshaclaw.memory.importer.project_resolver import resolve_project
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 _EMPTY = ProjectsConfig()
+_SCRATCH_ROOT = REPO_ROOT.parent / ".test-work"
+_SCRATCH_ROOT.mkdir(exist_ok=True)
 
 
 def _init_repo(path: Path, remote: str | None = None) -> None:
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     if remote:
         subprocess.run(["git", "-C", str(path), "remote", "add", "origin", remote], check=True)
+
+
+def _tempdir() -> tempfile.TemporaryDirectory:
+    return tempfile.TemporaryDirectory(dir=_SCRATCH_ROOT)
 
 
 class ProjectResolverTest(unittest.TestCase):
@@ -188,7 +194,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_keeps_non_github_url_ports_distinct(self):
         config = load_projects_config(
@@ -210,7 +216,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "example.com:9443/org/repo")
 
     def test_resolve_project_keeps_non_default_github_port_distinct(self):
         config = load_projects_config(
@@ -232,7 +238,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "github.com:2222/hamanpaul/paulshaclaw")
 
     def test_resolve_project_keeps_non_ssh_github_port_22_distinct(self):
         config = load_projects_config(
@@ -254,7 +260,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "github.com:22/hamanpaul/paulshaclaw")
 
     def test_resolve_project_preserves_file_remote_normalization(self):
         config = load_projects_config(
@@ -300,7 +306,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "github.com/someone/else")
 
     def test_alias_collision_warns_and_keeps_first_definition(self):
         config_path = self.write_projects_config(
@@ -324,7 +330,7 @@ class ProjectResolverTest(unittest.TestCase):
 
 class ResolveAutoDetectTests(unittest.TestCase):
     def test_repo_with_remote_resolves_owner_repo(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             repo = Path(tmp) / "paulshaclaw"
             repo.mkdir()
             _init_repo(repo, "git@github.com:hamanpaul/paulshaclaw.git")
@@ -332,7 +338,7 @@ class ResolveAutoDetectTests(unittest.TestCase):
             self.assertEqual(resolve_project(cwd=str(repo), projects=_EMPTY), "github.com/hamanpaul/paulshaclaw")
 
     def test_repo_without_remote_resolves_dir_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             repo = Path(tmp) / "solo"
             repo.mkdir()
             _init_repo(repo)
@@ -340,14 +346,14 @@ class ResolveAutoDetectTests(unittest.TestCase):
             self.assertEqual(resolve_project(cwd=str(repo), projects=_EMPTY), "solo")
 
     def test_not_a_repo_resolves_working_folder(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             folder = Path(tmp) / "scratchpad"
             folder.mkdir()
 
             self.assertEqual(resolve_project(cwd=str(folder), projects=_EMPTY), "scratchpad")
 
     def test_multi_repo_workspace_resolves_tree_path(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             workspace = Path(tmp) / "arc_prj"
             workspace.mkdir()
             repo_a = workspace / "serialwrap"
@@ -363,7 +369,7 @@ class ResolveAutoDetectTests(unittest.TestCase):
         self.assertEqual(resolve_project(cwd=None, projects=_EMPTY), "_unknown")
 
     def test_git_detection_failure_degrades_to_folder_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with _tempdir() as tmp:
             folder = Path(tmp) / "detached"
             folder.mkdir()
 
@@ -372,6 +378,23 @@ class ResolveAutoDetectTests(unittest.TestCase):
                 side_effect=OSError("git unavailable"),
             ):
                 self.assertEqual(resolve_project(cwd=str(folder), projects=_EMPTY), "detached")
+
+    def test_nonexistent_cwd_still_resolves_working_folder_name(self):
+        with _tempdir() as tmp:
+            cwd = Path(tmp) / "moved-folder"
+
+            self.assertEqual(resolve_project(cwd=str(cwd), projects=_EMPTY), "moved-folder")
+
+    def test_nonexistent_git_toplevel_is_still_honored(self):
+        with _tempdir() as tmp:
+            cwd = Path(tmp) / "scratchpad"
+            cwd.mkdir()
+            git_toplevel = Path(tmp) / "moved" / "ghost-repo"
+
+            self.assertEqual(
+                resolve_project(cwd=str(cwd), git_toplevel=str(git_toplevel), projects=_EMPTY),
+                "ghost-repo",
+            )
 
 
 if __name__ == "__main__":

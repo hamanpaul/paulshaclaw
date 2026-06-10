@@ -98,14 +98,11 @@ def resolve_project(
             return ""
         try:
             path = Path(value)
-            return path.name if path.exists() else ""
+            return path.name
         except Exception:
             return ""
 
-    try:
-        explicit_toplevel = git_toplevel if git_toplevel and Path(git_toplevel).exists() else None
-    except Exception:
-        explicit_toplevel = None
+    explicit_toplevel = git_toplevel if git_toplevel else None
 
     try:
         toplevel = explicit_toplevel or _git.git_toplevel(cwd)
