@@ -39,3 +39,13 @@ class GitHelperTests(unittest.TestCase):
         self.assertIsNone(_git.git_toplevel(None))
         self.assertIsNone(_git.git_remote(None))
         self.assertEqual(_git.sibling_repo_count(''), 0)
+
+    def test_nonexistent_path_returns_zero(self) -> None:
+        # Non-existent path should not scan siblings; must return 0
+        with TemporaryDirectory() as tmp:
+            # create a real sibling repo so current implementation would count it
+            repo = Path(tmp) / "a"
+            repo.mkdir()
+            _init_repo(repo)
+            missing = Path(tmp) / "nope"
+            self.assertEqual(_git.sibling_repo_count(str(missing)), 0)

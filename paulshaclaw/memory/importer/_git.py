@@ -50,6 +50,9 @@ def sibling_repo_count(toplevel: str | Path | None) -> int:
         return 0
     try:
         p = Path(toplevel)
+        # If the provided path doesn't exist or isn't a directory, treat as failure
+        if not p.exists() or not p.is_dir():
+            return 0
         parent = p.parent
         count = 0
         if not parent.exists():
