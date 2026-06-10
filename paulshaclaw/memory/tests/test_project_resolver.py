@@ -1,15 +1,29 @@
 import os
+import subprocess
 import tempfile
 import textwrap
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from paulshaclaw.memory.importer.config import default_projects_path, load_projects_config
+from paulshaclaw.memory.importer.config import ProjectsConfig, default_projects_path, load_projects_config
 from paulshaclaw.memory.importer.project_resolver import resolve_project
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+_EMPTY = ProjectsConfig()
+_SCRATCH_ROOT = REPO_ROOT.parent / ".test-work"
+_SCRATCH_ROOT.mkdir(exist_ok=True)
+
+
+def _init_repo(path: Path, remote: str | None = None) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    if remote:
+        subprocess.run(["git", "-C", str(path), "remote", "add", "origin", remote], check=True)
+
+
+def _tempdir() -> tempfile.TemporaryDirectory:
+    return tempfile.TemporaryDirectory(dir=_SCRATCH_ROOT)
 
 
 class ProjectResolverTest(unittest.TestCase):
@@ -180,7 +194,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_keeps_non_github_url_ports_distinct(self):
         config = load_projects_config(
@@ -202,7 +216,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_keeps_non_default_github_port_distinct(self):
         config = load_projects_config(
@@ -224,7 +238,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_keeps_non_ssh_github_port_22_distinct(self):
         config = load_projects_config(
@@ -246,7 +260,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_preserves_file_remote_normalization(self):
         config = load_projects_config(
@@ -292,7 +306,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "_unknown")
+        self.assertEqual(project, "project")
 
     def test_alias_collision_warns_and_keeps_first_definition(self):
         config_path = self.write_projects_config(
@@ -312,6 +326,92 @@ class ProjectResolverTest(unittest.TestCase):
         self.assertEqual(config.aliases["shared"], "paulshaclaw")
         self.assertEqual(config.aliases["obs-moc"], "obs-auto-moc")
         self.assertIn("shared", "\n".join(captured.output))
+
+
+class ResolveAutoDetectTests(unittest.TestCase):
+    def test_repo_with_remote_resolves_owner_repo(self):
+        with _tempdir() as tmp:
+            repo = Path(tmp) / "paulshaclaw"
+            repo.mkdir()
+            _init_repo(repo, "git@github.com:hamanpaul/paulshaclaw.git")
+
+            self.assertEqual(resolve_project(cwd=str(repo), projects=_EMPTY), "github.com/hamanpaul/paulshaclaw")
+
+    def test_repo_without_remote_resolves_dir_name(self):
+        with _tempdir() as tmp:
+            repo = Path(tmp) / "solo"
+            repo.mkdir()
+            _init_repo(repo)
+
+            self.assertEqual(resolve_project(cwd=str(repo), projects=_EMPTY), "solo")
+
+    def test_not_a_repo_resolves_working_folder(self):
+        with _tempdir() as tmp:
+            folder = Path(tmp) / "scratchpad"
+            folder.mkdir()
+
+            self.assertEqual(resolve_project(cwd=str(folder), projects=_EMPTY), "scratchpad")
+
+    def test_multi_repo_workspace_resolves_tree_path(self):
+        with _tempdir() as tmp:
+            workspace = Path(tmp) / "arc_prj"
+            workspace.mkdir()
+            repo_a = workspace / "serialwrap"
+            repo_a.mkdir()
+            _init_repo(repo_a)
+            repo_b = workspace / "other"
+            repo_b.mkdir()
+            _init_repo(repo_b)
+
+            self.assertEqual(resolve_project(cwd=str(repo_a), projects=_EMPTY), "arc_prj/serialwrap")
+
+    def test_truly_unresolvable_is_unknown(self):
+        self.assertEqual(resolve_project(cwd=None, projects=_EMPTY), "_unknown")
+
+    def test_root_and_dot_like_cwd_fall_back_to_unknown(self):
+        with mock.patch(
+            "paulshaclaw.memory.importer.project_resolver._git.git_toplevel",
+            return_value=None,
+        ):
+            for cwd in ("/", "."):
+                with self.subTest(cwd=cwd):
+                    self.assertEqual(resolve_project(cwd=cwd, projects=_EMPTY), "_unknown")
+
+    def test_git_detection_failure_degrades_to_folder_name(self):
+        with _tempdir() as tmp:
+            folder = Path(tmp) / "detached"
+            folder.mkdir()
+
+            with mock.patch(
+                "paulshaclaw.memory.importer.project_resolver._git.git_toplevel",
+                side_effect=OSError("git unavailable"),
+            ):
+                self.assertEqual(resolve_project(cwd=str(folder), projects=_EMPTY), "detached")
+
+    def test_nonexistent_cwd_still_resolves_working_folder_name(self):
+        with _tempdir() as tmp:
+            cwd = Path(tmp) / "moved-folder"
+
+            self.assertEqual(resolve_project(cwd=str(cwd), projects=_EMPTY), "moved-folder")
+
+    def test_nonexistent_git_toplevel_falls_back_to_working_folder_name(self):
+        with _tempdir() as tmp:
+            cwd = Path(tmp) / "scratchpad"
+            cwd.mkdir()
+            git_toplevel = Path(tmp) / "moved" / "ghost-repo"
+
+            self.assertEqual(
+                resolve_project(cwd=str(cwd), git_toplevel=str(git_toplevel), projects=_EMPTY),
+                "scratchpad",
+            )
+
+    def test_path_like_remote_url_does_not_override_repo_name(self):
+        with _tempdir() as tmp:
+            repo = Path(tmp) / "solo"
+            repo.mkdir()
+            _init_repo(repo)
+
+            self.assertEqual(resolve_project(cwd=str(repo), remote_url="/tmp/ws/repo", projects=_EMPTY), "solo")
 
 
 if __name__ == "__main__":

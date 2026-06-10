@@ -2,6 +2,7 @@ import json
 import tempfile
 import time
 import unittest
+import subprocess
 from threading import Event
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
@@ -13,6 +14,12 @@ from paulshaclaw.memory.importer.pipeline import ingest_queue_item
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _init_repo(path: Path, remote: str | None = None) -> None:
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    if remote:
+        subprocess.run(["git", "-C", str(path), "remote", "add", "origin", remote], check=True)
 
 
 class IdempotencyPipelineTest(unittest.TestCase):
@@ -117,6 +124,23 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertIn(f"- Raw payload: {archive}", rendered)
         self.assertNotIn(f"  path: {queue_item}", rendered)
         self.assertNotIn(f"- Raw payload: {queue_item}", rendered)
+
+    def test_written_markdown_uses_detected_git_remote_for_persisted_provenance_repo(self):
+        repo = self.root.parent / "remote-repo"
+        worktree = repo / "nested" / "cwd"
+        worktree.mkdir(parents=True)
+        _init_repo(repo, "git@github.com:owner/x.git")
+        payload = self.payload(session_id="sid-provenance-remote", scope="session_end")
+        payload["cwd"] = str(worktree)
+        payload["repo"] = "hamanpaul/other-repo"
+        queue_item = self.write_queue_item("provenance-remote", payload)
+
+        decision = ingest_queue_item(queue_item, memory_root=self.root)
+
+        inbox = Path(decision["inbox_path"])
+        rendered = inbox.read_text(encoding="utf-8")
+        self.assertIn("  repo: github.com/owner/x", rendered)
+        self.assertNotIn("  repo: hamanpaul/other-repo", rendered)
 
     def test_higher_completeness_updates_and_lower_completeness_stale_skips(self):
         base = self.payload(scope="turn", turns=1, files=["a.py"], prompts=["one"])
@@ -251,7 +275,8 @@ class IdempotencyPipelineTest(unittest.TestCase):
         self.assertEqual(decision["project"], "paulshaclaw")
         self.assertTrue(inbox.exists())
         self.assertIn("project: paulshaclaw", rendered)
-        self.assertIn("repo: /work/custom-claw-tools/unmatched", rendered)
+        self.assertIn("  repo: _unknown", rendered)
+        self.assertNotIn("  repo: /work/custom-claw-tools/unmatched", rendered)
 
     def test_reclassification_updates_when_bucket_changes_without_content_hash_change(self):
         payload = self.payload(

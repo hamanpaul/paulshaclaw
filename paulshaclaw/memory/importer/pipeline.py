@@ -15,8 +15,10 @@ from typing import Any
 
 from .adapters import claude, codex, copilot
 from .adapters.base import AdapterResult, NormalizedSession
+from . import _git
 from .classifier import classify_session
 from .frontmatter import render_markdown
+from .project_resolver import normalize_remote
 from .project_resolver import resolve_project
 
 _SCOPE_RANK = {"turn": 0, "subagent": 0, "pre_compact": 0, "session_end": 1, "watcher_final": 2}
@@ -266,6 +268,7 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
         status = "stale-skip"
     archive_path = _archive_path(root, month, key, status, incoming_hash)
     rendered_session = _persisted_session(session, raw_payload_pointer=str(archive_path))
+    provenance_repo = normalize_remote(_git.git_remote(_git.git_toplevel(session.get("cwd")))) or "_unknown"
     decision = _decision_entry(
         status=status,
         key=key,
@@ -283,6 +286,7 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
         project=project,
         classifier_bucket=bucket,
         captured_at=captured_at,
+        provenance_repo=provenance_repo,
     )
     return decision
 

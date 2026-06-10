@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
+from . import _git
 from .config import ProjectsConfig, default_projects_path, load_projects_config
 
 
@@ -91,4 +92,30 @@ def resolve_project(
             for remote in project.remotes:
                 if normalize_remote(remote) == normalized_remote:
                     return project.slug
+
+    try:
+        toplevel = _git.git_toplevel(cwd)
+    except Exception:
+        toplevel = None
+
+    if toplevel:
+        try:
+            remote = normalize_remote(_git.git_remote(toplevel))
+        except Exception:
+            remote = ""
+        if remote:
+            return remote
+
+        name = Path(toplevel).name
+        if name:
+            try:
+                if _git.sibling_repo_count(toplevel) >= 2:
+                    parent = Path(toplevel).parent.name
+                    return f"{parent}/{name}" if parent else name
+            except Exception:
+                pass
+            return name
+
+    if cwd:
+        return Path(cwd).name or "_unknown"
     return "_unknown"

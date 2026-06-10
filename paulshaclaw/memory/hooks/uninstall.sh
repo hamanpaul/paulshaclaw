@@ -3,7 +3,7 @@
 #
 # Removes:
 #   - The managed SessionEnd entry from ~/.claude/settings.json
-#   - The managed Stop/SubagentStop entries from ~/.codex/hooks.json
+#   - The managed Stop/SubagentStop/SessionStart entries from ~/.codex/hooks.json
 #   - The entire ~/.copilot/hooks/paulsha-memory.json file
 #
 # Preserves:
@@ -203,6 +203,8 @@ if "Stop" in hooks:
     hooks["Stop"] = _remove_managed(hooks["Stop"], "codex_session_end.py")
 if "SubagentStop" in hooks:
     hooks["SubagentStop"] = _remove_managed(hooks["SubagentStop"], "codex_session_end.py")
+if "SessionStart" in hooks:
+    hooks["SessionStart"] = _remove_managed(hooks["SessionStart"], "codex_session_start.py")
 
 with open(codex_path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2, sort_keys=True)
