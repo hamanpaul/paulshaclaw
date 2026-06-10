@@ -59,10 +59,11 @@ def pane_display_label(pane: PaneRecord) -> str:
 
 
 # How often the cockpit re-reads the tmux pane list so the work summary stays
-# live. Each tick is bounded (one `list-panes`, a tiny `ps` only for title-less
-# minicom panes, and one preview capture for the selected pane) — no large or
-# growing reads, so it can't pile up the way an unbounded scan would.
-REFRESH_INTERVAL_SECONDS = 3.0
+# live. Kept at 30s so the periodic redraw isn't a visible flicker; each tick is
+# bounded anyway (one `list-panes`, a tiny `ps` only for title-less minicom
+# panes, and one preview capture for the selected pane) — no large or growing
+# reads, so it can't pile up the way an unbounded scan would.
+REFRESH_INTERVAL_SECONDS = 30.0
 
 
 class CockpitApp(App[None]):
