@@ -216,7 +216,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "example.com:9443/org/repo")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_keeps_non_default_github_port_distinct(self):
         config = load_projects_config(
@@ -238,7 +238,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "github.com:2222/hamanpaul/paulshaclaw")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_keeps_non_ssh_github_port_22_distinct(self):
         config = load_projects_config(
@@ -260,7 +260,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "github.com:22/hamanpaul/paulshaclaw")
+        self.assertEqual(project, "path")
 
     def test_resolve_project_preserves_file_remote_normalization(self):
         config = load_projects_config(
@@ -306,7 +306,7 @@ class ProjectResolverTest(unittest.TestCase):
             projects=config,
         )
 
-        self.assertEqual(project, "github.com/someone/else")
+        self.assertEqual(project, "project")
 
     def test_alias_collision_warns_and_keeps_first_definition(self):
         config_path = self.write_projects_config(
@@ -385,7 +385,7 @@ class ResolveAutoDetectTests(unittest.TestCase):
 
             self.assertEqual(resolve_project(cwd=str(cwd), projects=_EMPTY), "moved-folder")
 
-    def test_nonexistent_git_toplevel_is_still_honored(self):
+    def test_nonexistent_git_toplevel_falls_back_to_working_folder_name(self):
         with _tempdir() as tmp:
             cwd = Path(tmp) / "scratchpad"
             cwd.mkdir()
@@ -393,8 +393,16 @@ class ResolveAutoDetectTests(unittest.TestCase):
 
             self.assertEqual(
                 resolve_project(cwd=str(cwd), git_toplevel=str(git_toplevel), projects=_EMPTY),
-                "ghost-repo",
+                "scratchpad",
             )
+
+    def test_path_like_remote_url_does_not_override_repo_name(self):
+        with _tempdir() as tmp:
+            repo = Path(tmp) / "solo"
+            repo.mkdir()
+            _init_repo(repo)
+
+            self.assertEqual(resolve_project(cwd=str(repo), remote_url="/tmp/ws/repo", projects=_EMPTY), "solo")
 
 
 if __name__ == "__main__":

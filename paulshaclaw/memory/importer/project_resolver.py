@@ -93,25 +93,14 @@ def resolve_project(
                 if normalize_remote(remote) == normalized_remote:
                     return project.slug
 
-    def _existing_folder_name(value: str | None) -> str:
-        if not value:
-            return ""
-        try:
-            path = Path(value)
-            return path.name
-        except Exception:
-            return ""
-
-    explicit_toplevel = git_toplevel if git_toplevel else None
-
     try:
-        toplevel = explicit_toplevel or _git.git_toplevel(cwd)
+        toplevel = _git.git_toplevel(cwd)
     except Exception:
         toplevel = None
 
     if toplevel:
         try:
-            remote = normalize_remote(remote_url or _git.git_remote(toplevel))
+            remote = normalize_remote(_git.git_remote(toplevel))
         except Exception:
             remote = ""
         if remote:
@@ -127,7 +116,6 @@ def resolve_project(
                 pass
             return name
 
-    folder_name = _existing_folder_name(cwd)
-    if folder_name:
-        return folder_name
+    if cwd:
+        return Path(cwd).name
     return "_unknown"
