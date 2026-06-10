@@ -219,7 +219,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cpt?", footer)
         self.assertIn("#[fg=magenta]haman:724#[default]", footer)
-        self.assertNotIn("#[fg=green]haman:724#[default]", footer)
+        self.assertNotIn("#[fg=black]haman:724#[default]", footer)
 
     def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
         snapshot = CostSnapshot(
@@ -254,9 +254,9 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         footer = format_footer(snapshot)
 
         self.assertIn("cpt?", footer)
-        self.assertIn("#[fg=green]fresh:42#[default]", footer)
+        self.assertIn("#[fg=black]fresh:42#[default]", footer)
         self.assertIn("#[fg=magenta]local:724#[default]", footer)
-        self.assertNotIn("#[fg=green]local:724#[default]", footer)
+        self.assertNotIn("#[fg=black]local:724#[default]", footer)
 
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
@@ -291,7 +291,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("#[fg=green]18%(15:21)#[default]", footer)
+        self.assertIn("#[fg=black]18%(15:21)#[default]", footer)
         self.assertIn("#[fg=red]91%(3d)#[default]", footer)
         self.assertIn("#[fg=colour245]--#[default]", footer)
         self.assertIn("#[fg=yellow]haman:1200#[default]", footer)
@@ -1011,8 +1011,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertIn("cpt haman:21% arc:∞", plain)
 
         styled = format_footer(snapshot, use_tmux_style=True)
-        self.assertIn("#[fg=green]haman:21%#[default]", styled)  # 21% -> low/green
-        self.assertIn("#[fg=green]arc:∞#[default]", styled)  # unlimited -> green
+        self.assertIn("#[fg=black]haman:21%#[default]", styled)  # 21% -> low -> black (visible on green bar)
+        self.assertIn("#[fg=black]arc:∞#[default]", styled)  # unlimited -> low -> black
 
     def test_read_local_observed_total_ignores_timestamp_less_shutdowns_with_explicit_month(self) -> None:
         with self.scratch_tempdir() as tmpdir:

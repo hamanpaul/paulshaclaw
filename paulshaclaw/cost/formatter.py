@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot, UsageWindow
 
+# tmux's default status bar is bg=green, so a green "low/healthy" foreground is
+# invisible (green-on-green). Use black for low instead — readable on the green
+# bar — and keep yellow/red for warning/critical, which contrast fine on green.
 TMUX_COLOR_BY_LEVEL = {
-    "low": "fg=green",
+    "low": "fg=black",
     "warning": "fg=yellow",
     "critical": "fg=red",
     "neutral": "fg=colour245",
