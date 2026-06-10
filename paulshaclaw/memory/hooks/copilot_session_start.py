@@ -12,13 +12,10 @@ from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
-# Add repo root to sys.path for imports when running from repo
-_hook_file = Path(__file__).resolve()
-_repo_root = _hook_file.parents[3]
-if _repo_root not in sys.path:
-    sys.path.insert(0, str(_repo_root))
+import _bootstrap  # sibling module; hooks dir is on sys.path[0]
+
+_bootstrap.ensure_repo_on_path()
 
 TOOL = "copilot-cli"
 

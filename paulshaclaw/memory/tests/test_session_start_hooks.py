@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
 import tempfile
 import unittest
+import sys
 from pathlib import Path
 
 
@@ -27,6 +29,15 @@ def _run_hook(script_name, stdin_data, extra_env=None):
         capture_output=True,
         text=True,
     )
+
+
+def _load_bootstrap():
+    spec = importlib.util.spec_from_file_location("_bootstrap", HOOKS_DIR / "_bootstrap.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("failed to load _bootstrap module spec")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 class SessionStartHooksTest(unittest.TestCase):
@@ -52,6 +63,38 @@ class SessionStartHooksTest(unittest.TestCase):
         if extra:
             e.update(extra)
         return e
+
+    def test_bootstrap_does_not_insert_a_non_package_repo_root(self):
+        bs = _load_bootstrap()
+        with tempfile.TemporaryDirectory(dir=self.scratch) as tmp:
+            hookfile = Path(tmp) / "paulshaclaw" / "memory" / "hooks" / "h.py"
+            hookfile.parent.mkdir(parents=True)
+            hookfile.write_text("", encoding="utf-8")
+            before = list(sys.path)
+
+            bs.ensure_repo_on_path(_hook_file=str(hookfile))
+
+            self.assertEqual(sys.path, before)
+
+    def test_bootstrap_inserts_a_real_package_root(self):
+        bs = _load_bootstrap()
+        with tempfile.TemporaryDirectory(dir=self.scratch) as tmp:
+            package_root = Path(tmp)
+            (package_root / "paulshaclaw").mkdir()
+            (package_root / "paulshaclaw" / "__init__.py").write_text("", encoding="utf-8")
+            hookfile = package_root / "paulshaclaw" / "memory" / "hooks" / "h.py"
+            hookfile.parent.mkdir(parents=True)
+            hookfile.write_text("", encoding="utf-8")
+            before = list(sys.path)
+
+            try:
+                bs.ensure_repo_on_path(_hook_file=str(hookfile))
+
+                self.assertEqual(sys.path[0], str(package_root))
+                self.assertEqual(sys.path.count(str(package_root)), before.count(str(package_root)) + 1)
+            finally:
+                while str(package_root) in sys.path:
+                    sys.path.remove(str(package_root))
 
     def _write_minimal_moc(self, project: str):
         """Write a minimal MOC file for a project."""
