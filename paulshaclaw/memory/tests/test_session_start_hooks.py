@@ -259,6 +259,50 @@ class SessionStartHooksTest(unittest.TestCase):
             brief = output.get("additionalContext", "")
             self.assertEqual(brief, "")
 
+    # ------------------------------------------------------------------
+    # Codex session-start hook
+    # ------------------------------------------------------------------
+
+    def test_codex_session_start_returns_structured_output_shape(self):
+        """Codex SessionStart hook must return hookSpecificOutput with hookEventName."""
+        self._write_projects_config()
+        self._write_minimal_moc("test")
+        payload = {"session_id": "test-007", "cwd": "/repo/test"}
+
+        result = _run_hook("codex_session_start.py", payload, extra_env=self._env())
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        output = json.loads(result.stdout)
+        self.assertIn("hookSpecificOutput", output)
+        self.assertEqual(output["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertIsInstance(output["hookSpecificOutput"]["additionalContext"], str)
+
+    def test_codex_session_start_includes_brief_in_additional_context(self):
+        """Hook can generate brief when project resolved (should include wake-up markers)."""
+        self._write_projects_config()
+        self._write_minimal_moc("test")
+        payload = {"session_id": "test-008", "cwd": "/repo/test"}
+
+        result = _run_hook("codex_session_start.py", payload, extra_env=self._env())
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        output = json.loads(result.stdout)
+        self.assertIn("hookSpecificOutput", output)
+        brief = output["hookSpecificOutput"]["additionalContext"]
+        self.assertIsInstance(brief, str)
+        self.assertTrue(len(brief) > 0, "expected non-empty brief when MOC/slices present")
+        self.assertIn("Memory wake-up", brief)
+        self.assertIn("Test MOC content", brief)
+
+    def test_codex_session_start_exits_zero_on_invalid_json(self):
+        result = _run_hook("codex_session_start.py", "not-json", extra_env=self._env())
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        try:
+            output = json.loads(result.stdout) if result.stdout.strip() else {}
+        except Exception as exc:
+            self.fail(f"stdout not valid JSON: {exc}: {result.stdout}")
+        hso = output.get("hookSpecificOutput", {})
+        self.assertEqual(hso.get("additionalContext", None), "")
 
 if __name__ == "__main__":
     unittest.main()
