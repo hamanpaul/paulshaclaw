@@ -76,6 +76,14 @@ class SessionStartHooksTest(unittest.TestCase):
 
             self.assertEqual(sys.path, before)
 
+    def test_bootstrap_does_not_raise_on_shallow_hook_path(self):
+        bs = _load_bootstrap()
+        before = list(sys.path)
+
+        bs.ensure_repo_on_path(_hook_file="/hook.py")
+
+        self.assertEqual(sys.path, before)
+
     def test_bootstrap_inserts_a_real_package_root(self):
         bs = _load_bootstrap()
         with tempfile.TemporaryDirectory(dir=self.scratch) as tmp:

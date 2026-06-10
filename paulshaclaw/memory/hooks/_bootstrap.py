@@ -9,6 +9,9 @@ from pathlib import Path
 
 def ensure_repo_on_path(_hook_file: str | None = None) -> None:
     hook_file = Path(_hook_file).resolve() if _hook_file else Path(__file__).resolve()
-    root = hook_file.parents[3]
+    try:
+        root = hook_file.parents[3]
+    except IndexError:
+        return
     if (root / "paulshaclaw" / "__init__.py").is_file() and str(root) not in sys.path:
         sys.path.insert(0, str(root))
