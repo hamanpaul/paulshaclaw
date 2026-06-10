@@ -1037,8 +1037,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         styled = format_footer(snapshot, use_tmux_style=True)
         # kept value carries the stale (light-green) background; reset time too.
         self.assertIn("cc~", styled)
-        self.assertIn("#[fg=colour33,bg=colour157]61%#[default]", styled)
-        self.assertIn("#[fg=colour245,bg=colour157](17:40)#[default]", styled)
+        self.assertIn("#[fg=colour33,bg=colour22]61%#[default]", styled)
+        self.assertIn("#[fg=colour245,bg=colour22](17:40)#[default]", styled)
 
     def test_carry_forward_degraded_keeps_previous_values_marked_stale(self) -> None:
         old = {

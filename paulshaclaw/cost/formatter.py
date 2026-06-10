@@ -11,11 +11,11 @@ TMUX_COLOR_BY_LEVEL = {
     "critical": "fg=red",       # red
     "neutral": "fg=colour245",
     "estimated": "fg=magenta",
-    "separator": "fg=colour250",  # light grey: low-chroma, high contrast on green
+    "separator": "fg=colour238",  # dark grey: low-chroma, stands out on green
 }
-# Carried-forward (stale) values get a light-green background until fresh data
+# Carried-forward (stale) values get a dark-green background until fresh data
 # returns, so kept-but-unconfirmed numbers are visually distinct.
-_STALE_BG = "bg=colour157"
+_STALE_BG = "bg=colour22"
 
 
 def classify_usage(value: int | None) -> str:
