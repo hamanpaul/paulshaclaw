@@ -401,6 +401,7 @@ class InstallerTest(unittest.TestCase):
             "copilot_session_end.py",
             # Session-start and precompact related scripts
             "_wakeup_common.py",
+            "_bootstrap.py",
             "claude_session_start.py",
             "copilot_session_start.py",
             "claude_precompact.py",

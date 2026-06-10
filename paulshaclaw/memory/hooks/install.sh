@@ -166,7 +166,7 @@ hooks_src_dir="${repo_root}/paulshaclaw/memory/hooks"
 
 for script in install.sh uninstall.sh \
   claude_session_end.py codex_session_end.py copilot_session_end.py \
-  _wakeup_common.py claude_session_start.py copilot_session_start.py \
+  _wakeup_common.py _bootstrap.py claude_session_start.py copilot_session_start.py \
   claude_precompact.py copilot_precompact.py; do
   src="${hooks_src_dir}/${script}"
   dst="${memory_root}/hooks/${script}"
