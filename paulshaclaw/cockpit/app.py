@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 
 try:
@@ -54,7 +55,14 @@ from .store import CockpitState
 
 
 def pane_display_label(pane: PaneRecord) -> str:
-    return f"{pane.session_name}:{pane.window_index} {pane.pane_id} {pane.title}"
+    return f"{pane.session_name}:{pane.window_index} {pane.pane_id} {pane.display_summary}"
+
+
+# How often the cockpit re-reads the tmux pane list so the work summary stays
+# live. Each tick is bounded (one `list-panes`, a tiny `ps` only for title-less
+# minicom panes, and one preview capture for the selected pane) — no large or
+# growing reads, so it can't pile up the way an unbounded scan would.
+REFRESH_INTERVAL_SECONDS = 3.0
 
 
 class CockpitApp(App[None]):
@@ -74,12 +82,14 @@ class CockpitApp(App[None]):
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
         pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
+        preview_loader: Callable[[str], tuple[str, ...]] | None = None,
     ) -> None:
         super().__init__()
         self.state = state
         self.jobs_by_pane = jobs_by_pane
         self.actions = actions
         self.pane_loader = pane_loader
+        self.preview_loader = preview_loader
 
     @classmethod
     def from_snapshot(
@@ -91,6 +101,7 @@ class CockpitApp(App[None]):
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
         pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
+        preview_loader: Callable[[str], tuple[str, ...]] | None = None,
     ) -> "CockpitApp":
         return cls(
             state=CockpitState.from_panes(
@@ -101,6 +112,7 @@ class CockpitApp(App[None]):
             jobs_by_pane=jobs_by_pane,
             actions=actions,
             pane_loader=pane_loader,
+            preview_loader=preview_loader,
         )
 
     def compose(self) -> ComposeResult:
@@ -116,6 +128,13 @@ class CockpitApp(App[None]):
 
     def on_mount(self) -> None:
         self._refresh_widgets()
+        # Keep the work list live: re-read panes on a fixed interval (bounded
+        # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
+        # set_interval; only that absence is tolerated, real errors surface.
+        try:
+            self.set_interval(REFRESH_INTERVAL_SECONDS, self._on_refresh_tick)
+        except AttributeError:
+            pass
         # Ensure a focusable widget is focused so Pilot key presses reach the app
         try:
             work_list = self.query_one("#work-list", ListView)
@@ -123,6 +142,9 @@ class CockpitApp(App[None]):
         except Exception:
             # fallback stubs may not support focus; ignore
             pass
+
+    def _on_refresh_tick(self) -> None:
+        self._reconcile_state(light=True)
 
     def action_move_up(self) -> None:
         self.state = self.state.move_selection(-1)
@@ -175,14 +197,40 @@ class CockpitApp(App[None]):
         elif key == "?" or key == "question_mark":
             self.action_show_help()
 
-    def _reconcile_state(self) -> None:
+    def _reconcile_state(self, *, light: bool = False) -> None:
         if self.pane_loader is None:
             return
-        self.state = self.state.refresh(self.pane_loader(cockpit_pane_id=self.state.cockpit_pane_id))
+        # The periodic (light) reload skips per-pane preview captures (the detail
+        # view captures the selected pane's preview on demand instead). A tick is
+        # then one `list-panes` plus a tiny `ps` per title-less minicom pane — no
+        # large or per-pane preview reads. Only pass capture_previews when the
+        # loader actually accepts it, so we never mask a real TypeError from it.
+        kwargs: dict[str, object] = {"cockpit_pane_id": self.state.cockpit_pane_id}
+        if light and self._loader_accepts_capture_previews():
+            kwargs["capture_previews"] = False
+        panes = self.pane_loader(**kwargs)
+        self.state = self.state.refresh(panes)
         try:
             self._refresh_widgets()
         except Exception:
             pass
+
+    def _loader_accepts_capture_previews(self) -> bool:
+        try:
+            params = inspect.signature(self.pane_loader).parameters
+        except (TypeError, ValueError):
+            return False
+        return "capture_previews" in params or any(
+            param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
+        )
+
+    def _selected_preview(self, pane: PaneRecord) -> tuple[str, ...]:
+        if self.preview_loader is not None and pane.pane_id != self.state.cockpit_pane_id:
+            try:
+                return self.preview_loader(pane.pane_id)
+            except Exception:
+                return pane.preview
+        return pane.preview
 
     def _refresh_widgets(self) -> None:
         active = self.state.active_pane
@@ -217,8 +265,8 @@ class CockpitApp(App[None]):
                 job_lines = ["job-state: unmapped"]
             detail_text = "\n".join(
                 [
-                    f"{selected.pane_id} {selected.title}",
-                    *selected.preview,
+                    f"{selected.pane_id} {selected.display_summary}",
+                    *self._selected_preview(selected),
                     *job_lines,
                     f"state: {self.state.degraded_reason or 'ok'}",
                 ]
