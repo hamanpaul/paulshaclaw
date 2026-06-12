@@ -105,6 +105,11 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertIn('link_gemma_skill', script_text)
         self.assertIn('ln -s "$src" "$dest"', script_text)
 
+    def test_launcher_sets_default_node_heap_cap_without_overriding_existing_value(self) -> None:
+        script_text = CLAUDE_GEMMA4.read_text(encoding="utf-8")
+        self.assertIn('export NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=3072}"', script_text)
+        self.assertIn("8.6GB", script_text)
+
     def test_launcher_skill_mirror_creates_per_skill_symlinks(self) -> None:
         # Exercise the mirror block in isolation: a real dir + per-skill symlinks,
         # idempotent across repeated runs.
