@@ -235,6 +235,10 @@ if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   exit 1
 fi
 
+# Stagger heavy service startups so their interpreter/import bursts do not all
+# land on the same second and recreate the boot-time memory spike.
+sleep 2
+
 # Stage 2: memory dream loop (bound to this start.sh lifecycle)
 start_dream_loop
 
@@ -280,6 +284,10 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
   done
   echo "telegram pid=$TELEGRAM_PID"
 fi
+
+# Keep the cockpit launch off the telegram/monitor startup second as well so
+# the last large TUI process does not stack onto the same burst.
+sleep 2
 
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   wait "$MONITOR_PID" 2>/dev/null || true

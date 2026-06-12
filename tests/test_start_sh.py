@@ -286,6 +286,9 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["TMUX_PANE"] = "%0"
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            runtime_dir = tmpdir_path / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            env["XDG_RUNTIME_DIR"] = str(runtime_dir)
             env["FAKE_TMUX_LOG"] = str(tmpdir_path / "tmux.log")
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_MONITOR_MODE"] = monitor_mode
@@ -423,7 +426,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             time.sleep(0.05)
         self.fail(f"timed out waiting for {path}")
 
-    def _wait_for_pidfile_int(self, path: Path, timeout: float = 5.0) -> int:
+    def _wait_for_pidfile_int(self, path: Path, timeout: float = 8.0) -> int:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if path.exists():
@@ -597,6 +600,9 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
+            runtime_dir = tmpdir_path / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            env["XDG_RUNTIME_DIR"] = str(runtime_dir)
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
@@ -673,6 +679,9 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
+            runtime_dir = tmpdir_path / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            env["XDG_RUNTIME_DIR"] = str(runtime_dir)
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
@@ -737,6 +746,9 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
+            runtime_dir = tmpdir_path / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            env["XDG_RUNTIME_DIR"] = str(runtime_dir)
             env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
@@ -769,3 +781,17 @@ class StartScriptDreamLoopTests(unittest.TestCase):
         sleep_index = dream_block.index('sleep "$interval"')
         run_index = dream_block.index('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run')
         self.assertLess(sleep_index, run_index)
+
+    def test_heavy_services_are_staggered_by_two_seconds(self) -> None:
+        text = START_SH.read_text(encoding="utf-8")
+        monitor_index = text.index('echo "monitor pid=$MONITOR_PID"')
+        telegram_index = text.index('"$PY" -m paulshaclaw.bot.listener')
+        cockpit_index = text.index('"$PY" -m paulshaclaw.cockpit')
+
+        first_sleep = text.index("sleep 2", monitor_index)
+        second_sleep = text.index("sleep 2", telegram_index)
+
+        self.assertLess(monitor_index, first_sleep)
+        self.assertLess(first_sleep, telegram_index)
+        self.assertLess(telegram_index, second_sleep)
+        self.assertLess(second_sleep, cockpit_index)
