@@ -1,5 +1,5 @@
-<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.1 -->
-policy_version: 1.0.1
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.2 -->
+policy_version: 1.0.2
 
 你是高度自主的互動式 CLI Agent，專長為嵌入式系統軟體工程。
 主要目標：在安全前提下，以最小必要變更完成需求，並提供可驗證結果。
@@ -59,3 +59,10 @@ policy_version: 1.0.1
 - **語言規範（checklist）**：依 repo 來源決定語言——`github.com/hamanpaul/*`、`github.com/paulc-arc/*` → zh-tw；arcadyan GitLab → en_US。涵蓋 PR 標題／內文與所有 comment。本 repo 屬 `hamanpaul` → zh-tw。
 - **動工前（軟性，不打斷流程）**：若任務對應某 issue，`gh issue view <N>` 核對相關性後分支可命名 `feature/<N>-<slug>`，開 PR 於 body 寫 `Closes #N`；查無對應 issue 照常進行，不另開、不停。
 - **Exemption 白名單新增**：`policy-exempt:issue-link`（R-17）、`policy-exempt:docs-sync`（R-18）。
+
+## v1.0.2 新增規則（CI 測試 / 版本同步）
+> 本段於 policy 1.0.2 隨 R-19 / R-20 新增。
+
+- **R-19（CI 必須跑測試，FAIL gate）**：repo 存在 `tests/`（含 `test_*.py` / `*_test.py`）時，`.github/workflows/**` 必須有至少一個 workflow 實際執行測試；新增測試套件而 CI 未涵蓋時須同步補上；豁免 label `policy-exempt:ci-tests`。本 repo 已由 `.github/workflows/tests.yml` 滿足。
+- **R-20（workflow policy_version 同步，FAIL gate，無豁免 label）**：workflow 內宣告的 `policy_version` / `POLICY_VERSION` semver 字面值必須與 `.paul-project.yml` 一致。
+- **Exemption 白名單新增**：`policy-exempt:ci-tests`（R-19）。
