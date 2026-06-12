@@ -757,3 +757,15 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
             calls = [json.loads(line) for line in tmux_log.read_text(encoding="utf-8").splitlines()]
             self.assertIn(["set-option", "status-interval", "30"], calls)
+
+
+class StartScriptDreamLoopTests(unittest.TestCase):
+    def test_dream_loop_sleeps_before_first_run(self) -> None:
+        text = START_SH.read_text(encoding="utf-8")
+        start = text.index("start_dream_loop() {")
+        end = text.index("# Telegram listener", start)
+        dream_block = text[start:end]
+
+        sleep_index = dream_block.index('sleep "$interval"')
+        run_index = dream_block.index('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run')
+        self.assertLess(sleep_index, run_index)

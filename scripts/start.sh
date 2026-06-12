@@ -187,10 +187,13 @@ start_dream_loop() {
   local dream_log="$HOME/.agents/log/dream.log"
   (
     while true; do
+      # Defer the first run by one full interval: right after boot the 1-minute
+      # load average is still near zero, so the idle gate would always pass and
+      # stack a full dream pass on top of the startup burst.
+      sleep "$interval"
       PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
         --memory-root "$dream_root" --require-idle --promoter identity \
         >>"$dream_log" 2>&1 || true
-      sleep "$interval"
     done
   ) &
   DREAM_PID=$!
