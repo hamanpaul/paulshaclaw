@@ -38,6 +38,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Imports from the Phase 3 modules (do not exist yet — Red).
 try:
@@ -376,6 +377,106 @@ class Stage9ServerTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertIn("error", payload)
 
+    def test_server_rejects_live_socket_instead_of_stealing_it(self) -> None:
+        (self.tmp / "ws2").mkdir(parents=True, exist_ok=True)
+        _make_workspace(self.tmp / "ws2", "projZ", DEFAULT_TODO)
+        other_cfg = MonitorConfig(
+            workspaces=(WorkspaceConfig(path=self.tmp / "ws2", name="ws2"),),
+            legacy_policy="list-only",
+        )
+        other_store = SnapshotStore(config=other_cfg)
+        other_store.load()
+        contender = MonitorServer(store=other_store, socket_path=self.socket_path)
+        errors: list[Exception] = []
+
+        def run_contender() -> None:
+            try:
+                contender.serve_forever()
+            except Exception as exc:  # pragma: no cover - captured for assertions
+                errors.append(exc)
+
+        contender_thread = threading.Thread(target=run_contender, daemon=True)
+        contender_thread.start()
+        try:
+            deadline = time.time() + 1.0
+            while time.time() < deadline and not errors:
+                time.sleep(0.02)
+
+            sock = self._connect()
+            _socket_send_request(sock, {"kind": "list_projects"})
+            payload = json.loads(_socket_recv_line(sock))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(
+                {project["project_id"] for project in payload["data"]["projects"]},
+                {"projA", "projB"},
+            )
+            self.assertTrue(errors, "second server should fail instead of stealing the live socket")
+            self.assertRegex(str(errors[0]), "live monitor|already.*monitor")
+        finally:
+            contender.stop()
+            contender_thread.join(timeout=2.0)
+
+    def test_server_reclaims_stale_socket_file(self) -> None:
+        stale_path = self.tmp / "stale-monitor.sock"
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(str(stale_path))
+        stale.close()
+
+        reclaimed = MonitorServer(store=self.store, socket_path=stale_path)
+        reclaimed_thread = threading.Thread(target=reclaimed.serve_forever, daemon=True)
+        reclaimed_thread.start()
+        try:
+            deadline = time.time() + 1.0
+            sock: socket.socket | None = None
+            last_error: OSError | None = None
+            while time.time() < deadline:
+                candidate = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                try:
+                    candidate.connect(str(stale_path))
+                except OSError as error:
+                    last_error = error
+                    candidate.close()
+                    time.sleep(0.02)
+                    continue
+                sock = candidate
+                break
+            self.assertIsNotNone(sock, msg=f"replacement server did not bind stale socket path: {last_error}")
+            self.addCleanup(sock.close)
+            _socket_send_request(sock, {"kind": "list_projects"})
+            payload = json.loads(_socket_recv_line(sock))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(
+                {project["project_id"] for project in payload["data"]["projects"]},
+                {"projA", "projB"},
+            )
+        finally:
+            reclaimed.stop()
+            reclaimed_thread.join(timeout=2.0)
+
+    def test_server_timeout_probe_treats_socket_as_live(self) -> None:
+        busy_path = self.tmp / "busy-monitor.sock"
+        busy_path.write_text("", encoding="utf-8")
+        contender = MonitorServer(store=self.store, socket_path=busy_path)
+
+        class _TimeoutProbe:
+            def settimeout(self, timeout: float) -> None:
+                self.timeout = timeout
+
+            def connect(self, path: str) -> None:
+                raise TimeoutError("probe timed out")
+
+            def close(self) -> None:
+                return None
+
+        with mock.patch(
+            "paulshaclaw.monitor.server.socket.socket",
+            return_value=_TimeoutProbe(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "live monitor|already.*monitor"):
+                contender._prepare_socket_path()
+
+        self.assertTrue(busy_path.exists())
+
 
 # --- ProjectMonitorService end-to-end -----------------------------------
 
@@ -387,7 +488,12 @@ class Stage9ServiceTests(unittest.TestCase):
         _require_phase3(self)
         self.tmp = Path(tempfile.mkdtemp(prefix="stage9-svc-"))
         (self.tmp / "ws").mkdir(parents=True, exist_ok=True)
-        _make_workspace(self.tmp / "ws", "projA", DEFAULT_TODO)
+        self.project_dir = _make_workspace(self.tmp / "ws", "projA", DEFAULT_TODO)
+        (self.project_dir / ".git" / "refs" / "heads").mkdir(parents=True, exist_ok=True)
+        (self.project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        (self.project_dir / ".git" / "refs" / "heads" / "main").write_text("deadbeef\n")
+        (self.project_dir / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
+        (self.project_dir / "node_modules" / "pkg" / "index.js").write_text("module.exports = 1;\n")
         self.run_dir = self.tmp / "run"
         self.socket_path = self.run_dir / "project-monitor.sock"
         self.cfg = MonitorConfig(
@@ -395,6 +501,7 @@ class Stage9ServiceTests(unittest.TestCase):
             legacy_policy="list-only",
             socket_path=self.socket_path,
             watch_debounce_ms=80,
+            rescan_interval_seconds=1,
         )
         self.stub_watcher = StubWatcher()
         self.service = ProjectMonitorService(
@@ -491,6 +598,43 @@ class Stage9ServiceTests(unittest.TestCase):
         except (TimeoutError, socket.timeout):
             pass
 
+    def test_service_watches_project_root_non_recursive_and_git_control_paths(self) -> None:
+        subscriptions = {
+            (str(path), recursive)
+            for path, _callback, recursive in self.stub_watcher.subscriptions
+        }
+
+        self.assertIn((str(self.project_dir), False), subscriptions)
+        self.assertIn((str(self.project_dir / ".git" / "HEAD"), False), subscriptions)
+        self.assertIn((str(self.project_dir / ".git" / "refs"), True), subscriptions)
+        self.assertNotIn((str(self.project_dir), True), subscriptions)
+        self.assertFalse(any("node_modules" in path for path, _recursive in subscriptions))
+
+    def test_service_branch_switch_trigger_still_emits_change_event_immediately(self) -> None:
+        sock = self._connect()
+        _socket_send_request(sock, {"kind": "subscribe"})
+        json.loads(_socket_recv_line(sock))  # consume initial snapshot
+
+        todo = self.project_dir / "docs" / "superpowers" / "workstreams" / "stage1-demo" / "todo.md"
+        todo.write_text(DEFAULT_TODO.replace("alpha", "alpha-head-trigger"))
+        self.stub_watcher.trigger(self.project_dir / ".git" / "HEAD")
+
+        change_msg = json.loads(_socket_recv_line(sock, timeout=3.0))
+        self.assertEqual(change_msg["kind"], "change")
+        self.assertEqual(change_msg["project"]["project_id"], "projA")
+
+    def test_service_deep_file_change_is_seen_after_periodic_rescan(self) -> None:
+        sock = self._connect()
+        _socket_send_request(sock, {"kind": "subscribe"})
+        json.loads(_socket_recv_line(sock))  # consume initial snapshot
+
+        todo = self.project_dir / "docs" / "superpowers" / "workstreams" / "stage1-demo" / "todo.md"
+        todo.write_text(DEFAULT_TODO.replace("alpha", "alpha-rescan"))
+
+        change_msg = json.loads(_socket_recv_line(sock, timeout=3.0))
+        self.assertEqual(change_msg["kind"], "change")
+        self.assertEqual(change_msg["project"]["project_id"], "projA")
+
 
 # --- Real watchdog integration (optional) -------------------------------
 
@@ -533,6 +677,34 @@ class Stage9WatchdogIntegrationTests(unittest.TestCase):
             watcher.stop()
 
         self.assertGreaterEqual(len(received), 1)
+
+    def test_watchdog_file_watcher_fires_on_file_rename_destination(self) -> None:
+        git_dir = self.tmp / ".git"
+        git_dir.mkdir(parents=True, exist_ok=True)
+        head_path = git_dir / "HEAD"
+        head_path.write_text("ref: refs/heads/main\n")
+        received: list[Path] = []
+        signal = threading.Event()
+
+        def callback(path: Path) -> None:
+            received.append(path)
+            signal.set()
+
+        watcher = WatchdogFileWatcher(debounce_ms=80)
+        watcher.watch(head_path, callback)
+        try:
+            time.sleep(0.2)  # let the observer settle
+            lock_path = git_dir / "HEAD.lock"
+            lock_path.write_text("ref: refs/heads/topic\n")
+            os.replace(lock_path, head_path)
+            self.assertTrue(
+                signal.wait(timeout=3.0),
+                msg="watchdog callback never fired for HEAD lockfile rename",
+            )
+        finally:
+            watcher.stop()
+
+        self.assertIn(head_path, received)
 
 
 if __name__ == "__main__":

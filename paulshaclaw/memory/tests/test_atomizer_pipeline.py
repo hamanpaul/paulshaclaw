@@ -263,6 +263,61 @@ class PipelineTests(unittest.TestCase):
             self.assertGreater(result["summary"]["skipped"], 0)
             self.assertTrue(any("unsafe path field" in w for w in result["warnings"]))
 
+    def test_oversize_raw_inbox_file_is_skipped_and_recorded(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = _seed_raw(root)
+            raw.write_text(_RAW + ("X" * 200), encoding="utf-8")
+            cfg, h = atomizer_config.load_config(override_path=None)
+
+            with (
+                mock.patch.object(pipeline, "_ATOMIZER_INBOX_FILE_MAX_BYTES", 64, create=True),
+                self.assertLogs("paulshaclaw.memory.atomizer.pipeline", level="WARNING") as captured,
+            ):
+                result = pipeline.run(root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z")
+
+            self.assertTrue(raw.exists())
+            self.assertEqual(processing.state_of(root, "claude:s1"), "skipped")
+            self.assertGreater(result["summary"]["skipped"], 0)
+            self.assertTrue(any("exceeds 64 bytes" in warning for warning in result["warnings"]))
+            latest_event = processing.read_events(root)[-1]
+            self.assertEqual(latest_event["state"], "skipped")
+            self.assertIn("file too large", latest_event["skip_reason"])
+            self.assertIn("exceeds 64 bytes", "\n".join(captured.output))
+
+    def test_oversize_raw_inbox_file_is_silently_skipped_after_first_run(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = _seed_raw(root)
+            raw.write_text(_RAW + ("X" * 200), encoding="utf-8")
+            cfg, h = atomizer_config.load_config(override_path=None)
+
+            with mock.patch.object(
+                pipeline,
+                "_ATOMIZER_INBOX_FILE_MAX_BYTES",
+                64,
+                create=True,
+            ):
+                pipeline.run(root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z")
+                first_events = processing.read_events(root)
+
+                with self.assertNoLogs(
+                    "paulshaclaw.memory.atomizer.pipeline",
+                    level="WARNING",
+                ):
+                    second = pipeline.run(
+                        root,
+                        config=cfg,
+                        config_hash=h,
+                        now="2026-05-31T04:00:00Z",
+                    )
+
+            second_events = processing.read_events(root)
+            self.assertEqual(len(second_events), len(first_events))
+            self.assertEqual(processing.state_of(root, "claude:s1"), "skipped")
+            self.assertEqual(second["warnings"], [])
+            self.assertEqual(second["summary"]["skipped"], 0)
+
     def test_llm_merge_path_writes_one_slice_and_semantic_edges(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

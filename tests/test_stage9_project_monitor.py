@@ -159,6 +159,7 @@ class Stage9ConfigTests(unittest.TestCase):
                 name: b
             monitor:
               poll_interval_seconds: 30
+              rescan_interval_seconds: 300
               legacy_policy: hide
             """
         )
@@ -167,6 +168,7 @@ class Stage9ConfigTests(unittest.TestCase):
         self.assertEqual(len(cfg.workspaces), 2)
         self.assertEqual(cfg.workspaces[0].name, "a")
         self.assertEqual(cfg.poll_interval_seconds, 30)
+        self.assertEqual(cfg.rescan_interval_seconds, 300)
         self.assertEqual(cfg.legacy_policy, "hide")
 
     def test_load_config_supports_env_fallback(self) -> None:
@@ -199,6 +201,7 @@ class Stage9ConfigTests(unittest.TestCase):
         )
         cfg = load_config(config_path=path)
         self.assertEqual(cfg.poll_interval_seconds, 60)
+        self.assertEqual(cfg.rescan_interval_seconds, 300)
         self.assertEqual(cfg.watch_debounce_ms, 500)
         self.assertEqual(cfg.legacy_policy, "list-only")
 

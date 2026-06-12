@@ -4,8 +4,11 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from ..ledger import lifecycle
 from ..ledger import retrieval_set
 from . import frontmatter_io as fio
+
+INDEX_WRITE_BATCH_SIZE = 100
 
 
 class SearchIndexError(Exception):
@@ -28,7 +31,31 @@ def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
         conn.execute("CREATE TABLE slice_meta (slice_id TEXT PRIMARY KEY, project TEXT, "
                      "captured_at TEXT, active INTEGER, link_weight INTEGER)")
         knowledge = memory_root / "knowledge"
-        rows = []
+        events = lifecycle.read_events(memory_root)
+
+        def flush_batch(rows: list[tuple[str, str, str, str, str, str]]) -> None:
+            if not rows:
+                return
+            active = set(
+                retrieval_set.active_records(
+                    memory_root,
+                    [row[0] for row in rows],
+                    events=events,
+                )
+            )
+            conn.executemany(
+                "INSERT INTO slices_fts VALUES (?,?,?,?,?)",
+                [(sid, project, title, tags, body) for sid, project, title, tags, body, _captured_at in rows],
+            )
+            conn.executemany(
+                "INSERT INTO slice_meta VALUES (?,?,?,?,?)",
+                [
+                    (sid, project, captured_at, 1 if sid in active else 0, link_weights.get(sid, 0))
+                    for sid, project, _title, _tags, _body, captured_at in rows
+                ],
+            )
+
+        rows: list[tuple[str, str, str, str, str, str]] = []
         if knowledge.exists():
             for fpath in sorted(knowledge.rglob("*.md")):
                 fm, body = fio.read(fpath.read_text(encoding="utf-8"))
@@ -40,11 +67,10 @@ def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
                 rows.append((str(sid), str(fm.get("project", "")), str(fm.get("title", "")),
                              " ".join(fm.get("tags", []) if isinstance(fm.get("tags"), list) else []),
                              body, str(fm.get("captured_at", ""))))
-        active = set(retrieval_set.active_records(memory_root, [r[0] for r in rows]))
-        for sid, project, title, tags, body, captured_at in rows:
-            conn.execute("INSERT INTO slices_fts VALUES (?,?,?,?,?)", (sid, project, title, tags, body))
-            conn.execute("INSERT INTO slice_meta VALUES (?,?,?,?,?)",
-                         (sid, project, captured_at, 1 if sid in active else 0, link_weights.get(sid, 0)))
+                if len(rows) >= INDEX_WRITE_BATCH_SIZE:
+                    flush_batch(rows)
+                    rows.clear()
+        flush_batch(rows)
         conn.commit()
     finally:
         conn.close()

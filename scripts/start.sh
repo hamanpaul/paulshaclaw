@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+start_lock="${XDG_RUNTIME_DIR:-/tmp}/paulshaclaw-start.lock"
+exec 200>"$start_lock"
+flock -n 200 || { echo 已有實例在跑; exit 1; }
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
 PY=$REPO/.venv/bin/python
@@ -154,7 +158,7 @@ start_cost_refresh_loop() {
       PYTHONPATH="$REPO" "$PY" -m paulshaclaw.cost --once || true
       sleep "$interval"
     done
-  ) >>"$cost_log" 2>&1 &
+  ) 200>&- >>"$cost_log" 2>&1 &
   COST_REFRESH_PID=$!
   echo "cost refresh pid=$COST_REFRESH_PID (interval=${interval}s)"
 }
@@ -183,12 +187,15 @@ start_dream_loop() {
   local dream_log="$HOME/.agents/log/dream.log"
   (
     while true; do
+      # Defer the first run by one full interval: right after boot the 1-minute
+      # load average is still near zero, so the idle gate would always pass and
+      # stack a full dream pass on top of the startup burst.
+      sleep "$interval"
       PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
         --memory-root "$dream_root" --require-idle --promoter identity \
         >>"$dream_log" 2>&1 || true
-      sleep "$interval"
     done
-  ) &
+  ) 200>&- &
   DREAM_PID=$!
   echo "dream pid=$DREAM_PID (interval=${interval}s, root=$dream_root)"
 }
@@ -218,7 +225,7 @@ else
 fi
 
 # Stage 9: project-monitor (background)
-"$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
+"$PY" -m paulshaclaw.monitor 200>&- >> ~/.agents/log/monitor.log 2>&1 &
 MONITOR_PID=$!
 echo "monitor pid=$MONITOR_PID"
 
@@ -228,6 +235,10 @@ if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   exit 1
 fi
 
+# Stagger heavy service startups so their interpreter/import bursts do not all
+# land on the same second and recreate the boot-time memory spike.
+sleep 2
+
 # Stage 2: memory dream loop (bound to this start.sh lifecycle)
 start_dream_loop
 
@@ -235,7 +246,7 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
-  "$PY" -m paulshaclaw.bot.listener >> "$TELEGRAM_LOG" 2>&1 &
+  "$PY" -m paulshaclaw.bot.listener 200>&- >> "$TELEGRAM_LOG" 2>&1 &
   TELEGRAM_PID=$!
   telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
   while true; do
@@ -274,6 +285,10 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
   echo "telegram pid=$TELEGRAM_PID"
 fi
 
+# Keep the cockpit launch off the telegram/monitor startup second as well so
+# the last large TUI process does not stack onto the same burst.
+sleep 2
+
 if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
   wait "$MONITOR_PID" 2>/dev/null || true
   echo "monitor exited before cockpit start (continuing)" >&2
@@ -288,7 +303,7 @@ _cockpit_stdin=/dev/null
 if (exec </dev/tty) 2>/dev/null; then
   _cockpit_stdin=/dev/tty
 fi
-"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" < "$_cockpit_stdin" &
+"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" < "$_cockpit_stdin" 200>&- &
 COCKPIT_PID=$!
 if wait "$COCKPIT_PID"; then
   exit 0
