@@ -217,11 +217,14 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
     count = 0
     dry_run_fragments: dict[str, list[Fragment]] = {}
     for raw_path in _raw_session_docs(memory_root):
+        path_session_key = f"{raw_path.parent.parent.name}:{raw_path.stem}"
         try:
             raw_size = raw_path.stat().st_size
         except OSError:
             raw_size = None
         if raw_size is not None and raw_size > _ATOMIZER_INBOX_FILE_MAX_BYTES:
+            if processing.state_of(memory_root, path_session_key) == "skipped":
+                continue
             warning = (
                 f"{raw_path}: exceeds {_ATOMIZER_INBOX_FILE_MAX_BYTES} bytes; "
                 "session skipped (file too large)"
@@ -230,7 +233,7 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
             LOGGER.warning(warning)
             processing.append_state(
                 memory_root,
-                session_key=f"{raw_path.parent.parent.name}:{raw_path.stem}",
+                session_key=path_session_key,
                 state="skipped",
                 now=now,
                 config_hash=config_hash,

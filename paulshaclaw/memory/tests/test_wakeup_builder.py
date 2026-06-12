@@ -293,6 +293,83 @@ class WakeupBuilderTests(unittest.TestCase):
             self.assertNotIn("sl-0", out)
             self.assertIn("total slice body budget", "\n".join(captured.output))
 
+    def test_malformed_frontmatter_cap_treats_file_as_body(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "malformed.md"
+            path.write_text("---\n" + ("key: value\n" * 40), encoding="utf-8")
+
+            with mock.patch.object(builder_module, "MAX_FRONTMATTER_BYTES", 64, create=True):
+                fm, body_offset = builder_module._read_frontmatter_only(path)
+                body, truncated, bytes_used = builder_module._read_slice_body(
+                    path,
+                    body_limit=32,
+                )
+
+            self.assertEqual(fm, {})
+            self.assertEqual(body_offset, 0)
+            self.assertTrue(truncated)
+            self.assertEqual(bytes_used, 32)
+            self.assertTrue(body.startswith("---\nkey: value"))
+            self.assertIn(builder_module.TRUNCATED_MARKER, body)
+
+    def test_slice_stat_failure_is_skipped_fail_open(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            _slice(root, "sl-1", "p", "alpha", body="summary\n")
+            real_stat = Path.stat
+
+            def flaky_stat(path_obj: Path, *args, **kwargs):
+                if path_obj.name == "alpha--sl-1.md":
+                    raise OSError("stat failed")
+                return real_stat(path_obj, *args, **kwargs)
+
+            with mock.patch("pathlib.Path.stat", autospec=True, side_effect=flaky_stat):
+                out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+
+            self.assertIn("MOC", out)
+            self.assertNotIn("sl-1", out)
+
+    def test_total_slice_body_budget_clamps_body_read_limit_to_remaining_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            for index in range(2):
+                _slice(root, f"sl-{index}", "p", f"title-{index}", body="B" * 50)
+                lifecycle.append_event(
+                    path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                    record_id=f"sl-{index}",
+                    event_type="created",
+                    source="x",
+                    reason="r",
+                    actor="a",
+                    ts=f"2026-05-0{index + 1}T00:00:00Z",
+                )
+
+            requested_limits: list[int] = []
+
+            def fake_read_slice_body(path: Path, *, body_limit: int) -> tuple[str, bool, int]:
+                requested_limits.append(body_limit)
+                return ("summary\n", False, 50)
+
+            with (
+                mock.patch.object(builder_module, "MAX_SLICE_BODY_BYTES", 64, create=True),
+                mock.patch.object(
+                    builder_module,
+                    "MAX_SLICE_BODY_TOTAL_BYTES",
+                    100,
+                    create=True,
+                ),
+                mock.patch.object(
+                    builder_module,
+                    "_read_slice_body",
+                    side_effect=fake_read_slice_body,
+                ),
+            ):
+                build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=1000)
+
+            self.assertEqual(requested_limits, [64, 50])
+
 
 if __name__ == "__main__":
     unittest.main()

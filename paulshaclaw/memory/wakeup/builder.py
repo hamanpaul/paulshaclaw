@@ -10,48 +10,54 @@ from ..moc import frontmatter_io as fio
 
 # Memory layer name (factored out to avoid policy-consumer lint false positive)
 _KNOWLEDGE_LAYER = "knowledge"
+MAX_FRONTMATTER_BYTES = 64 * 1024
 MAX_SLICE_BODY_BYTES = 256 * 1024
 MAX_SLICE_BODY_TOTAL_BYTES = 16 * 1024 * 1024
 TRUNCATED_MARKER = "[truncated]"
 LOGGER = logging.getLogger(__name__)
 
 
+def _read_frontmatter_prefix(handle) -> tuple[bytes, bool]:
+    start = handle.tell()
+    first_line = handle.readline()
+    if not first_line or not first_line.startswith(b"---"):
+        handle.seek(start)
+        return b"", False
+
+    chunks = [first_line]
+    total = len(first_line)
+    while True:
+        line = handle.readline()
+        if not line:
+            handle.seek(start)
+            return b"", False
+        chunks.append(line)
+        total += len(line)
+        if total > MAX_FRONTMATTER_BYTES:
+            handle.seek(start)
+            return b"", False
+        if line.startswith(b"---"):
+            return b"".join(chunks), True
+
+
 def _read_frontmatter_only(path: Path) -> tuple[dict, int]:
-    chunks: list[bytes] = []
     with path.open("rb") as handle:
-        first_line = handle.readline()
-        chunks.append(first_line)
-        if first_line.startswith(b"---"):
-            while True:
-                line = handle.readline()
-                if not line:
-                    break
-                chunks.append(line)
-                if line.startswith(b"---"):
-                    break
-    frontmatter_text = b"".join(chunks).decode("utf-8", errors="ignore")
+        frontmatter_bytes, has_frontmatter = _read_frontmatter_prefix(handle)
+    if not has_frontmatter:
+        return {}, 0
+    frontmatter_text = frontmatter_bytes.decode("utf-8", errors="ignore")
     fm, _body = fio.read(frontmatter_text)
-    return fm, len(b"".join(chunks))
+    return fm, len(frontmatter_bytes)
 
 
 def _read_slice_body(path: Path, *, body_limit: int) -> tuple[str, bool, int]:
-    header_chunks: list[bytes] = []
     with path.open("rb") as handle:
-        first_line = handle.readline()
-        header_chunks.append(first_line)
-        if first_line.startswith(b"---"):
-            while True:
-                line = handle.readline()
-                if not line:
-                    break
-                header_chunks.append(line)
-                if line.startswith(b"---"):
-                    break
+        frontmatter_bytes, has_frontmatter = _read_frontmatter_prefix(handle)
         raw_body = handle.read(body_limit + 1)
 
     truncated = len(raw_body) > body_limit
     body_bytes = raw_body[:body_limit] if truncated else raw_body
-    document = b"".join(header_chunks) + body_bytes
+    document = (frontmatter_bytes + body_bytes) if has_frontmatter else body_bytes
     _fm, body = fio.read(document.decode("utf-8", errors="ignore"))
     if truncated:
         body = f"{body}\n{TRUNCATED_MARKER}\n"
@@ -87,6 +93,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         for path in sorted(kdir.rglob("*.md")):
             try:
                 fm, body_offset = _read_frontmatter_only(path)
+                body_bytes = max(0, path.stat().st_size - body_offset)
             except Exception:
                 continue
             if fm.get("memory_layer") != _KNOWLEDGE_LAYER:
@@ -105,7 +112,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                     "title": title,
                     "file_stem": file_stem,
                     "path": path,
-                    "body_bytes": max(0, path.stat().st_size - body_offset),
+                    "body_bytes": body_bytes,
                 }
             )
 
@@ -164,7 +171,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         try:
             body, truncated, bytes_used = _read_slice_body(
                 slice_meta["path"],
-                body_limit=MAX_SLICE_BODY_BYTES,
+                body_limit=min(MAX_SLICE_BODY_BYTES, remaining_slice_body_budget),
             )
         except Exception:
             continue

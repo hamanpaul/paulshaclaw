@@ -38,6 +38,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 # Imports from the Phase 3 modules (do not exist yet — Red).
 try:
@@ -452,6 +453,30 @@ class Stage9ServerTests(unittest.TestCase):
             reclaimed.stop()
             reclaimed_thread.join(timeout=2.0)
 
+    def test_server_timeout_probe_treats_socket_as_live(self) -> None:
+        busy_path = self.tmp / "busy-monitor.sock"
+        busy_path.write_text("", encoding="utf-8")
+        contender = MonitorServer(store=self.store, socket_path=busy_path)
+
+        class _TimeoutProbe:
+            def settimeout(self, timeout: float) -> None:
+                self.timeout = timeout
+
+            def connect(self, path: str) -> None:
+                raise TimeoutError("probe timed out")
+
+            def close(self) -> None:
+                return None
+
+        with mock.patch(
+            "paulshaclaw.monitor.server.socket.socket",
+            return_value=_TimeoutProbe(),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "live monitor|already.*monitor"):
+                contender._prepare_socket_path()
+
+        self.assertTrue(busy_path.exists())
+
 
 # --- ProjectMonitorService end-to-end -----------------------------------
 
@@ -652,6 +677,34 @@ class Stage9WatchdogIntegrationTests(unittest.TestCase):
             watcher.stop()
 
         self.assertGreaterEqual(len(received), 1)
+
+    def test_watchdog_file_watcher_fires_on_file_rename_destination(self) -> None:
+        git_dir = self.tmp / ".git"
+        git_dir.mkdir(parents=True, exist_ok=True)
+        head_path = git_dir / "HEAD"
+        head_path.write_text("ref: refs/heads/main\n")
+        received: list[Path] = []
+        signal = threading.Event()
+
+        def callback(path: Path) -> None:
+            received.append(path)
+            signal.set()
+
+        watcher = WatchdogFileWatcher(debounce_ms=80)
+        watcher.watch(head_path, callback)
+        try:
+            time.sleep(0.2)  # let the observer settle
+            lock_path = git_dir / "HEAD.lock"
+            lock_path.write_text("ref: refs/heads/topic\n")
+            os.replace(lock_path, head_path)
+            self.assertTrue(
+                signal.wait(timeout=3.0),
+                msg="watchdog callback never fired for HEAD lockfile rename",
+            )
+        finally:
+            watcher.stop()
+
+        self.assertIn(head_path, received)
 
 
 if __name__ == "__main__":

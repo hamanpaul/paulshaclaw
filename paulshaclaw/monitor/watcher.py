@@ -126,24 +126,33 @@ if HAS_WATCHDOG:
                 self._timer.daemon = True
                 self._timer.start()
 
-        def on_any_event(self, event: FileSystemEvent) -> None:
-            if event.is_directory:
-                return
-            try:
-                path = Path(event.src_path)
-            except Exception:  # pragma: no cover
-                return
+        def _matches(self, path: Path) -> bool:
             if self._watch_path.is_file():
-                if path != self._watch_path:
-                    return
-            elif self._recursive:
+                return path == self._watch_path
+            if self._recursive:
                 try:
                     path.relative_to(self._watch_path)
                 except ValueError:
-                    return
-            elif path != self._watch_path and path.parent != self._watch_path:
+                    return False
+                return True
+            return path == self._watch_path or path.parent == self._watch_path
+
+        def on_any_event(self, event: FileSystemEvent) -> None:
+            if event.is_directory:
                 return
-            self._schedule(path)
+            for raw_path in (
+                event.src_path,
+                getattr(event, "dest_path", ""),
+            ):
+                if not raw_path:
+                    continue
+                try:
+                    path = Path(raw_path)
+                except Exception:  # pragma: no cover
+                    continue
+                if self._matches(path):
+                    self._schedule(path)
+                    return
 
         def cancel(self) -> None:
             with self._lock:

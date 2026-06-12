@@ -72,6 +72,10 @@ class MonitorServer:
         try:
             probe.settimeout(SOCKET_PROBE_TIMEOUT_SECONDS)
             probe.connect(str(self._socket_path))
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f"live monitor already listening on {self._socket_path}"
+            ) from exc
         except OSError:
             try:
                 self._socket_path.unlink()

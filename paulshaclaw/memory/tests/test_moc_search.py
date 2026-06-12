@@ -42,20 +42,36 @@ class SearchTests(unittest.TestCase):
                 _slice(root, f"sl-{index:03d}", "proj", f"title-{index:03d}", f"body {index}")
 
             batch_sizes: list[int] = []
+            lifecycle_events = [{"record_id": "sl-000", "event_type": "created"}]
+            seen_events: list[object] = []
 
-            def fake_active_records(memory_root: Path, record_ids: list[str]) -> list[str]:
+            def fake_active_records(
+                memory_root: Path,
+                record_ids: list[str],
+                *,
+                events=None,
+            ) -> list[str]:
                 batch_sizes.append(len(record_ids))
+                seen_events.append(events)
                 return record_ids
 
-            with mock.patch(
-                "paulshaclaw.memory.moc.search.retrieval_set.active_records",
-                side_effect=fake_active_records,
+            with (
+                mock.patch(
+                    "paulshaclaw.memory.moc.search.lifecycle.read_events",
+                    return_value=lifecycle_events,
+                ) as read_events,
+                mock.patch(
+                    "paulshaclaw.memory.moc.search.retrieval_set.active_records",
+                    side_effect=fake_active_records,
+                ),
             ):
                 search.build_index(root, link_weights={})
 
+            read_events.assert_called_once_with(root)
             self.assertGreater(len(batch_sizes), 1)
             self.assertTrue(all(size <= 100 for size in batch_sizes), batch_sizes)
             self.assertEqual(sum(batch_sizes), 205)
+            self.assertTrue(all(events is lifecycle_events for events in seen_events))
 
     def test_build_index_matches_legacy_row_contents(self):
         with TemporaryDirectory() as tmp:
@@ -68,7 +84,9 @@ class SearchTests(unittest.TestCase):
 
             with mock.patch(
                 "paulshaclaw.memory.moc.search.retrieval_set.active_records",
-                side_effect=lambda memory_root, record_ids: [rid for rid in record_ids if rid == "sl-2"],
+                side_effect=lambda memory_root, record_ids, *, events=None: [
+                    rid for rid in record_ids if rid == "sl-2"
+                ],
             ):
                 search.build_index(root, link_weights={"sl-1": 4, "sl-2": 0})
 
