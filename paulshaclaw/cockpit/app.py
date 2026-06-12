@@ -73,6 +73,8 @@ class CockpitApp(App[None]):
         Binding("down", "move_down", "↑/↓ 選擇"),
         Binding("enter", "swap_selected", "Enter 把選中的 pane 換到我面前"),
         Binding("c", "focus_cockpit", "c 回 cockpit"),
+        Binding("q", "quit_app", "q 離開 cockpit"),
+        Binding("ctrl+q", "quit_app", "Ctrl+Q 離開 cockpit"),
         Binding("question_mark", "show_help", "? 顯示說明"),
     ]
 
@@ -176,6 +178,12 @@ class CockpitApp(App[None]):
     def action_show_help(self) -> None:
         self.push_screen(HelpModal(self.BINDINGS))
 
+    def action_quit_app(self) -> None:
+        try:
+            self.exit()
+        except AttributeError:
+            pass
+
     def on_key(self, event: object) -> None:
         # Pilot key events are delivered as objects with either `key` or
         # `character` attributes depending on Textual version. Handle only
@@ -198,6 +206,8 @@ class CockpitApp(App[None]):
             self.action_swap_selected()
         elif key == "c":
             self.action_focus_cockpit()
+        elif key in {"q", "ctrl+q"}:
+            self.action_quit_app()
         elif key == "?" or key == "question_mark":
             self.action_show_help()
 

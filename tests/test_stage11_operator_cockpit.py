@@ -4,6 +4,7 @@ import sys
 import unittest
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 # textual is an optional dev/test dependency. Guard imports so the repository's
@@ -366,6 +367,8 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("down: ↑/↓ 選擇", help_text)
         self.assertIn("enter: Enter 把選中的 pane 換到我面前", help_text)
         self.assertIn("c: c 回 cockpit", help_text)
+        self.assertIn("q: q 離開 cockpit", help_text)
+        self.assertIn("ctrl+q: Ctrl+Q 離開 cockpit", help_text)
         self.assertIn("question_mark: ? 顯示說明", help_text)
         self.assertIn("all local tmux sessions", help_text)
 
@@ -486,3 +489,62 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("?")
             await pilot.press("escape")
             self.assertNotIsInstance(app.screen, HelpModal)
+
+    async def test_down_updates_selected_preview_target(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20, preview=("job 1",)),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20, preview=("traffic",)),
+        )
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("down")
+
+        self.assertEqual(app.state.selected_pane.pane_id, "%2")
+
+    async def test_help_modal_blocks_background_cockpit_actions(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+        )
+        actions = FakeLayoutActionService()
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("?")
+            await pilot.press("c")
+            self.assertIsInstance(app.screen, HelpModal)
+
+        self.assertEqual(actions.focused, [])
+
+    def test_q_and_ctrl_q_have_explicit_quit_paths(self) -> None:
+        app = CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", title="cockpit", command="python", width=120, height=40),
+                pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+        with patch.object(app, "exit") as exit_mock:
+            app.on_key(SimpleNamespace(key="q"))
+            app.on_key(SimpleNamespace(key="ctrl+q"))
+
+        self.assertEqual(exit_mock.call_count, 2)
