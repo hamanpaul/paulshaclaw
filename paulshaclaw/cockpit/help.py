@@ -62,4 +62,7 @@ class HelpModal(ModalScreen[None]):
         yield Static(self.help_text, id="help-modal")
 
     def action_dismiss_help(self) -> None:
+        callback = getattr(self.app, "_on_help_closed", None)
+        if callable(callback):
+            callback()
         self.dismiss()

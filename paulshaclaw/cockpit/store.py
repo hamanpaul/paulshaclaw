@@ -116,6 +116,7 @@ class CockpitState:
         )
 
     def refresh(self, panes: tuple[PaneRecord, ...]) -> "CockpitState":
+        previous_selected = self.selected_pane
         refreshed = CockpitState(
             cockpit_pane_id=self.cockpit_pane_id,
             cockpit_session_name=self.cockpit_session_name,
@@ -128,6 +129,13 @@ class CockpitState:
         next_index = self.selected_index
         if candidate_count == 0:
             next_index = 0
+        elif previous_selected is not None:
+            for index, pane in enumerate(refreshed.candidate_section):
+                if pane.pane_id == previous_selected.pane_id:
+                    next_index = index
+                    break
+            else:
+                next_index = min(next_index, candidate_count - 1)
         elif next_index >= candidate_count:
             next_index = candidate_count - 1
         active_exists = refreshed.active_pane is not None

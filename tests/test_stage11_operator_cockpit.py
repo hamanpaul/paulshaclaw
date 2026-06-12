@@ -360,6 +360,25 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(lost.degraded_reason, "active-slot-lost")
         self.assertEqual(lost.active_section, ())
 
+    def test_refresh_preserves_selected_pane_when_candidate_order_changes(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", title="active", left=120, top=0, width=120, height=40),
+            pane_record("%1", session_name="beta", title="agent1", top=40, width=80, height=20),
+            pane_record("%2", session_name="gamma", title="agent2", left=80, top=40, width=80, height=20),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+        state = state.move_selection(1)
+
+        refreshed = state.refresh((
+            pane_record("%0", session_name="main", title="cockpit", left=0, top=0, width=120, height=40),
+            pane_record("%4", session_name="main", title="active", left=120, top=0, width=120, height=40),
+            pane_record("%2", session_name="alpha", title="agent2", left=80, top=40, width=80, height=20),
+            pane_record("%1", session_name="zeta", title="agent1", top=40, width=80, height=20),
+        ))
+
+        self.assertEqual(refreshed.selected_pane.pane_id, "%2")
+
     def test_help_modal_lists_all_bindings(self) -> None:
         help_text = HelpModal.render_help_text(CockpitApp.BINDINGS)
 
@@ -510,7 +529,7 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(app.state.selected_pane.pane_id, "%2")
 
-    async def test_active_row_highlight_snaps_back_to_first_candidate(self) -> None:
+    async def test_active_row_highlight_returns_to_selected_candidate(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", command="python", width=120, height=40),
             pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
@@ -527,12 +546,16 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
         )
 
         async with app.run_test() as pilot:
-            await pilot.press("up")
+            await pilot.press("down")
             work_list = app.query_one("#work-list")
-            self.assertEqual(work_list.index, 1)
+            self.assertEqual(app.state.selected_pane.pane_id, "%2")
+            self.assertEqual(work_list.index, 2)
+            work_list.index = 0
+            app.on_list_view_highlighted(SimpleNamespace())
+            self.assertEqual(work_list.index, 2)
             await pilot.press("enter")
 
-        self.assertEqual(actions.swaps, [("%1", "%4")])
+        self.assertEqual(actions.swaps, [("%2", "%4")])
 
     async def test_help_modal_blocks_background_cockpit_actions(self) -> None:
         panes = (
@@ -556,7 +579,28 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(actions.focused, [])
 
-    def test_q_and_ctrl_q_have_explicit_quit_paths(self) -> None:
+    async def test_help_modal_blocks_enter_swap(self) -> None:
+        app = CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", title="cockpit", command="python", width=120, height=40),
+                pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+                pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+        actions = app.actions
+
+        async with app.run_test() as pilot:
+            await pilot.press("?")
+            await pilot.press("enter")
+            self.assertIsInstance(app.screen, HelpModal)
+
+        self.assertEqual(actions.swaps, [])
+
+    async def test_help_modal_blocks_q_and_ctrl_q(self) -> None:
         app = CockpitApp.from_snapshot(
             panes=(
                 pane_record("%0", title="cockpit", command="python", width=120, height=40),
@@ -568,7 +612,64 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
             actions=FakeLayoutActionService(),
         )
         with patch.object(app, "exit") as exit_mock:
-            app.on_key(SimpleNamespace(key="q"))
-            app.on_key(SimpleNamespace(key="ctrl+q"))
+            async with app.run_test() as pilot:
+                await pilot.press("?")
+                await pilot.press("q")
+                await pilot.press("ctrl+q")
+                self.assertIsInstance(app.screen, HelpModal)
 
-        self.assertEqual(exit_mock.call_count, 2)
+        exit_mock.assert_not_called()
+
+    async def test_help_modal_dismiss_triggers_light_refresh(self) -> None:
+        app = CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", title="cockpit", command="python", width=120, height=40),
+                pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+
+        with patch.object(app, "_reconcile_state") as reconcile:
+            async with app.run_test() as pilot:
+                await pilot.press("?")
+                await pilot.press("escape")
+                self.assertNotIsInstance(app.screen, HelpModal)
+
+        reconcile.assert_called_once_with(light=True)
+
+    async def test_q_exits_app_through_binding(self) -> None:
+        app = CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", title="cockpit", command="python", width=120, height=40),
+                pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+        with patch.object(app, "exit") as exit_mock:
+            async with app.run_test() as pilot:
+                await pilot.press("q")
+
+        exit_mock.assert_called_once_with()
+
+    async def test_ctrl_q_exits_app_through_binding(self) -> None:
+        app = CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", title="cockpit", command="python", width=120, height=40),
+                pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=FakeLayoutActionService(),
+        )
+        with patch.object(app, "exit") as exit_mock:
+            async with app.run_test() as pilot:
+                await pilot.press("ctrl+q")
+
+        exit_mock.assert_called_once_with()
