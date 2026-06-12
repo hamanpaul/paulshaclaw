@@ -201,7 +201,11 @@ class CockpitApp(App[None]):
             pass
 
     def on_key(self, event: object) -> None:
-        if isinstance(getattr(self, "screen", None), HelpModal):
+        try:
+            current_screen = self.screen
+        except Exception:
+            current_screen = None
+        if isinstance(current_screen, HelpModal):
             return
         # Pilot key events are delivered as objects with either `key` or
         # `character` attributes depending on Textual version. Handle only
