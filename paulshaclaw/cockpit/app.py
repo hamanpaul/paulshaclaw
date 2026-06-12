@@ -201,6 +201,8 @@ class CockpitApp(App[None]):
             pass
 
     def on_key(self, event: object) -> None:
+        if isinstance(getattr(self, "screen", None), HelpModal):
+            return
         # Pilot key events are delivered as objects with either `key` or
         # `character` attributes depending on Textual version. Handle only
         # those explicit attributes and dispatch the small set of keys we
