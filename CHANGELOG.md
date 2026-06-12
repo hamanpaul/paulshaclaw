@@ -12,6 +12,9 @@ and this project adheres to Semantic Versioning.
 - **同步 policy 1.0.1**：`policy_version` 1.0.0 → 1.0.1（`.paul-project.yml` + 四份 agent 檔 + `managed-by@v1.0.1`），caller `policy-check` workflow 的 `uses:` 與 `policy_engine_ref` 重新雙重釘選至 `hamanpaul/paulsha-conventions@4ff59b6c35a46a87af3c3e641975743ee8fa0858`（含 R-17 / R-18）；agent 檔追加 R-17 / R-18 與語言規範說明
 
 ### Fixed
+- **cockpit TUI 新增明確退出路徑（#9）**：新增 `q` / `Ctrl+Q` 離開 hotkey，並同步更新 help modal 的按鍵說明，不再只能靠 `Ctrl+C` 離開前景 TUI。
+- **work list 選取現在會驅動 preview pane（#10）**：將 `ListView` 的 highlight 與 `CockpitState.selected_pane` 同步，重建清單時也會把游標對齊當前候選 pane，右側 detail / preview 會跟著選取列即時更新。
+- **help modal 會阻擋 cockpit 背景操作（#11）**：help 開啟期間，`c` / `Enter` / `q` 等 cockpit 按鍵不再穿透到背景 app，保留 modal 自己的關閉路徑。
 - **cockpit TUI 即時更新 + 工作摘要修正**：(1) cockpit 先前只在啟動時抓一次 pane 快照、之後僅在按 Enter（swap）才重載，新開/改名的 pane 不會出現；改為每 `REFRESH_INTERVAL_SECONDS`(30s) 定時重抓 pane 清單；且**清單內容（標籤＋選取游標）沒變就不重建 ListView**，idle 重抓不會閃爍（detail/preview 仍每輪更新）。每輪 bounded——一次 `list-panes` + 僅對無標題 minicom pane 跑短 timeout 的 `ps`，preview 只抓選取中的 pane（與 footer 那次無邊界掃描當機相反，刻意維持小而固定）。(2) 工作摘要先前只用 `pane_title`，minicom 不設標題故一片空白；新增 `derive_summary` fallback：無標題的 minicom 從其 argv（`-C …/mini_COM<N>_…`／`-D <device>`）解析出 `minicom COM0`/`COM1`，其他無標題 pane 顯示 `[command]`。
 - **footer cpt 改顯示 plan 用量百分比**：copilot 帳號改讀 GitHub Copilot plan-quota endpoint（`/copilot_internal/user` 的 `quota_snapshots.premium_interactions`，與 Copilot CLI statusline 同源），footer 顯示 `haman:21%`，business/enterprise 無上限顯示 `arc:∞`。單次便宜 HTTP GET、**不掃任何本地 log**，取代先前從 `events.jsonl` 累加 AIU/premium 計數的作法（計數路徑保留為離線後備）。
 - **防止 footer 掃描拖垮 WSL（OOM 當機）**：tmux footer 改以 `--no-refresh` 純讀快取（不在每次 `#()` render 重建 snapshot）；snapshot 由 `start.sh` 中隨生命週期收束的 cost refresh loop 節流重建（`PSC_COST_REFRESH_DISABLED=1` 可停）。`events.jsonl` 後備掃描加上邊界：依 mtime 跳過目標月份以前的舊檔（先前 3.3GB、單檔上看 442MB 的歸檔全部跳過）、單檔超過 64MB 直接略過——即使後備路徑被觸發也不會 OOM。
