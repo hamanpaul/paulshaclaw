@@ -23,6 +23,7 @@ class WorkspaceConfig:
 class MonitorConfig:
     workspaces: tuple[WorkspaceConfig, ...]
     poll_interval_seconds: int = 60
+    rescan_interval_seconds: int = 300
     watch_debounce_ms: int = 500
     legacy_policy: str = "list-only"
     socket_path: Path = field(default_factory=lambda: DEFAULT_SOCKET_PATH.expanduser())
@@ -111,6 +112,7 @@ def load_config(*, config_path: Path | None = None) -> MonitorConfig:
         )
 
     poll_interval = int(monitor.get("poll_interval_seconds", 60))
+    rescan_interval = int(monitor.get("rescan_interval_seconds", 300))
     debounce = int(monitor.get("watch_debounce_ms", 500))
 
     socket_raw = monitor.get("socket_path")
@@ -128,6 +130,7 @@ def load_config(*, config_path: Path | None = None) -> MonitorConfig:
     return MonitorConfig(
         workspaces=workspaces,
         poll_interval_seconds=poll_interval,
+        rescan_interval_seconds=rescan_interval,
         watch_debounce_ms=debounce,
         legacy_policy=legacy_policy,
         socket_path=socket_path,

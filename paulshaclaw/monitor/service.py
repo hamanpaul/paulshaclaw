@@ -36,10 +36,11 @@ class ProjectMonitorService:
         )
         self._stop_event = threading.Event()
         self._poll_thread: threading.Thread | None = None
+        self._rescan_thread: threading.Thread | None = None
         self._debounce_lock = threading.Lock()
         self._debounce_timers: dict[str, threading.Timer] = {}
         self._project_roots: dict[str, Path] = {}
-        self._watched_roots: set[Path] = set()
+        self._watched_paths: set[tuple[Path, bool]] = set()
 
     def run_forever(self) -> None:
         self._prepare_run_dir()
@@ -47,6 +48,7 @@ class ProjectMonitorService:
         self._sync_project_roots()
         self._install_watches()
         self._start_poll_thread()
+        self._start_rescan_thread()
         try:
             self._server.serve_forever()
         finally:
@@ -69,10 +71,24 @@ class ProjectMonitorService:
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
 
+    def _start_rescan_thread(self) -> None:
+        if self._rescan_thread is not None:
+            return
+        self._rescan_thread = threading.Thread(target=self._rescan_loop, daemon=True)
+        self._rescan_thread.start()
+
     def _poll_loop(self) -> None:
         interval = max(0.1, float(self._config.poll_interval_seconds))
         while not self._stop_event.wait(interval):
             self._publish_refresh(self._store.refresh())
+
+    def _rescan_loop(self) -> None:
+        interval = max(0.1, float(self._config.rescan_interval_seconds))
+        while not self._stop_event.wait(interval):
+            tracked_ids = tuple(self._project_roots)
+            if not tracked_ids:
+                continue
+            self._publish_refresh(self._store.refresh_projects(tracked_ids))
 
     def _sync_project_roots(self) -> None:
         self._project_roots = {
@@ -83,10 +99,46 @@ class ProjectMonitorService:
 
     def _install_watches(self) -> None:
         for project_root in self._project_roots.values():
-            if project_root in self._watched_roots:
-                continue
-            self._watcher.watch(project_root, self._handle_fs_event)
-            self._watched_roots.add(project_root)
+            for watch_path, recursive in self._watch_specs(project_root):
+                watch_key = (watch_path, recursive)
+                if watch_key in self._watched_paths:
+                    continue
+                self._watcher.watch(watch_path, self._handle_fs_event, recursive=recursive)
+                self._watched_paths.add(watch_key)
+
+    def _watch_specs(self, project_root: Path) -> tuple[tuple[Path, bool], ...]:
+        specs: list[tuple[Path, bool]] = [(project_root, False)]
+        git_dir = self._resolve_git_dir(project_root)
+        if git_dir is None:
+            return tuple(specs)
+        head_path = git_dir / "HEAD"
+        refs_path = git_dir / "refs"
+        if head_path.exists():
+            specs.append((head_path, False))
+        if refs_path.exists():
+            specs.append((refs_path, True))
+        return tuple(specs)
+
+    def _resolve_git_dir(self, project_root: Path) -> Path | None:
+        git_entry = project_root / ".git"
+        if git_entry.is_dir():
+            return git_entry
+        if not git_entry.is_file():
+            return None
+        try:
+            first_line = git_entry.read_text(encoding="utf-8").splitlines()[0].strip()
+        except (OSError, IndexError):
+            return None
+        prefix = "gitdir:"
+        if not first_line.lower().startswith(prefix):
+            return None
+        raw_path = first_line[len(prefix):].strip()
+        if not raw_path:
+            return None
+        resolved = Path(raw_path)
+        if not resolved.is_absolute():
+            resolved = (git_entry.parent / resolved).resolve()
+        return resolved
 
     def _handle_fs_event(self, path: Path) -> None:
         project_id = self._project_id_for_path(Path(path))
@@ -157,3 +209,9 @@ class ProjectMonitorService:
             and threading.current_thread() is not self._poll_thread
         ):
             self._poll_thread.join(timeout=2.0)
+        if (
+            self._rescan_thread is not None
+            and self._rescan_thread.is_alive()
+            and threading.current_thread() is not self._rescan_thread
+        ):
+            self._rescan_thread.join(timeout=2.0)

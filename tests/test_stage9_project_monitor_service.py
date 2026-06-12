@@ -463,7 +463,12 @@ class Stage9ServiceTests(unittest.TestCase):
         _require_phase3(self)
         self.tmp = Path(tempfile.mkdtemp(prefix="stage9-svc-"))
         (self.tmp / "ws").mkdir(parents=True, exist_ok=True)
-        _make_workspace(self.tmp / "ws", "projA", DEFAULT_TODO)
+        self.project_dir = _make_workspace(self.tmp / "ws", "projA", DEFAULT_TODO)
+        (self.project_dir / ".git" / "refs" / "heads").mkdir(parents=True, exist_ok=True)
+        (self.project_dir / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        (self.project_dir / ".git" / "refs" / "heads" / "main").write_text("deadbeef\n")
+        (self.project_dir / "node_modules" / "pkg").mkdir(parents=True, exist_ok=True)
+        (self.project_dir / "node_modules" / "pkg" / "index.js").write_text("module.exports = 1;\n")
         self.run_dir = self.tmp / "run"
         self.socket_path = self.run_dir / "project-monitor.sock"
         self.cfg = MonitorConfig(
@@ -471,6 +476,7 @@ class Stage9ServiceTests(unittest.TestCase):
             legacy_policy="list-only",
             socket_path=self.socket_path,
             watch_debounce_ms=80,
+            rescan_interval_seconds=1,
         )
         self.stub_watcher = StubWatcher()
         self.service = ProjectMonitorService(
@@ -566,6 +572,43 @@ class Stage9ServiceTests(unittest.TestCase):
             )
         except (TimeoutError, socket.timeout):
             pass
+
+    def test_service_watches_project_root_non_recursive_and_git_control_paths(self) -> None:
+        subscriptions = {
+            (str(path), recursive)
+            for path, _callback, recursive in self.stub_watcher.subscriptions
+        }
+
+        self.assertIn((str(self.project_dir), False), subscriptions)
+        self.assertIn((str(self.project_dir / ".git" / "HEAD"), False), subscriptions)
+        self.assertIn((str(self.project_dir / ".git" / "refs"), True), subscriptions)
+        self.assertNotIn((str(self.project_dir), True), subscriptions)
+        self.assertFalse(any("node_modules" in path for path, _recursive in subscriptions))
+
+    def test_service_branch_switch_trigger_still_emits_change_event_immediately(self) -> None:
+        sock = self._connect()
+        _socket_send_request(sock, {"kind": "subscribe"})
+        json.loads(_socket_recv_line(sock))  # consume initial snapshot
+
+        todo = self.project_dir / "docs" / "superpowers" / "workstreams" / "stage1-demo" / "todo.md"
+        todo.write_text(DEFAULT_TODO.replace("alpha", "alpha-head-trigger"))
+        self.stub_watcher.trigger(self.project_dir / ".git" / "HEAD")
+
+        change_msg = json.loads(_socket_recv_line(sock, timeout=3.0))
+        self.assertEqual(change_msg["kind"], "change")
+        self.assertEqual(change_msg["project"]["project_id"], "projA")
+
+    def test_service_deep_file_change_is_seen_after_periodic_rescan(self) -> None:
+        sock = self._connect()
+        _socket_send_request(sock, {"kind": "subscribe"})
+        json.loads(_socket_recv_line(sock))  # consume initial snapshot
+
+        todo = self.project_dir / "docs" / "superpowers" / "workstreams" / "stage1-demo" / "todo.md"
+        todo.write_text(DEFAULT_TODO.replace("alpha", "alpha-rescan"))
+
+        change_msg = json.loads(_socket_recv_line(sock, timeout=3.0))
+        self.assertEqual(change_msg["kind"], "change")
+        self.assertEqual(change_msg["project"]["project_id"], "projA")
 
 
 # --- Real watchdog integration (optional) -------------------------------

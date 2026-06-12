@@ -18,7 +18,13 @@ WatcherCallback = Callable[[Path], None]
 
 
 class Watcher(Protocol):
-    def watch(self, path: Path, callback: WatcherCallback) -> None: ...
+    def watch(
+        self,
+        path: Path,
+        callback: WatcherCallback,
+        *,
+        recursive: bool = True,
+    ) -> None: ...
 
     def stop(self) -> None: ...
 
@@ -29,24 +35,41 @@ class StubWatcher:
     swap it in for production."""
 
     def __init__(self) -> None:
-        self._subscriptions: list[tuple[Path, WatcherCallback]] = []
+        self._subscriptions: list[tuple[Path, WatcherCallback, bool]] = []
         self._stopped = False
 
-    def watch(self, path: Path, callback: WatcherCallback) -> None:
-        self._subscriptions.append((Path(path), callback))
+    @property
+    def subscriptions(self) -> tuple[tuple[Path, WatcherCallback, bool], ...]:
+        return tuple(self._subscriptions)
+
+    def watch(
+        self,
+        path: Path,
+        callback: WatcherCallback,
+        *,
+        recursive: bool = True,
+    ) -> None:
+        self._subscriptions.append((Path(path), callback, recursive))
 
     def trigger(self, path: Path) -> None:
         if self._stopped:
             return
         target = Path(path)
-        for watched_path, callback in list(self._subscriptions):
-            # Fire if the trigger path equals or descends from a watched root.
-            try:
-                target.relative_to(watched_path)
+        for watched_path, callback, recursive in list(self._subscriptions):
+            if watched_path == target:
                 callback(target)
-            except ValueError:
-                if watched_path == target:
-                    callback(target)
+                continue
+            if watched_path.exists() and watched_path.is_file():
+                continue
+            if recursive:
+                try:
+                    target.relative_to(watched_path)
+                except ValueError:
+                    continue
+                callback(target)
+                continue
+            if target.parent == watched_path:
+                callback(target)
 
     def stop(self) -> None:
         self._stopped = True
@@ -70,21 +93,23 @@ if HAS_WATCHDOG:
         def __init__(
             self,
             *,
-            root: Path,
+            watch_path: Path,
             callback: WatcherCallback,
             debounce_seconds: float,
+            recursive: bool,
         ) -> None:
             super().__init__()
-            self._root = root
+            self._watch_path = watch_path
             self._callback = callback
             self._debounce = debounce_seconds
+            self._recursive = recursive
             self._lock = threading.Lock()
             self._timer: threading.Timer | None = None
             self._latest_path: Path | None = None
 
         def _flush(self) -> None:
             with self._lock:
-                path = self._latest_path or self._root
+                path = self._latest_path or self._watch_path
                 self._timer = None
                 self._latest_path = None
             try:
@@ -108,6 +133,16 @@ if HAS_WATCHDOG:
                 path = Path(event.src_path)
             except Exception:  # pragma: no cover
                 return
+            if self._watch_path.is_file():
+                if path != self._watch_path:
+                    return
+            elif self._recursive:
+                try:
+                    path.relative_to(self._watch_path)
+                except ValueError:
+                    return
+            elif path != self._watch_path and path.parent != self._watch_path:
+                return
             self._schedule(path)
 
         def cancel(self) -> None:
@@ -126,17 +161,25 @@ if HAS_WATCHDOG:
             self._started = False
             self._stopped = False
 
-        def watch(self, path: Path, callback: WatcherCallback) -> None:
+        def watch(
+            self,
+            path: Path,
+            callback: WatcherCallback,
+            *,
+            recursive: bool = True,
+        ) -> None:
             if self._stopped:
                 raise RuntimeError("watcher is stopped")
-            root = Path(path)
+            watch_path = Path(path)
+            observer_root = watch_path.parent if watch_path.is_file() else watch_path
             handler = _DebouncedHandler(
-                root=root,
+                watch_path=watch_path,
                 callback=callback,
                 debounce_seconds=self._debounce_seconds,
+                recursive=recursive,
             )
             self._handlers.append(handler)
-            self._observer.schedule(handler, str(root), recursive=True)
+            self._observer.schedule(handler, str(observer_root), recursive=recursive)
             if not self._started:
                 self._observer.start()
                 self._started = True

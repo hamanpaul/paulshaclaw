@@ -13,6 +13,7 @@ workspaces:
 
 monitor:
   poll_interval_seconds: 60      # workspace scan cadence
+  rescan_interval_seconds: 300   # tracked-project deep rescan fallback
   watch_debounce_ms: 500         # filesystem event debounce
   legacy_policy: list-only       # list-only | hide
   socket_path: ~/.agents/run/project-monitor.sock
