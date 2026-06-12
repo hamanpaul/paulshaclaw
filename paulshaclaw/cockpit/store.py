@@ -99,6 +99,13 @@ class CockpitState:
             return self
         count = len(self.candidate_section)
         next_index = (self.selected_index + delta) % count
+        return self.set_selection(next_index)
+
+    def set_selection(self, index: int) -> "CockpitState":
+        if not self.candidate_section:
+            return self
+        count = len(self.candidate_section)
+        next_index = max(0, min(index, count - 1))
         return CockpitState(
             cockpit_pane_id=self.cockpit_pane_id,
             cockpit_session_name=self.cockpit_session_name,

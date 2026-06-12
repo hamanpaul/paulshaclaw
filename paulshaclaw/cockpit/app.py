@@ -149,6 +149,22 @@ class CockpitApp(App[None]):
             # fallback stubs may not support focus; ignore
             pass
 
+    def on_list_view_highlighted(self, event: object) -> None:
+        try:
+            list_view = self.query_one("#work-list", ListView)
+            highlighted_index = getattr(list_view, "index", None)
+        except Exception:
+            return
+        if not isinstance(highlighted_index, int):
+            return
+        candidate_index = highlighted_index - (1 if self.state.active_pane is not None else 0)
+        if candidate_index < 0:
+            return
+        if self.state.selected_pane is not None and candidate_index == self.state.selected_index:
+            return
+        self.state = self.state.set_selection(candidate_index)
+        self._refresh_widgets()
+
     def _on_refresh_tick(self) -> None:
         self._reconcile_state(light=True)
 
@@ -275,6 +291,11 @@ class CockpitApp(App[None]):
             work_list.clear()
             for line in items:
                 work_list.append(ListItem(Static(line)))
+            selected_offset = 1 if active is not None else 0
+            try:
+                work_list.index = selected_offset + self.state.selected_index
+            except Exception:
+                pass
 
         selected = self.state.selected_pane
         if selected is None:
