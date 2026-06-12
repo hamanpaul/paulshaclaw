@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Mapping
@@ -11,6 +12,9 @@ from .config import AtomizerConfig, is_safe_path_component
 from .llm_promoter import LLMPromoter, PromoteError
 from .promoter import IdentityPromoter, Promoter
 from .splitter import Fragment
+
+LOGGER = logging.getLogger(__name__)
+_ATOMIZER_INBOX_FILE_MAX_BYTES = 64 * 1024 * 1024
 
 
 def _parse_frontmatter(text: str) -> tuple[Mapping[str, Any] | None, str]:
@@ -213,6 +217,27 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
     count = 0
     dry_run_fragments: dict[str, list[Fragment]] = {}
     for raw_path in _raw_session_docs(memory_root):
+        try:
+            raw_size = raw_path.stat().st_size
+        except OSError:
+            raw_size = None
+        if raw_size is not None and raw_size > _ATOMIZER_INBOX_FILE_MAX_BYTES:
+            warning = (
+                f"{raw_path}: exceeds {_ATOMIZER_INBOX_FILE_MAX_BYTES} bytes; "
+                "session skipped (file too large)"
+            )
+            warnings.append(warning)
+            LOGGER.warning(warning)
+            processing.append_state(
+                memory_root,
+                session_key=f"{raw_path.parent.parent.name}:{raw_path.stem}",
+                state="skipped",
+                now=now,
+                config_hash=config_hash,
+                skip_reason="file too large",
+                skipped_bytes=raw_size,
+            )
+            continue
         data, body = _parse_frontmatter(raw_path.read_text(encoding="utf-8"))
         if data is None or not data.get("project") or not data.get("source_session"):
             warnings.append(f"{raw_path}: unparseable or missing project/source_session; skipped")
