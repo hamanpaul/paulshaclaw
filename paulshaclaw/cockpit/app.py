@@ -159,6 +159,11 @@ class CockpitApp(App[None]):
             return
         candidate_index = highlighted_index - (1 if self.state.active_pane is not None else 0)
         if candidate_index < 0:
+            if self.state.active_pane is not None and self.state.candidate_section:
+                try:
+                    list_view.index = 1
+                except Exception:
+                    pass
             return
         if self.state.selected_pane is not None and candidate_index == self.state.selected_index:
             return

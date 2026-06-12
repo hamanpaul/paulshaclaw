@@ -510,6 +510,30 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(app.state.selected_pane.pane_id, "%2")
 
+    async def test_active_row_highlight_snaps_back_to_first_candidate(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
+        )
+        actions = FakeLayoutActionService()
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+        )
+
+        async with app.run_test() as pilot:
+            await pilot.press("up")
+            work_list = app.query_one("#work-list")
+            self.assertEqual(work_list.index, 1)
+            await pilot.press("enter")
+
+        self.assertEqual(actions.swaps, [("%1", "%4")])
+
     async def test_help_modal_blocks_background_cockpit_actions(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", command="python", width=120, height=40),
