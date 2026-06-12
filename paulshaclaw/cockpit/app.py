@@ -73,6 +73,8 @@ class CockpitApp(App[None]):
         Binding("down", "move_down", "↑/↓ 選擇"),
         Binding("enter", "swap_selected", "Enter 把選中的 pane 換到我面前"),
         Binding("c", "focus_cockpit", "c 回 cockpit"),
+        Binding("q", "quit_app", "q 離開 cockpit"),
+        Binding("ctrl+q", "quit_app", "Ctrl+Q 離開 cockpit"),
         Binding("question_mark", "show_help", "? 顯示說明"),
     ]
 
@@ -147,6 +149,27 @@ class CockpitApp(App[None]):
             # fallback stubs may not support focus; ignore
             pass
 
+    def on_list_view_highlighted(self, event: object) -> None:
+        try:
+            list_view = self.query_one("#work-list", ListView)
+            highlighted_index = getattr(list_view, "index", None)
+        except Exception:
+            return
+        if not isinstance(highlighted_index, int):
+            return
+        candidate_index = highlighted_index - (1 if self.state.active_pane is not None else 0)
+        if candidate_index < 0:
+            if self.state.active_pane is not None and self.state.candidate_section:
+                try:
+                    list_view.index = self._selected_list_index()
+                except Exception:
+                    pass
+            return
+        if self.state.selected_pane is not None and candidate_index == self.state.selected_index:
+            return
+        self.state = self.state.set_selection(candidate_index)
+        self._refresh_widgets()
+
     def _on_refresh_tick(self) -> None:
         self._reconcile_state(light=True)
 
@@ -158,7 +181,24 @@ class CockpitApp(App[None]):
         self.state = self.state.move_selection(1)
         self._refresh_widgets()
 
+    def _help_modal_open(self) -> bool:
+        try:
+            return isinstance(self.screen, HelpModal)
+        except Exception:
+            return False
+
+    def _selected_list_index(self) -> int:
+        selected_offset = 1 if self.state.active_pane is not None else 0
+        selected = self.state.selected_pane
+        if selected is not None:
+            for index, pane in enumerate(self.state.candidate_section):
+                if pane.pane_id == selected.pane_id:
+                    return selected_offset + index
+        return selected_offset
+
     def action_swap_selected(self) -> None:
+        if self._help_modal_open():
+            return
         active_pane = self.state.active_pane
         selected_pane = self.state.selected_pane
         if active_pane is None or selected_pane is None:
@@ -171,17 +211,29 @@ class CockpitApp(App[None]):
         self._reconcile_state()
 
     def action_focus_cockpit(self) -> None:
+        if self._help_modal_open():
+            return
         self.actions.return_to_cockpit(self.state.cockpit_pane_id)
 
+    def _on_help_closed(self, _result: object | None = None) -> None:
+        self._reconcile_state(light=True)
+
     def action_show_help(self) -> None:
+        if self._help_modal_open():
+            return
         self.push_screen(HelpModal(self.BINDINGS))
 
+    def action_quit_app(self) -> None:
+        if self._help_modal_open():
+            return
+        try:
+            self.exit()
+        except AttributeError:
+            pass
+
     def on_key(self, event: object) -> None:
-        # Pilot key events are delivered as objects with either `key` or
-        # `character` attributes depending on Textual version. Handle only
-        # those explicit attributes and dispatch the small set of keys we
-        # need for the tests. This keeps the compatibility path narrow and
-        # avoids swallowing unrelated errors.
+        if self._help_modal_open():
+            return
         try:
             if hasattr(event, "key"):
                 key = event.key
@@ -190,16 +242,9 @@ class CockpitApp(App[None]):
             else:
                 return
         except AttributeError:
-            # If event is a strange object without expected attributes,
-            # don't attempt to handle it.
             return
-
-        if key == "enter" or key == "\r":
+        if key in {"enter", "\r"}:
             self.action_swap_selected()
-        elif key == "c":
-            self.action_focus_cockpit()
-        elif key == "?" or key == "question_mark":
-            self.action_show_help()
 
     def _reconcile_state(self, *, light: bool = False) -> None:
         if self.pane_loader is None:
@@ -265,6 +310,10 @@ class CockpitApp(App[None]):
             work_list.clear()
             for line in items:
                 work_list.append(ListItem(Static(line)))
+            try:
+                work_list.index = self._selected_list_index()
+            except Exception:
+                pass
 
         selected = self.state.selected_pane
         if selected is None:
