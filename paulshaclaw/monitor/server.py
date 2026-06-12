@@ -34,6 +34,7 @@ from .snapshot import ChangeEvent, SnapshotStore
 ACCEPT_TIMEOUT_SECONDS = 0.25
 SUBSCRIBE_QUEUE_GET_TIMEOUT = 0.25
 EVENT_QUEUE_MAXSIZE = 1024
+SOCKET_PROBE_TIMEOUT_SECONDS = 0.2
 
 
 class _Subscriber:
@@ -63,14 +64,29 @@ class MonitorServer:
 
     # --- lifecycle ---
 
-    def serve_forever(self) -> None:
-        # Atomic bind + permission tightening.
-        if self._socket_path.exists():
+    def _prepare_socket_path(self) -> None:
+        if not self._socket_path.exists():
+            return
+
+        probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            probe.settimeout(SOCKET_PROBE_TIMEOUT_SECONDS)
+            probe.connect(str(self._socket_path))
+        except OSError:
             try:
                 self._socket_path.unlink()
             except OSError:
                 pass
+            return
+        finally:
+            probe.close()
+
+        raise RuntimeError(f"live monitor already listening on {self._socket_path}")
+
+    def serve_forever(self) -> None:
+        # Atomic bind + permission tightening.
         self._socket_path.parent.mkdir(parents=True, exist_ok=True)
+        self._prepare_socket_path()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(self._socket_path))
         os.chmod(str(self._socket_path), 0o600)

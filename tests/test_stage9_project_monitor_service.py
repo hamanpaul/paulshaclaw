@@ -376,6 +376,82 @@ class Stage9ServerTests(unittest.TestCase):
         self.assertFalse(payload["ok"])
         self.assertIn("error", payload)
 
+    def test_server_rejects_live_socket_instead_of_stealing_it(self) -> None:
+        (self.tmp / "ws2").mkdir(parents=True, exist_ok=True)
+        _make_workspace(self.tmp / "ws2", "projZ", DEFAULT_TODO)
+        other_cfg = MonitorConfig(
+            workspaces=(WorkspaceConfig(path=self.tmp / "ws2", name="ws2"),),
+            legacy_policy="list-only",
+        )
+        other_store = SnapshotStore(config=other_cfg)
+        other_store.load()
+        contender = MonitorServer(store=other_store, socket_path=self.socket_path)
+        errors: list[Exception] = []
+
+        def run_contender() -> None:
+            try:
+                contender.serve_forever()
+            except Exception as exc:  # pragma: no cover - captured for assertions
+                errors.append(exc)
+
+        contender_thread = threading.Thread(target=run_contender, daemon=True)
+        contender_thread.start()
+        try:
+            deadline = time.time() + 1.0
+            while time.time() < deadline and not errors:
+                time.sleep(0.02)
+
+            sock = self._connect()
+            _socket_send_request(sock, {"kind": "list_projects"})
+            payload = json.loads(_socket_recv_line(sock))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(
+                {project["project_id"] for project in payload["data"]["projects"]},
+                {"projA", "projB"},
+            )
+            self.assertTrue(errors, "second server should fail instead of stealing the live socket")
+            self.assertRegex(str(errors[0]), "live monitor|already.*monitor")
+        finally:
+            contender.stop()
+            contender_thread.join(timeout=2.0)
+
+    def test_server_reclaims_stale_socket_file(self) -> None:
+        stale_path = self.tmp / "stale-monitor.sock"
+        stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        stale.bind(str(stale_path))
+        stale.close()
+
+        reclaimed = MonitorServer(store=self.store, socket_path=stale_path)
+        reclaimed_thread = threading.Thread(target=reclaimed.serve_forever, daemon=True)
+        reclaimed_thread.start()
+        try:
+            deadline = time.time() + 1.0
+            sock: socket.socket | None = None
+            last_error: OSError | None = None
+            while time.time() < deadline:
+                candidate = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                try:
+                    candidate.connect(str(stale_path))
+                except OSError as error:
+                    last_error = error
+                    candidate.close()
+                    time.sleep(0.02)
+                    continue
+                sock = candidate
+                break
+            self.assertIsNotNone(sock, msg=f"replacement server did not bind stale socket path: {last_error}")
+            self.addCleanup(sock.close)
+            _socket_send_request(sock, {"kind": "list_projects"})
+            payload = json.loads(_socket_recv_line(sock))
+            self.assertTrue(payload["ok"])
+            self.assertEqual(
+                {project["project_id"] for project in payload["data"]["projects"]},
+                {"projA", "projB"},
+            )
+        finally:
+            reclaimed.stop()
+            reclaimed_thread.join(timeout=2.0)
+
 
 # --- ProjectMonitorService end-to-end -----------------------------------
 

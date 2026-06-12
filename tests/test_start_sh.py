@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import tempfile
 import textwrap
 import time
@@ -446,6 +447,96 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 return
             time.sleep(0.05)
         self.fail(f"timed out waiting for empty file at {path}")
+
+
+class StartScriptSingletonGuardTests(unittest.TestCase):
+    def test_start_script_exits_when_runtime_lock_is_held(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            repo_root = tmpdir_path / "repo"
+            home_dir = tmpdir_path / "home"
+            runtime_dir = tmpdir_path / "runtime"
+            holder_ready = tmpdir_path / "holder.ready"
+            fake_bin = repo_root / ".venv" / "bin"
+            fake_scripts = repo_root / "scripts"
+            monitor_pidfile = tmpdir_path / "monitor.pid"
+            cockpit_pidfile = tmpdir_path / "cockpit.pid"
+            cockpit_started = tmpdir_path / "cockpit.started"
+
+            fake_bin.mkdir(parents=True)
+            fake_scripts.mkdir(parents=True)
+            home_dir.mkdir(parents=True)
+            runtime_dir.mkdir(parents=True)
+
+            fake_python = fake_bin / "python"
+            fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            fake_tmux = fake_bin / "tmux"
+            fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
+            fake_tmux.chmod(0o755)
+
+            start_sh = fake_scripts / "start.sh"
+            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
+            start_sh.chmod(0o755)
+
+            env = dict(os.environ)
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            env["TMUX_PANE"] = "%0"
+            env["XDG_RUNTIME_DIR"] = str(runtime_dir)
+            env["PSC_COST_REFRESH_DISABLED"] = "1"
+            env["PSC_DREAM_DISABLED"] = "1"
+            env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
+            env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
+            env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            env["FAKE_COCKPIT_MODE"] = "exit"
+            env["FAKE_TMUX_LOG"] = str(tmpdir_path / "tmux.log")
+
+            lock_path = runtime_dir / "paulshaclaw-start.lock"
+            holder = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import fcntl, os, sys, time; "
+                        "fd = os.open(sys.argv[1], os.O_CREAT | os.O_RDWR, 0o600); "
+                        "fcntl.flock(fd, fcntl.LOCK_EX); "
+                        "open(sys.argv[2], 'w', encoding='utf-8').write('ready'); "
+                        "time.sleep(5)"
+                    ),
+                    str(lock_path),
+                    str(holder_ready),
+                ],
+                env=env,
+            )
+            try:
+                deadline = time.monotonic() + 3.0
+                while time.monotonic() < deadline:
+                    if holder_ready.exists():
+                        break
+                    time.sleep(0.05)
+                self.assertTrue(holder_ready.exists(), "lock holder never acquired the singleton lock")
+
+                completed = subprocess.run(
+                    ["bash", str(start_sh)],
+                    cwd=repo_root,
+                    env=env,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+            finally:
+                holder.terminate()
+                holder.wait(timeout=5)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("已有實例在跑", completed.stdout)
+            self.assertFalse(monitor_pidfile.exists())
+            self.assertFalse(cockpit_pidfile.exists())
+            self.assertFalse(cockpit_started.exists())
 
 
 class StartScriptStage8FooterTests(unittest.TestCase):

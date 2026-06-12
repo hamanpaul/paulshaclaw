@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+start_lock="${XDG_RUNTIME_DIR:-/tmp}/paulshaclaw-start.lock"
+exec 200>"$start_lock"
+flock -n 200 || { echo 已有實例在跑; exit 1; }
+
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
 PY=$REPO/.venv/bin/python
