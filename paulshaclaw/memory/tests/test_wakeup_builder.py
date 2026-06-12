@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from paulshaclaw.memory.ledger import lifecycle
+from paulshaclaw.memory.wakeup import builder as builder_module
 from paulshaclaw.memory.wakeup import build_brief
 
 
@@ -217,6 +219,79 @@ class WakeupBuilderTests(unittest.TestCase):
             # expect the wikilink to be [[meta-title--sl-1]] not [[meta-title]]
             self.assertIn("[[meta-title--sl-1]]", out)
             self.assertNotIn("[[meta-title]]", out)
+
+    def test_reuses_lifecycle_events_for_active_record_filter(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            _slice(root, "sl-1", "p", "alpha")
+            events = [
+                {
+                    "record_id": "sl-1",
+                    "event_type": "created",
+                    "ts": "2026-05-01T00:00:00Z",
+                }
+            ]
+            lifecycle_state = {
+                "sl-1": {
+                    "last_state": "active",
+                    "last_event_ts": "2026-05-01T00:00:00Z",
+                    "deleted": None,
+                }
+            }
+            with (
+                mock.patch(
+                    "paulshaclaw.memory.wakeup.builder.lifecycle.read_events",
+                    return_value=events,
+                ) as read_events,
+                mock.patch(
+                    "paulshaclaw.memory.wakeup.builder.lifecycle.fold_lifecycle",
+                    return_value=lifecycle_state,
+                ),
+                mock.patch(
+                    "paulshaclaw.memory.wakeup.builder.retrieval_set.active_records",
+                    return_value=["sl-1"],
+                ) as active_records,
+            ):
+                build_brief(root, "p", now="2026-06-03T00:00:00Z")
+
+            read_events.assert_called_once_with(root)
+            self.assertIs(active_records.call_args.kwargs["events"], events)
+
+    def test_large_slice_body_is_truncated_and_marked(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            giant_body = "A" * (300 * 1024)
+            _slice(root, "sl-1", "p", "alpha", body=giant_body)
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=400000)
+
+            self.assertIn("sl-1", out)
+            self.assertIn("[truncated]", out)
+
+    def test_total_slice_body_budget_stops_collecting_and_logs(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            for index in range(3):
+                _slice(root, f"sl-{index}", "p", f"title-{index}", body=f"body-{index}-" + ("X" * 40))
+                lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                       record_id=f"sl-{index}", event_type="created", source="x", reason="r", actor="a", ts=f"2026-05-0{index + 1}T00:00:00Z")
+
+            with (
+                mock.patch.object(builder_module, "MAX_SLICE_BODY_BYTES", 64, create=True),
+                mock.patch.object(builder_module, "MAX_SLICE_BODY_TOTAL_BYTES", 120, create=True),
+                self.assertLogs("paulshaclaw.memory.wakeup.builder", level="INFO") as captured,
+            ):
+                out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=1000)
+
+            self.assertIn("sl-2", out)
+            self.assertIn("sl-1", out)
+            self.assertNotIn("sl-0", out)
+            self.assertIn("total slice body budget", "\n".join(captured.output))
 
 
 if __name__ == "__main__":

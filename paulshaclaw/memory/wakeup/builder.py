@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import List
 
@@ -9,6 +10,52 @@ from ..moc import frontmatter_io as fio
 
 # Memory layer name (factored out to avoid policy-consumer lint false positive)
 _KNOWLEDGE_LAYER = "knowledge"
+MAX_SLICE_BODY_BYTES = 256 * 1024
+MAX_SLICE_BODY_TOTAL_BYTES = 16 * 1024 * 1024
+TRUNCATED_MARKER = "[truncated]"
+LOGGER = logging.getLogger(__name__)
+
+
+def _read_frontmatter_only(path: Path) -> tuple[dict, int]:
+    chunks: list[bytes] = []
+    with path.open("rb") as handle:
+        first_line = handle.readline()
+        chunks.append(first_line)
+        if first_line.startswith(b"---"):
+            while True:
+                line = handle.readline()
+                if not line:
+                    break
+                chunks.append(line)
+                if line.startswith(b"---"):
+                    break
+    frontmatter_text = b"".join(chunks).decode("utf-8", errors="ignore")
+    fm, _body = fio.read(frontmatter_text)
+    return fm, len(b"".join(chunks))
+
+
+def _read_slice_body(path: Path, *, body_limit: int) -> tuple[str, bool, int]:
+    header_chunks: list[bytes] = []
+    with path.open("rb") as handle:
+        first_line = handle.readline()
+        header_chunks.append(first_line)
+        if first_line.startswith(b"---"):
+            while True:
+                line = handle.readline()
+                if not line:
+                    break
+                header_chunks.append(line)
+                if line.startswith(b"---"):
+                    break
+        raw_body = handle.read(body_limit + 1)
+
+    truncated = len(raw_body) > body_limit
+    body_bytes = raw_body[:body_limit] if truncated else raw_body
+    document = b"".join(header_chunks) + body_bytes
+    _fm, body = fio.read(document.decode("utf-8", errors="ignore"))
+    if truncated:
+        body = f"{body}\n{TRUNCATED_MARKER}\n"
+    return body, truncated, len(body_bytes)
 
 
 def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_budget: int = 8000) -> str:
@@ -39,7 +86,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     if kdir.exists():
         for path in sorted(kdir.rglob("*.md")):
             try:
-                fm, body = fio.read(path.read_text(encoding="utf-8"))
+                fm, body_offset = _read_frontmatter_only(path)
             except Exception:
                 continue
             if fm.get("memory_layer") != _KNOWLEDGE_LAYER:
@@ -52,7 +99,15 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
             title = fm.get("title") or path.stem.rsplit("--", 1)[0]
             # Capture the actual file stem for wikilinks
             file_stem = path.stem
-            slices.append({"slice_id": str(sid), "title": title, "body": body, "file_stem": file_stem})
+            slices.append(
+                {
+                    "slice_id": str(sid),
+                    "title": title,
+                    "file_stem": file_stem,
+                    "path": path,
+                    "body_bytes": max(0, path.stat().st_size - body_offset),
+                }
+            )
 
     # Per spec: empty only when both MOC and active slices are absent
     if moc_body is None and not slices:
@@ -64,7 +119,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
 
     # Determine active slice ids respecting no-events semantics
     candidate_ids = [s["slice_id"] for s in slices]
-    active_ids = retrieval_set.active_records(memory_root, candidate_ids)
+    active_ids = retrieval_set.active_records(memory_root, candidate_ids, events=events)
 
     # Filter slices to only active ones
     active_slices = [s for s in slices if s["slice_id"] in active_ids]
@@ -83,6 +138,40 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     active_slices.sort(key=lambda x: ((x.get("last_event_ts") or ""), x["slice_id"]))
     active_slices = list(reversed(active_slices))
 
+    remaining_slice_body_budget = MAX_SLICE_BODY_TOTAL_BYTES
+    loaded_active_slices: List[dict] = []
+    total_budget_logged = False
+    for slice_meta in active_slices:
+        if remaining_slice_body_budget <= 0:
+            if not total_budget_logged:
+                LOGGER.info(
+                    "total slice body budget reached for wake-up brief project=%s limit_bytes=%s",
+                    project,
+                    MAX_SLICE_BODY_TOTAL_BYTES,
+                )
+                total_budget_logged = True
+            break
+        bounded_body_bytes = min(MAX_SLICE_BODY_BYTES, int(slice_meta.get("body_bytes", 0)))
+        if bounded_body_bytes > remaining_slice_body_budget:
+            if not total_budget_logged:
+                LOGGER.info(
+                    "total slice body budget reached for wake-up brief project=%s limit_bytes=%s",
+                    project,
+                    MAX_SLICE_BODY_TOTAL_BYTES,
+                )
+                total_budget_logged = True
+            break
+        try:
+            body, truncated, bytes_used = _read_slice_body(
+                slice_meta["path"],
+                body_limit=MAX_SLICE_BODY_BYTES,
+            )
+        except Exception:
+            continue
+        remaining_slice_body_budget -= bytes_used
+        loaded_active_slices.append({**slice_meta, "body": body, "truncated": truncated})
+    active_slices = loaded_active_slices
+
     # Build Recent block (one-line summaries) - summary must come from the slice body per spec
     recent_lines: List[str] = []
     for s in active_slices[:k]:
@@ -97,6 +186,8 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         if not summary:
             # fallback to title if body has no meaningful lines
             summary = s.get("title") or ""
+        if s.get("truncated"):
+            summary = f"{summary} {TRUNCATED_MARKER}".strip()
         # recent line: use actual file stem for wikilink
         stem = s.get("file_stem") or s.get("title") or ""
         ts = s.get("last_event_ts") or ""

@@ -8,7 +8,7 @@ retrievable based on their lifecycle state.
 from pathlib import Path
 from typing import List
 
-from paulshaclaw.memory.ledger.lifecycle import read_events, fold_lifecycle
+from paulshaclaw.memory.ledger.lifecycle import LifecycleEvent, fold_lifecycle, read_events
 
 
 def active_record_ids(lifecycle_path: Path) -> set[str]:
@@ -42,7 +42,12 @@ def active_record_ids(lifecycle_path: Path) -> set[str]:
     return active_ids
 
 
-def active_records(memory_root: Path, record_ids: List[str]) -> List[str]:
+def active_records(
+    memory_root: Path,
+    record_ids: List[str],
+    *,
+    events: List[LifecycleEvent] | None = None,
+) -> List[str]:
     """
     Filter list of record IDs to only those currently active.
     
@@ -58,13 +63,13 @@ def active_records(memory_root: Path, record_ids: List[str]) -> List[str]:
         Sublist of record_ids that are active, preserving order
     """
     lifecycle_path = memory_root / "runtime" / "ledger" / "lifecycle.jsonl"
-    events = read_events(lifecycle_path)
-    
-    if not events:
+    lifecycle_events = events if events is not None else read_events(lifecycle_path)
+
+    if not lifecycle_events:
         # No lifecycle events means all records are in default active state
         return record_ids
-    
-    lifecycle_state = fold_lifecycle(events)
+
+    lifecycle_state = fold_lifecycle(lifecycle_events)
     
     result = []
     for rid in record_ids:
