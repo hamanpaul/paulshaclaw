@@ -158,7 +158,7 @@ start_cost_refresh_loop() {
       PYTHONPATH="$REPO" "$PY" -m paulshaclaw.cost --once || true
       sleep "$interval"
     done
-  ) >>"$cost_log" 2>&1 &
+  ) 200>&- >>"$cost_log" 2>&1 &
   COST_REFRESH_PID=$!
   echo "cost refresh pid=$COST_REFRESH_PID (interval=${interval}s)"
 }
@@ -195,7 +195,7 @@ start_dream_loop() {
         --memory-root "$dream_root" --require-idle --promoter identity \
         >>"$dream_log" 2>&1 || true
     done
-  ) &
+  ) 200>&- &
   DREAM_PID=$!
   echo "dream pid=$DREAM_PID (interval=${interval}s, root=$dream_root)"
 }
@@ -225,7 +225,7 @@ else
 fi
 
 # Stage 9: project-monitor (background)
-"$PY" -m paulshaclaw.monitor >> ~/.agents/log/monitor.log 2>&1 &
+"$PY" -m paulshaclaw.monitor 200>&- >> ~/.agents/log/monitor.log 2>&1 &
 MONITOR_PID=$!
 echo "monitor pid=$MONITOR_PID"
 
@@ -246,7 +246,7 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
-  "$PY" -m paulshaclaw.bot.listener >> "$TELEGRAM_LOG" 2>&1 &
+  "$PY" -m paulshaclaw.bot.listener 200>&- >> "$TELEGRAM_LOG" 2>&1 &
   TELEGRAM_PID=$!
   telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
   while true; do
@@ -303,7 +303,7 @@ _cockpit_stdin=/dev/null
 if (exec </dev/tty) 2>/dev/null; then
   _cockpit_stdin=/dev/tty
 fi
-"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" < "$_cockpit_stdin" &
+"$PY" -m paulshaclaw.cockpit --cockpit-pane "${TMUX_PANE:?must run inside tmux}" < "$_cockpit_stdin" 200>&- &
 COCKPIT_PID=$!
 if wait "$COCKPIT_PID"; then
   exit 0
