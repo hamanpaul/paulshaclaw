@@ -38,7 +38,10 @@ from paulshaclaw.cost.models import (
     UsageWindow,
 )
 from paulshaclaw.cost.providers import (
+    _claude_local_token_total,
     _claude_message_token_total,
+    _codex_local_rate_limits,
+    _codex_local_token_total,
     _fetch_copilot_quota,
     _read_local_observed_metrics,
     _read_local_observed_total,
@@ -1404,6 +1407,31 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["five_hour"].used_percent, 61)
         self.assertEqual(provider.windows["weekly"].used_percent, 10)
 
+    def test_codex_local_rate_limits_skip_oversize_latest_session(self) -> None:
+        now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        record = {
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 61.0, "resets_at": epoch + 3600},
+                    "secondary": {"used_percent": 10.0, "resets_at": epoch + 7 * 86400},
+                },
+            }
+        }
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions"
+            sessions.mkdir(parents=True)
+            stale = sessions / "stale.jsonl"
+            stale.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            latest = sessions / "latest.jsonl"
+            latest.write_text((json.dumps(record) + "\n") * 2, encoding="utf-8")
+            os.utime(stale, (epoch - 60, epoch - 60))
+            os.utime(latest, (epoch, epoch))
+
+            with patch("paulshaclaw.cost.providers._CODEX_LOCAL_EVENT_FILE_MAX_BYTES", 120, create=True):
+                self.assertIsNone(_codex_local_rate_limits(Path(tmpdir), now))
+
     def test_collect_codex_drops_already_reset_local_window(self) -> None:
         now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
         epoch = int(now.timestamp())
@@ -1618,6 +1646,33 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.windows["five_hour"].used_percent, 5)
+
+    def test_codex_local_token_total_ignores_stale_and_oversize_sessions(self) -> None:
+        now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions"
+            sessions.mkdir(parents=True)
+            current = sessions / "current.jsonl"
+            current.write_text(
+                json.dumps({"payload": {"type": "token_count", "total_tokens": 12000}}) + "\n",
+                encoding="utf-8",
+            )
+            stale = sessions / "stale.jsonl"
+            stale.write_text(
+                json.dumps({"payload": {"type": "token_count", "total_tokens": 99000}}) + "\n",
+                encoding="utf-8",
+            )
+            oversize = sessions / "oversize.jsonl"
+            oversize.write_text("X" * 512, encoding="utf-8")
+            os.utime(current, (epoch, epoch))
+            os.utime(stale, (epoch - (12 * 60 * 60), epoch - (12 * 60 * 60)))
+            os.utime(oversize, (epoch, epoch))
+
+            with patch("paulshaclaw.cost.providers._CODEX_LOCAL_EVENT_FILE_MAX_BYTES", 64, create=True):
+                total = _codex_local_token_total(Path(tmpdir), now=now)
+
+        self.assertEqual(total, 12000)
 
     def test_collect_codex_rejects_non_exact_usage_urls_before_reading_or_sending_token(self) -> None:
         unsafe_urls = [
@@ -2013,6 +2068,49 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
         self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.windows["five_hour"].used_percent, 2)
+
+    def test_claude_local_token_total_ignores_stale_and_oversize_sessions(self) -> None:
+        now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sessions = Path(tmpdir) / ".claude" / "projects" / "p1"
+            sessions.mkdir(parents=True)
+            current = sessions / "current.jsonl"
+            current.write_text(
+                json.dumps(
+                    {
+                        "message": {
+                            "model": "claude-sonnet-4.5",
+                            "usage": {"input_tokens": 5000, "output_tokens": 1000},
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            stale = sessions / "stale.jsonl"
+            stale.write_text(
+                json.dumps(
+                    {
+                        "message": {
+                            "model": "claude-sonnet-4.5",
+                            "usage": {"input_tokens": 99000, "output_tokens": 1000},
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            oversize = sessions / "oversize.jsonl"
+            oversize.write_text("X" * 128, encoding="utf-8")
+            os.utime(current, (epoch, epoch))
+            os.utime(stale, (epoch - (12 * 60 * 60), epoch - (12 * 60 * 60)))
+            os.utime(oversize, (epoch, epoch))
+
+            with patch("paulshaclaw.cost.providers._CLAUDE_LOCAL_EVENT_FILE_MAX_BYTES", 256, create=True):
+                total = _claude_local_token_total(Path(tmpdir) / ".claude", now=now)
+
+        self.assertEqual(total, 6000)
 
 
 class Stage8CacheTests(unittest.TestCase):

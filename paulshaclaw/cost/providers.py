@@ -28,6 +28,9 @@ _ACCOUNT_RE = re.compile(r"account\s+([A-Za-z0-9-]+)")
 # host (the original unbounded 3.3GB scan crashed the WSL2 VM). Files larger
 # than this are skipped; the primary plan-quota path reads no local files.
 _COPILOT_EVENT_FILE_MAX_BYTES = 64 * 1024 * 1024
+_CLAUDE_LOCAL_EVENT_FILE_MAX_BYTES = 64 * 1024 * 1024
+_CODEX_LOCAL_EVENT_FILE_MAX_BYTES = 64 * 1024 * 1024
+_LOCAL_TOKEN_WINDOW_SECONDS = 5 * 60 * 60
 
 
 def _unknown_codex() -> ProviderSnapshot:
@@ -142,6 +145,15 @@ def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
     return time.time() - stat.st_mtime <= max_age_seconds
 
 
+def _file_in_current_token_window(path: Path, *, now: datetime) -> bool:
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    cutoff = now.timestamp() - _LOCAL_TOKEN_WINDOW_SECONDS
+    return stat.st_mtime >= cutoff
+
+
 def _claude_message_token_total(
     message: Mapping[str, Any],
     record: Mapping[str, Any] | None = None,
@@ -177,13 +189,22 @@ def _claude_message_token_total(
     return total
 
 
-def _claude_local_token_total(claude_home: Path) -> int:
+def _claude_local_token_total(claude_home: Path, *, now: datetime | None = None) -> int:
     projects = claude_home / "projects"
     if not projects.exists():
         return 0
 
+    resolved_now = now or _now_utc()
     total = 0
     for session_path in projects.rglob("*.jsonl"):
+        try:
+            stat = session_path.stat()
+        except OSError:
+            continue
+        if stat.st_size > _CLAUDE_LOCAL_EVENT_FILE_MAX_BYTES:
+            continue
+        if not _file_in_current_token_window(session_path, now=resolved_now):
+            continue
         try:
             with session_path.open("r", encoding="utf-8", errors="ignore") as handle:
                 for line in handle:
@@ -300,13 +321,22 @@ def _codex_token_count_payload(record: Mapping[str, Any]) -> Mapping[str, Any] |
     return None
 
 
-def _codex_local_token_total(codex_home: Path) -> int:
+def _codex_local_token_total(codex_home: Path, *, now: datetime | None = None) -> int:
     sessions = codex_home / "sessions"
     if not sessions.exists():
         return 0
 
+    resolved_now = now or _now_utc()
     observed = 0
     for session_path in sessions.rglob("*.jsonl"):
+        try:
+            stat = session_path.stat()
+        except OSError:
+            continue
+        if stat.st_size > _CODEX_LOCAL_EVENT_FILE_MAX_BYTES:
+            continue
+        if not _file_in_current_token_window(session_path, now=resolved_now):
+            continue
         session_observed = 0
         try:
             with session_path.open("r", encoding="utf-8", errors="ignore") as handle:
@@ -358,6 +388,11 @@ def _codex_local_rate_limits(codex_home: Path, now: datetime) -> dict[str, Usage
     except (OSError, ValueError):
         return None
     if latest is None:
+        return None
+    try:
+        if latest.stat().st_size > _CODEX_LOCAL_EVENT_FILE_MAX_BYTES:
+            return None
+    except OSError:
         return None
 
     rate_limits: Mapping[str, Any] | None = None
@@ -446,7 +481,10 @@ def collect_codex(
         pass
 
     if local_fallback:
-        tokens = _codex_local_token_total(codex_home or Path("~/.codex").expanduser())
+        tokens = _codex_local_token_total(
+            codex_home or Path("~/.codex").expanduser(),
+            now=resolved_now,
+        )
         if tokens > 0:
             return ProviderSnapshot(
                 source_status="estimated",
@@ -483,7 +521,10 @@ def collect_claude(
                 return ProviderSnapshot(source_status="fresh", windows=windows)
 
     if local_fallback:
-        tokens = _claude_local_token_total(claude_home or Path("~/.claude").expanduser())
+        tokens = _claude_local_token_total(
+            claude_home or Path("~/.claude").expanduser(),
+            now=resolved_now,
+        )
         if tokens > 0:
             return ProviderSnapshot(
                 source_status="estimated",

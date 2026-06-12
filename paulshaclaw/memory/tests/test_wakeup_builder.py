@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from paulshaclaw.memory.ledger import lifecycle
+from paulshaclaw.memory.wakeup import builder as builder_module
 from paulshaclaw.memory.wakeup import build_brief
 
 
@@ -217,6 +219,156 @@ class WakeupBuilderTests(unittest.TestCase):
             # expect the wikilink to be [[meta-title--sl-1]] not [[meta-title]]
             self.assertIn("[[meta-title--sl-1]]", out)
             self.assertNotIn("[[meta-title]]", out)
+
+    def test_reuses_lifecycle_events_for_active_record_filter(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            _slice(root, "sl-1", "p", "alpha")
+            events = [
+                {
+                    "record_id": "sl-1",
+                    "event_type": "created",
+                    "ts": "2026-05-01T00:00:00Z",
+                }
+            ]
+            lifecycle_state = {
+                "sl-1": {
+                    "last_state": "active",
+                    "last_event_ts": "2026-05-01T00:00:00Z",
+                    "deleted": None,
+                }
+            }
+            with (
+                mock.patch(
+                    "paulshaclaw.memory.wakeup.builder.lifecycle.read_events",
+                    return_value=events,
+                ) as read_events,
+                mock.patch(
+                    "paulshaclaw.memory.wakeup.builder.lifecycle.fold_lifecycle",
+                    return_value=lifecycle_state,
+                ),
+                mock.patch(
+                    "paulshaclaw.memory.wakeup.builder.retrieval_set.active_records",
+                    return_value=["sl-1"],
+                ) as active_records,
+            ):
+                build_brief(root, "p", now="2026-06-03T00:00:00Z")
+
+            read_events.assert_called_once_with(root)
+            self.assertIs(active_records.call_args.kwargs["events"], events)
+
+    def test_large_slice_body_is_truncated_and_marked(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            giant_body = "A" * (300 * 1024)
+            _slice(root, "sl-1", "p", "alpha", body=giant_body)
+            lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                   record_id="sl-1", event_type="created", source="x", reason="r", actor="a", ts="2026-05-01T00:00:00Z")
+
+            out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=400000)
+
+            self.assertIn("sl-1", out)
+            self.assertIn("[truncated]", out)
+
+    def test_total_slice_body_budget_stops_collecting_and_logs(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            for index in range(3):
+                _slice(root, f"sl-{index}", "p", f"title-{index}", body=f"body-{index}-" + ("X" * 40))
+                lifecycle.append_event(path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                                       record_id=f"sl-{index}", event_type="created", source="x", reason="r", actor="a", ts=f"2026-05-0{index + 1}T00:00:00Z")
+
+            with (
+                mock.patch.object(builder_module, "MAX_SLICE_BODY_BYTES", 64, create=True),
+                mock.patch.object(builder_module, "MAX_SLICE_BODY_TOTAL_BYTES", 120, create=True),
+                self.assertLogs("paulshaclaw.memory.wakeup.builder", level="INFO") as captured,
+            ):
+                out = build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=1000)
+
+            self.assertIn("sl-2", out)
+            self.assertIn("sl-1", out)
+            self.assertNotIn("sl-0", out)
+            self.assertIn("total slice body budget", "\n".join(captured.output))
+
+    def test_malformed_frontmatter_cap_treats_file_as_body(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "malformed.md"
+            path.write_text("---\n" + ("key: value\n" * 40), encoding="utf-8")
+
+            with mock.patch.object(builder_module, "MAX_FRONTMATTER_BYTES", 64, create=True):
+                fm, body_offset = builder_module._read_frontmatter_only(path)
+                body, truncated, bytes_used = builder_module._read_slice_body(
+                    path,
+                    body_limit=32,
+                )
+
+            self.assertEqual(fm, {})
+            self.assertEqual(body_offset, 0)
+            self.assertTrue(truncated)
+            self.assertEqual(bytes_used, 32)
+            self.assertTrue(body.startswith("---\nkey: value"))
+            self.assertIn(builder_module.TRUNCATED_MARKER, body)
+
+    def test_slice_stat_failure_is_skipped_fail_open(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            _slice(root, "sl-1", "p", "alpha", body="summary\n")
+            real_stat = Path.stat
+
+            def flaky_stat(path_obj: Path, *args, **kwargs):
+                if path_obj.name == "alpha--sl-1.md":
+                    raise OSError("stat failed")
+                return real_stat(path_obj, *args, **kwargs)
+
+            with mock.patch("pathlib.Path.stat", autospec=True, side_effect=flaky_stat):
+                out = build_brief(root, "p", now="2026-06-03T00:00:00Z")
+
+            self.assertIn("MOC", out)
+            self.assertNotIn("sl-1", out)
+
+    def test_total_slice_body_budget_clamps_body_read_limit_to_remaining_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _moc(root, "p", "MOC\n")
+            for index in range(2):
+                _slice(root, f"sl-{index}", "p", f"title-{index}", body="B" * 50)
+                lifecycle.append_event(
+                    path=root / "runtime" / "ledger" / "lifecycle.jsonl",
+                    record_id=f"sl-{index}",
+                    event_type="created",
+                    source="x",
+                    reason="r",
+                    actor="a",
+                    ts=f"2026-05-0{index + 1}T00:00:00Z",
+                )
+
+            requested_limits: list[int] = []
+
+            def fake_read_slice_body(path: Path, *, body_limit: int) -> tuple[str, bool, int]:
+                requested_limits.append(body_limit)
+                return ("summary\n", False, 50)
+
+            with (
+                mock.patch.object(builder_module, "MAX_SLICE_BODY_BYTES", 64, create=True),
+                mock.patch.object(
+                    builder_module,
+                    "MAX_SLICE_BODY_TOTAL_BYTES",
+                    100,
+                    create=True,
+                ),
+                mock.patch.object(
+                    builder_module,
+                    "_read_slice_body",
+                    side_effect=fake_read_slice_body,
+                ),
+            ):
+                build_brief(root, "p", now="2026-06-03T00:00:00Z", char_budget=1000)
+
+            self.assertEqual(requested_limits, [64, 50])
 
 
 if __name__ == "__main__":

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import threading
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Iterable
 
 from .config import MonitorConfig
 from .models import ProjectState
+from .parser import extract_project_state
 from .scanner import scan_workspaces
 
 
@@ -85,9 +87,35 @@ class SnapshotStore:
             self._signatures = new_signatures
             return tuple(events)
 
+    def refresh_projects(self, project_ids: Iterable[str]) -> tuple[ChangeEvent, ...]:
+        with self._lock:
+            events: list[ChangeEvent] = []
+            for project_id in project_ids:
+                current = self._states.get(project_id)
+                if current is None or current.legacy:
+                    continue
+                project_dir = Path(current.path)
+                if not project_dir.is_dir():
+                    continue
+                state = extract_project_state(project_dir, workspace_name=current.workspace)
+                signature = _project_signature(state)
+                self._states[project_id] = state
+                if self._signatures.get(project_id) == signature:
+                    continue
+                self._signatures[project_id] = signature
+                self._sequence += 1
+                events.append(
+                    ChangeEvent(
+                        project_id=project_id,
+                        sequence=self._sequence,
+                        project_state=state,
+                    )
+                )
+            return tuple(events)
+
     def refresh_project(self, project_id: str) -> ChangeEvent | None:
         """Re-scan a single project (used after a debounced watcher fire)."""
-        events = self.refresh()
+        events = self.refresh_projects((project_id,))
         for evt in events:
             if evt.project_id == project_id:
                 return evt

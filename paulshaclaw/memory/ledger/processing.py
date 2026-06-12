@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-VALID_STATES = {"split", "promoted"}
+VALID_STATES = {"split", "promoted", "skipped"}
 
 
 class ProcessingLedgerError(Exception):
