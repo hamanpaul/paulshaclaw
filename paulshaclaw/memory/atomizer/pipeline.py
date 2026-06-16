@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 from ..ledger import processing, relations
 from . import slice_frontmatter, splitter
-from .config import AtomizerConfig, is_safe_path_component
+from .config import AtomizerConfig, is_safe_path_component, sanitize_project_component
 from .llm_promoter import LLMPromoter, PromoteError
 from .promoter import IdentityPromoter, Promoter
 from .splitter import Fragment
@@ -249,12 +249,13 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
         session = str(data["source_session"])
         project = str(data["project"])
         unsafe_fields = [
-            field for field, value in (("project", project), ("source_agent", agent), ("source_session", session))
+            field for field, value in (("source_agent", agent), ("source_session", session))
             if not is_safe_path_component(value)
         ]
         if unsafe_fields:
             warnings.append(f"{raw_path}: unsafe path field(s) {', '.join(unsafe_fields)}; skipped")
             continue
+        project_path = sanitize_project_component(project)
         session_key = f"{agent}:{session}"
         if processing.state_of(memory_root, session_key) in {"split", "promoted"}:
             continue
@@ -275,7 +276,7 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
             count += 1
             continue
         for index, frag_body in enumerate(bodies):
-            frag_path = (memory_root / "inbox" / "_slices" / project
+            frag_path = (memory_root / "inbox" / "_slices" / project_path
                          / f"{agent}__{session}__{index:03d}.md")
             _atomic_write(frag_path, _render_fragment(
                 project, agent, session, source_artifact, captured_at, provenance, index, frag_body))
@@ -423,7 +424,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
             continue
         for slice_, referenced_fragments in prepared_writes:
             knowledge_path = _knowledge_path_for(
-                memory_root, str(slice_.frontmatter["project"]), slice_.slice_id
+                memory_root, sanitize_project_component(str(slice_.frontmatter["project"])), slice_.slice_id
             )
             _atomic_write(knowledge_path, slice_frontmatter.render(slice_))
             for frag_path, _ in referenced_fragments:

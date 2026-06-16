@@ -167,6 +167,17 @@ def is_safe_path_component(value: str) -> bool:
     )
 
 
+def sanitize_project_component(value: str) -> str:
+    """Map any project identifier (including URL form with '/') to a path-safe
+    component. The original rich value should be preserved separately in metadata;
+    this is only for filesystem directory naming under the knowledge and slice layers."""
+    text = (value or "").strip().replace("\\", "/")
+    text = text.strip("/").replace("..", "__")
+    text = text.replace("/", "__")
+    text = "".join(ch for ch in text if ch not in "*?[]\x00")
+    return text or "_unknown"
+
+
 def resolve_command_argv(
     command: Sequence[str], *, base_dir: str | Path = PROJECT_ROOT
 ) -> tuple[str, ...]:

@@ -26,6 +26,7 @@ and this project adheres to Semantic Versioning.
 - **claude-gemma4 skill 鏡像支援「容器目錄」攤平**：launcher 先前把 `~/.agents/skills/<容器>`（如 superpowers，真正的 skill 在子層）整包鏡像成單一 `skills/<容器>`，因頂層無 `SKILL.md` 無法被 Claude Code 載入 → gem「找不到」brainstorming 等 superpowers skill。改為偵測無頂層 `SKILL.md` 的容器，把其下每個含 `SKILL.md` 的子 skill 攤平成扁平 user skill（同名跳過）。
 
 ### Added
+- **Stage 2 記憶內容擷取（Phase 1）**：修復「部署完成但功能空心」——三家 adapter（claude/codex/copilot）改為實際讀 `transcript_path`/history 擷取 prompts/touched_files；import 時用本機 gemma4 產每 session ≤20 字繁中標題（gemma4 離線以 TCP 快速可達性檢查瞬間 fallback、不阻塞 import）；atomizer 新增 `sanitize_project_component` 消毒含斜線 project，不再 skip URL 形專案（`atomize.slices:0` 根因）；新增 `importer/backfill.py` 三家強制回填（繞 checksum、`--dry-run`、可重入）。promoter→LLM 蒸餾留 Phase 2。
 - **新增 pytest CI workflow（`.github/workflows/tests.yml`）**：PR 與 main push 時於 GitHub Actions（ubuntu, Python 3.12）執行完整測試套件——`tests/` + `paulshaclaw/memory/tests/`（1042 tests + 112 subtests）。live LLM 測試維持 `PSC_ATOMIZE_LIVE` guard 自動跳過；依賴自 `requirements-stage9.txt` + `requirements-stage11.txt` 安裝。在此之前 CI 僅跑 policy check，測試從未在 PR gate 上執行。
 - `paulshiabro-telegram-reply` skill 升級：新增 `scripts/reply_bridge.py` standalone 橋接工具與對應測試，移除對 repo venv 的依賴
 - `tmate.start()` 加入 `_wait_until_ready()`：呼叫 `tmate wait tmate-ready` 確保連結就緒，timeout 回傳 pending 狀態

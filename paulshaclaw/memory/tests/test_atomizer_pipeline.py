@@ -245,7 +245,7 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(result["summary"]["slices"], 1)
             self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
 
-    def test_unsafe_project_path_is_skipped_without_writing_outside_root(self):
+    def test_traversal_project_is_sanitized_without_writing_outside_root(self):
         with TemporaryDirectory() as tmp:
             parent = Path(tmp)
             root = parent / "memory"
@@ -257,11 +257,18 @@ class PipelineTests(unittest.TestCase):
             cfg, h = atomizer_config.load_config(override_path=None)
             result = pipeline.run(root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z")
 
-            self.assertTrue(raw.exists())
+            # Security: a traversal-style project MUST NOT write anything outside the root.
             self.assertFalse(escaped.exists())
-            self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
-            self.assertGreater(result["summary"]["skipped"], 0)
-            self.assertTrue(any("unsafe path field" in w for w in result["warnings"]))
+            root_prefix = str(root.resolve())
+            for path in parent.rglob("*"):
+                if path.is_file():
+                    self.assertTrue(
+                        str(path.resolve()).startswith(root_prefix),
+                        msg=f"wrote outside memory root: {path}",
+                    )
+            # New behavior: project is sanitized (not skipped); the session is processed.
+            self.assertGreaterEqual(result["summary"]["split_sessions"], 1)
+            self.assertFalse(any("unsafe path field" in w for w in result["warnings"]))
 
     def test_oversize_raw_inbox_file_is_skipped_and_recorded(self):
         with TemporaryDirectory() as tmp:
