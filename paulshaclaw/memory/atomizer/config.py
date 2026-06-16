@@ -170,7 +170,7 @@ def is_safe_path_component(value: str) -> bool:
 def sanitize_project_component(value: str) -> str:
     """Map any project identifier (including URL form with '/') to a path-safe
     component. The original rich value should be preserved separately in metadata;
-    this is only for filesystem directory naming (knowledge/<proj>, _slices/<proj>)."""
+    this is only for filesystem directory naming under the knowledge and slice layers."""
     text = (value or "").strip().replace("\\", "/")
     text = text.strip("/").replace("..", "__")
     text = text.replace("/", "__")

@@ -22,12 +22,14 @@ def extract(queue_path: str | Path) -> AdapterResult:
         or payload.get("PSC_CONFIG_ROOT")
         or str(Path.home())
     )
+    extract_from = payload
     if session_id:
-        content = read_copilot_history(config_root, session_id)
-        if content.get("user_prompts") or content.get("assistant_summary"):
-            payload = {**payload, **content}
+        extracted = {k: v for k, v in read_copilot_history(config_root, session_id).items() if v}
+        if extracted:
+            extract_from = {**payload, **extracted}
     return build_session(
-        payload=payload,
+        payload=extract_from,
+        raw_payload=payload,
         queue_path=queue_path,
         tool="copilot-cli",
         session_id=session_id,

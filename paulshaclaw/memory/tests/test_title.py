@@ -21,6 +21,15 @@ def test_generate_falls_back_when_runner_raises():
     assert out.startswith("幫我修")
 
 
+def test_default_runner_fails_fast_when_backend_unreachable(monkeypatch):
+    import paulshaclaw.memory.importer.title as t
+
+    monkeypatch.setattr(t, "_gemma4_reachable", lambda *a, **k: False)
+    out, source = t.generate_title({"user_prompts": ["主題"], "assistant_summary": "y"})
+    assert source == "fallback"
+    assert out == "主題"
+
+
 def test_generate_falls_back_on_empty_llm_output():
     out, source = title.generate_title(
         {"user_prompts": ["主題"], "assistant_summary": "y"},

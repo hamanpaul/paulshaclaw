@@ -115,6 +115,7 @@ def build_session(
     session_id: str,
     default_capture_scope: str,
     ended_at: str | None,
+    raw_payload: dict[str, Any] | None = None,
 ) -> AdapterResult:
     prompts = extract_user_prompts(payload)
     session: NormalizedSession = {
@@ -134,7 +135,11 @@ def build_session(
         "raw_payload_pointer": str(queue_path),
     }
     capture_scope = string_or_empty(payload.get("capture_scope")) or default_capture_scope
-    return AdapterResult(session=session, capture_scope=capture_scope, raw_payload=payload)
+    return AdapterResult(
+        session=session,
+        capture_scope=capture_scope,
+        raw_payload=payload if raw_payload is None else raw_payload,
+    )
 
 
 def _dedupe(items: list[str]) -> list[str]:

@@ -70,3 +70,15 @@ def test_copilot_adapter_enriches_from_history(tmp_path):
     result = copilot_adapter.extract(qp)
     assert result.session["user_prompts"] == ["列出 PON HLAPI"]
     assert result.session["assistant_summary"] == "已整理 PON HLAPI 對照表。"
+
+
+def test_claude_adapter_missing_transcript_keeps_inline_content(tmp_path):
+    # A dead/empty transcript pointer must NOT wipe inline payload content.
+    payload = {"tool": "claude-code", "session_id": "s2", "cwd": "/repo",
+               "transcript_path": "/nonexistent.jsonl",
+               "touched_files": ["a.py"], "user_prompts": ["inline q"]}
+    qp = tmp_path / "q.json"
+    qp.write_text(json.dumps(payload), encoding="utf-8")
+    result = claude_adapter.extract(qp)
+    assert result.session["touched_files"] == ["a.py"]
+    assert result.session["user_prompts"] == ["inline q"]

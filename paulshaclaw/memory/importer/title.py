@@ -9,7 +9,9 @@ falls back to the first user prompt truncated, marked ``fallback`` for later reg
 from __future__ import annotations
 
 import json
+import os
 import re
+import socket
 import subprocess
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +28,21 @@ def _truncate(text: str, limit: int = _MAX) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())[:limit]
 
 
+def _gemma4_reachable(timeout: float = 0.3) -> bool:
+    """Fast TCP pre-check so an offline backend fails over to the fallback title
+    instantly, instead of blocking the import on a long subprocess timeout."""
+    host = os.environ.get("PSC_GEMMA4_HOST", "127.0.0.1")
+    port = int(os.environ.get("PSC_GEMMA4_PORT", "8001"))
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 def _default_runner(text: str, command: tuple[str, ...], timeout: int) -> str:
+    if not _gemma4_reachable():
+        raise RuntimeError("gemma4 backend not reachable")
     proc = subprocess.run(
         list(command), input=text, capture_output=True, text=True, timeout=timeout
     )

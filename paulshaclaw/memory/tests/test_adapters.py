@@ -23,6 +23,7 @@ NORMALIZED_KEYS = {
     "touched_files",
     "referenced_artifacts",
     "raw_payload_pointer",
+    "title_source",
 }
 FRONTMATTER_ONLY_KEYS = {
     "source_agent",
