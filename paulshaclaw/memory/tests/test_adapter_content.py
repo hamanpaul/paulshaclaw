@@ -82,3 +82,21 @@ def test_claude_adapter_missing_transcript_keeps_inline_content(tmp_path):
     result = claude_adapter.extract(qp)
     assert result.session["touched_files"] == ["a.py"]
     assert result.session["user_prompts"] == ["inline q"]
+
+
+def test_end_to_end_inbox_has_content_and_title(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "paulshaclaw.memory.importer.title._default_runner",
+        lambda t, c, to: "端到端標題",
+    )
+    from paulshaclaw.memory.importer import pipeline
+
+    qp = tmp_path / "q.json"
+    qp.write_text(json.dumps({"tool": "claude-code", "session_id": "e2e", "cwd": "/repo",
+                              "transcript_path": str(FIX / "claude_transcript.jsonl")}), encoding="utf-8")
+    pipeline.ingest_queue_item(qp, memory_root=tmp_path, dry_run=False)
+    md = list((tmp_path / "inbox").rglob("*.md"))[0].read_text(encoding="utf-8")
+    assert "title: 端到端標題" in md
+    assert "## Summary\n端到端標題" in md
+    assert "1. 幫我修 UART 升級流程" in md
+    assert "- /repo/uart.py" in md
