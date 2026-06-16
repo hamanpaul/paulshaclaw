@@ -19,6 +19,7 @@ class NormalizedSession(TypedDict):
     turn_count: int
     user_prompts: list[str]
     assistant_summary: str
+    title_source: str
     touched_files: list[str]
     referenced_artifacts: list[str]
     raw_payload_pointer: str
@@ -127,6 +128,7 @@ def build_session(
         "turn_count": extract_turn_count(payload, prompts),
         "user_prompts": prompts,
         "assistant_summary": extract_assistant_summary(payload),
+        "title_source": string_or_empty(payload.get("title_source")),
         "touched_files": string_list(payload.get("touched_files")),
         "referenced_artifacts": string_list(payload.get("referenced_artifacts")),
         "raw_payload_pointer": str(queue_path),

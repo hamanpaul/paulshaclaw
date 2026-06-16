@@ -42,3 +42,25 @@ def test_apply_caches_and_sets_fields(tmp_path):
     assert s1["assistant_summary"] == "簡短標題"
     assert s1["title_source"] == "gemma4"
     assert len(calls) == 1  # second call hit cache
+
+
+def test_pipeline_injects_title_into_inbox(tmp_path, monkeypatch):
+    import json as _json
+    from pathlib import Path
+    from paulshaclaw.memory.importer import pipeline
+
+    monkeypatch.setattr(
+        "paulshaclaw.memory.importer.title._default_runner",
+        lambda text, cmd, timeout: "UART 升級修復",
+    )
+    fix = Path(__file__).parent / "fixtures" / "claude_transcript.jsonl"
+    qdir = tmp_path / "inbox-queue"
+    qdir.mkdir()
+    qp = qdir / "q.json"
+    qp.write_text(_json.dumps({"tool": "claude-code", "session_id": "s1", "cwd": "/repo",
+                               "transcript_path": str(fix)}), encoding="utf-8")
+    decision = pipeline.ingest_queue_item(qp, memory_root=tmp_path, dry_run=True)
+    rendered = decision["rendered"]
+    assert "title: UART 升級修復" in rendered
+    assert "title_source: gemma4" in rendered
+    assert "## Summary\nUART 升級修復" in rendered

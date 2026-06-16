@@ -88,6 +88,8 @@ def render_markdown(
         f"source_agent: {_frontmatter_value(session.get('tool'))}",
         f"source_session: {_frontmatter_value(session.get('session_id'))}",
         f"source_artifact: {_frontmatter_value(source_artifact)}",
+        f"title: {_frontmatter_value(session.get('assistant_summary'))}",
+        f"title_source: {_frontmatter_value(session.get('title_source') or 'fallback')}",
         f"captured_at: {_frontmatter_value(captured)}",
         "provenance:",
         f"  repo: {_required_frontmatter_value(repo_value)}",

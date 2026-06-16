@@ -16,6 +16,7 @@ from typing import Any
 from .adapters import claude, codex, copilot
 from .adapters.base import AdapterResult, NormalizedSession
 from . import _git
+from . import title
 from .classifier import classify_session
 from .frontmatter import render_markdown
 from .project_resolver import normalize_remote
@@ -236,7 +237,7 @@ def _preview_queue_item_unlocked(queue_item: str | Path, *, memory_root: str | P
     queue_path = Path(queue_item)
     root = Path(memory_root)
     result = _extract(queue_path)
-    session = result.session
+    session = title.apply(dict(result.session), memory_root=root)
     remote_url = result.raw_payload.get("remote_url") or result.raw_payload.get("remote") or session.get("repo")
     if not isinstance(remote_url, str):
         remote_url = None
