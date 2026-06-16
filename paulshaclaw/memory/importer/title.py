@@ -92,10 +92,13 @@ def apply(session: dict[str, Any], *, memory_root: str | Path, **kwargs: Any) ->
         except (OSError, json.JSONDecodeError, KeyError):
             pass
     title, source = generate_title(session, **kwargs)
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cache.with_name(f".{cache.name}.tmp")
-    tmp.write_text(json.dumps({"title": title, "source": source}), encoding="utf-8")
-    tmp.replace(cache)
+    if source == "gemma4":
+        # Only cache successful LLM titles. Fallback titles are deterministic and
+        # left uncached so they regenerate (and upgrade) once gemma4 is reachable.
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        tmp = cache.with_name(f".{cache.name}.tmp")
+        tmp.write_text(json.dumps({"title": title, "source": source}), encoding="utf-8")
+        tmp.replace(cache)
     session["assistant_summary"] = title
     session["title_source"] = source
     return session

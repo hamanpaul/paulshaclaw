@@ -73,3 +73,17 @@ def test_pipeline_injects_title_into_inbox(tmp_path, monkeypatch):
     assert "title: UART 升級修復" in rendered
     assert "title_source: gemma4" in rendered
     assert "## Summary\nUART 升級修復" in rendered
+
+
+def test_apply_does_not_cache_fallback(tmp_path):
+    calls = []
+
+    def runner(text, cmd, timeout):
+        calls.append(1)
+        raise RuntimeError("offline")
+
+    sess = {"session_id": "sf", "user_prompts": ["重要任務"], "assistant_summary": "x"}
+    s1 = title.apply(dict(sess), memory_root=tmp_path, runner=runner)
+    title.apply(dict(sess), memory_root=tmp_path, runner=runner)
+    assert s1["title_source"] == "fallback"
+    assert len(calls) == 2  # fallback not cached → re-attempted (補生 when gemma4 returns)
