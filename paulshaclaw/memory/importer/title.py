@@ -13,6 +13,7 @@ import os
 import re
 import socket
 import subprocess
+import urllib.parse
 from pathlib import Path
 from typing import Any, Callable
 
@@ -28,11 +29,18 @@ def _truncate(text: str, limit: int = _MAX) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())[:limit]
 
 
-def _gemma4_reachable(timeout: float = 0.3) -> bool:
-    """Fast TCP pre-check so an offline backend fails over to the fallback title
-    instantly, instead of blocking the import on a long subprocess timeout."""
-    host = os.environ.get("PSC_GEMMA4_HOST", "127.0.0.1")
-    port = int(os.environ.get("PSC_GEMMA4_PORT", "8001"))
+def _gemma4_reachable(timeout: float = 1.0) -> bool:
+    """Fast TCP pre-check on the gemma4 upstream so an unreachable backend fails over
+    to the fallback title instantly instead of blocking on a long subprocess timeout.
+
+    Targets the same upstream as scripts/claude-gemma4-proxy (the real backend behind
+    the local proxy), not the proxy port — the wrapper starts the proxy on demand, so
+    only the upstream reliably reflects whether a title can actually be generated.
+    """
+    upstream = os.environ.get("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", "http://192.168.199.199:8001")
+    parsed = urllib.parse.urlsplit(upstream)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True

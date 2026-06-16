@@ -87,3 +87,18 @@ def test_apply_does_not_cache_fallback(tmp_path):
     title.apply(dict(sess), memory_root=tmp_path, runner=runner)
     assert s1["title_source"] == "fallback"
     assert len(calls) == 2  # fallback not cached → re-attempted (補生 when gemma4 returns)
+
+
+def test_gemma4_reachable_targets_upstream_url(monkeypatch):
+    import paulshaclaw.memory.importer.title as t
+
+    seen = {}
+
+    def fake_conn(addr, timeout):
+        seen["addr"] = addr
+        raise OSError("refused")
+
+    monkeypatch.setenv("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", "http://10.0.0.5:9001")
+    monkeypatch.setattr(t.socket, "create_connection", fake_conn)
+    assert t._gemma4_reachable() is False
+    assert seen["addr"] == ("10.0.0.5", 9001)  # checks upstream host:port, not localhost:8001
