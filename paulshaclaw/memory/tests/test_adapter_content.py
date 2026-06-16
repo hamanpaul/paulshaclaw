@@ -1,5 +1,9 @@
+import json
 from pathlib import Path
 from paulshaclaw.memory.importer.adapters import base
+from paulshaclaw.memory.importer.adapters import claude as claude_adapter
+from paulshaclaw.memory.importer.adapters import codex as codex_adapter
+from paulshaclaw.memory.importer.adapters import copilot as copilot_adapter
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -31,3 +35,38 @@ def test_read_codex_rollout_extracts_prompts_only():
     # assistant summary comes from the queue payload's last_assistant_message,
     # not from the rollout file — read_codex_rollout returns prompts only.
     assert "assistant_summary" not in out
+
+
+def test_claude_adapter_enriches_from_transcript(tmp_path):
+    payload = {"tool": "claude-code", "session_id": "s1", "cwd": "/repo",
+               "transcript_path": str(FIX / "claude_transcript.jsonl")}
+    qp = tmp_path / "q.json"
+    qp.write_text(json.dumps(payload), encoding="utf-8")
+    result = claude_adapter.extract(qp)
+    assert result.session["user_prompts"] == ["幫我修 UART 升級流程"]
+    assert result.session["touched_files"] == ["/repo/uart.py"]
+    assert result.session["assistant_summary"] == "已修好 UART 升級流程並加上重試。"
+
+
+def test_codex_adapter_uses_last_assistant_message_and_rollout_prompts(tmp_path):
+    payload = {"tool": "codex", "session_id": "cdx1", "cwd": "/repo",
+               "last_assistant_message": "已完成 codex 任務摘要。",
+               "transcript_path": str(FIX / "codex_rollout.jsonl")}
+    qp = tmp_path / "q.json"
+    qp.write_text(json.dumps(payload), encoding="utf-8")
+    result = codex_adapter.extract(qp)
+    assert result.session["assistant_summary"] == "已完成 codex 任務摘要。"
+    assert result.session["user_prompts"] == ["請幫我產生 codex 範例"]
+
+
+def test_copilot_adapter_enriches_from_history(tmp_path):
+    hist = tmp_path / ".copilot" / "history-session-state"
+    hist.mkdir(parents=True)
+    (hist / "session_cop-1_9.json").write_text((FIX / "copilot_history.json").read_text(), encoding="utf-8")
+    payload = {"tool": "copilot-cli", "sessionId": "cop-1", "cwd": "/repo",
+               "psc_config_root": str(tmp_path)}
+    qp = tmp_path / "q.json"
+    qp.write_text(json.dumps(payload), encoding="utf-8")
+    result = copilot_adapter.extract(qp)
+    assert result.session["user_prompts"] == ["列出 PON HLAPI"]
+    assert result.session["assistant_summary"] == "已整理 PON HLAPI 對照表。"
