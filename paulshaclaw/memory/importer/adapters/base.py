@@ -198,16 +198,13 @@ def read_codex_rollout(path: str | Path) -> dict[str, Any]:
     """Best-effort: extract user message text from a codex rollout .jsonl.
     Codex stores turns as 'response_item' records; user turns carry role=='user'
     with a content list of {type:'input_text'|'text', text:str}. Missing/unknown
-    shape yields empty prompts (graceful — title still comes from last_assistant_message).
-
-    Returns a dict with keys: user_prompts (list[str]) and assistant_summary (str)
-    where assistant_summary is read from a top-level 'last_assistant_message' if present.
+    shape yields empty prompts (graceful). The assistant summary is NOT read here —
+    it comes from the queue payload's 'last_assistant_message' via extract_assistant_summary.
     """
     p = Path(path)
     if not p.exists():
-        return {"user_prompts": [], "assistant_summary": ""}
+        return {"user_prompts": []}
     prompts: list[str] = []
-    assistant_summary = ""
     for line in p.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -215,13 +212,8 @@ def read_codex_rollout(path: str | Path) -> dict[str, Any]:
             d = json.loads(line)
         except json.JSONDecodeError:
             continue
-        # prefer explicit last_assistant_message at top-level
-        if isinstance(d, dict) and isinstance(d.get("last_assistant_message"), str):
-            assistant_summary = d.get("last_assistant_message")
         payload = d.get("payload") if isinstance(d.get("payload"), dict) else d
-        if not isinstance(payload, dict):
-            continue
-        if payload.get("role") != "user":
+        if not isinstance(payload, dict) or payload.get("role") != "user":
             continue
         content = payload.get("content")
         if isinstance(content, str) and content.strip():
@@ -230,10 +222,5 @@ def read_codex_rollout(path: str | Path) -> dict[str, Any]:
             for block in content:
                 if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
                     prompts.append(block["text"])
-    return {"user_prompts": prompts, "assistant_summary": assistant_summary}
-
-
-# back-compat: include common alternate history keys
-# include 'chatMessages' for Copilot and 'last_assistant_message' as assistant alias
-# minimal changes to existing helpers below
+    return {"user_prompts": prompts}
 

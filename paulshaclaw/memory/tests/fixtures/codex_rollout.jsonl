@@ -1,1 +1,1 @@
-{"payload":{"role":"user","content":[{"type":"input_text","text":"請幫我產生 codex 範例"}]},"last_assistant_message":"已建立 codex 回顧摘要。"}
+{"timestamp":"2026-01-01T00:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"請幫我產生 codex 範例"}]}}

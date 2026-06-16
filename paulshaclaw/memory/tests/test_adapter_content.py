@@ -25,7 +25,9 @@ def test_read_copilot_history_extracts_from_chatmessages(tmp_path):
     assert out["assistant_summary"] == "已整理 PON HLAPI 對照表。"
 
 
-def test_read_codex_rollout_extracts_prompts_and_summary():
+def test_read_codex_rollout_extracts_prompts_only():
     out = base.read_codex_rollout(FIX / "codex_rollout.jsonl")
     assert out["user_prompts"] == ["請幫我產生 codex 範例"]
-    assert out["assistant_summary"] == "已建立 codex 回顧摘要。"
+    # assistant summary comes from the queue payload's last_assistant_message,
+    # not from the rollout file — read_codex_rollout returns prompts only.
+    assert "assistant_summary" not in out
