@@ -54,7 +54,8 @@ def string_list(value: Any) -> list[str]:
 
 
 def history_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    for key in ("history", "turns", "messages"):
+    # include common variants and Copilot 'chatMessages'
+    for key in ("history", "turns", "messages", "chatMessages"):
         value = payload.get(key)
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
@@ -91,15 +92,16 @@ def extract_turn_count(payload: dict[str, Any], prompts: list[str]) -> int:
 
 
 def extract_assistant_summary(payload: dict[str, Any]) -> str:
-    for key in ("assistant_summary", "summary"):
+    # check common keys and Copilot/Codex aliases
+    for key in ("assistant_summary", "summary", "last_assistant_message"):
         value = payload.get(key)
-        if isinstance(value, str):
+        if isinstance(value, str) and value:
             return value[:2000]
     for item in history_items(payload):
         if item.get("role") != "assistant":
             continue
         content = item.get("content") or item.get("text")
-        if isinstance(content, str):
+        if isinstance(content, str) and content:
             return content[:2000]
     return ""
 
@@ -131,3 +133,107 @@ def build_session(
     }
     capture_scope = string_or_empty(payload.get("capture_scope")) or default_capture_scope
     return AdapterResult(session=session, capture_scope=capture_scope, raw_payload=payload)
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    return [x for x in items if not (x in seen or seen.add(x))]
+
+
+def read_claude_transcript(path: str | Path) -> dict[str, Any]:
+    p = Path(path)
+    empty = {"user_prompts": [], "assistant_summary": "", "touched_files": []}
+    if not p.exists():
+        return empty
+    prompts: list[str] = []
+    touched: list[str] = []
+    last_assistant = ""
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        kind = d.get("type")
+        message = d.get("message") if isinstance(d.get("message"), dict) else {}
+        content = message.get("content")
+        if kind == "user" and isinstance(content, str) and content.strip():
+            prompts.append(content)
+        elif kind == "assistant" and isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"].strip():
+                    last_assistant = block["text"]
+                elif block.get("type") == "tool_use" and block.get("name") in ("Write", "Edit"):
+                    fp = (block.get("input") or {}).get("file_path")
+                    if isinstance(fp, str) and fp:
+                        touched.append(fp)
+    return {"user_prompts": prompts, "assistant_summary": last_assistant, "touched_files": _dedupe(touched)}
+
+
+def read_copilot_history(config_root: str | Path, session_id: str) -> dict[str, Any]:
+    base_dir = Path(config_root) / ".copilot" / "history-session-state"
+    matches = sorted(base_dir.glob(f"session_{session_id}_*.json")) if base_dir.is_dir() else []
+    if not matches:
+        return {"user_prompts": [], "assistant_summary": ""}
+    try:
+        data = json.loads(matches[-1].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"user_prompts": [], "assistant_summary": ""}
+    prompts: list[str] = []
+    last_assistant = ""
+    for m in data.get("chatMessages", []) if isinstance(data, dict) else []:
+        if not isinstance(m, dict) or not isinstance(m.get("content"), str):
+            continue
+        if m.get("role") == "user":
+            prompts.append(m["content"])
+        elif m.get("role") == "assistant":
+            last_assistant = m["content"]
+    return {"user_prompts": prompts, "assistant_summary": last_assistant}
+
+
+def read_codex_rollout(path: str | Path) -> dict[str, Any]:
+    """Best-effort: extract user message text from a codex rollout .jsonl.
+    Codex stores turns as 'response_item' records; user turns carry role=='user'
+    with a content list of {type:'input_text'|'text', text:str}. Missing/unknown
+    shape yields empty prompts (graceful — title still comes from last_assistant_message).
+
+    Returns a dict with keys: user_prompts (list[str]) and assistant_summary (str)
+    where assistant_summary is read from a top-level 'last_assistant_message' if present.
+    """
+    p = Path(path)
+    if not p.exists():
+        return {"user_prompts": [], "assistant_summary": ""}
+    prompts: list[str] = []
+    assistant_summary = ""
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        # prefer explicit last_assistant_message at top-level
+        if isinstance(d, dict) and isinstance(d.get("last_assistant_message"), str):
+            assistant_summary = d.get("last_assistant_message")
+        payload = d.get("payload") if isinstance(d.get("payload"), dict) else d
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("role") != "user":
+            continue
+        content = payload.get("content")
+        if isinstance(content, str) and content.strip():
+            prompts.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
+                    prompts.append(block["text"])
+    return {"user_prompts": prompts, "assistant_summary": assistant_summary}
+
+
+# back-compat: include common alternate history keys
+# include 'chatMessages' for Copilot and 'last_assistant_message' as assistant alias
+# minimal changes to existing helpers below
+

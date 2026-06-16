@@ -1,0 +1,10 @@
+
+root@prplOS:/# 
+root@prplOS:/# 
+root@prplOS:/# 
+root@prplOS:/# firstboot -y;reboot -^C
+
+root@prplOS:/# ^C
+
+root@prplOS:/# 
+root@prplOS:/# 
