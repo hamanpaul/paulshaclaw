@@ -17,6 +17,17 @@ def _slice(root: Path, slice_id: str, project: str, title: str) -> None:
                     f"artifact_kind: research\ntitle: {title}\n---\n{body}", encoding="utf-8")
 
 
+def _slice_full(root: Path, slice_id: str, project: str, source_session: str,
+                session_title: str, atom_title: str) -> None:
+    path = root / "knowledge" / project / f"{atom_title}--{slice_id}.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"---\nslice_id: {slice_id}\nmemory_layer: knowledge\nproject: {project}\n"
+        f"artifact_kind: report\nsource_session: {source_session}\n"
+        f'session_title: "{session_title}"\natom_title: "{atom_title}"\n---\nbody {slice_id}\n',
+        encoding="utf-8")
+
+
 class MocBuilderTests(unittest.TestCase):
     def test_three_mocs_with_moc_layer(self):
         with TemporaryDirectory() as tmp:
@@ -26,12 +37,13 @@ class MocBuilderTests(unittest.TestCase):
             moc_builder.build_mocs(root, now="2026-06-03T00:00:00Z")
             project_moc = (root / "knowledge" / "prplos-core-moc.md").read_text(encoding="utf-8")
             self.assertIn("memory_layer: moc", project_moc)
-            self.assertIn("[[alpha--sl-1]]", project_moc)
+            # no session_title/atom_title → spine + atom both fall back to basename, nested
+            self.assertIn("  - [[alpha--sl-1|alpha--sl-1]]", project_moc)
             cs = (root / "knowledge" / "common-sense-moc.md").read_text(encoding="utf-8")
-            self.assertIn("[[rule-x--sl-2]]", cs)
+            self.assertIn("  - [[rule-x--sl-2|rule-x--sl-2]]", cs)
             wiki = (root / "knowledge" / "wiki-moc.md").read_text(encoding="utf-8")
             self.assertIn("## Active", wiki)
-            self.assertIn("[[alpha--sl-1]]", wiki)
+            self.assertIn("  - [[alpha--sl-1|alpha--sl-1]]", wiki)
 
     def test_faceout_lists_decayed_not_deleted(self):
         with TemporaryDirectory() as tmp:
@@ -51,6 +63,27 @@ class MocBuilderTests(unittest.TestCase):
             self.assertIn("## Faceout", wiki)
             self.assertIn("sl-1", wiki)
             self.assertTrue((root / "knowledge" / "p" / "alpha--sl-1.md").exists())  # not deleted
+
+
+class MocTwoLayerTests(unittest.TestCase):
+    def test_atoms_nested_under_session_title(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice_full(root, "sl-a1", "prplos-core", "claude:s1", "修正啟動鏈", "OOM 風險")
+            _slice_full(root, "sl-a2", "prplos-core", "claude:s1", "修正啟動鏈", "PYTHONPATH 修法")
+            moc_builder.build_mocs(root, now="2026-06-17T00:00:00Z")
+            moc = (root / "knowledge" / "prplos-core-moc.md").read_text(encoding="utf-8")
+            self.assertIn("- 修正啟動鏈", moc)
+            self.assertIn("  - [[OOM 風險--sl-a1|OOM 風險]]", moc)
+            self.assertIn("  - [[PYTHONPATH 修法--sl-a2|PYTHONPATH 修法]]", moc)
+
+    def test_missing_session_title_renders_without_crash(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, "sl-x", "p", "alpha")  # legacy helper: no session_title/atom_title
+            moc_builder.build_mocs(root, now="2026-06-17T00:00:00Z")
+            moc = (root / "knowledge" / "p-moc.md").read_text(encoding="utf-8")
+            self.assertIn("alpha--sl-x", moc)
 
 
 if __name__ == "__main__":
