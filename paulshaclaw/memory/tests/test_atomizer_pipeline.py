@@ -13,6 +13,7 @@ from paulshaclaw.memory.atomizer.agent_exec import FakeAgentClient
 from paulshaclaw.memory.atomizer.promoter import Promoter
 from paulshaclaw.memory.atomizer.splitter import Fragment
 from paulshaclaw.memory.ledger import processing, relations
+from paulshaclaw.memory.moc import frontmatter_io as fio
 
 _RAW = """---
 memory_layer: inbox
@@ -786,6 +787,94 @@ class PipelineTests(unittest.TestCase):
                 len(set(edge_triples)),
                 f"duplicate relation edges detected: {len(edge_triples)} total, {len(set(edge_triples))} unique",
             )
+
+
+_RAW_TITLED = """---
+memory_layer: inbox
+project: paulshaclaw
+source_agent: claude
+source_session: s1
+source_artifact: research
+captured_at: "2026-05-31T00:00:00Z"
+title: "修正啟動鏈"
+provenance:
+  repo: paulshaclaw
+  commit: c
+  path: docs/x.md
+---
+# Topic A
+alpha body
+# Topic B
+beta body
+"""
+
+
+def _seed_raw_titled(root: Path) -> Path:
+    raw = root / "inbox" / "research" / "claude" / "2026-05-31" / "s1.md"
+    raw.parent.mkdir(parents=True, exist_ok=True)
+    raw.write_text(_RAW_TITLED, encoding="utf-8")
+    return raw
+
+
+class LLMPromoteEndToEndTests(unittest.TestCase):
+    def test_llm_promote_persists_titles_in_frontmatter(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw_titled(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            skill_text = "TITLE-SKILL"
+            promoter = llm_promoter.LLMPromoter(
+                FakeAgentClient(
+                    '[{"title":"OOM 風險","artifact_kind":"report","project":"paulshaclaw",'
+                    '"tags":["oom"],"body":"distilled body","source_fragment_indices":[0,1],'
+                    '"relations":[]}]'
+                ),
+                skill_text=skill_text,
+                known_projects=["paulshaclaw"],
+                model="fake-llm",
+            )
+
+            result = pipeline.run(
+                root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z", promoter=promoter
+            )
+
+            self.assertEqual(result["summary"]["slices"], 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            written = list((root / "knowledge" / "paulshaclaw").rglob("*.md"))
+            self.assertEqual(len(written), 1)
+            fm, _ = fio.read(written[0].read_text(encoding="utf-8"))
+            self.assertEqual(fm["session_title"], "修正啟動鏈")
+            self.assertEqual(fm["atom_title"], "OOM 風險")
+            self.assertEqual(fm["distilled_from"], "claude:s1")
+
+            promoted_event = processing.read_events(root)[-1]
+            self.assertEqual(promoted_event["promoter"], "llm")
+            self.assertEqual(promoted_event["model"], "fake-llm")
+            self.assertEqual(
+                promoted_event["skill_hash"],
+                hashlib.sha256(skill_text.encode("utf-8")).hexdigest(),
+            )
+
+    def test_llm_promote_fail_closed_leaves_session_split_and_writes_no_slices(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw_titled(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            promoter = llm_promoter.LLMPromoter(
+                FakeAgentClient("not valid json at all"),
+                skill_text="BROKEN-SKILL",
+                known_projects=["paulshaclaw"],
+                model="fake-llm",
+            )
+
+            result = pipeline.run(
+                root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z", promoter=promoter
+            )
+
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
+            self.assertEqual(result["summary"]["slices"], 0)
+            self.assertTrue(any("left in split" in warning for warning in result["warnings"]))
 
 
 class ReimportOverwriteTests(unittest.TestCase):
