@@ -85,4 +85,5 @@ def test_build_mocs_writes_sanitized_per_project_moc_for_slash_project(tmp_path,
     moc_builder.build_mocs(tmp_path, "2026-06-16T00:00:00Z")  # must not raise
     names = {p.name for p in (tmp_path / "knowledge").glob("*-moc.md")}
     assert "github.com__owner__repo-moc.md" in names
-    assert not any("/" in p.name for p in (tmp_path / "knowledge").glob("*-moc.md"))
+    # the slash must not have leaked into a nested path like knowledge/github.com/...
+    assert not (tmp_path / "knowledge" / "github.com").exists()

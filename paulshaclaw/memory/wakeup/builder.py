@@ -73,6 +73,11 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     """
     memory_root = Path(memory_root)
 
+    # Normalize first so the on-disk path (sanitized) and the frontmatter comparison
+    # below both use the same value — otherwise a whitespace-padded project would read
+    # the right MOC but mismatch every slice's frontmatter and exclude them all.
+    project = (project or "").strip()
+
     # guard empty or unknown project
     if project in ("_unknown", ""):
         return ""
