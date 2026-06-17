@@ -73,18 +73,20 @@ def generate_title(
     """Return (title, source). source is 'gemma4' on success, 'fallback' otherwise."""
     prompts = session.get("user_prompts") or []
     first_prompt = prompts[0] if prompts else ""
+    summary = session.get("assistant_summary") or ""
+    if not first_prompt.strip() and not summary.strip():
+        # Nothing to title — don't feed the LLM an empty prompt; it answers with a
+        # complaint that would get stored as a junk title. Use a neutral marker.
+        return "(無內容)", "fallback"
     runner = runner or _default_runner
-    text = _PROMPT.format(
-        prompt=first_prompt[:500],
-        summary=(session.get("assistant_summary") or "")[:500],
-    )
+    text = _PROMPT.format(prompt=first_prompt[:500], summary=summary[:500])
     try:
         title = _truncate(runner(text, command, timeout))
         if title:
             return title, "gemma4"
     except Exception:
         pass
-    return _truncate(first_prompt), "fallback"
+    return _truncate(first_prompt) or _truncate(summary) or "(無內容)", "fallback"
 
 
 def _cache_path(memory_root: str | Path, session_id: str) -> Path:
