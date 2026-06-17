@@ -182,6 +182,25 @@ class AgentExecTests(unittest.TestCase):
 
         self.assertFalse(cache_path.exists())
 
+    def test_exec_client_env_override_passed_to_subprocess(self):
+        client = agent_exec.AgentExecClient(
+            [sys.executable, "-c",
+             "import os,sys; sys.stdin.read(); print(os.environ.get('CLAUDE_CODE_MAX_OUTPUT_TOKENS',''))"],
+            timeout=5,
+            env={"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192"},
+        )
+        self.assertEqual(client.run("x").strip(), "8192")
+
+    def test_exec_client_no_env_inherits_parent(self):
+        os.environ["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = "4242"
+        self.addCleanup(os.environ.pop, "CLAUDE_CODE_MAX_OUTPUT_TOKENS", None)
+        client = agent_exec.AgentExecClient(
+            [sys.executable, "-c",
+             "import os,sys; sys.stdin.read(); print(os.environ.get('CLAUDE_CODE_MAX_OUTPUT_TOKENS',''))"],
+            timeout=5,
+        )
+        self.assertEqual(client.run("x").strip(), "4242")
+
 
 if __name__ == "__main__":
     unittest.main()
