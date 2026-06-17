@@ -43,23 +43,34 @@ def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str, str, str
     return [c for c in candidates if c[0] in active]
 
 
-def _hierarchy_lines(rows: list[tuple]) -> list[str]:
-    """Group rows by source_session: session-title spine with nested atoms.
-    Row = (slice_id, project, basename, kind, source_session, session_title, atom_title)."""
-    by_session: dict[str, list[tuple]] = defaultdict(list)
-    order: list[str] = []
-    for row in sorted(rows, key=lambda r: (r[4], r[2])):
-        if row[4] not in by_session:
-            order.append(row[4])
-        by_session[row[4]].append(row)
+def _hierarchy_lines(
+    rows: list[tuple[str, str, str, str, str, str, str]], *, show_project: bool = False
+) -> list[str]:
+    """Group active slices by (project, source_session) into a session-title spine
+    with nested atoms. Row = (slice_id, project, basename, kind, source_session,
+    session_title, atom_title). basename embeds the unique slice_id, so the sort is stable."""
+    by_key: dict[tuple[str, str], list[tuple[str, str, str, str, str, str, str]]] = defaultdict(list)
+    order: list[tuple[str, str]] = []
+    for row in sorted(rows, key=lambda r: (r[1], r[4], r[2])):
+        key = (row[1], row[4])
+        if key not in by_key:
+            order.append(key)
+        by_key[key].append(row)
     lines: list[str] = []
-    for sess in order:
-        group = by_session[sess]
-        parent = group[0][5] or group[0][2]
+    for key in order:
+        group = by_key[key]
+        session_title = group[0][5]
+        if session_title:
+            parent = session_title
+        elif key[1]:           # has source_session but no title
+            parent = group[0][2]
+        else:                  # no session grouping at all
+            parent = "(未分組)"
         lines.append(f"- {parent}")
         for sid, project, basename, kind, ss, st, at in group:
             label = at or st or basename
-            lines.append(f"  - [[{alias_link(basename, label)}]] — {kind}")
+            suffix = f"{project} · {kind}" if show_project else kind
+            lines.append(f"  - [[{alias_link(basename, label)}]] — {suffix}")
     return lines
 
 
@@ -89,5 +100,5 @@ def build_mocs(memory_root: Path, now: str) -> None:
     cs = _hierarchy_lines([r for r in rows if r[1] == "common-sense"])
     _write_moc(knowledge / "common-sense-moc.md", "common-sense", now, "Common-sense MOC", cs)
 
-    active_lines = ["## Active", ""] + _hierarchy_lines(rows)
+    active_lines = ["## Active", ""] + _hierarchy_lines(rows, show_project=True)
     _write_moc(knowledge / "wiki-moc.md", "wiki", now, "Wiki MOC", active_lines)

@@ -83,7 +83,24 @@ class MocTwoLayerTests(unittest.TestCase):
             _slice(root, "sl-x", "p", "alpha")  # legacy helper: no session_title/atom_title
             moc_builder.build_mocs(root, now="2026-06-17T00:00:00Z")
             moc = (root / "knowledge" / "p-moc.md").read_text(encoding="utf-8")
+            # no source_session + no session_title → neutral (未分組) spine, link still present
+            self.assertIn("- (未分組)", moc)
             self.assertIn("alpha--sl-x", moc)
+
+    def test_wiki_keeps_project_attribution_and_no_cross_project_collapse(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # two slices in DIFFERENT projects sharing the same source_session
+            _slice_full(root, "sl-w1", "prplos-core", "claude:s1", "啟動鏈調查", "OOM 風險")
+            _slice_full(root, "sl-w2", "pwhm-core", "claude:s1", "FSM 追蹤", "FTA override")
+            moc_builder.build_mocs(root, now="2026-06-17T00:00:00Z")
+            wiki = (root / "knowledge" / "wiki-moc.md").read_text(encoding="utf-8")
+            # 1. project attribution preserved on atom child lines
+            self.assertIn("— prplos-core · report", wiki)
+            self.assertIn("— pwhm-core · report", wiki)
+            # 2. not collapsed under a single spine — both project session spines present
+            self.assertIn("- 啟動鏈調查", wiki)
+            self.assertIn("- FSM 追蹤", wiki)
 
 
 if __name__ == "__main__":
