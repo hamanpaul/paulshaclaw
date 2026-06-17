@@ -160,7 +160,7 @@ class BuildFromProposalTests(unittest.TestCase):
         rendered = slice_frontmatter.render(built)
         self.assertIn('tags: ["pwhm", "fsm"]', rendered)
         self.assertIn("source_fragments: [0, 1]", rendered)
-        self.assertNotIn("title:", rendered)
+        self.assertNotIn("\ntitle:", rendered)
 
     def test_legacy_build_leaves_runtime_title_unset(self):
         built = slice_frontmatter.build(_frag(), CFG)
@@ -225,6 +225,35 @@ class BuildFromProposalTests(unittest.TestCase):
         )
         parsed = parse_artifact_text(text)
         self.assertEqual(parsed.frontmatter["tags"], ["pwhm", "fsm"])
+
+
+class BuildFromProposalTitleTests(unittest.TestCase):
+    def _proposal(self) -> SliceProposal:
+        return SliceProposal(
+            title="atom one", artifact_kind="report", project="paulshaclaw",
+            tags=("t1",), body="distilled body", source_fragment_indices=(0,), relations=(),
+        )
+
+    def _meta(self) -> dict:
+        return {"source_agent": "claude", "source_session": "s1",
+                "captured_at": "2026-01-01T00:00:00Z", "provenance": {},
+                "session_title": "修正 X 啟動"}
+
+    def test_titles_persisted_to_frontmatter(self):
+        sl = slice_frontmatter.build_from_proposal(self._proposal(), self._meta())
+        self.assertEqual(sl.frontmatter["session_title"], "修正 X 啟動")
+        self.assertEqual(sl.frontmatter["atom_title"], "atom one")
+
+    def test_titles_rendered_quoted(self):
+        rendered = slice_frontmatter.render(
+            slice_frontmatter.build_from_proposal(self._proposal(), self._meta()))
+        self.assertIn('session_title: "修正 X 啟動"', rendered)
+        self.assertIn('atom_title: "atom one"', rendered)
+
+    def test_missing_session_title_defaults_empty(self):
+        meta = self._meta(); del meta["session_title"]
+        sl = slice_frontmatter.build_from_proposal(self._proposal(), meta)
+        self.assertEqual(sl.frontmatter["session_title"], "")
 
 
 if __name__ == "__main__":

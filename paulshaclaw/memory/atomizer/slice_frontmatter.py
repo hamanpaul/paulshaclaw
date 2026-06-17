@@ -18,7 +18,7 @@ _SCALAR_ORDER = (
     "phase", "project", "slice_id", "artifact_kind", "version", "created_at",
     "created_by", "source_session", "gate_required", "checksum",
     "memory_layer", "source_agent", "captured_at", "supersedes",
-    "distilled_from", "fragment_ref", "session_title", "tags", "source_fragments",
+    "distilled_from", "fragment_ref", "session_title", "atom_title", "tags", "source_fragments",
 )
 
 
@@ -104,6 +104,8 @@ def build_from_proposal(proposal: "SliceProposal", session_meta: dict[str, objec
         "provenance": dict(session_meta.get("provenance") or {}),
         "supersedes": [],
         "distilled_from": f"{agent}:{session}",
+        "session_title": str(session_meta.get("session_title", "")),
+        "atom_title": proposal.title,
         "tags": list(proposal.tags),
         "source_fragments": list(proposal.source_fragment_indices),
     }
@@ -141,7 +143,7 @@ def render(slice_: Slice) -> str:
     for key in _SCALAR_ORDER:
         if key not in fm:
             continue
-        if key == "session_title":
+        if key in ("session_title", "atom_title"):
             # free-text → always a quoted scalar so YAML indicator chars can't deform it
             lines.append(f"{key}: {json.dumps(str(fm[key]), ensure_ascii=False)}")
         else:
