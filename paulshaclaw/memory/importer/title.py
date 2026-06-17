@@ -86,7 +86,7 @@ def generate_title(
             return title, "gemma4"
     except Exception:
         pass
-    return _truncate(first_prompt) or "(無內容)", "fallback"
+    return _truncate(first_prompt) or _truncate(summary) or "(無內容)", "fallback"
 
 
 def _cache_path(memory_root: str | Path, session_id: str) -> Path:

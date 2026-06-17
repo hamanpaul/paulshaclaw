@@ -127,3 +127,15 @@ def test_generate_returns_neutral_marker_when_no_content():
     out, src = title.generate_title({"user_prompts": [], "assistant_summary": ""}, runner=boom)
     assert out == "(無內容)"
     assert src == "fallback"
+
+
+def test_generate_fallback_uses_summary_when_no_prompt(monkeypatch):
+    # Summary-only session whose LLM call fails must fall back to the summary,
+    # not be mislabeled "(無內容)".
+    out, src = title.generate_title(
+        {"user_prompts": [], "assistant_summary": "完成了 PON HLAPI 對照表整理"},
+        runner=lambda t, c, to: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+    assert src == "fallback"
+    assert out.startswith("完成了")
+    assert out != "(無內容)"
