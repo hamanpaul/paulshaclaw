@@ -24,7 +24,8 @@ def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str]]:
         if not sid:
             continue
         candidates.append((str(sid), str(fm.get("project", "_unknown")), path.stem,
-                           str(fm.get("artifact_kind", ""))))
+                           str(fm.get("artifact_kind", "")),
+                           str(fm.get("source_session", "")), str(fm.get("session_title", ""))))
     active = set(retrieval_set.active_records(memory_root, [c[0] for c in candidates]))
     return [c for c in candidates if c[0] in active]
 
@@ -49,11 +50,11 @@ def build_mocs(memory_root: Path, now: str) -> None:
     for project, items in by_project.items():
         if project == "common-sense":
             continue
-        lines = [f"- [[{basename}]] — {kind}" for _, _, basename, kind in sorted(items)]
+        lines = [f"- [[{basename}{('|' + st) if st else ''}]] — {kind}" for _, _, basename, kind, _, st in sorted(items)]
         _write_moc(knowledge / f"{sanitize_project_component(project)}-moc.md", "project", now, f"{project} MOC", lines, project)
 
-    cs = [f"- [[{b}]] — {k}" for sid, p, b, k in sorted(rows) if p == "common-sense"]
+    cs = [f"- [[{b}{('|' + st) if st else ''}]] — {k}" for sid, p, b, k, _, st in sorted(rows) if p == "common-sense"]
     _write_moc(knowledge / "common-sense-moc.md", "common-sense", now, "Common-sense MOC", cs)
 
-    active_lines = ["## Active", ""] + [f"- [[{b}]] — {p} · {k}" for sid, p, b, k in sorted(rows)]
+    active_lines = ["## Active", ""] + [f"- [[{b}{('|' + st) if st else ''}]] — {p} · {k}" for sid, p, b, k, _, st in sorted(rows)]
     _write_moc(knowledge / "wiki-moc.md", "wiki", now, "Wiki MOC", active_lines)

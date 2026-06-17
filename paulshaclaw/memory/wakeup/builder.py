@@ -120,6 +120,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                 {
                     "slice_id": str(sid),
                     "title": title,
+                    "session_title": str(fm.get("session_title", "")),
                     "file_stem": file_stem,
                     "path": path,
                     "body_bytes": body_bytes,
@@ -205,10 +206,12 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
             summary = s.get("title") or ""
         if s.get("truncated"):
             summary = f"{summary} {TRUNCATED_MARKER}".strip()
-        # recent line: use actual file stem for wikilink
+        # recent line: use actual file stem for wikilink, aliased to the session title
         stem = s.get("file_stem") or s.get("title") or ""
+        st = s.get("session_title") or ""
+        link = f"{stem}|{st}" if st else stem
         ts = s.get("last_event_ts") or ""
-        recent_lines.append(f"- {s['slice_id']} [[{stem}]] — {summary} ({ts})")
+        recent_lines.append(f"- {s['slice_id']} [[{link}]] — {summary} ({ts})")
 
     header = f"# Memory wake-up — {project}\n\n"
     map_header = "## Map\n\n"

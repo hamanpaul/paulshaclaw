@@ -17,6 +17,7 @@ class Fragment:
     provenance: dict[str, str]
     fragment_index: int
     body: str
+    session_title: str = ""
 
 
 def split(body: str, config: AtomizerConfig) -> list[str]:

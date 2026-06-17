@@ -18,7 +18,7 @@ _SCALAR_ORDER = (
     "phase", "project", "slice_id", "artifact_kind", "version", "created_at",
     "created_by", "source_session", "gate_required", "checksum",
     "memory_layer", "source_agent", "captured_at", "supersedes",
-    "distilled_from", "fragment_ref", "tags", "source_fragments",
+    "distilled_from", "fragment_ref", "session_title", "tags", "source_fragments",
 )
 
 
@@ -64,8 +64,9 @@ def build(fragment: Fragment, config: AtomizerConfig) -> Slice:
         # derivation
         "distilled_from": session_ref,
         "fragment_ref": fragment_ref,
+        "session_title": fragment.session_title,
     }
-    return Slice(slice_id=slice_id, frontmatter=frontmatter, body=body)
+    return Slice(slice_id=slice_id, frontmatter=frontmatter, body=body, title=fragment.session_title or None)
 
 
 def _phase_for_artifact_kind(artifact_kind: str) -> str:

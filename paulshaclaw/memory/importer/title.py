@@ -26,7 +26,11 @@ _PROMPT = (
 
 
 def _truncate(text: str, limit: int = _MAX) -> str:
-    return re.sub(r"\s+", " ", (text or "").strip())[:limit]
+    cleaned = re.sub(r"\s+", " ", (text or "").strip())
+    # Keep the title safe as an unquoted YAML scalar downstream (it is propagated into
+    # fragment/slice frontmatter as session_title, which is rendered without quoting).
+    cleaned = cleaned.replace(":", "：").replace("#", "＃")
+    return cleaned[:limit]
 
 
 def _gemma4_reachable(timeout: float = 1.0) -> bool:
