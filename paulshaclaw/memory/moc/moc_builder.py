@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
+from ..atomizer.config import sanitize_project_component
 from ..ledger import retrieval_set
 from . import frontmatter_io as fio
 
@@ -33,6 +34,7 @@ def _write_moc(path: Path, kind: str, now: str, header: str, lines: list[str], p
     if project is not None:
         fm.append(f"project: {project}")
     fm.append("---")
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(fm) + f"\n# {header}\n\n" + "\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -48,7 +50,7 @@ def build_mocs(memory_root: Path, now: str) -> None:
         if project == "common-sense":
             continue
         lines = [f"- [[{basename}]] — {kind}" for _, _, basename, kind in sorted(items)]
-        _write_moc(knowledge / f"{project}-moc.md", "project", now, f"{project} MOC", lines, project)
+        _write_moc(knowledge / f"{sanitize_project_component(project)}-moc.md", "project", now, f"{project} MOC", lines, project)
 
     cs = [f"- [[{b}]] — {k}" for sid, p, b, k in sorted(rows) if p == "common-sense"]
     _write_moc(knowledge / "common-sense-moc.md", "common-sense", now, "Common-sense MOC", cs)

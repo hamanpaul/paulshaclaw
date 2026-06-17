@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import List
 
+from ..atomizer.config import sanitize_project_component
 from ..ledger import lifecycle
 from ..ledger import retrieval_set
 from ..moc import frontmatter_io as fio
@@ -72,12 +73,21 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
     """
     memory_root = Path(memory_root)
 
+    # Normalize first so the on-disk path (sanitized) and the frontmatter comparison
+    # below both use the same value — otherwise a whitespace-padded project would read
+    # the right MOC but mismatch every slice's frontmatter and exclude them all.
+    project = (project or "").strip()
+
     # guard empty or unknown project
     if project in ("_unknown", ""):
         return ""
 
+    # project is rich metadata (may contain '/'); sanitize for the on-disk paths,
+    # matching where moc_builder/atomizer actually write per-project MOC and slices.
+    safe_project = sanitize_project_component(project)
+
     # Read MOC
-    moc_path = memory_root / _KNOWLEDGE_LAYER / f"{project}-moc.md"
+    moc_path = memory_root / _KNOWLEDGE_LAYER / f"{safe_project}-moc.md"
     moc_body = None
     if moc_path.exists():
         try:
@@ -87,7 +97,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
             moc_body = None
 
     # Discover candidate slice files under <knowledge-layer>/<project>
-    kdir = memory_root / _KNOWLEDGE_LAYER / project
+    kdir = memory_root / _KNOWLEDGE_LAYER / safe_project
     slices: List[dict] = []
     if kdir.exists():
         for path in sorted(kdir.rglob("*.md")):
