@@ -118,3 +118,12 @@ def test_gemma4_reachable_false_on_malformed_upstream(monkeypatch):
         monkeypatch.setenv("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", bad)
         assert t._gemma4_reachable() is False
     assert attempts["n"] == 0  # malformed URL never triggers a connection (no localhost probe)
+
+
+def test_generate_returns_neutral_marker_when_no_content():
+    def boom(text, cmd, timeout):
+        raise AssertionError("LLM must not be called for a content-less session")
+
+    out, src = title.generate_title({"user_prompts": [], "assistant_summary": ""}, runner=boom)
+    assert out == "(無內容)"
+    assert src == "fallback"

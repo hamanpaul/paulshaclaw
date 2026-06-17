@@ -308,7 +308,10 @@ def _read_fragment(path: Path) -> Fragment | None:
     project = str(data["project"])
     agent = str(data.get("source_agent", "_unknown"))
     session = str(data["source_session"])
-    if not all(is_safe_path_component(value) for value in (project, agent, session)):
+    # project is rich metadata (may contain '/', e.g. github.com/owner/repo) — it is
+    # sanitized to a path-safe component only where used as a directory. Only the
+    # agent/session, which ARE used directly as path components, must be path-safe.
+    if not all(is_safe_path_component(value) for value in (agent, session)):
         return None
     provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
     provenance = {k: str(provenance.get(k, "")) for k in ("repo", "commit", "path")}
