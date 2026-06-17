@@ -75,7 +75,7 @@ def test_build_mocs_writes_sanitized_per_project_moc_for_slash_project(tmp_path,
     kn.mkdir(parents=True)
     (kn / "summary--sl-abc.md").write_text(
         "---\nmemory_layer: knowledge\nslice_id: sl-abc\nproject: github.com/owner/repo\n"
-        "artifact_kind: report\n---\n## Summary\n內容\n",
+        "artifact_kind: report\nsource_session: sess1\nsession_title: 修復 UART\n---\n## Summary\n內容\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(
@@ -87,3 +87,24 @@ def test_build_mocs_writes_sanitized_per_project_moc_for_slash_project(tmp_path,
     assert "github.com__owner__repo-moc.md" in names
     # the slash must not have leaked into a nested path like knowledge/github.com/...
     assert not (tmp_path / "knowledge" / "github.com").exists()
+    # the session title surfaces as the wikilink alias (not the raw facet stem)
+    moc = (tmp_path / "knowledge" / "github.com__owner__repo-moc.md").read_text(encoding="utf-8")
+    assert "|修復 UART]]" in moc
+
+
+def test_session_title_propagates_to_knowledge_slices(tmp_path):
+    # The per-session gemma4 title (inbox frontmatter `title:`) must reach every
+    # knowledge slice as `session_title`, so MOC/wake-up can show it as the label.
+    inbox = tmp_path / "inbox" / "sessions" / "claude-code" / "2026-06-16"
+    inbox.mkdir(parents=True)
+    (inbox / "s1.md").write_text(
+        "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude-code\n"
+        "source_session: s1\ncaptured_at: 2026-06-16\ntitle: 修復 UART 升級流程\n---\n"
+        "## Summary\n修復 UART 升級流程\n\n## Prompts\n1. 修 UART\n",
+        encoding="utf-8",
+    )
+    cfg, config_hash = load_config()
+    apipe.run(tmp_path, config=cfg, config_hash=config_hash, now="2026-06-16T00:00:00Z")
+    slices = list((tmp_path / "knowledge").rglob("*.md"))
+    assert slices
+    assert all('session_title: "修復 UART 升級流程"' in p.read_text(encoding="utf-8") for p in slices)

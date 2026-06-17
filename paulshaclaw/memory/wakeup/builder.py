@@ -8,6 +8,7 @@ from ..atomizer.config import sanitize_project_component
 from ..ledger import lifecycle
 from ..ledger import retrieval_set
 from ..moc import frontmatter_io as fio
+from ..moc.moc_builder import alias_link
 
 # Memory layer name (factored out to avoid policy-consumer lint false positive)
 _KNOWLEDGE_LAYER = "knowledge"
@@ -120,6 +121,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                 {
                     "slice_id": str(sid),
                     "title": title,
+                    "session_title": str(fm.get("session_title", "")),
                     "file_stem": file_stem,
                     "path": path,
                     "body_bytes": body_bytes,
@@ -205,10 +207,12 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
             summary = s.get("title") or ""
         if s.get("truncated"):
             summary = f"{summary} {TRUNCATED_MARKER}".strip()
-        # recent line: use actual file stem for wikilink
+        # recent line: use actual file stem for wikilink, aliased to the session title
         stem = s.get("file_stem") or s.get("title") or ""
+        st = s.get("session_title") or ""
+        link = alias_link(stem, st)
         ts = s.get("last_event_ts") or ""
-        recent_lines.append(f"- {s['slice_id']} [[{stem}]] — {summary} ({ts})")
+        recent_lines.append(f"- {s['slice_id']} [[{link}]] — {summary} ({ts})")
 
     header = f"# Memory wake-up — {project}\n\n"
     map_header = "## Map\n\n"

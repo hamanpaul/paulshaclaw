@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -263,6 +264,7 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
         provenance = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
         provenance = {k: str(provenance.get(k, "")) for k in ("repo", "commit", "path")}
         source_artifact = str(data.get("source_artifact", "session"))
+        session_title = str(data.get("title", ""))
 
         bodies = splitter.split(body, config)
         if dry_run:
@@ -271,7 +273,8 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
                 fragments.append(Fragment(
                     project=project, source_agent=agent, source_session=session,
                     source_artifact=source_artifact, captured_at=captured_at,
-                    provenance=provenance, fragment_index=index, body=frag_body))
+                    provenance=provenance, fragment_index=index, body=frag_body,
+                    session_title=session_title))
             dry_run_fragments[session_key] = fragments
             count += 1
             continue
@@ -279,7 +282,7 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
             frag_path = (memory_root / "inbox" / "_slices" / project_path
                          / f"{agent}__{session}__{index:03d}.md")
             _atomic_write(frag_path, _render_fragment(
-                project, agent, session, source_artifact, captured_at, provenance, index, frag_body))
+                project, agent, session, source_artifact, captured_at, provenance, index, frag_body, session_title))
             relations.append_edge(memory_root, type="fragment_of",
                                   frm=f"fragment:{agent}__{session}__{index:03d}",
                                   to=f"session:{session_key}", now=now, config_hash=config_hash)
@@ -291,10 +294,11 @@ def _split_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now
     return count, dry_run_fragments
 
 
-def _render_fragment(project, agent, session, source_artifact, captured_at, provenance, index, body) -> str:
+def _render_fragment(project, agent, session, source_artifact, captured_at, provenance, index, body, session_title="") -> str:
     lines = ["---", "memory_layer: inbox", f"project: {project}",
              f"source_agent: {agent}", f"source_session: {session}",
              f"source_artifact: {source_artifact}", f"captured_at: {captured_at}",
+             f"session_title: {json.dumps(session_title, ensure_ascii=False)}",
              "provenance:", f"  repo: {provenance.get('repo', '')}",
              f"  commit: {provenance.get('commit', '')}", f"  path: {provenance.get('path', '')}",
              f"fragment_index: {index}", f"parent_session_ref: {agent}:{session}", "---"]
@@ -319,7 +323,8 @@ def _read_fragment(path: Path) -> Fragment | None:
                     source_session=session,
                     source_artifact=str(data.get("source_artifact", "session")),
                     captured_at=str(data.get("captured_at", "")), provenance=provenance,
-                    fragment_index=int(data.get("fragment_index", 0)), body=body)
+                    fragment_index=int(data.get("fragment_index", 0)), body=body,
+                    session_title=str(data.get("session_title", "")))
 
 
 def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now: str,
