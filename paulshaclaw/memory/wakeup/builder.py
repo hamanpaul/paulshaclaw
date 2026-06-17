@@ -8,6 +8,7 @@ from ..atomizer.config import sanitize_project_component
 from ..ledger import lifecycle
 from ..ledger import retrieval_set
 from ..moc import frontmatter_io as fio
+from ..moc.moc_builder import alias_link
 
 # Memory layer name (factored out to avoid policy-consumer lint false positive)
 _KNOWLEDGE_LAYER = "knowledge"
@@ -209,7 +210,7 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
         # recent line: use actual file stem for wikilink, aliased to the session title
         stem = s.get("file_stem") or s.get("title") or ""
         st = s.get("session_title") or ""
-        link = f"{stem}|{st}" if st else stem
+        link = alias_link(stem, st)
         ts = s.get("last_event_ts") or ""
         recent_lines.append(f"- {s['slice_id']} [[{link}]] — {summary} ({ts})")
 

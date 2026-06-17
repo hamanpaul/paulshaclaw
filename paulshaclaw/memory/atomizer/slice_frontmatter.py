@@ -141,7 +141,11 @@ def render(slice_: Slice) -> str:
     for key in _SCALAR_ORDER:
         if key not in fm:
             continue
-        lines.append(f"{key}: {_scalar(fm[key])}")
+        if key == "session_title":
+            # free-text → always a quoted scalar so YAML indicator chars can't deform it
+            lines.append(f"{key}: {json.dumps(str(fm[key]), ensure_ascii=False)}")
+        else:
+            lines.append(f"{key}: {_scalar(fm[key])}")
     provenance = fm.get("provenance") or {}
     if isinstance(provenance, dict):
         lines.append("provenance:")

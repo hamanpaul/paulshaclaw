@@ -9,13 +9,25 @@ from ..ledger import retrieval_set
 from . import frontmatter_io as fio
 
 
-def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str]]:
-    """Return (slice_id, project, basename, artifact_kind) for active knowledge slices."""
+def alias_link(stem: str, title: str) -> str:
+    """Render a wikilink target aliased to the session title when one is present.
+
+    The title is free text, so neutralize the two chars that would deform the
+    resulting ``[[stem|title]]``: ``|`` (splits target from alias) and ``]``
+    (closes the link). Converted to fullwidth so the label stays readable.
+    """
+    safe = (title or "").replace("|", "｜").replace("]", "］").strip()
+    return f"{stem}|{safe}" if safe else stem
+
+
+def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str, str, str]]:
+    """Return (slice_id, project, basename, artifact_kind, source_session, session_title)
+    for active knowledge slices."""
     knowledge = memory_root / "knowledge"
-    rows: list[tuple[str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str, str]] = []
     if not knowledge.exists():
         return rows
-    candidates: list[tuple[str, str, str, str]] = []
+    candidates: list[tuple[str, str, str, str, str, str]] = []
     for path in sorted(knowledge.rglob("*.md")):
         fm, _ = fio.read(path.read_text(encoding="utf-8"))
         if fm.get("memory_layer") != "knowledge":
@@ -43,18 +55,18 @@ def build_mocs(memory_root: Path, now: str) -> None:
     knowledge = memory_root / "knowledge"
     knowledge.mkdir(parents=True, exist_ok=True)
     rows = _active_slices(memory_root)
-    by_project: dict[str, list[tuple[str, str, str, str]]] = defaultdict(list)
+    by_project: dict[str, list[tuple[str, str, str, str, str, str]]] = defaultdict(list)
     for row in rows:
         by_project[row[1]].append(row)
 
     for project, items in by_project.items():
         if project == "common-sense":
             continue
-        lines = [f"- [[{basename}{('|' + st) if st else ''}]] — {kind}" for _, _, basename, kind, _, st in sorted(items)]
+        lines = [f"- [[{alias_link(basename, st)}]] — {kind}" for _, _, basename, kind, _, st in sorted(items)]
         _write_moc(knowledge / f"{sanitize_project_component(project)}-moc.md", "project", now, f"{project} MOC", lines, project)
 
-    cs = [f"- [[{b}{('|' + st) if st else ''}]] — {k}" for sid, p, b, k, _, st in sorted(rows) if p == "common-sense"]
+    cs = [f"- [[{alias_link(b, st)}]] — {k}" for sid, p, b, k, _, st in sorted(rows) if p == "common-sense"]
     _write_moc(knowledge / "common-sense-moc.md", "common-sense", now, "Common-sense MOC", cs)
 
-    active_lines = ["## Active", ""] + [f"- [[{b}{('|' + st) if st else ''}]] — {p} · {k}" for sid, p, b, k, _, st in sorted(rows)]
+    active_lines = ["## Active", ""] + [f"- [[{alias_link(b, st)}]] — {p} · {k}" for sid, p, b, k, _, st in sorted(rows)]
     _write_moc(knowledge / "wiki-moc.md", "wiki", now, "Wiki MOC", active_lines)

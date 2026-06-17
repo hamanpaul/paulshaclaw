@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
 from pathlib import Path
@@ -297,7 +298,7 @@ def _render_fragment(project, agent, session, source_artifact, captured_at, prov
     lines = ["---", "memory_layer: inbox", f"project: {project}",
              f"source_agent: {agent}", f"source_session: {session}",
              f"source_artifact: {source_artifact}", f"captured_at: {captured_at}",
-             f"session_title: {session_title}",
+             f"session_title: {json.dumps(session_title, ensure_ascii=False)}",
              "provenance:", f"  repo: {provenance.get('repo', '')}",
              f"  commit: {provenance.get('commit', '')}", f"  path: {provenance.get('path', '')}",
              f"fragment_index: {index}", f"parent_session_ref: {agent}:{session}", "---"]

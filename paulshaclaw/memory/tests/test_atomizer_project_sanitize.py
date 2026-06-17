@@ -107,4 +107,4 @@ def test_session_title_propagates_to_knowledge_slices(tmp_path):
     apipe.run(tmp_path, config=cfg, config_hash=config_hash, now="2026-06-16T00:00:00Z")
     slices = list((tmp_path / "knowledge").rglob("*.md"))
     assert slices
-    assert all("session_title: 修復 UART 升級流程" in p.read_text(encoding="utf-8") for p in slices)
+    assert all('session_title: "修復 UART 升級流程"' in p.read_text(encoding="utf-8") for p in slices)
