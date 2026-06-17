@@ -124,6 +124,16 @@ class AtomizeCliLlmTests(unittest.TestCase):
 
             self.assertEqual(cache_dir, root / "runtime" / "cache" / "atomize")
 
+    def test_build_promoter_llm_sets_output_token_env(self):
+        import argparse
+        from pathlib import Path
+        from paulshaclaw.memory.atomizer import cli, config as cfgmod
+        cfg, _ = cfgmod.load_config()
+        args = argparse.Namespace(promoter="llm", agent_command=None)
+        promoter = cli._build_promoter(args, cfg, Path("/tmp/does-not-matter"))
+        inner = promoter._agent._inner
+        self.assertEqual(inner._env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], str(cfg.agent_exec_max_output_tokens))
+
 
 if __name__ == "__main__":
     unittest.main()
