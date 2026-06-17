@@ -102,3 +102,19 @@ def test_gemma4_reachable_targets_upstream_url(monkeypatch):
     monkeypatch.setattr(t.socket, "create_connection", fake_conn)
     assert t._gemma4_reachable() is False
     assert seen["addr"] == ("10.0.0.5", 9001)  # checks upstream host:port, not localhost:8001
+
+
+def test_gemma4_reachable_false_on_malformed_upstream(monkeypatch):
+    import paulshaclaw.memory.importer.title as t
+
+    attempts = {"n": 0}
+
+    def fake_conn(addr, timeout):
+        attempts["n"] += 1
+        raise OSError("should not be called")
+
+    monkeypatch.setattr(t.socket, "create_connection", fake_conn)
+    for bad in ["192.168.199.199:8001", "not-a-url", "ftp://host:1", ""]:
+        monkeypatch.setenv("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", bad)
+        assert t._gemma4_reachable() is False
+    assert attempts["n"] == 0  # malformed URL never triggers a connection (no localhost probe)

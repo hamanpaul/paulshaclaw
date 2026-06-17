@@ -39,7 +39,11 @@ def _gemma4_reachable(timeout: float = 1.0) -> bool:
     """
     upstream = os.environ.get("PSC_CLAUDE_GEMMA4_UPSTREAM_URL", "http://192.168.199.199:8001")
     parsed = urllib.parse.urlsplit(upstream)
-    host = parsed.hostname or "127.0.0.1"
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        # Malformed upstream URL → treat as unreachable so we fall back, instead of
+        # accidentally probing localhost and then blocking on the subprocess timeout.
+        return False
+    host = parsed.hostname
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
         with socket.create_connection((host, port), timeout=timeout):
