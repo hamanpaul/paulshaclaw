@@ -26,6 +26,7 @@ agent_exec:
     - scripts/claude-gemma4
   timeout_seconds: 600
   model: gemma4-26b-a4b-nvfp4
+  max_output_tokens: 8192
 promoter: identity
 skill_path: skills/atomize-knowledge-slice.md
 known_projects_file: ~/.agents/config/projects.yaml

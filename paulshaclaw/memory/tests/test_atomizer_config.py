@@ -169,6 +169,31 @@ class AgentExecConfigTests(unittest.TestCase):
         self.assertTrue(Path(resolved[0]).is_absolute())
         self.assertTrue(resolved[0].endswith("/scripts/claude-gemma4"))
 
+    def test_max_output_tokens_default_and_in_hash(self):
+        import tempfile, pathlib
+        from paulshaclaw.memory.atomizer import config as cfgmod
+        base = "schema_version: 1\nsplit:\n  boundary_patterns:\n    - '^#'\n  max_fragment_chars: 8000\n"
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d)
+            (p / "atomizer.yaml").write_text(base, encoding="utf-8")
+            cfg_default, hash_default = cfgmod.load_config(default_dir=p, override_path=None)
+            self.assertEqual(cfg_default.agent_exec_max_output_tokens, 8192)
+            (p / "atomizer.yaml").write_text(base + "agent_exec:\n  max_output_tokens: 16384\n", encoding="utf-8")
+            cfg_big, hash_big = cfgmod.load_config(default_dir=p, override_path=None)
+            self.assertEqual(cfg_big.agent_exec_max_output_tokens, 16384)
+            self.assertNotEqual(hash_default, hash_big)
+
+    def test_max_output_tokens_rejects_non_positive(self):
+        import tempfile, pathlib
+        from paulshaclaw.memory.atomizer import config as cfgmod
+        base = ("schema_version: 1\nsplit:\n  boundary_patterns:\n    - '^#'\n"
+                "  max_fragment_chars: 8000\nagent_exec:\n  max_output_tokens: 0\n")
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d)
+            (p / "atomizer.yaml").write_text(base, encoding="utf-8")
+            with self.assertRaises(cfgmod.AtomizerConfigError):
+                cfgmod.load_config(default_dir=p, override_path=None)
+
 
 if __name__ == '__main__':
     unittest.main()
