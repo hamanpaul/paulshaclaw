@@ -65,7 +65,24 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
 
     base = resolve_base(env)
     head = resolve_head(env)
-    catalog = load_catalog()
+
+    # catalog 壞掉（缺 personas.yaml / YAML 壞 / schema 不過）→ 視為「不可驗證」：
+    # 印 verdict（ok=false + catalog_error）、shadow 仍恆放行。
+    # 註：import 期 contract.PERSONA_CATALOG 已 fail-closed 退空（見 contract._load_catalog_import_safe），
+    # 故 import 不會逃逸；此處再 guard 直接 load_catalog() 的 fail-closed 例外。
+    try:
+        catalog = load_catalog()
+    except (FileNotFoundError, ValueError) as exc:
+        verdict = {
+            "mode": "shadow",
+            "manifest": str(manifest),
+            "base": base,
+            "head": head,
+            "catalog_error": str(exc),
+            "ok": False,
+        }
+        print(json.dumps(verdict, ensure_ascii=False))
+        return 0  # shadow：catalog 壞掉仍乾淨放行，僅觀測/annotate
 
     # manifest 存在但壞掉 → 視為「存在但不可信」：印 verdict（ok=false）、shadow 放行。
     try:

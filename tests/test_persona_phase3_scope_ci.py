@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PERSONAS_YAML = REPO_ROOT / "paulshaclaw" / "persona" / "personas.yaml"
 
 
 def _valid_manifest(**overrides: object) -> dict[str, object]:
@@ -125,6 +131,60 @@ class OutOfScopeShadowTests(unittest.TestCase):
             self.assertEqual(code, 0)  # shadow 仍放行
             self.assertIn("diff_error", payload)
             self.assertFalse(payload["ok"])
+
+
+class CatalogErrorShadowTests(unittest.TestCase):
+    """壞掉的 personas.yaml 不得讓 shadow workflow 報錯（設計 §8 硬安全保證）。"""
+
+    def test_main_with_broken_catalog_emits_catalog_error_and_exit_zero(self) -> None:
+        from paulshaclaw.persona import loader, scope_ci
+
+        def _raise(path=None):
+            raise ValueError("persona catalog 解析失敗: broken")
+
+        original = loader.load_catalog
+        loader.load_catalog = _raise
+        # scope_ci 以 `from .loader import load_catalog` 綁定 → 須同步 patch 模組屬性
+        original_sc = scope_ci.load_catalog
+        scope_ci.load_catalog = _raise
+        self.addCleanup(setattr, loader, "load_catalog", original)
+        self.addCleanup(setattr, scope_ci, "load_catalog", original_sc)
+
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            _write_manifest(repo)  # manifest 存在，但 catalog 壞掉
+            code, payload = _run(repo, {"GITHUB_BASE_REF": "main"})
+            self.assertEqual(code, 0)  # shadow 恆 0，即使 catalog 壞掉
+            self.assertIn("catalog_error", payload)
+            self.assertTrue(payload["catalog_error"])
+            self.assertFalse(payload["ok"])
+
+    def test_subprocess_with_malformed_yaml_still_exits_zero(self) -> None:
+        """以真實 entry point (`python -m ...`) 驗 import-time 不報錯。
+
+        壞掉的 personas.yaml 在 import 期（__init__ → context → contract:174）
+        即 raise，早於 main() 的 guard；故須以 subprocess 還原真實 workflow 呼叫。
+        """
+        original = PERSONAS_YAML.read_text(encoding="utf-8")
+        self.addCleanup(PERSONAS_YAML.write_text, original, "utf-8")
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                # 故意寫入 schema-malformed YAML（builder 自己 write scope 內的常見人為錯誤）
+                PERSONAS_YAML.write_text("roles: [unclosed\n", encoding="utf-8")
+                proc = subprocess.run(
+                    [sys.executable, "-m", "paulshaclaw.persona.scope_ci", "--repo", d],
+                    capture_output=True,
+                    text=True,
+                    cwd=str(REPO_ROOT),
+                    env={**os.environ, "GITHUB_BASE_REF": "main"},
+                )
+        finally:
+            PERSONAS_YAML.write_text(original, encoding="utf-8")
+        self.assertEqual(
+            proc.returncode,
+            0,
+            msg=f"shadow entry point 必須恆 exit 0；stderr=\n{proc.stderr}",
+        )
 
 
 if __name__ == "__main__":
