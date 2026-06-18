@@ -43,6 +43,7 @@ def main(
     pane_sender: PaneSender | None = None,
     worktree_creator: WorktreeCreator | None = None,
     is_satisfied=None,
+    git_runner=None,
 ) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -83,7 +84,10 @@ def main(
                 return 0
             # fanout：reuse Phase 2 Dispatcher（注入或預設 seam）
             disp = Dispatcher(reg, sender, creator)
-            jobs = autonomy.dispatch_ready(metas, predicate, disp, persona=args.persona)
+            # git_runner 未注入 → 不傳（沿用 Dispatcher 預設真 git）；測試一律注入 fake
+            jobs = autonomy.dispatch_ready(
+                metas, predicate, disp, persona=args.persona, git_runner=git_runner
+            )
             print(json.dumps(jobs, ensure_ascii=False))
             return 0
         except ValueError as exc:        # 循環相依 → refuse

@@ -49,3 +49,10 @@
 - [ ] 8.1 `openspec validate persona-phase4-fanout-autonomy --strict` 通過
 - [ ] 8.2 `python -m unittest tests.test_persona_phase4_fanout_autonomy -v` 全綠
 - [ ] 8.3 全套件不回歸（同 7.3）
+
+## 9. 阻斷修正（code review 後 fail-safe 補強）
+
+- [x] 9.1 `test_dispatch_ready_with_real_dispatcher_fake_seams` 與 CLI `test_main_fanout_with_fakes` 皆注入 fake `git_runner`（經 `dispatch_ready(..., git_runner=)` / `main(..., git_runner=)` 透傳 Phase 2 既有 `Dispatcher.dispatch` seam），以 spy 斷言真 `git` 子行程零呼叫——兌現 spec「全程不啟動真 tmux／git／copilot」、不再耦合 repo branch 狀態。`dispatch_ready`／`cli.main` 新增可選 `git_runner` 參數（未注入時沿用 dispatcher 預設真 git，生產行為不變）
+- [x] 9.2 `detect_cycles` 抽 `_build_graph` 並偵測**重複 `slice_id`** → `raise ValueError('depends_on 偵測到重複 slice_id: <id>')`（先於 DFS）：避免後者覆寫前者邊而遮蔽真環，且避免下游對同一 `feature/<slice_id>` 重複派工
+- [x] 9.3 `ready_units` 新增 `slice_id` 為非空字串條件：無身分（`None`/空字串）單位 MUST NOT 就緒，杜絕 `dispatch_ready` 以 `task=None`／`feature/None` 派工
+- [x] 9.4 新增回歸測試（`CycleTests.test_duplicate_slice_id_refused` / `test_duplicate_slice_id_does_not_mask_cycle`、`ReadyTests.test_no_slice_id_not_ready`、`FanoutTests.test_dispatch_ready_no_slice_id_not_dispatched` / `test_dispatch_ready_refuses_duplicate_slice_id`）並更新 spec scenario；全套件不回歸（僅 2 個既知 stage11 textual 失敗）

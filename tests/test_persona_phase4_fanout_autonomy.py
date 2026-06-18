@@ -178,6 +178,28 @@ class CycleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ready_units(metas, is_satisfied=lambda _id: True)
 
+    def test_duplicate_slice_id_refused(self) -> None:
+        from paulshaclaw.coordinator.autonomy import detect_cycles, ready_units
+
+        # 重複 slice_id 本身 → 直接 refuse（身分不明確），不靜默以後者覆寫前者的邊
+        dup = [_meta("dupX", depends_on=[]), _meta("dupX", depends_on=[])]
+        with self.assertRaisesRegex(ValueError, "重複 slice_id"):
+            detect_cycles(dup)
+        with self.assertRaisesRegex(ValueError, "重複 slice_id"):
+            ready_units(dup, is_satisfied=lambda _id: True)
+
+    def test_duplicate_slice_id_does_not_mask_cycle(self) -> None:
+        from paulshaclaw.coordinator.autonomy import detect_cycles
+
+        # A->B, A->[], B->A：第二個 A 不得覆寫掉 A->B 而遮蔽 A<->B 真環
+        masking = [
+            _meta("A", depends_on=["B"]),
+            _meta("A", depends_on=[]),
+            _meta("B", depends_on=["A"]),
+        ]
+        with self.assertRaises(ValueError):  # 重複 slice_id 先擋下（亦不漏環）
+            detect_cycles(masking)
+
 
 # --------------------------------------------------------------------------- #
 # ReadyTests
@@ -207,6 +229,18 @@ class ReadyTests(unittest.TestCase):
         # upstream 滿足 → blocked 釋放；確定性序（沿 metas 順序：free 在前、blocked 在後）
         ready2 = ready_units(metas, is_satisfied=lambda _id: True)
         self.assertEqual([m["slice_id"] for m in ready2], ["free", "blocked"])
+
+    def test_no_slice_id_not_ready(self) -> None:
+        from paulshaclaw.coordinator.autonomy import ready_units
+
+        # auto + 有 plan 但 slice_id 缺（None/空字串）→ 無身分 → MUST NOT 就緒
+        metas = [
+            {"path": "/s/x.md", "dispatch": "auto", "slice_id": None,
+             "plan": "docs/p.md", "depends_on": []},
+            {"path": "/s/y.md", "dispatch": "auto", "slice_id": "",
+             "plan": "docs/p.md", "depends_on": []},
+        ]
+        self.assertEqual(ready_units(metas, is_satisfied=lambda _id: True), [])
 
     def test_default_is_satisfied_reads_gate_status(self) -> None:
         from paulshaclaw.coordinator.autonomy import default_is_satisfied
@@ -257,7 +291,32 @@ class FanoutTests(unittest.TestCase):
         self.assertNotIn("noplan", dispatched_tasks)
         self.assertNotIn("blocked", dispatched_tasks)
 
+    def test_dispatch_ready_no_slice_id_not_dispatched(self) -> None:
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+
+        # auto + plan 但無 slice_id → 不就緒 → 不得以 task=None 派工（branch feature/None）
+        metas = [
+            {"path": "/s/x.md", "dispatch": "auto", "slice_id": None,
+             "plan": "docs/p.md", "depends_on": []},
+        ]
+        fake = _FakeDispatcher()
+        jobs = dispatch_ready(metas, is_satisfied=lambda _id: True, dispatcher=fake)
+        self.assertEqual(jobs, [])
+        self.assertEqual(fake.calls, [])
+
+    def test_dispatch_ready_refuses_duplicate_slice_id(self) -> None:
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+
+        # 兩份 spec 誤用同一 slice_id → refuse（否則對同一 feature/<id> 重複派工）
+        dup = [_meta("dupX", depends_on=[]), _meta("dupX", depends_on=[])]
+        fake = _FakeDispatcher()
+        with self.assertRaisesRegex(ValueError, "重複 slice_id"):
+            dispatch_ready(dup, is_satisfied=lambda _id: True, dispatcher=fake)
+        self.assertEqual(fake.calls, [])  # refuse → 一筆都沒派
+
     def test_dispatch_ready_with_real_dispatcher_fake_seams(self) -> None:
+        import subprocess as _subprocess
+
         from paulshaclaw.coordinator.autonomy import dispatch_ready
         from paulshaclaw.coordinator.dispatcher import Dispatcher
         from paulshaclaw.coordinator.registry import JobRegistry
@@ -273,23 +332,53 @@ class FanoutTests(unittest.TestCase):
             def create(self, branch):
                 return f"/fake/wt/{branch.replace('/', '-')}"
 
+        class _FakeGitRunner:
+            """fake git_runner：記錄 rev-parse 呼叫、回固定 head；全程不啟動真 git。"""
+
+            def __init__(self):
+                self.calls = []
+
+            def __call__(self, args):
+                self.calls.append(list(args))
+                return "deadbeef"  # 固定 baseline head
+
+        # spy 真 subprocess.run：本測試全程不得對 git 起任何真子行程
+        real_calls: list = []
+        orig_run = _subprocess.run
+
+        def _spy_run(args, *a, **k):
+            if args and args[0] == "git":
+                real_calls.append(list(args))
+            return orig_run(args, *a, **k)
+
         with tempfile.TemporaryDirectory() as d:
             reg = JobRegistry(state_path=Path(d) / "jobs.json")
             sender = _FakeSender()
             disp = Dispatcher(reg, sender, _FakeWt())
+            git = _FakeGitRunner()
             metas = [_meta("real-a", depends_on=[]), _meta("real-b", depends_on=[])]
-            jobs = dispatch_ready(
-                metas,
-                is_satisfied=lambda _id: True,
-                dispatcher=disp,
-                # git_runner 取不到 head → dispatch_head=None（不碰真 git）
-            )
+            _subprocess.run = _spy_run
+            try:
+                jobs = dispatch_ready(
+                    metas,
+                    is_satisfied=lambda _id: True,
+                    dispatcher=disp,
+                    git_runner=git,  # 注入 fake git_runner → 不 fallback 到真 git
+                )
+            finally:
+                _subprocess.run = orig_run
             self.assertEqual(len(jobs), 2)
             self.assertEqual({j["status"] for j in jobs}, {"dispatched"})
             self.assertEqual(len(reg.list_jobs()), 2)
             # 各自一個 pane（fan-out 佔位 %0、%1...）
             self.assertEqual(len(sender.sent), 2)
             self.assertNotEqual(sender.sent[0][0], sender.sent[1][0])
+            # fake git_runner 被各單位呼叫一次（rev-parse feature/<slice>），真 git 零呼叫
+            self.assertEqual(
+                git.calls,
+                [["rev-parse", "feature/real-a"], ["rev-parse", "feature/real-b"]],
+            )
+            self.assertEqual(real_calls, [])  # 全程不啟動真 git
 
 
 # --------------------------------------------------------------------------- #
@@ -310,6 +399,8 @@ class CliTests(unittest.TestCase):
             self.assertEqual([m["slice_id"] for m in payload], ["r"])
 
     def test_main_fanout_with_fakes(self) -> None:
+        import subprocess as _subprocess
+
         from paulshaclaw.coordinator.cli import main
         from paulshaclaw.coordinator.registry import JobRegistry
 
@@ -324,25 +415,42 @@ class CliTests(unittest.TestCase):
             def create(self, branch):
                 return f"/fake/wt/{branch.replace('/', '-')}"
 
+        def _fake_git(args):  # fake git_runner：不啟動真 git
+            return "deadbeef"
+
+        real_calls: list = []
+        orig_run = _subprocess.run
+
+        def _spy_run(args, *a, **k):
+            if args and args[0] == "git":
+                real_calls.append(list(args))
+            return orig_run(args, *a, **k)
+
         with tempfile.TemporaryDirectory() as d:
             _write_spec(Path(d), "a.md", "dispatch: auto\nslice_id: fa\nplan: docs/p.md")
             _write_spec(Path(d), "b.md", "dispatch: auto\nslice_id: fb\nplan: docs/p.md\ndepends_on: [up]")
             reg = JobRegistry(state_path=Path(d) / "jobs.json")
             sender = _FakeSender()
             out = io.StringIO()
-            with contextlib.redirect_stdout(out):
-                rc = main(
-                    ["fanout", "--specs-dir", d],
-                    registry=reg,
-                    pane_sender=sender,
-                    worktree_creator=_FakeWt(),
-                    is_satisfied=lambda _id: True,  # up 滿足 → fa, fb 都就緒
-                )
+            _subprocess.run = _spy_run
+            try:
+                with contextlib.redirect_stdout(out):
+                    rc = main(
+                        ["fanout", "--specs-dir", d],
+                        registry=reg,
+                        pane_sender=sender,
+                        worktree_creator=_FakeWt(),
+                        is_satisfied=lambda _id: True,  # up 滿足 → fa, fb 都就緒
+                        git_runner=_fake_git,           # 注入 fake → 不碰真 git
+                    )
+            finally:
+                _subprocess.run = orig_run
             self.assertEqual(rc, 0)
             jobs = json.loads(out.getvalue())
             self.assertEqual(sorted(j["task"] for j in jobs), ["fa", "fb"])
             self.assertEqual(len(reg.list_jobs()), 2)
             self.assertEqual(len(sender.sent), 2)  # 不碰真 tmux/copilot
+            self.assertEqual(real_calls, [])        # 全程不啟動真 git
 
     def test_main_refuses_on_cycle(self) -> None:
         from paulshaclaw.coordinator.cli import main

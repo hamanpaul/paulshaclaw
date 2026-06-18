@@ -97,17 +97,34 @@ def scan_specs(specs_dir) -> list[dict]:
 # --------------------------------------------------------------------------- #
 # 3) detect_cycles（DAG 回邊偵測，refuse）
 # --------------------------------------------------------------------------- #
-def detect_cycles(metas: list[dict]) -> None:
-    """以 slice_id 為節點、depends_on 為有向邊偵測循環相依。
+def _build_graph(metas: list[dict]) -> dict[str, list[str]]:
+    """以 slice_id 為節點、depends_on 為有向邊建圖。
 
-    成環 → raise ValueError（帶 cycle path）。
-    指向不在 metas 的 slice_id 的邊不算環（外部/未掃到，交給 is_satisfied）。
+    重複 slice_id → raise ValueError（身分不明確的 DAG 直接拒絕，不靜默合併）。
+    兩份 spec 誤用同一 slice_id 是現實的 copy-paste 錯誤：若靜默以後者覆寫前者的
+    邊，會遮蔽真實的環；下游 fan-out 也會對同一 `feature/<slice_id>` 重複派工
+    （第二次 `git worktree add` 必失敗、且違反「一單位一 job」）。故 fail-safe 提前拒絕。
+    不含 slice_id（None/非字串）的 meta 不入圖（無身分，不可為相依目標）。
     """
     graph: dict[str, list[str]] = {}
     for m in metas:
         sid = m.get("slice_id")
-        if isinstance(sid, str):
-            graph[sid] = [d for d in m.get("depends_on", [])]
+        if not isinstance(sid, str):
+            continue
+        if sid in graph:
+            raise ValueError(f"depends_on 偵測到重複 slice_id: {sid}")
+        graph[sid] = [d for d in m.get("depends_on", [])]
+    return graph
+
+
+def detect_cycles(metas: list[dict]) -> None:
+    """以 slice_id 為節點、depends_on 為有向邊偵測循環相依。
+
+    成環 → raise ValueError（帶 cycle path）。
+    重複 slice_id → raise ValueError（先於 DFS，見 _build_graph）。
+    指向不在 metas 的 slice_id 的邊不算環（外部/未掃到，交給 is_satisfied）。
+    """
+    graph = _build_graph(metas)
 
     WHITE, GRAY, BLACK = 0, 1, 2
     color: dict[str, int] = {sid: WHITE for sid in graph}
@@ -136,14 +153,19 @@ def detect_cycles(metas: list[dict]) -> None:
 # 4) ready_units（三條件 + 先偵測環）
 # --------------------------------------------------------------------------- #
 def ready_units(metas: list[dict], is_satisfied: IsSatisfied) -> list[dict]:
-    """回就緒單位：dispatch=='auto' ∧ plan 非空 ∧ depends_on 全滿足。
+    """回就緒單位：有 slice_id ∧ dispatch=='auto' ∧ plan 非空 ∧ depends_on 全滿足。
 
-    MUST 先 detect_cycles（成環整批 raise，不回部分集）。
+    MUST 先 detect_cycles（成環/重複 slice_id 整批 raise，不回部分集）。
+    無 slice_id（None/非字串/空字串）的單位無身分——無法成為 depends_on 目標、
+    無法被追蹤或交接——依 fail-safe 立場 MUST NOT 就緒；此檢查也使 dispatch_ready
+    存取 m['slice_id'] / m['plan'] 必為合法非空字串。
     is_satisfied 為必注入參數（呼叫者決定判定來源）。確定性序（沿 metas 順序）。
     """
-    detect_cycles(metas)  # 先 refuse 環
+    detect_cycles(metas)  # 先 refuse 環/重複 slice_id
     ready: list[dict] = []
     for m in metas:
+        if not (isinstance(m.get("slice_id"), str) and m["slice_id"]):
+            continue
         if m.get("dispatch") != "auto":
             continue
         if not (isinstance(m.get("plan"), str) and m["plan"]):
@@ -182,22 +204,29 @@ def dispatch_ready(
     is_satisfied: IsSatisfied,
     dispatcher,
     persona: str = "builder",
+    git_runner=None,
 ) -> list[dict]:
     """算就緒集，對每單位經注入的 Phase 2 Dispatcher 各派一筆 job（reuse，不重寫派工）。
 
     一單位一 job；隔離靠 per-worktree/pane（Phase 2 性質），故並行安全。
     pane_id/command 為佔位（真實 pane 分配與 copilot prompt 拼裝屬 §5 ①，非本層）。
+    git_runner 為可選注入物：給定時透傳給 Dispatcher.dispatch（沿用 Phase 2 既有 seam），
+    讓測試以 fake git_runner 取代真 git（不啟動真 git）；未給定時不傳，沿用
+    dispatcher 自身預設（且相容不收 git_runner 的 fake dispatcher）。
     回 dispatched jobs。
     """
     ready = ready_units(metas, is_satisfied)
     jobs: list[dict] = []
     for i, m in enumerate(ready):
         slice_id = m["slice_id"]
-        job = dispatcher.dispatch(
-            task=slice_id,
-            persona=persona,
-            pane_id=f"%{i}",
-            command=f"# dispatch {slice_id} (plan={m['plan']})",
-        )
+        kwargs = {
+            "task": slice_id,
+            "persona": persona,
+            "pane_id": f"%{i}",
+            "command": f"# dispatch {slice_id} (plan={m['plan']})",
+        }
+        if git_runner is not None:
+            kwargs["git_runner"] = git_runner
+        job = dispatcher.dispatch(**kwargs)
         jobs.append(job)
     return jobs
