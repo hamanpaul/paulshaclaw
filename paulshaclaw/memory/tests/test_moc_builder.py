@@ -18,12 +18,13 @@ def _slice(root: Path, slice_id: str, project: str, title: str) -> None:
 
 
 def _slice_full(root: Path, slice_id: str, project: str, source_session: str,
-                session_title: str, atom_title: str) -> None:
+                session_title: str, atom_title: str, distilled_from: str = "") -> None:
     path = root / "knowledge" / project / f"{atom_title}--{slice_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
+    distilled_line = f"distilled_from: {distilled_from}\n" if distilled_from else ""
     path.write_text(
         f"---\nslice_id: {slice_id}\nmemory_layer: knowledge\nproject: {project}\n"
-        f"artifact_kind: report\nsource_session: {source_session}\n"
+        f"artifact_kind: report\nsource_session: {source_session}\n{distilled_line}"
         f'session_title: "{session_title}"\natom_title: "{atom_title}"\n---\nbody {slice_id}\n',
         encoding="utf-8")
 
@@ -101,6 +102,20 @@ class MocTwoLayerTests(unittest.TestCase):
             # 2. not collapsed under a single spine — both project session spines present
             self.assertIn("- 啟動鏈調查", wiki)
             self.assertIn("- FSM 追蹤", wiki)
+
+    def test_same_session_id_different_agents_do_not_collide(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # same project + same bare source_session id, but captured by different agents:
+            # distilled_from (agent:session) must keep them as separate spines.
+            _slice_full(root, "sl-c", "prplos-core", "s1", "claude 那次", "A",
+                        distilled_from="claude:s1")
+            _slice_full(root, "sl-x", "prplos-core", "s1", "codex 那次", "B",
+                        distilled_from="codex:s1")
+            moc_builder.build_mocs(root, now="2026-06-17T00:00:00Z")
+            moc = (root / "knowledge" / "prplos-core-moc.md").read_text(encoding="utf-8")
+            self.assertIn("- claude 那次", moc)
+            self.assertIn("- codex 那次", moc)
 
 
 if __name__ == "__main__":

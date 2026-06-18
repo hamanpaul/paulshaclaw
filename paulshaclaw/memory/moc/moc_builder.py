@@ -21,8 +21,10 @@ def alias_link(stem: str, title: str) -> str:
 
 
 def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str, str, str, str]]:
-    """Return (slice_id, project, basename, artifact_kind, source_session, session_title, atom_title)
-    for active knowledge slices."""
+    """Return (slice_id, project, basename, artifact_kind, session_key, session_title, atom_title)
+    for active knowledge slices. session_key is the agent-qualified ``distilled_from``
+    (``agent:session``) when present, else the bare ``source_session`` — grouping on it
+    avoids merging same-id sessions captured by different agents under one spine."""
     knowledge = memory_root / "knowledge"
     rows: list[tuple[str, str, str, str, str, str, str]] = []
     if not knowledge.exists():
@@ -35,9 +37,10 @@ def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str, str, str
         sid = fm.get("slice_id")
         if not sid:
             continue
+        session_key = str(fm.get("distilled_from", "")) or str(fm.get("source_session", ""))
         candidates.append((str(sid), str(fm.get("project", "_unknown")), path.stem,
                            str(fm.get("artifact_kind", "")),
-                           str(fm.get("source_session", "")), str(fm.get("session_title", "")),
+                           session_key, str(fm.get("session_title", "")),
                            str(fm.get("atom_title", ""))))
     active = set(retrieval_set.active_records(memory_root, [c[0] for c in candidates]))
     return [c for c in candidates if c[0] in active]
@@ -46,9 +49,11 @@ def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str, str, str
 def _hierarchy_lines(
     rows: list[tuple[str, str, str, str, str, str, str]], *, show_project: bool = False
 ) -> list[str]:
-    """Group active slices by (project, source_session) into a session-title spine
-    with nested atoms. Row = (slice_id, project, basename, kind, source_session,
-    session_title, atom_title). basename embeds the unique slice_id, so the sort is stable."""
+    """Group active slices by (project, session_key) into a session-title spine with
+    nested atoms. Row = (slice_id, project, basename, kind, session_key, session_title,
+    atom_title); session_key is agent-qualified (see _active_slices) so same-id sessions
+    from different agents do not collide. basename embeds the unique slice_id, so the sort
+    is stable."""
     by_key: dict[tuple[str, str], list[tuple[str, str, str, str, str, str, str]]] = defaultdict(list)
     order: list[tuple[str, str]] = []
     for row in sorted(rows, key=lambda r: (r[1], r[4], r[2])):
@@ -62,12 +67,12 @@ def _hierarchy_lines(
         session_title = group[0][5]
         if session_title:
             parent = session_title
-        elif key[1]:           # has source_session but no title
+        elif key[1]:           # has a session key but no title
             parent = group[0][2]
         else:                  # no session grouping at all
             parent = "(未分組)"
         lines.append(f"- {parent}")
-        for sid, project, basename, kind, ss, st, at in group:
+        for sid, project, basename, kind, sk, st, at in group:
             label = at or st or basename
             suffix = f"{project} · {kind}" if show_project else kind
             lines.append(f"  - [[{alias_link(basename, label)}]] — {suffix}")

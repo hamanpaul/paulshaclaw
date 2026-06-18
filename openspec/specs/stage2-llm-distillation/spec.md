@@ -45,13 +45,13 @@ Switching the dream loop to `promoter: llm` SHALL apply LLM distillation to newl
 
 ### Requirement: Two-layer MOC rendering of distilled atoms
 
-The MOC builder SHALL render a per-session title as the navigational spine with that session's distilled atoms nested beneath it, resolved via the `distilled_from` relation. Sessions without distilled atoms SHALL render as a title-only entry. Rendering MUST remain deterministic and MUST NOT fail on a mixed `identity`/`llm` knowledge layer.
+The MOC builder SHALL group a project's active knowledge slices by their agent-qualified session key (`distilled_from`, falling back to `source_session`) and render each session's per-session title as the navigational spine with that session's slices nested beneath it. A slice lacking a session title SHALL degrade to its basename label (or a neutral spine when no session key is present). Rendering MUST remain deterministic and MUST NOT fail on a mixed `identity`/`llm` knowledge layer. (Only active knowledge slices are enumerated; a session with no slice is not listed.)
 
 #### Scenario: Session with atoms renders hierarchically
 - **WHEN** the MOC builder renders a session that has distilled atoms
 - **THEN** the session title appears as the parent entry with its atoms listed beneath, linked by wikilink
 
-#### Scenario: Session without atoms renders title-only
-- **WHEN** the MOC builder renders a session that has no distilled atoms
-- **THEN** only the per-session title entry is rendered and no error occurs
+#### Scenario: Slice without a session title degrades without error
+- **WHEN** the MOC builder renders an active slice that has no session title
+- **THEN** it is rendered under its basename (or a neutral spine when no session key is present) and no error occurs
 
