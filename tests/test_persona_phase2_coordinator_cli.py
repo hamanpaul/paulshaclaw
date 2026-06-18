@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -205,6 +207,64 @@ class DispatcherTests(unittest.TestCase):
                           git_runner=lambda args: "samehead")
             updated = disp.poll_done("e-1", git_runner=lambda args: "samehead")
             self.assertEqual(updated["status"], "dispatched")
+
+
+class CliTests(unittest.TestCase):
+    def _fakes(self, tmp: Path):
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        reg = JobRegistry(state_path=tmp / "jobs.json")
+        return reg, FakePaneSender(), FakeWorktreeCreator()
+
+    def test_main_dispatch_with_fakes(self) -> None:
+        from paulshaclaw.coordinator import cli
+
+        with tempfile.TemporaryDirectory() as d:
+            reg, sender, creator = self._fakes(Path(d))
+            command = 'copilot --model gpt-5.4 --yolo -p "go"'
+            argv = ["dispatch", "--task", "slice-z", "--persona", "builder",
+                    "--pane", "%7", "--command", command]
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cli.main(argv, registry=reg, pane_sender=sender, worktree_creator=creator)
+            self.assertEqual(rc, 0)
+            # 送出的命令一字不差
+            self.assertEqual(sender.sent, [("%7", command)])
+            # registry 多一筆 job 且 stdout 為該 job 的 JSON
+            self.assertEqual(len(reg.list_jobs()), 1)
+            printed = json.loads(buf.getvalue())
+            self.assertEqual(printed["job_id"], "slice-z-1")
+            self.assertEqual(printed["pane"], "%7")
+
+    def test_main_jobs_and_stat(self) -> None:
+        from paulshaclaw.coordinator import cli
+
+        with tempfile.TemporaryDirectory() as d:
+            reg, sender, creator = self._fakes(Path(d))
+            cli.main(["dispatch", "--task", "j", "--persona", "builder",
+                      "--pane", "%1", "--command", "c"],
+                     registry=reg, pane_sender=sender, worktree_creator=creator)
+
+            # jobs：列出既有 job
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cli.main(["jobs"], registry=reg, pane_sender=sender, worktree_creator=creator)
+            self.assertEqual(rc, 0)
+            listed = json.loads(buf.getvalue())
+            self.assertEqual([j["job_id"] for j in listed], ["j-1"])
+
+            # stat：存在的 job 回 0
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cli.main(["stat", "j-1"], registry=reg, pane_sender=sender, worktree_creator=creator)
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(buf.getvalue())["job_id"], "j-1")
+
+            # stat：不存在的 job 回非零
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = cli.main(["stat", "nope-9"], registry=reg, pane_sender=sender, worktree_creator=creator)
+            self.assertNotEqual(rc, 0)
 
 
 if __name__ == "__main__":
