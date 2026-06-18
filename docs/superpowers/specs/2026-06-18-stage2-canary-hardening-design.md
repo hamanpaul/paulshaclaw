@@ -74,6 +74,21 @@ if remote:
 
 **session 只在以下才 fail-closed**：零 proposal 存活、輸出非 JSON 陣列、agent 報錯。
 
+> **實作補正（live 驗證揭露）**：promoter「unknown indices 取交集」若**交集為空**（gemma4 全部 index 越界），slice 仍需 ≥1 source fragment（`pipeline._referenced_fragments` 會 `KeyError`）→ 改為交集空時 **fallback 整個 session 的 valid set**，把 atom 歸屬整 session 而非丟棄。
+
+## Part C — atomize prompt session-project 軟 hint（repo code，TDD）
+
+**live 驗證揭露的第三個根因**：A1 把 `known_projects` 擴張到 11 個後，重跑 sample **仍 100% 歸 paulshaclaw**。`prompt.build_prompt` 只給 gemma4 `known_projects` 清單 + fragment 內文，**從不告知 session 已解析出的 project**（`fragment.project`，A1+A2 後已正確，如 MTK PON session = `OCP-0602`）→ gemma4 純靠內容猜、預設 paulshaclaw。
+
+修法：prompt 加一段 session-project 軟 hint（僅當該 project 在 known_projects 時）：「This session was captured in project: \<X\>. Prefer it for each slice unless the content clearly belongs to a different known project.」gemma4 預設歸該專案、內容明顯跨專案才改（保留 multi-project 拆分彈性）。
+
+## 7. Live 驗證結果
+
+A1+A2+B+C 後重跑 5-session live sample：
+- **A2**：`airoha-mcu-clean` → `airoha`、`ot-ti-mirror` → `ot-ti-mirror`（原洩漏 raw URL）。✓
+- **歸屬**：不再全 paulshaclaw——MTK PON session 正確產 OCP-0602 原子、codex session → custom-skills、其餘真 paulshaclaw 維持。✓
+- **fail-closed**：contract-violation（relation typo / 越界 index）已 salvage；剩餘 skip 是 gemma4 stochastic「no JSON array found」——**lenient 無法修**（沒 JSON 可救），屬 model 輸出層、需 retry 或 SkillOpt，列為已知殘留 floor。
+
 **可觀測性**：每筆 repair/drop **WARN log 進 `atomizer.log`**（類別 + proposal index + session_key，**不記原文**）。「no silent salvage」——丟了什麼要看得到。
 
 **契約變更**：這軟化了 Phase 2a `stage2-llm-distillation` 的「Fail-closed distillation」requirement（從 all-or-nothing 改為「整 session 只在空時 fail，個別問題 repair/drop」）。因 #98 spec 尚未進 main，本期以本設計文件 + PR 說明 + 測試為準，待 #98 merge 後再對齊 spec。
