@@ -31,6 +31,20 @@ class LoadCatalogTests(unittest.TestCase):
             {"paulshaclaw/**", "tests/**", "openspec/changes/archive/**"},
         )
 
+    def test_malformed_yaml_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "personas.yaml"
+            bad.write_text("roles: [unclosed\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_catalog(bad)
+
+    def test_missing_roles_key_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            bad = Path(d) / "personas.yaml"
+            bad.write_text("version: 1\n", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_catalog(bad)
+
 
 class RoleV2ScopeTests(unittest.TestCase):
     def setUp(self) -> None:

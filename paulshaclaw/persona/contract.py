@@ -82,6 +82,11 @@ def validate_persona_schema(
             if value in (None, ""):
                 errors.append(f"{role}: missing required field {field}")
 
+        for str_field in ("role", "version", "summary"):
+            value = record.get(str_field)
+            if value is not None and not isinstance(value, str):
+                errors.append(f"{role}: {str_field} must be a string")
+
         if record.get("role") != role:
             errors.append(f"{role}: role field must match catalog key")
 
