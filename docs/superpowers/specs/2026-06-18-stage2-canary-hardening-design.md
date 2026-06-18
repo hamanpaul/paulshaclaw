@@ -82,7 +82,7 @@ if remote:
 
 修法：prompt 加一段 session-project 軟 hint（僅當該 project 在 known_projects 時）：「This session was captured in project: \<X\>. Prefer it for each slice unless the content clearly belongs to a different known project.」gemma4 預設歸該專案、內容明顯跨專案才改（保留 multi-project 拆分彈性）。
 
-## 7. Live 驗證結果
+## 5. Live 驗證結果
 
 A1+A2+B+C 後重跑 5-session live sample：
 - **A2**：`airoha-mcu-clean` → `airoha`、`ot-ti-mirror` → `ot-ti-mirror`（原洩漏 raw URL）。✓
@@ -95,7 +95,7 @@ A1+A2+B+C 後重跑 5-session live sample：
 
 **測試（TDD）**：一份含「壞 relation + 越界 indices + 一個空 body proposal」的 LLM 輸出 → 斷言可救 atom 出來（edge 丟、indices 取交集、壞 proposal skip）、不 raise；另斷言「全壞 → 零 proposal → session fail-closed」仍成立。`FakeAgentClient` 確定性、CI 不碰真 gemma4。
 
-## 5. 順序與邊界
+## 6. 順序與邊界
 
 1. **A1 先**（`projects.yaml` 本機 config）。
 2. **A2 + B**（repo code，同一 PR、base `main`、疊在 #98 上、PR body 註明依賴）：resolver fallback 映射 + lenient 驗證，皆 TDD。
@@ -103,7 +103,7 @@ A1+A2+B+C 後重跑 5-session live sample：
 
 不開 openspec change（避免在未 merge 的 #98 spec 上做 MODIFIED delta 的混亂）；spec 對齊待 #98 進 main 後處理。本期以本設計文件 + PR 說明 + 測試為準。
 
-## 6. 風險
+## 7. 風險
 
 - Part A：分桶是使用者個人 taxonomy；以「交付 repo 為主桶」對齊使用者意圖，noise 明確排除。可逆（config）。
 - Part B：軟化 fail-closed 可能讓「品質差但格式合法」的 atom 落地（原本會被連坐丟掉）——以「硬錯仍 drop proposal」+ WARN log 緩解，品質把關交 canary 人工判 + 未來 SkillOpt。
