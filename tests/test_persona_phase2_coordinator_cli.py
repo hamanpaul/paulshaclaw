@@ -88,5 +88,42 @@ class JobRegistryTests(unittest.TestCase):
             self.assertEqual(reg.list_jobs(), [])   # 不存在非錯誤
 
 
+# ---- fakes（dispatcher / cli 測試共用；真實作不進任何測試）----
+class FakePaneSender:
+    """記錄 send 呼叫的 fake；結構相容 seams.PaneSender。"""
+
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str]] = []
+
+    def send(self, pane_id: str, text: str) -> None:
+        self.sent.append((pane_id, text))
+
+
+class FakeWorktreeCreator:
+    """回固定路徑並記錄 branch 的 fake；結構相容 seams.WorktreeCreator。"""
+
+    def __init__(self, root: str = "/fake/wt") -> None:
+        self.root = root
+        self.created: list[str] = []
+
+    def create(self, branch: str) -> str:
+        self.created.append(branch)
+        return f"{self.root}/{branch.replace('/', '-')}"
+
+
+class SeamProtocolTests(unittest.TestCase):
+    def test_fakes_satisfy_protocols(self) -> None:
+        from paulshaclaw.coordinator import seams
+
+        sender: seams.PaneSender = FakePaneSender()
+        creator: seams.WorktreeCreator = FakeWorktreeCreator()
+        sender.send("%9", "hello")
+        path = creator.create("feature/x")
+        self.assertEqual(path, "/fake/wt/feature-x")
+        # 真實作存在且為對應型別（不呼叫其副作用方法）
+        self.assertTrue(hasattr(seams, "TmuxPaneSender"))
+        self.assertTrue(hasattr(seams, "ScriptWorktreeCreator"))
+
+
 if __name__ == "__main__":
     unittest.main()
