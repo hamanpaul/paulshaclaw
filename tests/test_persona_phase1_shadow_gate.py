@@ -174,6 +174,44 @@ class GateVerdictTests(unittest.TestCase):
             paths = gate.compute_changed_paths("main", "feature/x", repo=repo)
             self.assertEqual(paths, ["paulshaclaw/new.py"])
 
+    def test_non_ascii_path_no_false_violation(self) -> None:
+        # 回歸：core.quotepath 預設 true 會把 docs/正體.md 變成
+        # '"docs/\346\255\243\351\253\224.md"'，經 _normalize_path 後誤判越界。
+        # compute_changed_paths 必須回傳未跳脫的原始路徑，manager scope 下不得有 false violation。
+        from paulshaclaw.persona import gate
+        from paulshaclaw.persona.loader import load_catalog
+
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+            run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True,
+                                            capture_output=True, env={**__import__("os").environ, **env})
+            run("init", "-q", "-b", "main")
+            # 明確開 quotepath（模擬 git 預設），確保即使環境 config 已關仍能重現
+            run("config", "core.quotepath", "true")
+            (repo / "base.txt").write_text("x\n", encoding="utf-8")
+            run("add", "-A")
+            run("commit", "-q", "-m", "base")
+            run("checkout", "-q", "-b", "feature/x")
+            (repo / "docs").mkdir()
+            (repo / "docs" / "正體.md").write_text("zh\n", encoding="utf-8")
+            run("add", "-A")
+            run("commit", "-q", "-m", "feat")
+
+            paths = gate.compute_changed_paths("main", "feature/x", repo=repo)
+            self.assertEqual(paths, ["docs/正體.md"])
+
+            # manager scope 含 docs/** → 不得有 false violation
+            verdict = gate.build_verdict(
+                role="manager",
+                changed_paths=paths,
+                manifest_ok=True,
+                catalog=load_catalog(),
+            )
+            self.assertEqual(verdict["violations"], [])
+            self.assertTrue(verdict["ok"])
+
 
 class GateExitCodeTests(unittest.TestCase):
     def _patch_diff(self, gate_mod, paths: list[str]):
