@@ -28,59 +28,6 @@ class ValidationResult:
     errors: tuple[str, ...]
 
 
-PERSONA_CATALOG: dict[str, PersonaContract] = {
-    "manager": PersonaContract(
-        role="manager",
-        version="1.0.0",
-        summary="orchestrates lifecycle transitions and handoff routing",
-        allowed_phases=PHASES,
-        write_paths=(
-            "docs/**",
-            "runtime/lifecycle/**",
-            "lifecycle.yaml",
-        ),
-        allowed_tools=(
-            "coordinator.dispatch",
-            "coordinator.handoff",
-            "git status",
-            "python -m unittest",
-        ),
-    ),
-    "builder": PersonaContract(
-        role="builder",
-        version="1.0.0",
-        summary="implements approved build slices within bounded scope",
-        allowed_phases=("build",),
-        write_paths=(
-            "paulshaclaw/**",
-            "tests/**",
-        ),
-        allowed_tools=(
-            "python -m unittest",
-            "rg",
-            "sed",
-            "cat",
-            "apply_patch",
-        ),
-    ),
-    "reviewer": PersonaContract(
-        role="reviewer",
-        version="1.0.0",
-        summary="reviews artifacts and records verdicts without code edits",
-        allowed_phases=("review",),
-        write_paths=(
-            "reports/review/**",
-        ),
-        allowed_tools=(
-            "python -m unittest",
-            "rg",
-            "cat",
-            "review-helper",
-        ),
-    ),
-}
-
-
 _REQUIRED_PERSONA_FIELDS = (
     "role",
     "version",
@@ -215,3 +162,8 @@ def _is_iso8601(value: object) -> bool:
     except ValueError:
         return False
     return True
+
+
+from .loader import load_catalog  # noqa: E402  bottom-import 避免與 loader 循環相依
+
+PERSONA_CATALOG: dict[str, PersonaContract] = load_catalog()

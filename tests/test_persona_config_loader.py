@@ -25,6 +25,12 @@ class LoadCatalogTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_catalog(bad)
 
+    def test_contract_catalog_sourced_from_yaml(self) -> None:
+        self.assertEqual(
+            set(contract.PERSONA_CATALOG["builder"].write_paths),
+            {"paulshaclaw/**", "tests/**", "openspec/changes/archive/**"},
+        )
+
 
 class RoleV2ScopeTests(unittest.TestCase):
     def setUp(self) -> None:
