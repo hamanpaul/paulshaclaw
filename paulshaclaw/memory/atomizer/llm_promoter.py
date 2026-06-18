@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+from dataclasses import replace
 
 from . import llm_output, prompt, slice_frontmatter
 from .agent_exec import AgentClient, AgentExecError, CachingAgentClient
@@ -9,6 +11,8 @@ from .config import AtomizerConfig, is_safe_path_component
 from .promoter import Promoter
 from .slice_frontmatter import Slice
 from .splitter import Fragment
+
+_LOG = logging.getLogger("paulshaclaw.memory.atomizer")
 
 
 class PromoteError(Exception):
@@ -114,7 +118,14 @@ class LLMPromoter(Promoter):
         for proposal in proposals:
             unknown_indices = sorted(set(proposal.source_fragment_indices) - valid_fragment_indices)
             if unknown_indices:
-                raise PromoteError(f"llm promote failed: unknown source_fragment_indices {unknown_indices}")
+                # gemma4 does not reliably honour the fragment-index contract; drop the
+                # out-of-range references (lenient) instead of failing the whole session.
+                _LOG.warning(
+                    "atomize: dropped out-of-range source_fragment_indices %s for session %s:%s",
+                    unknown_indices, first.source_agent, first.source_session,
+                )
+                kept = tuple(i for i in proposal.source_fragment_indices if i in valid_fragment_indices)
+                proposal = replace(proposal, source_fragment_indices=kept)
             slice_ = slice_frontmatter.build_from_proposal(proposal, session_meta)
             errors = slice_frontmatter.validate(slice_.frontmatter, slice_.body)
             if errors:
