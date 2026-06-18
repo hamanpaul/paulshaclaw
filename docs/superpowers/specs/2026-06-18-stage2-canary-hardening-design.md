@@ -26,26 +26,40 @@ Phase 2a canary 翻開後，把 LLM promoter 拉去跑真 gemma4（隔離 `/tmp`
 - Phase 2b 全量回填——獨立、canary 判過關才動。
 - 改 splitter / ledger / pipeline 骨架。
 
-## 3. Part A — projects.yaml 登記（本機 config，無 PR）
+## 3. Part A — project 歸屬修正（config + 小 resolver fix）
 
-**性質**：`~/.agents/config/projects.yaml` 是本機 runtime config（非 repo code、本機個人筆記，不涉去識別化）。可直接編輯、可逆。
+**根因（讀 resolver + 實機 payload 確認）**：raw payload **不帶 `remote_url/remote/repo`（全 None）**，只有 `cwd`。`resolve_project` 流程：① root 前綴比對（最長贏）② remote 比對（需 `remote_url`，這裡沒有 → 跳過）③ git fallback：`git_toplevel(cwd)` 在 import 機跑出 repo 的 remote，但 **line 106 直接 `return` 原始 URL，不查 projects.yaml** → 這就是 corpus URL 形式的來源（Phase 1 memo 說的 whack-a-mole）。所以「登 remotes」單靠 config 不會生效；roots-only 又要逐子目錄列（脆）。
 
-**分桶原則**：交付 repo 為主桶（remote 比對，resolver remote 優先）、ref 工作區資料夾為輔桶（root 比對）。
+**修法 = config + 3 行 resolver fix**：
+
+### A1 — `projects.yaml` 登記（本機 config，可逆）
+交付 repo 用 `remotes`（靠 A2 的 fallback 映射，對所有子目錄 robust）；工作區資料夾用 slug-only（空 roots，靠 basename fallback 落乾淨名 + 進 known_projects）。
 
 | slug | 性質 | remotes（正規化形） | roots |
 |---|---|---|---|
-| `airoha` | 交付 repo | `vcs-sw2.arcadyan.com.tw/airoha/airoha_openwrt_feed` | `OCP-0602/airoha`, `OCP-0602/airoha-mcu-clean` |
-| `ot-ti-mirror` | 交付 repo | `vcs-sw2.arcadyan.com.tw/mcu/ti/ot-ti-mirror` | `MCU-Octopus/ot-ti-mirror`, `prj_arc/userspace/ot-ti-mirror` |
-| `mtk-pon-llapi` | 交付 repo（封存，留經驗） | `github.com/hamanpaul/mtk-pon-llapi` | `OCP-0602/mtk-pon-llapi-repo` |
-| `OCP-0602` | ref 工作區 | — | `/home/build20/OCP-0602` |
-| `MCU-Octopus` | ref 工作區 | — | `/home/build20/MCU-Octopus` |
+| `airoha` | 交付 repo | `vcs-sw2.arcadyan.com.tw/airoha/airoha_openwrt_feed` | `OCP-0602/airoha`（備援） |
+| `ot-ti-mirror` | 交付 repo | `vcs-sw2.arcadyan.com.tw/mcu/ti/ot-ti-mirror` | `prj_arc/userspace/ot-ti-mirror`（備援） |
+| `mtk-pon-llapi` | 交付 repo（封存留經驗） | `github.com/hamanpaul/mtk-pon-llapi` | `OCP-0602/mtk-pon-llapi-repo` |
+| `OCP-0602` | ref 工作區 | — | （空，靠 basename fallback） |
+| `MCU-Octopus` | ref 工作區 | — | （空，靠 basename fallback） |
 | `custom-skills` | repo | `github.com/hamanpaul/custom-skills` | `~/prj_pri/custom-skills` |
 | `testpilot` | repo | `github.com/hamanpaul/testpilot` | `~/prj_arc/testpilot` |
 | `paulsha-conventions` | repo | `github.com/hamanpaul/paulsha-conventions` | `~/prj_pri/paulsha-conventions` |
 
-外加：既有 `serialwrap` entry 補 remote `github.com/hamanpaul/serialwrap`（映 corpus 2 筆 URL 形式）。排除 noise（`paul_chen` home-dir、`.codex/memories`）。
+外加：既有 `serialwrap` entry 補 remote `github.com/hamanpaul/serialwrap`。排除 noise（`paul_chen` home-dir、`.codex/memories`）。**不登 OCP-0602/MCU-Octopus 的 roots**——否則 root 前綴會在 git fallback 前先把底下的 airoha 吞進 OCP-0602。
 
-**驗證**：套用後重跑剛才那組 5-session live sample，斷言 project 不再全是 paulshaclaw（airoha/OCP-0602 等正確出現）。
+### A2 — resolver git-fallback 映射 slug（repo code，TDD）
+`project_resolver.py` git fallback 算出 `remote` 後，**先查 projects.yaml remotes 映成 slug 再回**，查無才回原始 URL：
+```python
+if remote:
+    for project in loaded_projects.projects:
+        if any(normalize_remote(r) == remote for r in project.remotes):
+            return project.slug
+    return remote
+```
+這是 URL-form 洩漏的根因修正，讓 remote 登記對所有子目錄 robust。
+
+**驗證**：A1+A2 後重跑那組 5-session live sample，斷言 project 不再全是 paulshaclaw（airoha/OCP-0602/ot-ti-mirror 等正確出現）。
 
 ## 4. Part B — lenient LLM 驗證（repo code → PR）
 
@@ -68,10 +82,11 @@ Phase 2a canary 翻開後，把 LLM promoter 拉去跑真 gemma4（隔離 `/tmp`
 
 ## 5. 順序與邊界
 
-1. **Part A 先**（config edit）→ 重跑 live sample 驗證歸屬改善。
-2. **Part B 後**（pipeline：plan → TDD/subagent → code-review → PR，base `main`、疊在 #98 上、PR body 註明依賴）。
+1. **A1 先**（`projects.yaml` 本機 config）。
+2. **A2 + B**（repo code，同一 PR、base `main`、疊在 #98 上、PR body 註明依賴）：resolver fallback 映射 + lenient 驗證，皆 TDD。
+3. A1+A2 落地後**重跑 live sample 驗證**歸屬改善 + fail-closed 率下降。
 
-Part B 不開 openspec change（避免在未 merge 的 #98 spec 上做 MODIFIED delta 的混亂）；spec 對齊待 #98 進 main 後處理。
+不開 openspec change（避免在未 merge 的 #98 spec 上做 MODIFIED delta 的混亂）；spec 對齊待 #98 進 main 後處理。本期以本設計文件 + PR 說明 + 測試為準。
 
 ## 6. 風險
 
