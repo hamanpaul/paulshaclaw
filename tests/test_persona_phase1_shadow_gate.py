@@ -97,5 +97,112 @@ class RenderContractPromptTests(unittest.TestCase):
             render.render_contract_prompt("nope")
 
 
+def _write_manifest(tmp: Path) -> Path:
+    from paulshaclaw.persona import handoff
+
+    path = tmp / "runtime" / "handoff" / "persona-phase1-shadow-gate.json"
+    handoff.write_manifest(path, _valid_manifest())
+    return path
+
+
+class GateVerdictTests(unittest.TestCase):
+    def test_in_scope_ok(self) -> None:
+        from paulshaclaw.persona import gate
+        from paulshaclaw.persona.loader import load_catalog
+
+        catalog = load_catalog()
+        verdict = gate.build_verdict(
+            role="builder",
+            changed_paths=["paulshaclaw/persona/gate.py", "tests/test_x.py"],
+            manifest_ok=True,
+            catalog=catalog,
+        )
+        self.assertEqual(verdict["role"], "builder")
+        self.assertEqual(verdict["changed_paths"], ["paulshaclaw/persona/gate.py", "tests/test_x.py"])
+        self.assertEqual(verdict["violations"], [])
+        self.assertTrue(verdict["handoff_ok"])
+        self.assertTrue(verdict["ok"])
+
+    def test_out_of_scope_violation(self) -> None:
+        from paulshaclaw.persona import gate
+        from paulshaclaw.persona.loader import load_catalog
+
+        catalog = load_catalog()
+        verdict = gate.build_verdict(
+            role="builder",
+            changed_paths=["paulshaclaw/persona/gate.py", "docs/secret.md"],
+            manifest_ok=True,
+            catalog=catalog,
+        )
+        self.assertFalse(verdict["ok"])
+        offending = [v["path"] for v in verdict["violations"]]
+        self.assertIn("docs/secret.md", offending)
+        for v in verdict["violations"]:
+            self.assertTrue(v["reason"])  # 帶可審計原因
+
+    def test_manifest_not_ok_makes_verdict_fail(self) -> None:
+        from paulshaclaw.persona import gate
+        from paulshaclaw.persona.loader import load_catalog
+
+        verdict = gate.build_verdict(
+            role="builder",
+            changed_paths=["paulshaclaw/persona/gate.py"],
+            manifest_ok=False,
+            catalog=load_catalog(),
+        )
+        self.assertFalse(verdict["handoff_ok"])
+        self.assertFalse(verdict["ok"])
+
+    def test_compute_changed_paths_real_git(self) -> None:
+        from paulshaclaw.persona import gate
+
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d)
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                   "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+            run = lambda *a: subprocess.run(["git", "-C", str(repo), *a], check=True,
+                                            capture_output=True, env={**__import__("os").environ, **env})
+            run("init", "-q", "-b", "main")
+            (repo / "base.txt").write_text("x\n", encoding="utf-8")
+            run("add", "-A")
+            run("commit", "-q", "-m", "base")
+            run("checkout", "-q", "-b", "feature/x")
+            (repo / "paulshaclaw").mkdir()
+            (repo / "paulshaclaw" / "new.py").write_text("y\n", encoding="utf-8")
+            run("add", "-A")
+            run("commit", "-q", "-m", "feat")
+            paths = gate.compute_changed_paths("main", "feature/x", repo=repo)
+            self.assertEqual(paths, ["paulshaclaw/new.py"])
+
+
+class GateExitCodeTests(unittest.TestCase):
+    def _patch_diff(self, gate_mod, paths: list[str]):
+        original = gate_mod.compute_changed_paths
+        gate_mod.compute_changed_paths = lambda base, head, repo=None: list(paths)
+        self.addCleanup(setattr, gate_mod, "compute_changed_paths", original)
+
+    def test_shadow_always_zero_enforce_one_on_violation(self) -> None:
+        from paulshaclaw.persona import gate
+
+        self._patch_diff(gate, ["docs/secret.md"])  # builder 越界
+        with tempfile.TemporaryDirectory() as d:
+            manifest = _write_manifest(Path(d))
+            argv = ["--role", "builder", "--base", "main",
+                    "--head", "feature/x", "--manifest", str(manifest)]
+            self.assertEqual(gate.main(argv), 0)              # shadow 恆 0
+            self.assertEqual(gate.main([*argv, "--enforce"]), 1)  # enforce 違規 → 1
+
+    def test_in_scope_zero_in_both_modes(self) -> None:
+        from paulshaclaw.persona import gate
+
+        self._patch_diff(gate, ["paulshaclaw/persona/gate.py"])  # in-scope
+        with tempfile.TemporaryDirectory() as d:
+            manifest = _write_manifest(Path(d))
+            argv = ["--role", "builder", "--base", "main",
+                    "--head", "feature/x", "--manifest", str(manifest)]
+            self.assertEqual(gate.main(argv), 0)
+            self.assertEqual(gate.main([*argv, "--enforce"]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
