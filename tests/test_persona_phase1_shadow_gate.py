@@ -66,5 +66,36 @@ class HandoffManifestTests(unittest.TestCase):
         self.assertIsInstance(ctx.exception, (FileNotFoundError, ValueError))
 
 
+class RenderContractPromptTests(unittest.TestCase):
+    def test_contains_role_scope(self) -> None:
+        from paulshaclaw.persona import render
+        from paulshaclaw.persona.loader import load_catalog
+
+        catalog = load_catalog()
+        prompt = render.render_contract_prompt("builder", catalog=catalog)
+        self.assertIsInstance(prompt, str)
+        self.assertIn("builder", prompt)
+        # 角色名與各 write_path 子字串皆須出現
+        for write_path in catalog["builder"].write_paths:
+            self.assertIn(write_path, prompt)
+        # allowed_phases 與 effective_tools 也須體現（① 契約注入）
+        self.assertIn("build", prompt)
+        self.assertIn("git commit", prompt)
+
+    def test_deterministic(self) -> None:
+        from paulshaclaw.persona import render
+
+        self.assertEqual(
+            render.render_contract_prompt("reviewer"),
+            render.render_contract_prompt("reviewer"),
+        )
+
+    def test_unknown_role_raises(self) -> None:
+        from paulshaclaw.persona import render
+
+        with self.assertRaises(ValueError):
+            render.render_contract_prompt("nope")
+
+
 if __name__ == "__main__":
     unittest.main()
