@@ -19,6 +19,27 @@ def _frag(index, body):
     )
 
 
+class PromptSessionHintTests(unittest.TestCase):
+    def test_includes_session_project_hint_when_known(self):
+        frag = Fragment(
+            project="OCP-0602", source_agent="claude", source_session="s1",
+            source_artifact="research", captured_at="2026-06-02T00:00:00Z",
+            provenance={}, fragment_index=0, body="mtk pon work",
+        )
+        text = prompt_mod.build_prompt("SKILL", [frag], ["paulshaclaw", "OCP-0602"])
+        self.assertIn("This session was captured in project: OCP-0602", text)
+        self.assertIn("unless the content clearly belongs to a different known project", text)
+
+    def test_omits_hint_when_session_project_not_in_known(self):
+        frag = Fragment(
+            project="_unknown", source_agent="claude", source_session="s1",
+            source_artifact="research", captured_at="2026-06-02T00:00:00Z",
+            provenance={}, fragment_index=0, body="x",
+        )
+        text = prompt_mod.build_prompt("SKILL", [frag], ["paulshaclaw", "OCP-0602"])
+        self.assertNotIn("This session was captured in project", text)
+
+
 class PromptTests(unittest.TestCase):
     def test_matches_plan_prompt_sections(self):
         text = prompt_mod.build_prompt(
@@ -34,6 +55,10 @@ class PromptTests(unittest.TestCase):
                     "",
                     "## Known projects (choose exactly one per slice, or _unknown)",
                     "paulshaclaw, prplos-core",
+                    "",
+                    "## This session's project",
+                    "This session was captured in project: paulshaclaw. "
+                    "Prefer it for each slice unless the content clearly belongs to a different known project.",
                     "",
                     "## Session fragments to atomize",
                     "[fragment 0]",
@@ -62,6 +87,10 @@ class PromptTests(unittest.TestCase):
                     "",
                     "## Known projects (choose exactly one per slice, or _unknown)",
                     "paulshaclaw",
+                    "",
+                    "## This session's project",
+                    "This session was captured in project: paulshaclaw. "
+                    "Prefer it for each slice unless the content clearly belongs to a different known project.",
                     "",
                     "## Session fragments to atomize",
                     "[fragment 0]",
