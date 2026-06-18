@@ -125,5 +125,87 @@ class SeamProtocolTests(unittest.TestCase):
         self.assertTrue(hasattr(seams, "ScriptWorktreeCreator"))
 
 
+class _RaisingWorktreeCreator:
+    def create(self, branch: str) -> str:
+        raise ValueError("boom: worktree add failed")
+
+
+class DispatcherTests(unittest.TestCase):
+    def _make(self, tmp: Path):
+        from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        reg = JobRegistry(state_path=tmp / "jobs.json")
+        sender = FakePaneSender()
+        creator = FakeWorktreeCreator()
+        return Dispatcher(reg, sender, creator), reg, sender, creator
+
+    def test_dispatch_records_job_and_sends_command(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            disp, reg, sender, creator = self._make(Path(d))
+            command = 'copilot --model gpt-5.4 --yolo -p "<contract+PROMPT>"'
+            job = disp.dispatch(task="slice-a", persona="builder",
+                                pane_id="%5", command=command)
+
+            self.assertEqual(job["job_id"], "slice-a-1")
+            self.assertEqual(job["status"], "dispatched")
+            self.assertEqual(job["pane"], "%5")
+            # worktree 被建立、branch 由 task 推導
+            self.assertEqual(creator.created, ["feature/slice-a"])
+            self.assertEqual(job["worktree"], "/fake/wt/feature-slice-a")
+            self.assertEqual(job["branch"], "feature/slice-a")
+            # 送入 pane 的文字 = 呼叫者給的 command（一字不差）
+            self.assertEqual(sender.sent, [("%5", command)])
+            # registry 確實記了
+            self.assertEqual(len(reg.list_jobs()), 1)
+            self.assertEqual(reg.get_job("slice-a-1")["status"], "dispatched")
+
+    def test_multiple_dispatch_isolated(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            disp, reg, sender, creator = self._make(Path(d))
+            j1 = disp.dispatch(task="a", persona="builder", pane_id="%1", command="cmd-a")
+            j2 = disp.dispatch(task="b", persona="builder", pane_id="%2", command="cmd-b")
+            # job_id 用 registry-wide 單調計數器：a→1、b→2（確定性、跨 task 唯一）
+            self.assertEqual(j1["job_id"], "a-1")
+            self.assertEqual(j2["job_id"], "b-2")
+            self.assertEqual({j["job_id"] for j in reg.list_jobs()}, {"a-1", "b-2"})
+            self.assertEqual(creator.created, ["feature/a", "feature/b"])
+            self.assertEqual(sender.sent, [("%1", "cmd-a"), ("%2", "cmd-b")])
+
+    def test_worktree_failure_records_no_job_and_sends_nothing(self) -> None:
+        from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            sender = FakePaneSender()
+            disp = Dispatcher(reg, sender, _RaisingWorktreeCreator())
+            with self.assertRaises(ValueError):
+                disp.dispatch(task="x", persona="builder", pane_id="%9", command="cmd")
+            # fail-closed：不送命令、不記 job
+            self.assertEqual(sender.sent, [])
+            self.assertEqual(reg.list_jobs(), [])
+
+    def test_poll_done_marks_done_on_new_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            disp, reg, sender, creator = self._make(Path(d))
+            job = disp.dispatch(task="c", persona="builder", pane_id="%3", command="cmd-c")
+            # baseline head 記在 dispatch 時（fake git_runner 回 baseline）
+            # 之後 git_runner 回新 head → 標 done
+            new_head_runner = lambda args: "deadbeefcafe"
+            updated = disp.poll_done(job["job_id"], git_runner=new_head_runner)
+            self.assertEqual(updated["status"], "done")
+            self.assertEqual(reg.get_job("c-1")["status"], "done")
+
+    def test_poll_done_no_new_commit_keeps_status(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            disp, reg, sender, creator = self._make(Path(d))
+            # dispatch 時以固定 head 記 baseline；poll 回同 head → 維持 dispatched
+            disp.dispatch(task="e", persona="builder", pane_id="%4", command="cmd-e",
+                          git_runner=lambda args: "samehead")
+            updated = disp.poll_done("e-1", git_runner=lambda args: "samehead")
+            self.assertEqual(updated["status"], "dispatched")
+
+
 if __name__ == "__main__":
     unittest.main()
