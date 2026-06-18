@@ -82,6 +82,21 @@ class JobRegistryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 JobRegistry(state_path=state)   # fail-closed：不可靜默清空
 
+    def test_non_dict_job_element_fails_closed(self) -> None:
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        # 結構性損壞但 JSON 合法：jobs 內含非 dict 元素 → 必須 fail-closed（明確 branded 訊息）
+        for jobs in (["not-a-dict", 42], [123], [None], [[["a", "b"]]]):
+            with tempfile.TemporaryDirectory() as d:
+                state = Path(d) / "jobs.json"
+                state.write_text(
+                    json.dumps({"seq": 1, "jobs": jobs}), encoding="utf-8"
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    JobRegistry(state_path=state)
+                # MUST 為 fail-closed branded 訊息，非 dict() 拋的混淆訊息，且不可靜默接受
+                self.assertIn("fail-closed", str(ctx.exception))
+
     def test_missing_state_is_empty_registry(self) -> None:
         from paulshaclaw.coordinator.registry import JobRegistry
 
@@ -191,9 +206,10 @@ class DispatcherTests(unittest.TestCase):
     def test_poll_done_marks_done_on_new_commit(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             disp, reg, sender, creator = self._make(Path(d))
-            job = disp.dispatch(task="c", persona="builder", pane_id="%3", command="cmd-c")
-            # baseline head 記在 dispatch 時（fake git_runner 回 baseline）
-            # 之後 git_runner 回新 head → 標 done
+            # baseline head 記在 dispatch 時（fake git_runner 回 baseline，持久化於 job）
+            job = disp.dispatch(task="c", persona="builder", pane_id="%3", command="cmd-c",
+                                git_runner=lambda args: "baselinehead")
+            # 之後 git_runner 回新 head（異於 dispatch_head）→ 標 done
             new_head_runner = lambda args: "deadbeefcafe"
             updated = disp.poll_done(job["job_id"], git_runner=new_head_runner)
             self.assertEqual(updated["status"], "done")
@@ -207,6 +223,55 @@ class DispatcherTests(unittest.TestCase):
                           git_runner=lambda args: "samehead")
             updated = disp.poll_done("e-1", git_runner=lambda args: "samehead")
             self.assertEqual(updated["status"], "dispatched")
+
+    def test_dispatch_persists_dispatch_head_on_job(self) -> None:
+        # D5：baseline（dispatch 當下的 branch head）MUST 記在 job 上（持久化），
+        # 而非只存在 Dispatcher 實例的記憶體 dict。
+        with tempfile.TemporaryDirectory() as d:
+            disp, reg, sender, creator = self._make(Path(d))
+            job = disp.dispatch(task="f", persona="builder", pane_id="%5",
+                                command="cmd-f", git_runner=lambda args: "baseline-f")
+            self.assertEqual(job["dispatch_head"], "baseline-f")
+            # 持久化：指向同檔的新 registry 讀回 dispatch_head 一致
+            self.assertEqual(reg.get_job("f-1")["dispatch_head"], "baseline-f")
+
+    def test_poll_done_survives_process_boundary(self) -> None:
+        # 設計 CLI 用法：dispatch 與後續 poll 為兩次獨立進程 → 各自全新 Dispatcher，
+        # 記憶體 baseline dict 為空。poll_done MUST 從 job 記錄讀 dispatch_head，
+        # 故同 head（零新 commit）時 MUST 維持 dispatched，不可誤標 done。
+        from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "jobs.json"
+            reg1 = JobRegistry(state_path=state)
+            disp1 = Dispatcher(reg1, FakePaneSender(), FakeWorktreeCreator())
+            disp1.dispatch(task="g", persona="builder", pane_id="%6",
+                           command="cmd-g", git_runner=lambda args: "same-g")
+
+            # 全新進程：新 registry（同檔）+ 新 Dispatcher（_baseline_head 為空）
+            reg2 = JobRegistry(state_path=state)
+            disp2 = Dispatcher(reg2, FakePaneSender(), FakeWorktreeCreator())
+            same = disp2.poll_done("g-1", git_runner=lambda args: "same-g")
+            self.assertEqual(same["status"], "dispatched")   # 零新 commit → 維持
+            # 真有新 commit（head 異於記錄的 dispatch_head）→ 標 done
+            done = disp2.poll_done("g-1", git_runner=lambda args: "new-g")
+            self.assertEqual(done["status"], "done")
+            self.assertEqual(reg2.get_job("g-1")["status"], "done")
+
+    def test_poll_done_none_baseline_does_not_autocomplete(self) -> None:
+        # dispatch_head 為 None（dispatch 時取不到 head）→ poll_done MUST NOT 自動完成。
+        with tempfile.TemporaryDirectory() as d:
+            disp, reg, sender, creator = self._make(Path(d))
+
+            def boom(args):
+                raise RuntimeError("rev-parse failed at dispatch")
+
+            job = disp.dispatch(task="h", persona="builder", pane_id="%7",
+                                command="cmd-h", git_runner=boom)
+            self.assertIsNone(job["dispatch_head"])
+            updated = disp.poll_done("h-1", git_runner=lambda args: "any-head")
+            self.assertEqual(updated["status"], "dispatched")   # baseline 不明 → 不自動完成
 
 
 class CliTests(unittest.TestCase):

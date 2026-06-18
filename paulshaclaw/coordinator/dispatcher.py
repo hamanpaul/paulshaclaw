@@ -37,8 +37,6 @@ class Dispatcher:
         self._registry = registry
         self._pane_sender = pane_sender
         self._worktree_creator = worktree_creator
-        # job_id -> dispatch 當下的 branch head（baseline），供 poll_done 比對
-        self._baseline_head: dict[str, str | None] = {}
 
     def dispatch(
         self,
@@ -54,17 +52,18 @@ class Dispatcher:
         worktree = self._worktree_creator.create(branch)
         # (2) 忠實轉送呼叫者給的完整 command（本 change 不組裝 copilot 指令）
         self._pane_sender.send(pane_id, command)
-        # (3) registry 記一筆 job（status=dispatched）
-        job = self._registry.create_job(
-            task=task, persona=persona, branch=branch,
-            pane=pane_id, worktree=worktree,
-        )
-        # baseline head（若可取）供 poll_done 比對；取不到記 None
+        # (3) 取 dispatch 當下的 branch head（baseline）；取不到記 None。
+        #     D5：baseline 持久化於 job 上（非實例 dict），故 poll_done 可跨進程比對。
         runner = git_runner or _default_git_runner
         try:
-            self._baseline_head[job["job_id"]] = runner(["rev-parse", branch])
+            dispatch_head: str | None = runner(["rev-parse", branch])
         except Exception:
-            self._baseline_head[job["job_id"]] = None
+            dispatch_head = None
+        # (4) registry 記一筆 job（status=dispatched，含 dispatch_head baseline）
+        job = self._registry.create_job(
+            task=task, persona=persona, branch=branch,
+            pane=pane_id, worktree=worktree, dispatch_head=dispatch_head,
+        )
         return job
 
     def poll_done(
@@ -72,14 +71,20 @@ class Dispatcher:
         job_id: str,
         git_runner: GitRunner | None = None,
     ) -> dict[str, object]:
-        """branch 出現新 commit（head 異於 baseline）→ 標 done；否則維持原 status。"""
+        """branch 出現新 commit（head 異於 dispatch_head baseline）→ 標 done；否則維持原 status。
+
+        baseline 從 job 記錄（`dispatch_head`）讀，故跨進程（CLI 多次獨立呼叫）仍可比對。
+        baseline 為 None（dispatch 時取不到 head）時不自動完成——無 baseline 即無法判定有無新 commit。
+        """
         job = self._registry.get_job(job_id)
+        baseline = job.get("dispatch_head")
+        if baseline is None:
+            return job  # baseline 不明 → 不自動完成
         runner = git_runner or _default_git_runner
         try:
             current = runner(["rev-parse", job["branch"]])
         except Exception:
             return job  # 取不到 head → 無法判定，維持原狀
-        baseline = self._baseline_head.get(job_id)
         if current != baseline:
             return self._registry.update_status(job_id, "done")
         return job

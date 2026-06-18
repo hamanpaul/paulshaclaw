@@ -47,6 +47,13 @@ class JobRegistry:
         seq = payload.get("seq", 0)
         if not isinstance(seq, int):
             raise ValueError(f"coordinator 狀態檔 seq 型別錯誤（fail-closed）: {self._state_path}")
+        # 每筆 job MUST 為 dict 且含必要鍵（job_id/status）；否則 fail-closed。
+        # 防 dict() 對非 dict（如 [["a","b"]]）靜默吞成畸形 job，事後在 get/update 才炸。
+        for job in payload["jobs"]:
+            if not isinstance(job, dict) or "job_id" not in job or "status" not in job:
+                raise ValueError(
+                    f"coordinator 狀態檔格式錯誤（fail-closed）: {self._state_path}"
+                )
         self._jobs = [dict(job) for job in payload["jobs"]]
         # 重載後計數器續編：max(載入 seq, 現有 seq)，避免撞號
         self._seq = max(seq, self._seq)
@@ -76,6 +83,7 @@ class JobRegistry:
         branch: str,
         pane: str,
         worktree: str,
+        dispatch_head: str | None = None,
     ) -> dict[str, object]:
         self._seq += 1
         job: dict[str, object] = {
@@ -86,6 +94,9 @@ class JobRegistry:
             "pane": pane,
             "worktree": worktree,
             "status": "dispatched",
+            # D5：dispatch 當下的 branch head（baseline），持久化於 job 上供
+            # 跨進程的 poll_done 比對；取不到則為 None。
+            "dispatch_head": dispatch_head,
             "created_at": _now_iso(),
         }
         self._jobs.append(job)
