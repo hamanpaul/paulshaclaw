@@ -125,6 +125,10 @@ class LLMPromoter(Promoter):
                     unknown_indices, first.source_agent, first.source_session,
                 )
                 kept = tuple(i for i in proposal.source_fragment_indices if i in valid_fragment_indices)
+                if not kept:
+                    # every reference was bogus; a slice still needs >=1 source fragment,
+                    # so attribute the atom to the whole session rather than dropping it.
+                    kept = tuple(sorted(valid_fragment_indices))
                 proposal = replace(proposal, source_fragment_indices=kept)
             slice_ = slice_frontmatter.build_from_proposal(proposal, session_meta)
             errors = slice_frontmatter.validate(slice_.frontmatter, slice_.body)

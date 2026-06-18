@@ -114,12 +114,13 @@ class LLMPromoterTests(unittest.TestCase):
         with self.assertRaises(llm_promoter.PromoteError):
             _promoter(bad).promote([_frag(0)], CFG)
 
-    def test_out_of_range_source_fragment_index_is_dropped(self):
+    def test_out_of_range_source_fragment_index_falls_back_to_whole_session(self):
         # gemma4 stochastically references indices that do not exist; intersect with
-        # the valid set rather than nuking the whole (otherwise good) session.
+        # the valid set rather than nuking the whole (otherwise good) session. When
+        # every reference is bogus, attribute to the whole session (a slice needs >=1).
         slices = _promoter(_OUT_OF_RANGE).promote([_frag(0)], CFG)
         self.assertEqual(len(slices), 1)
-        self.assertEqual(slices[0].frontmatter["source_fragments"], [])
+        self.assertEqual(slices[0].frontmatter["source_fragments"], [0])
 
     def test_partial_out_of_range_indices_intersected(self):
         partial = (
