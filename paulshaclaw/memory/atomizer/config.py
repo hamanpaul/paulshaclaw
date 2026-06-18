@@ -37,6 +37,7 @@ class AtomizerConfig:
     agent_exec_command: tuple[str, ...] = ("scripts/claude-gemma4",)
     agent_exec_timeout: int = 600
     agent_exec_model: str = "unknown"
+    agent_exec_max_output_tokens: int = 8192
     default_promoter: str = "identity"
     skill_path: str = "skills/atomize-knowledge-slice.md"
     known_projects_file: str = "~/.agents/config/projects.yaml"
@@ -288,6 +289,10 @@ def load_config(
         agent_exec_config.get("model", "unknown"),
         "agent_exec.model",
     )
+    agent_exec_max_output_tokens = _parse_positive_int(
+        agent_exec_config.get("max_output_tokens", 8192),
+        "agent_exec.max_output_tokens",
+    )
 
     default_promoter = _require_non_empty_string(
         config_data.get("promoter", "identity"),
@@ -316,6 +321,7 @@ def load_config(
         agent_exec_command=agent_exec_command,
         agent_exec_timeout=agent_exec_timeout,
         agent_exec_model=agent_exec_model,
+        agent_exec_max_output_tokens=agent_exec_max_output_tokens,
         default_promoter=default_promoter,
         skill_path=skill_path,
         known_projects_file=known_projects_file,

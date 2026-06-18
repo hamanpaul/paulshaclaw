@@ -192,7 +192,7 @@ start_dream_loop() {
       # stack a full dream pass on top of the startup burst.
       sleep "$interval"
       PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
-        --memory-root "$dream_root" --require-idle --promoter identity \
+        --memory-root "$dream_root" --require-idle --promoter llm \
         >>"$dream_log" 2>&1 || true
     done
   ) 200>&- &

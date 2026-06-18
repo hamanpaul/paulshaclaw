@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -17,9 +18,10 @@ class AgentClient(ABC):
 
 
 class AgentExecClient(AgentClient):
-    def __init__(self, command: list[str], timeout: int = 600) -> None:
+    def __init__(self, command: list[str], timeout: int = 600, env: dict | None = None) -> None:
         self._command = list(command)
         self._timeout = timeout
+        self._env = dict(env) if env is not None else None
 
     def run(self, prompt: str) -> str:
         if not self._command:
@@ -32,6 +34,7 @@ class AgentExecClient(AgentClient):
                 text=True,
                 timeout=self._timeout,
                 check=False,
+                env=None if self._env is None else {**os.environ, **self._env},
             )
         except FileNotFoundError as exc:
             raise AgentExecError(f"agent command not found: {self._command[0]}") from exc

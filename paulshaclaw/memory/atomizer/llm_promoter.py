@@ -95,6 +95,7 @@ class LLMPromoter(Promoter):
             "source_session": first.source_session,
             "captured_at": first.captured_at,
             "provenance": dict(first.provenance),
+            "session_title": first.session_title,
         }
         built_prompt = prompt.build_prompt(self._skill, fragments, self._projects)
 

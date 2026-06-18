@@ -79,7 +79,14 @@ def _build_promoter(
         if args.agent_command is not None
         else list(atomizer_config.resolve_command_argv(config.agent_exec_command))
     )
-    inner = AgentExecClient(command, timeout=config.agent_exec_timeout)
+    inner = AgentExecClient(
+        command,
+        timeout=config.agent_exec_timeout,
+        # Config is authoritative: this overrides any CLAUDE_CODE_MAX_OUTPUT_TOKENS the
+        # parent env (e.g. claude-gemma4's 1024 default) would otherwise impose, so
+        # multi-atom distillation JSON is not truncated.
+        env={"CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(config.agent_exec_max_output_tokens)},
+    )
     cached_client = CachingAgentClient(
         inner,
         _cache_dir(memory_root),
