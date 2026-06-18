@@ -104,6 +104,13 @@ def resolve_project(
         except Exception:
             remote = ""
         if remote:
+            # payloads rarely carry remote_url, so this fallback is where most
+            # repos resolve. Map the discovered remote through projects.yaml to a
+            # slug before falling back to the raw URL form (else registered
+            # remotes never take effect for nested/unlisted working dirs).
+            for project in loaded_projects.projects:
+                if any(normalize_remote(value) == remote for value in project.remotes):
+                    return project.slug
             return remote
 
         name = Path(toplevel).name

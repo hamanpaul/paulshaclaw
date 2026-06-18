@@ -123,6 +123,56 @@ class ProjectResolverTest(unittest.TestCase):
 
         self.assertEqual(project, "obs-auto-moc")
 
+    def test_resolve_project_maps_fallback_git_remote_to_slug(self):
+        # payload carries no remote_url; the git fallback discovers the repo's
+        # remote and MUST map it through projects.yaml to a slug, not return raw.
+        config = load_projects_config(
+            self.write_projects_config(
+                """
+                version: 1
+                projects:
+                  airoha:
+                    remotes:
+                      - vcs-sw2.arcadyan.com.tw/airoha/airoha_openwrt_feed
+                """
+            )
+        )
+        with mock.patch(
+            "paulshaclaw.memory.importer.project_resolver._git.git_toplevel",
+            return_value="/home/build20/OCP-0602/airoha-mcu-clean",
+        ), mock.patch(
+            "paulshaclaw.memory.importer.project_resolver._git.git_remote",
+            return_value="git@vcs-sw2.arcadyan.com.tw:airoha/airoha_openwrt_feed.git",
+        ):
+            project = resolve_project(
+                cwd="/home/build20/OCP-0602/airoha-mcu-clean", projects=config
+            )
+
+        self.assertEqual(project, "airoha")
+
+    def test_resolve_project_fallback_unregistered_remote_returns_normalized_url(self):
+        config = load_projects_config(
+            self.write_projects_config(
+                """
+                version: 1
+                projects:
+                  airoha:
+                    remotes:
+                      - vcs-sw2.arcadyan.com.tw/airoha/airoha_openwrt_feed
+                """
+            )
+        )
+        with mock.patch(
+            "paulshaclaw.memory.importer.project_resolver._git.git_toplevel",
+            return_value="/some/unregistered/repo",
+        ), mock.patch(
+            "paulshaclaw.memory.importer.project_resolver._git.git_remote",
+            return_value="git@github.com:other/thing.git",
+        ):
+            project = resolve_project(cwd="/some/unregistered/repo", projects=config)
+
+        self.assertEqual(project, "github.com/other/thing")
+
     def test_resolve_project_matches_remote_url_when_paths_do_not_match(self):
         config = load_projects_config(
             self.write_projects_config(

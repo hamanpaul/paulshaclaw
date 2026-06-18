@@ -114,9 +114,21 @@ class LLMPromoterTests(unittest.TestCase):
         with self.assertRaises(llm_promoter.PromoteError):
             _promoter(bad).promote([_frag(0)], CFG)
 
-    def test_unknown_source_fragment_index_fails_closed(self):
-        with self.assertRaises(llm_promoter.PromoteError):
-            _promoter(_OUT_OF_RANGE).promote([_frag(0)], CFG)
+    def test_out_of_range_source_fragment_index_falls_back_to_whole_session(self):
+        # gemma4 stochastically references indices that do not exist; intersect with
+        # the valid set rather than nuking the whole (otherwise good) session. When
+        # every reference is bogus, attribute to the whole session (a slice needs >=1).
+        slices = _promoter(_OUT_OF_RANGE).promote([_frag(0)], CFG)
+        self.assertEqual(len(slices), 1)
+        self.assertEqual(slices[0].frontmatter["source_fragments"], [0])
+
+    def test_partial_out_of_range_indices_intersected(self):
+        partial = (
+            '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":[],'
+            '"body":"body a","source_fragment_indices":[0,99],"relations":[]}]'
+        )
+        slices = _promoter(partial).promote([_frag(0), _frag(1)], CFG)
+        self.assertEqual(slices[0].frontmatter["source_fragments"], [0])
 
     def test_mixed_session_input_fails_closed(self):
         fragments = [_frag(0), _frag_with(fragment_index=1, source_session="s2")]
