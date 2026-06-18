@@ -1,6 +1,6 @@
 """Stage4 persona contract and guardrail primitives."""
 
-from . import context, contract, gate, guardrail, handoff, render, shadow
+from . import context, contract, gate, guardrail, handoff, render, scope_ci, shadow
 
 __all__ = [
     "contract",
@@ -10,4 +10,5 @@ __all__ = [
     "handoff",
     "render",
     "gate",
+    "scope_ci",
 ]
