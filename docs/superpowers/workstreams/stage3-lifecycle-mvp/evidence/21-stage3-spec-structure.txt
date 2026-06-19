@@ -1,0 +1,11 @@
+9:### Requirement: Artifact frontmatter 與 lifecycle template 基線
+14:#### Scenario: Frontmatter schema 測試可驗證必要欄位與 checksum
+19:#### Scenario: Lifecycle template 輸出固定欄位
+24:### Requirement: Static gate 與事件回放狀態
+29:#### Scenario: gate passed 事件回放為 passed
+34:#### Scenario: gate failed 事件回放為 blocked
+39:### Requirement: Golden slice 七階段回歸
+44:#### Scenario: Golden slice 全流程通過
+49:### Requirement: Stage 1 / Stage 2 介面契約邊界
+55:#### Scenario: Stage 1 邊界符合 core-runtime 契約
+60:#### Scenario: Stage 2 邊界符合 memory-governance 契約

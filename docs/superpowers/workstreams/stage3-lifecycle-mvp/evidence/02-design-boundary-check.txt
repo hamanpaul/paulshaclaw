@@ -1,0 +1,10 @@
+6:- `docs/superpowers/workstreams/stage3-lifecycle-mvp/todo.md`：要求先開 OpenSpec change，並確認 Stage 1/2 最小介面
+20:- 明確 Stage 3 與 Stage 1 / Stage 2 的介面邊界，避免 runtime 職責混淆。
+25:- 不修改 Stage 1 與 Stage 2 canonical spec 內容。
+42:### Decision 3：Stage 1 邊界固定為 daemon/coordinator seam
+44:- **選擇**：Stage 3 只消費 Stage 1 `/status`、`/dispatch` 與 `create_job(*, phase, scope, payload)`。
+48:### Decision 4：Stage 2 邊界固定為 memory 路由與事件交握
+50:- **選擇**：Stage 3 僅寫入 phase artifact pointer/copy 到 `inbox/*` 與 runtime `events.jsonl` / gate report；不直接寫 `knowledge/*`、不直接驅動 janitor。
+51:- **替代方案**：Stage 3 直接升級資料到 `knowledge/*` 或直接控制 janitor decayed/reactivation。
+52:- **理由**：符合 `openspec/specs/stage2-memory-governance/spec.md` 的 importer/classifier/janitor 邊界，維持責任分離。
+72:- Stage 3 phase artifact 對應 Stage 2 `inbox/*` bucket 的最終映射（例如 `inbox/plans/` vs `inbox/reports/`）是否需在 Stage 3 runtime 啟動前先凍結？

@@ -1,0 +1,3 @@
+# openspec validate --specs
+- Validating...
+No items found to validate.

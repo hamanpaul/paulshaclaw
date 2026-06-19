@@ -1,0 +1,8 @@
+test_persona_schema_accepts_baseline_catalog (tests.test_stage4_persona_contract.PersonaSchemaTests.test_persona_schema_accepts_baseline_catalog) ... ok
+test_persona_schema_rejects_missing_required_field (tests.test_stage4_persona_contract.PersonaSchemaTests.test_persona_schema_rejects_missing_required_field) ... ok
+test_required_roles_present (tests.test_stage4_persona_contract.RoleBaselineTests.test_required_roles_present) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK

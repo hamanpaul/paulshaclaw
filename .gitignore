@@ -1,0 +1,40 @@
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python cache / tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Logs / temp
+*.log
+tmp/
+.psc_tmp/
+
+# External reference repos (Stage 0)
+ref/
+.worktrees/
+.test-work/

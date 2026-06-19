@@ -1,0 +1,8 @@
+5:Stage 3 SHALL 定義 artifact-first lifecycle MVP 的最小可驗收契約，涵蓋 frontmatter schema、`lifecycle.yaml` template、static gate、最小事件流與 golden slice 回歸，同時明確 Stage 1 dispatch seam 與 Stage 2 memory routing seam 的邊界。
+49:### Requirement: Stage 1 / Stage 2 介面契約邊界
+52:- 對 Stage 1：只依賴 daemon `/status`、`/dispatch <task-id>` 與 coordinator `create_job(*, phase, scope, payload)` seam，不得要求 Stage 1 新增啟動流程耦合。
+53:- 對 Stage 2：只透過 `inbox -> work-centric -> knowledge` 的既有治理路徑交付 artifact pointer/copy 與 lifecycle 事件，不得由 Stage 3 直接寫入 `knowledge/*` 或直接操作 janitor `decayed/reactivation` 流程。
+55:#### Scenario: Stage 1 邊界符合 core-runtime 契約
+58:- **THEN** Stage 3 依賴面 MUST 僅限 `/status`、`/dispatch` 與 coordinator seam
+60:#### Scenario: Stage 2 邊界符合 memory-governance 契約
+63:- **THEN** Stage 3 流程 MUST 不宣告直接寫 `knowledge/*`，且 MUST 維持 `inbox -> work-centric -> knowledge` 路徑約束

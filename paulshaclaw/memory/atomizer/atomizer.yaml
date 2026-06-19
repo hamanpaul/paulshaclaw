@@ -1,0 +1,32 @@
+schema_version: 1
+split:
+  boundary_patterns:
+    - '^#{1,6}\s'
+  max_fragment_chars: 8000
+artifact_kind_map:
+  research: research
+  plan: plan
+  plans: plan
+  spec: spec
+  report: report
+  reports: report
+  review: review
+  session: report
+  sessions: report
+phase_map:
+  research: research
+  spec: define
+  plan: plan
+  report: review
+  review: review
+default_artifact_kind: report
+default_phase: review
+agent_exec:
+  command:
+    - scripts/claude-gemma4
+  timeout_seconds: 600
+  model: gemma4-26b-a4b-nvfp4
+  max_output_tokens: 8192
+promoter: identity
+skill_path: skills/atomize-knowledge-slice.md
+known_projects_file: ~/.agents/config/projects.yaml

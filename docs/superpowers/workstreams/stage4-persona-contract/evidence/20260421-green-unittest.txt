@@ -1,0 +1,15 @@
+test_allowed_phases_subset_of_stage3_vocabulary (tests.test_stage4_persona_contract.AllowedPhasesTests.test_allowed_phases_subset_of_stage3_vocabulary) ... ok
+test_disallow_path_outside_scope (tests.test_stage4_persona_contract.GuardrailTests.test_disallow_path_outside_scope) ... ok
+test_disallow_tool_outside_allowlist (tests.test_stage4_persona_contract.GuardrailTests.test_disallow_tool_outside_allowlist) ... ok
+test_gate_status_is_required_and_validated (tests.test_stage4_persona_contract.HandoffSchemaTests.test_gate_status_is_required_and_validated) ... ok
+test_stage3_phase_gate_compatibility (tests.test_stage4_persona_contract.HandoffSchemaTests.test_stage3_phase_gate_compatibility) ... ok
+test_persona_schema_accepts_baseline_catalog (tests.test_stage4_persona_contract.PersonaSchemaTests.test_persona_schema_accepts_baseline_catalog) ... ok
+test_persona_schema_rejects_missing_required_field (tests.test_stage4_persona_contract.PersonaSchemaTests.test_persona_schema_rejects_missing_required_field) ... ok
+test_required_roles_present (tests.test_stage4_persona_contract.RoleBaselineTests.test_required_roles_present) ... ok
+test_shadow_run_summary_contains_gate_and_guardrail_decisions (tests.test_stage4_persona_contract.ShadowRunTests.test_shadow_run_summary_contains_gate_and_guardrail_decisions) ... ok
+test_user_overlay_load_and_context_build (tests.test_stage4_persona_contract.ShadowRunTests.test_user_overlay_load_and_context_build) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 0.000s
+
+OK

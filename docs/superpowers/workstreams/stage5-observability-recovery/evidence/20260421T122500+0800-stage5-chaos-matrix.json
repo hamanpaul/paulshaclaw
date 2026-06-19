@@ -1,0 +1,46 @@
+{
+  "schema_version": "stage5.chaos-matrix.v1",
+  "run_id": "20260421T122500+0800",
+  "scenarios": [
+    {
+      "name": "tmux-server-crash",
+      "fault": "kill tmux server process or remove socket",
+      "expected_status": "recovered",
+      "checks": [
+        "tmux ls",
+        "python3 -m paulshaclaw.core.daemon --command /status",
+        "確認 pane 標題與 task id 已重建"
+      ],
+      "evidence_files": [
+        "evidence/20260421T122500+0800-tmux-server-crash-before.log",
+        "evidence/20260421T122500+0800-tmux-server-crash-after.log"
+      ]
+    },
+    {
+      "name": "full-runtime-restart",
+      "fault": "restart daemon, bot listener, janitor placeholder",
+      "expected_status": "recovered",
+      "checks": [
+        "systemctl --user status paulshaclaw-daemon.service",
+        "systemctl --user status paulshaclaw-bot.service",
+        "systemctl --user status paulshaclaw-janitor.service"
+      ],
+      "evidence_files": [
+        "evidence/20260421T122500+0800-full-runtime-restart-before.log",
+        "evidence/20260421T122500+0800-full-runtime-restart-after.log"
+      ]
+    },
+    {
+      "name": "memory-pipeline-backpressure",
+      "fault": "inject backlog until queue_backlog warn threshold",
+      "expected_status": "degraded",
+      "checks": [
+        "檢查 queue_backlog 與 error_burst_5m 指標",
+        "確認 raw log 已裁切且保留尾端錯誤樣本"
+      ],
+      "evidence_files": [
+        "evidence/20260421T122500+0800-memory-pipeline-backpressure.log"
+      ]
+    }
+  ]
+}

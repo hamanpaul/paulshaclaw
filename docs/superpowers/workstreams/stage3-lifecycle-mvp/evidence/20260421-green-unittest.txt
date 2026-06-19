@@ -1,0 +1,13 @@
+test_event_stream_rebuilds_current_phase_state (tests.test_stage3_lifecycle_mvp.EventReplayTests.test_event_stream_rebuilds_current_phase_state) ... ok
+test_gate_failed_event_blocks_phase (tests.test_stage3_lifecycle_mvp.EventReplayTests.test_gate_failed_event_blocks_phase) ... ok
+test_checksum_is_validated (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_checksum_is_validated) ... ok
+test_frontmatter_missing_required_field_is_rejected (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_frontmatter_missing_required_field_is_rejected) ... ok
+test_phase_enum_is_validated (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_phase_enum_is_validated) ... ok
+test_static_gate_cli_accepts_valid_artifact (tests.test_stage3_lifecycle_mvp.FrontmatterSchemaTests.test_static_gate_cli_accepts_valid_artifact) ... ok
+test_golden_slice_full_flow (tests.test_stage3_lifecycle_mvp.GoldenSliceTests.test_golden_slice_full_flow) ... ok
+test_lifecycle_template_has_expected_shape (tests.test_stage3_lifecycle_mvp.LifecycleTemplateTests.test_lifecycle_template_has_expected_shape) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.040s
+
+OK

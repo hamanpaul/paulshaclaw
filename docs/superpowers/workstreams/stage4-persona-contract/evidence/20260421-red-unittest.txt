@@ -1,0 +1,14 @@
+test_stage4_persona_contract (unittest.loader._FailedTest.test_stage4_persona_contract) ... ERROR
+
+======================================================================
+ERROR: test_stage4_persona_contract (unittest.loader._FailedTest.test_stage4_persona_contract)
+----------------------------------------------------------------------
+ImportError: Failed to import test module: test_stage4_persona_contract
+Traceback (most recent call last):
+  ...
+ImportError: cannot import name 'shadow' from 'paulshaclaw.persona'
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+FAILED (errors=1)

@@ -1,0 +1,59 @@
+version: 1
+updated_at: 2026-04-20
+policy:
+  local_root: ref
+  tracked_in_git: false
+  runtime_source: false
+  note: "ref/ 僅供閱讀、grep、比對；runtime 一律走正式安裝/載入路徑。"
+sync_back_policy:
+  target_repo: hamanpaul/custom-skills
+  required_for_project_tuned_skills: true
+  gate: "必須先通過該技能所屬 stage 測試，並保留測試證據，才可 sync 回 custom-skills。"
+  applies_to:
+    - ops-companion
+    - paulsha-memory
+repos:
+  - name: custom-claw-tools
+    github: hamanpaul/custom-claw-tools
+    path: ref/custom-claw-tools
+    stages: [2, 6]
+    purpose: "source：obs-auto-moc（rename 目標：paulsha-memory）與 picoclaw-ops-companion（rename 目標：ops-companion）"
+    pin: 8bd0f156606eb078f8979a7a40441ee0e9d96e34
+    status: cloned
+  - name: custom-skills
+    github: hamanpaul/custom-skills
+    path: ref/custom-skills
+    stages: [0, 1, 2, 3, 4]
+    purpose: "核心 skill 與最終回寫目標 repo（含 project-tuned 的 ops-companion、paulsha-memory）"
+    pin: 056104aef3ac9b66c3dfe59495de37ada3909d14
+    status: cloned
+  - name: max
+    github: hamanpaul/max
+    path: ref/max
+    stages: [1]
+    purpose: "PaulShiaBro daemon/TUI 架構參考"
+    pin: 9c2204cd0d531c303763f1735c6956117353cc0c
+    status: cloned
+  - name: serialwrap
+    github: hamanpaul/serialwrap
+    path: ref/serialwrap
+    stages: [4]
+    purpose: "Tester/Debugger persona 的 device access"
+    pin: dc57a547ce5357c9d60cd7923e2b515770e98525
+    status: cloned
+  - name: testpilot
+    github: hamanpaul/testpilot
+    path: ref/testpilot
+    stages: [4]
+    purpose: "Tester persona 測試執行器"
+    pin: 7963cff9037effb736ae2ef16660e6ae9867cc63
+    status: cloned
+excluded:
+  - name: obs-note-cron
+    reason: "依本專案 Stage 0 調校決策移除，不納入 ref 基線。"
+  - name: ai-report-gen_devel
+    reason: "不在 Stage 0 既定依賴清單。"
+  - name: testpilot-repair
+    reason: "屬於修復/分支型工作目錄，不列入基線參考。"
+  - name: sw2-skills-collection
+    reason: "不在 Stage 0 驗收要求之 hamanpaul 核心參考清單。"

@@ -1,0 +1,16 @@
+[Unit]
+Description=__INSTANCE__ Telegram listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env
+EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env
+EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env
+Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json
+ExecStart=/usr/bin/env python3 -m paulshaclaw.bot.listener
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

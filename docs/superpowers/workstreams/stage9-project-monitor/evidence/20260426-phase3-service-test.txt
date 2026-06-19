@@ -1,0 +1,21 @@
+test_server_rejects_unknown_request_kind (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_rejects_unknown_request_kind) ... ok
+test_server_responds_to_get_project_state_request (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_responds_to_get_project_state_request) ... ok
+test_server_responds_to_list_projects_request (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_responds_to_list_projects_request) ... ok
+test_server_socket_has_0600_permission (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_socket_has_0600_permission) ... ok
+test_server_subscribe_streams_initial_snapshot_then_change_event (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_subscribe_streams_initial_snapshot_then_change_event) ... ok
+test_service_coalesces_burst_changes_into_single_event_per_project (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_coalesces_burst_changes_into_single_event_per_project) ... ok
+test_service_creates_run_dir_with_0700_permission (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_creates_run_dir_with_0700_permission) ... ok
+test_service_emits_event_when_underlying_todo_changes (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_emits_event_when_underlying_todo_changes) ... ok
+test_store_assigns_monotonic_sequence_to_events (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_assigns_monotonic_sequence_to_events) ... ok
+test_store_load_returns_initial_snapshot_with_no_events (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_load_returns_initial_snapshot_with_no_events) ... ok
+test_store_refresh_emits_event_when_project_state_changes (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_emits_event_when_project_state_changes) ... ok
+test_store_refresh_emits_no_event_when_state_unchanged (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_emits_no_event_when_state_unchanged) ... ok
+test_store_refresh_removes_deleted_project_from_snapshot (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_removes_deleted_project_from_snapshot) ... ok
+test_stub_watcher_invokes_callback_on_trigger (tests.test_stage9_project_monitor_service.Stage9StubWatcherTests.test_stub_watcher_invokes_callback_on_trigger) ... ok
+test_stub_watcher_stop_prevents_further_callbacks (tests.test_stage9_project_monitor_service.Stage9StubWatcherTests.test_stub_watcher_stop_prevents_further_callbacks) ... ok
+test_watchdog_file_watcher_fires_on_real_file_change (tests.test_stage9_project_monitor_service.Stage9WatchdogIntegrationTests.test_watchdog_file_watcher_fires_on_real_file_change) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 3.086s
+
+OK

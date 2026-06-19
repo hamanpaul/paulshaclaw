@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  破蝦哥 Lobster Mascot
+  - 128x128 正方形，方便轉 PNG 當 emoji / favicon / PUA 字型 glyph
+  - 來源：基於 lobster_banner.py 的 ASCII 半身像重畫為向量版
+  - 授權：CC0 / Public Domain（本 repo 內部自用）
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0"  stop-color="#ff6b5a"/>
+      <stop offset="1"  stop-color="#c5331e"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe27a"/>
+      <stop offset="1" stop-color="#c99a1f"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 煙霧 -->
+  <g fill="none" stroke="#cccccc" stroke-width="2" stroke-linecap="round" opacity="0.75">
+    <path d="M104 46 q6 -4 2 -10 q-4 -5 2 -10"/>
+    <path d="M112 50 q5 -3 1 -9"/>
+  </g>
+
+  <!-- 觸鬚 -->
+  <g fill="none" stroke="#7a1a0e" stroke-width="2.5" stroke-linecap="round">
+    <path d="M46 18 q-10 -6 -22 -4"/>
+    <path d="M82 18 q10 -6 22 -4"/>
+  </g>
+
+  <!-- 左螯 -->
+  <g fill="url(#shell)" stroke="#6b1a10" stroke-width="1.5">
+    <path d="M18 70
+             q-6 -10 2 -20
+             q8 -8 18 -4
+             q6 3 6 10
+             q0 6 -4 8
+             q6 2 6 8
+             q0 6 -8 8
+             q-12 2 -20 -10 z"/>
+    <!-- 螯開口 -->
+    <path d="M22 60 q8 -2 14 2" fill="none" stroke="#3a0a05" stroke-width="1.5"/>
+  </g>
+
+  <!-- 右螯 -->
+  <g fill="url(#shell)" stroke="#6b1a10" stroke-width="1.5">
+    <path d="M110 70
+             q6 -10 -2 -20
+             q-8 -8 -18 -4
+             q-6 3 -6 10
+             q0 6 4 8
+             q-6 2 -6 8
+             q0 6 8 8
+             q12 2 20 -10 z"/>
+    <path d="M106 60 q-8 -2 -14 2" fill="none" stroke="#3a0a05" stroke-width="1.5"/>
+  </g>
+
+  <!-- 頭 / 身（立領上緣） -->
+  <path d="M36 58
+           q0 -22 28 -22
+           q28 0 28 22
+           q0 18 -12 26
+           l-32 0
+           q-12 -8 -12 -26 z"
+        fill="url(#shell)" stroke="#6b1a10" stroke-width="2"/>
+
+  <!-- 立領 (popped collar) -->
+  <path d="M34 78
+           l10 20 l8 -14
+           l12 18 l12 -18
+           l8 14 l10 -20
+           l -4 -4 l-56 0 z"
+        fill="#c5331e" stroke="#6b1a10" stroke-width="1.5"/>
+
+  <!-- 墨鏡 -->
+  <g>
+    <rect x="42" y="52" width="44" height="4" fill="#1a1a1a"/>
+    <rect x="42" y="54" width="18" height="12" rx="3" fill="#0b0b0b" stroke="#000" stroke-width="1"/>
+    <rect x="68" y="54" width="18" height="12" rx="3" fill="#0b0b0b" stroke="#000" stroke-width="1"/>
+    <!-- 反光 -->
+    <path d="M46 57 l4 -2 l0 3 z" fill="#ffffff" opacity="0.6"/>
+    <path d="M72 57 l4 -2 l0 3 z" fill="#ffffff" opacity="0.6"/>
+  </g>
+
+  <!-- 雪茄 -->
+  <g>
+    <rect x="82" y="72" width="20" height="5" rx="1" fill="#6b3b1a"/>
+    <rect x="98"  y="72" width="4" height="5" fill="#d7a352"/>
+    <rect x="100" y="72" width="2" height="5" fill="#ff5a3a"/> <!-- 火光 -->
+  </g>
+
+  <!-- 金項鍊 -->
+  <g fill="url(#gold)" stroke="#7a5a10" stroke-width="0.8">
+    <circle cx="46" cy="104" r="3"/>
+    <circle cx="54" cy="108" r="3"/>
+    <circle cx="62" cy="110" r="3.5"/>
+    <circle cx="70" cy="108" r="3"/>
+    <circle cx="78" cy="104" r="3"/>
+    <!-- 墜飾 $ -->
+    <circle cx="62" cy="118" r="6"/>
+    <text x="62" y="122" font-family="monospace" font-size="9" font-weight="bold"
+          text-anchor="middle" fill="#6b4a05">$</text>
+  </g>
+
+  <!-- 公事包（夾在右腋下，用右螯後方一點） -->
+  <g>
+    <rect x="96" y="92" width="24" height="18" rx="2" fill="#7a4a1e" stroke="#3a2208" stroke-width="1.5"/>
+    <rect x="105" y="90" width="6" height="3" fill="#3a2208"/>
+    <rect x="107" y="99" width="2" height="4" fill="#c99a1f"/>
+  </g>
+</svg>

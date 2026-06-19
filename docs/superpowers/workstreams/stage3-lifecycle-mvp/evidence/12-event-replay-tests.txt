@@ -1,0 +1,7 @@
+test_event_stream_rebuilds_current_phase_state (tests.test_stage3_lifecycle_mvp.EventReplayTests.test_event_stream_rebuilds_current_phase_state) ... ok
+test_gate_failed_event_blocks_phase (tests.test_stage3_lifecycle_mvp.EventReplayTests.test_gate_failed_event_blocks_phase) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.001s
+
+OK

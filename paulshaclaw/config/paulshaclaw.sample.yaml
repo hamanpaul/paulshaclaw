@@ -1,0 +1,52 @@
+# paulshaclaw — global config sample
+#
+# This is the first paulshaclaw-wide config (Stage 9 introduces it).
+# Real deployments should copy this to ~/.config/paulshaclaw/paulshaclaw.yaml
+# and customise. Stage 8 cost runtime resolves:
+# --config → PAULSHACLAW_CONFIG env → default path → bundled sample fallback.
+
+workspaces:
+  - path: ~/prj_work
+    name: archive
+  - path: ~/prj_pri
+    name: private
+
+monitor:
+  poll_interval_seconds: 60      # workspace scan cadence
+  rescan_interval_seconds: 300   # tracked-project deep rescan fallback
+  watch_debounce_ms: 500         # filesystem event debounce
+  legacy_policy: list-only       # list-only | hide
+  socket_path: ~/.agents/run/project-monitor.sock
+  ignore_dirs: []                # extra patterns; .git/node_modules already implicit
+
+cost:
+  timezone: Asia/Taipei
+  cache_ttl_seconds: 120
+  tmux_refresh_seconds: 30
+  colors:
+    warning_percent: 70
+    critical_percent: 90
+  providers:
+    copilot:
+      accounts:
+        - id: hamanpaul
+          label: haman           # footer alias shown as cpt haman:...
+          kind: personal
+          monthly_allowance: 1500
+        - id: org-a
+          label: arc             # footer alias shown as cpt ... arc:...
+          kind: company
+          monthly_allowance: 300
+          org: example-org
+    claude:
+      # Trusted source: a local sidecar JSON written by your Claude Code
+      # statusline helper. Expected keys:
+      #   rate_limits.five_hour.used_percentage / resets_at
+      #   rate_limits.seven_day.used_percentage / resets_at
+      statusline_sidecar: ~/.agents/state/cost/claude_rate_limits.json
+      local_fallback: false
+    codex:
+      # Trusted source is enabled by default and uses your Codex CLI auth at
+      # ~/.codex/auth.json to query the ChatGPT Codex usage endpoint.
+      enabled: true
+      local_fallback: false

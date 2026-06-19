@@ -1,0 +1,9 @@
+[Unit]
+Description=PaulSha memory dream service (atomize + janitor)
+
+[Service]
+Type=oneshot
+# %h = user home; adjust MEMORY_ROOT/PYTHONPATH at install time.
+# Keep the scheduled dream path on the identity promoter so a local atomizer
+# override cannot silently flip this unit into spawning a full Claude CLI.
+ExecStart=/usr/bin/env python3 -m paulshaclaw.memory.cli memory dream run --memory-root %h/.agents/memory --require-idle --promoter identity

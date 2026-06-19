@@ -1,0 +1,265 @@
+........ss......................................................FFFFFFFFFFFFFFFFFFFFFFFFFF
+======================================================================
+FAIL: test_ignore_dirs_filter_skips_listed_directories (test_stage9_project_monitor.Stage9ClassifierTests.test_ignore_dirs_filter_skips_listed_directories)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 248, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_legacy_policy_hide_excludes_legacy_projects (test_stage9_project_monitor.Stage9ClassifierTests.test_legacy_policy_hide_excludes_legacy_projects)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 248, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_legacy_policy_list_only_includes_legacy_with_no_state (test_stage9_project_monitor.Stage9ClassifierTests.test_legacy_policy_list_only_includes_legacy_with_no_state)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 248, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_project_with_paul_project_yml_is_tracked (test_stage9_project_monitor.Stage9ClassifierTests.test_project_with_paul_project_yml_is_tracked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 248, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_project_with_workstreams_dir_is_tracked (test_stage9_project_monitor.Stage9ClassifierTests.test_project_with_workstreams_dir_is_tracked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 248, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_project_without_either_is_legacy (test_stage9_project_monitor.Stage9ClassifierTests.test_project_without_either_is_legacy)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 248, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_missing_workspace_path_does_not_crash (test_stage9_project_monitor.Stage9CliTests.test_missing_workspace_path_does_not_crash)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 453, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_module_help_exits_zero (test_stage9_project_monitor.Stage9CliTests.test_module_help_exits_zero)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 453, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_once_mode_exits_zero_with_json_snapshot (test_stage9_project_monitor.Stage9CliTests.test_once_mode_exits_zero_with_json_snapshot)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 453, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_once_mode_traceback_does_not_leak_to_stderr_on_known_error (test_stage9_project_monitor.Stage9CliTests.test_once_mode_traceback_does_not_leak_to_stderr_on_known_error)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 453, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_load_config_applies_documented_defaults (test_stage9_project_monitor.Stage9ConfigTests.test_load_config_applies_documented_defaults)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 145, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_load_config_reads_explicit_path (test_stage9_project_monitor.Stage9ConfigTests.test_load_config_reads_explicit_path)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 145, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_load_config_rejects_empty_workspaces (test_stage9_project_monitor.Stage9ConfigTests.test_load_config_rejects_empty_workspaces)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 145, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_load_config_rejects_invalid_legacy_policy (test_stage9_project_monitor.Stage9ConfigTests.test_load_config_rejects_invalid_legacy_policy)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 145, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_load_config_supports_env_fallback (test_stage9_project_monitor.Stage9ConfigTests.test_load_config_supports_env_fallback)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 145, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_sample_config_file_loads (test_stage9_project_monitor.Stage9ConfigTests.test_sample_config_file_loads)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 145, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_blockers_parsed_from_blockers_section (test_stage9_project_monitor.Stage9ParserTests.test_blockers_parsed_from_blockers_section)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_completed_when_all_current_sprint_items_checked (test_stage9_project_monitor.Stage9ParserTests.test_completed_when_all_current_sprint_items_checked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_in_progress_when_open_checkbox_in_current_sprint (test_stage9_project_monitor.Stage9ParserTests.test_in_progress_when_open_checkbox_in_current_sprint)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_malformed_todo_marks_stage_as_degraded (test_stage9_project_monitor.Stage9ParserTests.test_malformed_todo_marks_stage_as_degraded)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_next_task_is_second_unchecked (test_stage9_project_monitor.Stage9ParserTests.test_next_task_is_second_unchecked)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_parse_blockers_returns_listed_strings (test_stage9_project_monitor.Stage9ParserTests.test_parse_blockers_returns_listed_strings)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_parse_todo_current_sprint_returns_only_open_items (test_stage9_project_monitor.Stage9ParserTests.test_parse_todo_current_sprint_returns_only_open_items)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_processing_task_is_first_unchecked_in_current_sprint (test_stage9_project_monitor.Stage9ParserTests.test_processing_task_is_first_unchecked_in_current_sprint)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_source_signals_record_inspected_paths (test_stage9_project_monitor.Stage9ParserTests.test_source_signals_record_inspected_paths)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 342, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+======================================================================
+FAIL: test_paulshaclaw_self_snapshot_matches_known_state (test_stage9_project_monitor.Stage9SnapshotTests.test_paulshaclaw_self_snapshot_matches_known_state)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 578, in setUp
+    _require_monitor(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor.py", line 133, in _require_monitor
+    test.fail(
+AssertionError: paulshaclaw.monitor not implemented yet (Phase 1 Red): No module named 'paulshaclaw.monitor'
+
+----------------------------------------------------------------------
+Ran 90 tests in 0.373s
+
+FAILED (failures=26, skipped=2)

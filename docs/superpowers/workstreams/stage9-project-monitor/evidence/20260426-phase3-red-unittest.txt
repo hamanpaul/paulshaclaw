@@ -1,0 +1,160 @@
+test_server_rejects_unknown_request_kind (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_rejects_unknown_request_kind) ... FAIL
+test_server_responds_to_get_project_state_request (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_responds_to_get_project_state_request) ... FAIL
+test_server_responds_to_list_projects_request (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_responds_to_list_projects_request) ... FAIL
+test_server_socket_has_0600_permission (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_socket_has_0600_permission) ... FAIL
+test_server_subscribe_streams_initial_snapshot_then_change_event (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_subscribe_streams_initial_snapshot_then_change_event) ... FAIL
+test_service_coalesces_burst_changes_into_single_event_per_project (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_coalesces_burst_changes_into_single_event_per_project) ... FAIL
+test_service_creates_run_dir_with_0700_permission (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_creates_run_dir_with_0700_permission) ... FAIL
+test_service_emits_event_when_underlying_todo_changes (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_emits_event_when_underlying_todo_changes) ... FAIL
+test_store_assigns_monotonic_sequence_to_events (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_assigns_monotonic_sequence_to_events) ... FAIL
+test_store_load_returns_initial_snapshot_with_no_events (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_load_returns_initial_snapshot_with_no_events) ... FAIL
+test_store_refresh_emits_event_when_project_state_changes (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_emits_event_when_project_state_changes) ... FAIL
+test_store_refresh_emits_no_event_when_state_unchanged (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_emits_no_event_when_state_unchanged) ... FAIL
+test_stub_watcher_invokes_callback_on_trigger (tests.test_stage9_project_monitor_service.Stage9StubWatcherTests.test_stub_watcher_invokes_callback_on_trigger) ... FAIL
+test_stub_watcher_stop_prevents_further_callbacks (tests.test_stage9_project_monitor_service.Stage9StubWatcherTests.test_stub_watcher_stop_prevents_further_callbacks) ... FAIL
+test_watchdog_file_watcher_fires_on_real_file_change (tests.test_stage9_project_monitor_service.Stage9WatchdogIntegrationTests.test_watchdog_file_watcher_fires_on_real_file_change) ... skipped 'requires real watchdog installed and WatchdogFileWatcher present'
+
+======================================================================
+FAIL: test_server_rejects_unknown_request_kind (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_rejects_unknown_request_kind)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 248, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_server_responds_to_get_project_state_request (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_responds_to_get_project_state_request)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 248, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_server_responds_to_list_projects_request (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_responds_to_list_projects_request)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 248, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_server_socket_has_0600_permission (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_socket_has_0600_permission)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 248, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_server_subscribe_streams_initial_snapshot_then_change_event (tests.test_stage9_project_monitor_service.Stage9ServerTests.test_server_subscribe_streams_initial_snapshot_then_change_event)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 248, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_service_coalesces_burst_changes_into_single_event_per_project (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_coalesces_burst_changes_into_single_event_per_project)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 357, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_service_creates_run_dir_with_0700_permission (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_creates_run_dir_with_0700_permission)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 357, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_service_emits_event_when_underlying_todo_changes (tests.test_stage9_project_monitor_service.Stage9ServiceTests.test_service_emits_event_when_underlying_todo_changes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 357, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_store_assigns_monotonic_sequence_to_events (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_assigns_monotonic_sequence_to_events)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 134, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_store_load_returns_initial_snapshot_with_no_events (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_load_returns_initial_snapshot_with_no_events)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 134, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_store_refresh_emits_event_when_project_state_changes (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_emits_event_when_project_state_changes)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 134, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_store_refresh_emits_no_event_when_state_unchanged (tests.test_stage9_project_monitor_service.Stage9SnapshotStoreTests.test_store_refresh_emits_no_event_when_state_unchanged)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 134, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_stub_watcher_invokes_callback_on_trigger (tests.test_stage9_project_monitor_service.Stage9StubWatcherTests.test_stub_watcher_invokes_callback_on_trigger)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 219, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+======================================================================
+FAIL: test_stub_watcher_stop_prevents_further_callbacks (tests.test_stage9_project_monitor_service.Stage9StubWatcherTests.test_stub_watcher_stop_prevents_further_callbacks)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 219, in setUp
+    _require_phase3(self)
+  File "/home/paul_chen/prj_pri/paulshaclaw-worktrees/stage9-project-monitor/tests/test_stage9_project_monitor_service.py", line 78, in _require_phase3
+    test.fail(
+AssertionError: paulshaclaw.monitor service layer not implemented yet (Phase 3 Red): No module named 'paulshaclaw.monitor.snapshot'
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.002s
+
+FAILED (failures=14, skipped=1)
