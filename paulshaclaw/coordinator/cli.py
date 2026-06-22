@@ -105,7 +105,8 @@ def main(
             )
             print(json.dumps(jobs, ensure_ascii=False))
             return 0
-        except ValueError as exc:        # 循環相依 → refuse
+        except (ValueError, autonomy.DispatchReadyRequiresLauncherError) as exc:
+            # 循環相依 → refuse；fan-out 無 headless launcher → fail-fast（提示 --executor）
             print(f"錯誤: {exc}", file=sys.stderr)
             return 1
 

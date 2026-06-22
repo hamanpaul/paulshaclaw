@@ -32,7 +32,11 @@ def _meta(slice_id, *, dispatch="auto", plan="docs/plan.md", depends_on=None, pa
 
 
 class _FakeDispatcher:
-    """記錄 dispatch 呼叫的 fake；duck-typed 相容 Phase 2 Dispatcher.dispatch。"""
+    """記錄 dispatch 呼叫的 fake；duck-typed 相容 Phase 2 Dispatcher.dispatch。
+
+    headless fail-fast 後（reviewer #112-3），dispatch_ready fan-out 不再經 pane
+    dispatch；保留此 fake 供「無 launcher 應 fail-fast / refuse」一類測試斷言不派工。
+    """
 
     def __init__(self) -> None:
         self.calls: list[dict] = []
@@ -48,6 +52,22 @@ class _FakeDispatcher:
         }
         self.calls.append(job)
         return job
+
+
+class _RecordingLauncher:
+    """記錄 launch 呼叫的 fake headless launcher（headless fan-out 路徑）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def launch(self, *, slice_id, prompt, worktree, log_dir):
+        from paulshaclaw.coordinator.launcher import LaunchHandle
+
+        self.calls.append({"slice_id": slice_id, "prompt": prompt, "worktree": worktree})
+        return LaunchHandle(
+            executor="copilot", session_name=slice_id, pid=100 + len(self.calls),
+            log_path=f"{log_dir}/{slice_id}.jsonl",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -273,37 +293,101 @@ class FanoutTests(unittest.TestCase):
             _meta("blocked", depends_on=["down"]),     # down 未滿足 → 不就緒
             _meta("ready-2", depends_on=["up"]),        # up 滿足 → 就緒
         ]
-        fake = _FakeDispatcher()
+        launcher = _RecordingLauncher()
         # is_satisfied 只對 "up" 回 True → ready-1（無相依）、ready-2（dep=up）就緒；
         # held（hold）/noplan（無 plan）/blocked（dep=down 未滿足）皆不就緒
         jobs = dispatch_ready(
             metas,
             is_satisfied=lambda _id: _id == "up",
-            dispatcher=fake,
+            dispatcher=_FakeDispatcher(),
             persona="builder",
+            launcher=launcher,
         )
-        dispatched_tasks = [c["task"] for c in fake.calls]
+        dispatched_tasks = [c["slice_id"] for c in launcher.calls]
         self.assertEqual(sorted(dispatched_tasks), ["ready-1", "ready-2"])
         self.assertEqual(len(jobs), 2)
-        self.assertTrue(all(c["persona"] == "builder" for c in fake.calls))
+        self.assertTrue(all(j["persona"] == "builder" for j in jobs))
         # 非就緒一個都沒派
         self.assertNotIn("held", dispatched_tasks)
         self.assertNotIn("noplan", dispatched_tasks)
         self.assertNotIn("blocked", dispatched_tasks)
 
-    def test_dispatch_ready_command_carries_persona_contract(self) -> None:
+    def test_dispatch_ready_without_launcher_fails_fast(self) -> None:
+        # headless fail-fast（reviewer #112-3）：就緒集非空卻無 launcher → 直接拒絕，
+        # 不經 tmux pane 送多行 persona prompt（send-keys -l 會被換行打散）。
+        from paulshaclaw.coordinator.autonomy import (
+            DispatchReadyRequiresLauncherError,
+            dispatch_ready,
+        )
+
+        fake = _FakeDispatcher()
+        metas = [_meta("ready-1", depends_on=[])]
+        with self.assertRaisesRegex(DispatchReadyRequiresLauncherError, "--executor"):
+            dispatch_ready(
+                metas, is_satisfied=lambda _id: True, dispatcher=fake, persona="builder",
+            )
+        self.assertEqual(fake.calls, [])  # 一筆都沒經 pane 派
+
+    def test_dispatch_ready_empty_ready_set_without_launcher_ok(self) -> None:
+        # 就緒集為空時無 launcher 不應 fail-fast（無事可派）
         from paulshaclaw.coordinator.autonomy import dispatch_ready
 
         fake = _FakeDispatcher()
-        metas = [_meta("slice-a", plan="docs/superpowers/plans/a.md")]
-        dispatch_ready(metas, is_satisfied=lambda _id: True, dispatcher=fake, persona="builder")
+        metas = [_meta("held", dispatch="hold")]
+        jobs = dispatch_ready(metas, is_satisfied=lambda _id: True, dispatcher=fake)
+        self.assertEqual(jobs, [])
+        self.assertEqual(fake.calls, [])
 
-        self.assertEqual(len(fake.calls), 1)
-        command = fake.calls[0]["command"]
+    def test_dispatch_ready_command_carries_persona_contract(self) -> None:
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+
+        launcher = _RecordingLauncher()
+        metas = [_meta("slice-a", plan="docs/superpowers/plans/a.md")]
+        dispatch_ready(
+            metas, is_satisfied=lambda _id: True, dispatcher=_FakeDispatcher(),
+            persona="builder", launcher=launcher,
+        )
+
+        self.assertEqual(len(launcher.calls), 1)
+        command = launcher.calls[0]["prompt"]
         self.assertIn("[PERSONA CONTRACT", command)        # 不再是 "# dispatch ..." 佔位
         self.assertIn("role: builder", command)
         self.assertIn("docs/superpowers/plans/a.md", command)
         self.assertNotIn("copilot", command)               # executor wrapping moved to launcher
+
+    def test_dispatch_ready_bad_role_isolated_from_other_slices(self) -> None:
+        # reviewer #112-2：未知 role 的 prompt 構建失敗只該影響該單位，
+        # 其餘就緒單位照常派工，失敗被收進 DispatchReadyError（per-slice 隔離）。
+        from paulshaclaw.coordinator.autonomy import (
+            DispatchReadyError,
+            build_dispatch_prompt as _real_build,
+            dispatch_ready,
+        )
+        import paulshaclaw.coordinator.autonomy as autonomy_mod
+
+        launcher = _RecordingLauncher()
+        metas = [_meta("bad-role-slice", plan="docs/a.md"), _meta("ok-slice", plan="docs/b.md")]
+
+        def _build(persona, *, task, plan_path):
+            if task == "bad-role-slice":
+                raise ValueError("unknown persona role: bogus")
+            return _real_build(persona, task=task, plan_path=plan_path)
+
+        original = autonomy_mod.build_dispatch_prompt
+        autonomy_mod.build_dispatch_prompt = _build
+        try:
+            with self.assertRaises(DispatchReadyError) as ctx:
+                dispatch_ready(
+                    metas, is_satisfied=lambda _id: True, dispatcher=_FakeDispatcher(),
+                    persona="builder", launcher=launcher,
+                )
+        finally:
+            autonomy_mod.build_dispatch_prompt = original
+
+        # 好的單位照常派；壞 role 被收進 error，不破壞隔離
+        self.assertEqual([c["slice_id"] for c in launcher.calls], ["ok-slice"])
+        self.assertEqual([job["task"] for job in ctx.exception.jobs], ["ok-slice"])
+        self.assertIn("bad-role-slice", str(ctx.exception))
 
     def test_dispatch_ready_launches_via_agent_launcher(self) -> None:
         from paulshaclaw.coordinator.autonomy import dispatch_ready
@@ -441,11 +525,14 @@ class FanoutTests(unittest.TestCase):
             dispatch_ready(dup, is_satisfied=lambda _id: True, dispatcher=fake)
         self.assertEqual(fake.calls, [])  # refuse → 一筆都沒派
 
-    def test_dispatch_ready_with_real_dispatcher_fake_seams(self) -> None:
+    def test_dispatch_ready_with_real_dispatcher_headless_launcher(self) -> None:
+        # headless fan-out（reviewer #112-3）：經 launcher 啟 agent、registry 記 job，
+        # 全程不送 tmux pane、不碰真 git。
         import subprocess as _subprocess
 
         from paulshaclaw.coordinator.autonomy import dispatch_ready
         from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.launcher import LaunchHandle
         from paulshaclaw.coordinator.registry import JobRegistry
 
         class _FakeSender:
@@ -459,15 +546,16 @@ class FanoutTests(unittest.TestCase):
             def create(self, branch):
                 return f"/fake/wt/{branch.replace('/', '-')}"
 
-        class _FakeGitRunner:
-            """fake git_runner：記錄 rev-parse 呼叫、回固定 head；全程不啟動真 git。"""
-
+        class _FakeLauncher:
             def __init__(self):
                 self.calls = []
 
-            def __call__(self, args):
-                self.calls.append(list(args))
-                return "deadbeef"  # 固定 baseline head
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                self.calls.append(slice_id)
+                return LaunchHandle(
+                    executor="copilot", session_name=slice_id, pid=200 + len(self.calls),
+                    log_path=f"{log_dir}/{slice_id}.jsonl",
+                )
 
         # spy 真 subprocess.run：本測試全程不得對 git 起任何真子行程
         real_calls: list = []
@@ -482,7 +570,7 @@ class FanoutTests(unittest.TestCase):
             reg = JobRegistry(state_path=Path(d) / "jobs.json")
             sender = _FakeSender()
             disp = Dispatcher(reg, sender, _FakeWt())
-            git = _FakeGitRunner()
+            launcher = _FakeLauncher()
             metas = [_meta("real-a", depends_on=[]), _meta("real-b", depends_on=[])]
             _subprocess.run = _spy_run
             try:
@@ -490,22 +578,16 @@ class FanoutTests(unittest.TestCase):
                     metas,
                     is_satisfied=lambda _id: True,
                     dispatcher=disp,
-                    git_runner=git,  # 注入 fake git_runner → 不 fallback 到真 git
+                    launcher=launcher,
                 )
             finally:
                 _subprocess.run = orig_run
             self.assertEqual(len(jobs), 2)
             self.assertEqual({j["status"] for j in jobs}, {"dispatched"})
             self.assertEqual(len(reg.list_jobs()), 2)
-            # 各自一個 pane（fan-out 佔位 %0、%1...）
-            self.assertEqual(len(sender.sent), 2)
-            self.assertNotEqual(sender.sent[0][0], sender.sent[1][0])
-            # fake git_runner 被各單位呼叫一次（rev-parse feature/<slice>），真 git 零呼叫
-            self.assertEqual(
-                git.calls,
-                [["rev-parse", "feature/real-a"], ["rev-parse", "feature/real-b"]],
-            )
-            self.assertEqual(real_calls, [])  # 全程不啟動真 git
+            self.assertEqual(launcher.calls, ["real-a", "real-b"])
+            self.assertEqual(sender.sent, [])   # headless：不送 tmux pane
+            self.assertEqual(real_calls, [])     # 全程不啟動真 git
 
 
 # --------------------------------------------------------------------------- #
@@ -526,9 +608,12 @@ class CliTests(unittest.TestCase):
             self.assertEqual([m["slice_id"] for m in payload], ["r"])
 
     def test_main_fanout_with_fakes(self) -> None:
+        # headless fan-out（reviewer #112-3）：多就緒單位經 launcher 各啟 agent，
+        # registry 記 job，全程不送 tmux pane、不碰真 git。
         import subprocess as _subprocess
 
         from paulshaclaw.coordinator.cli import main
+        from paulshaclaw.coordinator.launcher import LaunchHandle
         from paulshaclaw.coordinator.registry import JobRegistry
 
         class _FakeSender:
@@ -542,8 +627,16 @@ class CliTests(unittest.TestCase):
             def create(self, branch):
                 return f"/fake/wt/{branch.replace('/', '-')}"
 
-        def _fake_git(args):  # fake git_runner：不啟動真 git
-            return "deadbeef"
+        class _FakeLauncher:
+            def __init__(self):
+                self.calls = []
+
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                self.calls.append(slice_id)
+                return LaunchHandle(
+                    executor="copilot", session_name=slice_id, pid=300 + len(self.calls),
+                    log_path=f"{log_dir}/{slice_id}.jsonl",
+                )
 
         real_calls: list = []
         orig_run = _subprocess.run
@@ -558,17 +651,18 @@ class CliTests(unittest.TestCase):
             _write_spec(Path(d), "b.md", "dispatch: auto\nslice_id: fb\nplan: docs/p.md\ndepends_on: [up]")
             reg = JobRegistry(state_path=Path(d) / "jobs.json")
             sender = _FakeSender()
+            launcher = _FakeLauncher()
             out = io.StringIO()
             _subprocess.run = _spy_run
             try:
                 with contextlib.redirect_stdout(out):
                     rc = main(
-                        ["fanout", "--specs-dir", d],
+                        ["fanout", "--specs-dir", d, "--executor", "copilot"],
                         registry=reg,
                         pane_sender=sender,
                         worktree_creator=_FakeWt(),
                         is_satisfied=lambda _id: True,  # up 滿足 → fa, fb 都就緒
-                        git_runner=_fake_git,           # 注入 fake → 不碰真 git
+                        launcher=launcher,
                     )
             finally:
                 _subprocess.run = orig_run
@@ -576,8 +670,9 @@ class CliTests(unittest.TestCase):
             jobs = json.loads(out.getvalue())
             self.assertEqual(sorted(j["task"] for j in jobs), ["fa", "fb"])
             self.assertEqual(len(reg.list_jobs()), 2)
-            self.assertEqual(len(sender.sent), 2)  # 不碰真 tmux/copilot
-            self.assertEqual(real_calls, [])        # 全程不啟動真 git
+            self.assertEqual(sorted(launcher.calls), ["fa", "fb"])
+            self.assertEqual(sender.sent, [])   # headless：不送 tmux pane
+            self.assertEqual(real_calls, [])     # 全程不啟動真 git
 
     def test_main_fanout_executor_uses_headless_launcher_no_pane_send(self) -> None:
         from paulshaclaw.coordinator.cli import main
@@ -641,8 +736,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(recorded["pid"], 4321)
             self.assertTrue(recorded["log_path"].endswith("fa.jsonl"))
 
-    def test_main_fanout_without_executor_uses_pane_dispatch(self) -> None:
-        # 不帶 --executor → 沿用舊 pane 路徑（向後相容）；不建 launcher
+    def test_main_fanout_without_executor_fails_fast(self) -> None:
+        # 不帶 --executor 卻有就緒單位 → fail-fast（reviewer #112-3）：
+        # 不再 silently 經 tmux pane 送多行 persona prompt；rc!=0 且提示改用 --executor。
         from paulshaclaw.coordinator.cli import main
         from paulshaclaw.coordinator.registry import JobRegistry
 
@@ -657,25 +753,23 @@ class CliTests(unittest.TestCase):
             def create(self, branch):
                 return f"/fake/wt/{branch.replace('/', '-')}"
 
-        def _fake_git(args):
-            return "deadbeef"
-
         with tempfile.TemporaryDirectory() as d:
             _write_spec(Path(d), "a.md", "dispatch: auto\nslice_id: fa\nplan: docs/p.md")
             reg = JobRegistry(state_path=Path(d) / "jobs.json")
             sender = _FakeSender()
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
                 rc = main(
                     ["fanout", "--specs-dir", d],
                     registry=reg,
                     pane_sender=sender,
                     worktree_creator=_FakeWt(),
                     is_satisfied=lambda _id: True,
-                    git_runner=_fake_git,
                 )
-            self.assertEqual(rc, 0)
-            self.assertEqual(len(sender.sent), 1)  # 舊 pane 路徑仍送
+            self.assertNotEqual(rc, 0)               # fail-fast
+            self.assertIn("--executor", err.getvalue())
+            self.assertEqual(sender.sent, [])        # 一行都沒送 pane
+            self.assertEqual(reg.list_jobs(), [])    # 也沒記 job
 
     def test_main_refuses_on_cycle(self) -> None:
         from paulshaclaw.coordinator.cli import main
