@@ -7,6 +7,7 @@ from typing import Sequence
 
 from . import autonomy
 from .dispatcher import Dispatcher
+from .launcher import _ARGV_BUILDERS, AgentLauncher, SubprocessLauncher
 from .registry import JobRegistry
 from .seams import PaneSender, ScriptWorktreeCreator, TmuxPaneSender, WorktreeCreator
 
@@ -32,6 +33,12 @@ def _build_parser() -> argparse.ArgumentParser:
     p_fanout = sub.add_parser("fanout", help="對就緒集經 Dispatcher 並行派工")
     p_fanout.add_argument("--specs-dir", required=True)
     p_fanout.add_argument("--persona", default="builder")
+    p_fanout.add_argument(
+        "--executor",
+        choices=sorted(_ARGV_BUILDERS),
+        default=None,
+        help="設定後走 headless launcher 路徑（copilot/claude/codex）；未設則沿用舊 tmux pane 路徑",
+    )
 
     return parser
 
@@ -44,6 +51,7 @@ def main(
     worktree_creator: WorktreeCreator | None = None,
     is_satisfied=None,
     git_runner=None,
+    launcher: AgentLauncher | None = None,
 ) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -84,9 +92,16 @@ def main(
                 return 0
             # fanout：reuse Phase 2 Dispatcher（注入或預設 seam）
             disp = Dispatcher(reg, sender, creator)
+            # --executor 設定（或測試注入 launcher）→ 走 headless launcher 路徑：
+            # SubprocessLauncher 啟動 agent，dispatch_ready 記 executor/session/pid/log，
+            # 且不再經 tmux pane send（與舊路徑互斥，無 double dispatch）。
+            active_launcher = launcher
+            if active_launcher is None and args.executor is not None:
+                active_launcher = SubprocessLauncher(executor=args.executor)
             # git_runner 未注入 → 不傳（沿用 Dispatcher 預設真 git）；測試一律注入 fake
             jobs = autonomy.dispatch_ready(
-                metas, predicate, disp, persona=args.persona, git_runner=git_runner
+                metas, predicate, disp, persona=args.persona,
+                git_runner=git_runner, launcher=active_launcher,
             )
             print(json.dumps(jobs, ensure_ascii=False))
             return 0

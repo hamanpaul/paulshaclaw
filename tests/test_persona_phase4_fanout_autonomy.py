@@ -579,6 +579,104 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(sender.sent), 2)  # 不碰真 tmux/copilot
             self.assertEqual(real_calls, [])        # 全程不啟動真 git
 
+    def test_main_fanout_executor_uses_headless_launcher_no_pane_send(self) -> None:
+        from paulshaclaw.coordinator.cli import main
+        from paulshaclaw.coordinator.launcher import LaunchHandle
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        class _FakeSender:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, pane_id, text):
+                self.sent.append((pane_id, text))
+
+        class _FakeWt:
+            def create(self, branch):
+                return f"/fake/wt/{branch.replace('/', '-')}"
+
+        class _FakeLauncher:
+            def __init__(self):
+                self.calls = []
+
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                self.calls.append(
+                    {"slice_id": slice_id, "prompt": prompt, "worktree": worktree, "log_dir": log_dir}
+                )
+                return LaunchHandle(
+                    executor="copilot", session_name=slice_id, pid=4321,
+                    log_path=f"{log_dir}/{slice_id}.jsonl",
+                )
+
+        with tempfile.TemporaryDirectory() as d:
+            _write_spec(Path(d), "a.md", "dispatch: auto\nslice_id: fa\nplan: docs/p.md")
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            sender = _FakeSender()
+            launcher = _FakeLauncher()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = main(
+                    ["fanout", "--specs-dir", d, "--executor", "copilot"],
+                    registry=reg,
+                    pane_sender=sender,
+                    worktree_creator=_FakeWt(),
+                    is_satisfied=lambda _id: True,
+                    launcher=launcher,
+                )
+            self.assertEqual(rc, 0)
+            jobs = json.loads(out.getvalue())
+            # 走 headless 路徑：launcher.launch 被呼叫、無 pane send
+            self.assertEqual(len(launcher.calls), 1)
+            self.assertEqual(launcher.calls[0]["slice_id"], "fa")
+            self.assertEqual(sender.sent, [])  # 無 double dispatch
+            # registry/job 記錄 executor/session_name/pid/log_path
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(jobs[0]["executor"], "copilot")
+            self.assertEqual(jobs[0]["session_name"], "fa")
+            self.assertEqual(jobs[0]["pid"], 4321)
+            self.assertTrue(jobs[0]["log_path"].endswith("fa.jsonl"))
+            recorded = reg.get_job("fa-1")
+            self.assertEqual(recorded["executor"], "copilot")
+            self.assertEqual(recorded["session_name"], "fa")
+            self.assertEqual(recorded["pid"], 4321)
+            self.assertTrue(recorded["log_path"].endswith("fa.jsonl"))
+
+    def test_main_fanout_without_executor_uses_pane_dispatch(self) -> None:
+        # 不帶 --executor → 沿用舊 pane 路徑（向後相容）；不建 launcher
+        from paulshaclaw.coordinator.cli import main
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        class _FakeSender:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, pane_id, text):
+                self.sent.append((pane_id, text))
+
+        class _FakeWt:
+            def create(self, branch):
+                return f"/fake/wt/{branch.replace('/', '-')}"
+
+        def _fake_git(args):
+            return "deadbeef"
+
+        with tempfile.TemporaryDirectory() as d:
+            _write_spec(Path(d), "a.md", "dispatch: auto\nslice_id: fa\nplan: docs/p.md")
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            sender = _FakeSender()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = main(
+                    ["fanout", "--specs-dir", d],
+                    registry=reg,
+                    pane_sender=sender,
+                    worktree_creator=_FakeWt(),
+                    is_satisfied=lambda _id: True,
+                    git_runner=_fake_git,
+                )
+            self.assertEqual(rc, 0)
+            self.assertEqual(len(sender.sent), 1)  # 舊 pane 路徑仍送
+
     def test_main_refuses_on_cycle(self) -> None:
         from paulshaclaw.coordinator.cli import main
 
