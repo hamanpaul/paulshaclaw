@@ -1,0 +1,57 @@
+## ADDED Requirements
+
+### Requirement: AgentLauncher seam 與三 executor headless 啟動
+
+系統 SHALL 提供 `AgentLauncher` Protocol seam，以 headless subprocess（**非 tmux pane**）啟動 agent，並提供 copilot / claude / codex 三個真實作。每個真實作 MUST 以 prompt 為單一 argv 元素、於指定 worktree 為 cwd、帶該家的 remote 旗標與 JSONL 輸出旗標啟動，並回傳含 `executor`、`session_name`、`pid`、`log_path` 的 handle。真實作 MUST 可經 seam 注入以便測試注入 fake（不啟動真 subprocess）。
+
+#### Scenario: copilot headless 啟動組正確 argv
+
+- **WHEN** 以 copilot launcher 啟動一個 slice
+- **THEN** 組出的 argv 含 `-p <prompt>`（prompt 為單一元素）、`--remote`、`--name <slice_id>`、`--output-format json`，cwd 為該 worktree，且不經 `tmux send-keys`
+
+#### Scenario: 注入 fake launcher 不啟真 subprocess
+
+- **WHEN** 測試以 fake `AgentLauncher` 注入 dispatch 流程
+- **THEN** 不啟動任何真實 subprocess，且 fake 收到正確的 `slice_id`/`prompt`/`worktree`
+
+#### Scenario: launch 失敗為 per-slice 隔離
+
+- **WHEN** 某 slice 的 launch 失敗（executor 不存在或 argv 錯）
+- **THEN** 該 slice 不入 registry 並冒泡錯誤，不影響其他就緒單位的啟動
+
+### Requirement: JobRegistry 記錄 session↔task 對應
+
+`JobRegistry` SHALL 為每個 headless job 記錄 `executor`、`session_name`（= `slice_id`）、`pid`、`log_path` 與 `exit_code`，使 session 可反查 task。
+
+#### Scenario: 啟動後 job 含 session 對應欄位
+
+- **WHEN** headless 啟動一個 slice 後查該 job
+- **THEN** job 含 `executor`、`session_name`（等於 `slice_id`）、`pid`、`log_path` 欄位
+
+### Requirement: 完成偵測以 subprocess exit 與 JSONL result 為準
+
+完成偵測 SHALL 以 subprocess exit code 搭配末筆 JSONL `result` 判定 job 為 `done` 或 `failed`；JSONL 不可解析時 MUST fallback 以 exit code 判定。
+
+#### Scenario: 正常結束標 done
+
+- **WHEN** headless subprocess 以 exit code 0 結束且末筆 JSONL 為成功 result
+- **THEN** 對應 job 標為 `done`
+
+#### Scenario: JSONL 不可解則 fallback exit code
+
+- **WHEN** JSONL 輸出無法解析
+- **THEN** 以 exit code 判定（0→done、非 0→failed），不拋例外
+
+### Requirement: 進度 relay 經三家共有 hook 推回 PaulShiaBro
+
+系統 SHALL 提供一支共用 relay hook，註冊於三家 executor **共有的事件** `session_start` 與 `stop`（copilot `sessionStart`/`agentStop`、claude `SessionStart`/`Stop`、codex `session_start`/`stop`），以啟動時注入的環境變數 `PSC_SLICE_ID` 標記事件所屬 task，並經現有 bro-bridge 推送至 PaulShiaBro。relay 失敗 MUST NOT 影響 agent 執行或完成偵測（fire-and-forget）。
+
+#### Scenario: stop 事件 relay 帶 slice 標記
+
+- **WHEN** headless agent 觸發 `stop` 事件且環境含 `PSC_SLICE_ID=<slice>`
+- **THEN** relay 產出標記該 `<slice>` 的「完成」訊息推往 bro-bridge
+
+#### Scenario: relay 失敗不影響派工
+
+- **WHEN** bro-bridge 不可達導致 relay 失敗
+- **THEN** agent 執行與完成偵測不受影響，僅該則通知丟失

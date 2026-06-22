@@ -93,6 +93,9 @@ build_dispatch_command(role: str, *, task: str, plan_path: str,
 
 ### 4.2 pane 配置 — `PaneAllocator`（新 seam）
 
+> ⚠️ **已被 `2026-06-22-persona-manager-phase-b-headless-dispatch-design.md` 取代。**
+> brainstorm 後校正：manager 自主路徑改走 **headless executor（subprocess argv）**，不自建 tmux pane，故 `PaneAllocator` 不採用、多行 transport 問題消滅。互動路徑（bot→既有 pane）維持 `route_to_agent` 不變。以下 §4.2/§4.3 的 PaneAllocator/tick 內容保留為歷史脈絡，實際 Phase B 以該 headless spec 為準。
+
 `dispatch_ready` 現以 `f"%{i}"` 佔位。新增 seam：
 
 ```
