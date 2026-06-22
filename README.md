@@ -72,7 +72,11 @@ flowchart LR
 | **transcript 來源格式** | 假設特定 agent CLI 的 transcript 落地格式 / 路徑 | 格式不符需自寫 adapter；路徑走 config |
 | **狀態 / secret 路徑** | runtime 狀態與密鑰**放在 repo 外**（例：`~/.agents/`、`~/.config/paulshaclaw/`） | 路徑走 config；secret 不入庫（見下方「安全」） |
 
-**安裝 / 試跑**
+---
+
+## Install
+
+> 先確認上方「環境前提」；缺了地端 LLM endpoint 等前提，多數功能跑不起來。
 
 ```bash
 # 1. 取得程式碼
@@ -94,6 +98,17 @@ pytest tests/ paulshaclaw/memory/tests/
 ```
 
 **安全 / 不入庫的東西**：密鑰、token、個人狀態一律放 repo 外（透過 config 指向 `~/.config/...`、`~/.agents/...`）。請勿把任何真實密鑰、內網主機名、客戶 / 專案代號寫進 repo。
+
+---
+
+## Usage
+
+> 本專案重度綁環境（見「環境前提」）；公開重點是**讀**核心程式碼 / 設計 ＋ **跑測試**驗證核心為真，而非一鍵運行。
+
+- 先跑測試確認核心為真（見下方「測試 / 驗證」）。
+- 核心記憶 pipeline 的子模組與用法見 [`paulshaclaw/memory/`](./paulshaclaw/memory/)。
+- 各模組「是否真的在 runtime 跑」一律見下方「誠實狀態表」。
+- 設計與規格入口見 [`docs/`](./docs/)、[`openspec/`](./openspec/)。
 
 ---
 
@@ -141,6 +156,12 @@ pytest tests/ paulshaclaw/memory/tests/
 - 架構總覽：[`docs/research/`](./docs/research/)
 - OpenSpec 規格與變更：[`openspec/`](./openspec/)
 - 七大設計原則：Hub-and-spoke · Artifact-first · Proposal-first · Fail-close · Stage 獨立性 · 三軸分層 · always-on 失敗域分離
+
+---
+
+## Version
+
+當前版本見 [`VERSION`](./VERSION)；變更紀錄見 [`CHANGELOG.md`](./CHANGELOG.md)。
 
 ---
 
