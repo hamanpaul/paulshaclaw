@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,7 +125,7 @@ class SubprocessLauncher:
 
     def launch(self, *, slice_id: str, prompt: str, worktree: str, log_dir: str) -> LaunchHandle:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
-        argv = _ARGV_BUILDERS[self._executor](
+        inner_argv = _ARGV_BUILDERS[self._executor](
             prompt=prompt,
             slice_id=slice_id,
             log_dir=log_dir,
@@ -135,6 +136,12 @@ class SubprocessLauncher:
         if self._relay_target is not None:
             env["PSC_RELAY_TARGET"] = self._relay_target
         log_path = str(Path(log_dir) / f"{slice_id}.jsonl")
+        # 跨進程 durable 完成判定：以 bash -lc 包裝，子進程結束時把 $? 寫入 exit sentinel。
+        # 用 shlex.join 安全嵌入內層 argv（prompt 含換行/空白仍為單一 token），
+        # sentinel 路徑亦 shlex.quote。poll_headless_done 讀此 sentinel，不再靠 os.waitpid。
+        sentinel = str(Path(log_dir) / f"{slice_id}.exit")
+        script = f'{shlex.join(inner_argv)}; printf %s "$?" > {shlex.quote(sentinel)}'
+        argv = ["bash", "-lc", script]
         with open(log_path, "ab") as logf:
             proc = subprocess.Popen(
                 argv,

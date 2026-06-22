@@ -99,6 +99,78 @@ class ArgvTests(unittest.TestCase):
         self.assertEqual(calls[0]["env"]["PSC_SLICE_ID"], "slice-a")
         self.assertEqual(calls[0]["env"]["PSC_RELAY_TARGET"], "/tmp/relay.out")
 
+    def test_subprocess_launcher_wraps_with_exit_sentinel(self) -> None:
+        import shlex
+
+        from paulshaclaw.coordinator.dispatcher import exit_sentinel_path
+
+        calls = []
+
+        class _FakeProc:
+            pid = 789
+
+        def _fake_popen(argv, *, cwd, env, stdout, stderr):
+            calls.append({"argv": argv})
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                log_dir = Path(d) / "logs"
+                handle = SubprocessLauncher("copilot").launch(
+                    slice_id="slice-a",
+                    prompt="PROMPT",
+                    worktree=d,
+                    log_dir=str(log_dir),
+                )
+        finally:
+            launcher_module.subprocess.Popen = original
+
+        argv = calls[0]["argv"]
+        # 子進程經 bash -lc 包裝，結束時把 $? 寫到 sentinel（跨進程 durable 完成判定）
+        self.assertEqual(argv[0], "bash")
+        self.assertEqual(argv[1], "-lc")
+        script = argv[2]
+        sentinel = str(exit_sentinel_path(handle.log_path))
+        self.assertIn(shlex.quote(sentinel), script)
+        self.assertIn('"$?"', script)
+        # 內層 argv 經 shlex.join 安全嵌入；含 -p PROMPT
+        inner = shlex.join(["copilot", "-p", "PROMPT"])
+        self.assertIn(inner, script)
+
+    def test_subprocess_launcher_sentinel_records_real_exit_code(self) -> None:
+        # 真跑 bash -lc 包裝，但內層 argv 覆寫成無害的 `exit 7`（絕不啟動真 copilot/codex），
+        # 驗證 sentinel 確實寫下內層命令的真實 exit code（跨進程 durable 機制端到端）。
+        import time
+
+        from paulshaclaw.coordinator.dispatcher import exit_sentinel_path
+
+        orig_builders = dict(launcher_module._ARGV_BUILDERS)
+        launcher_module._ARGV_BUILDERS["copilot"] = (
+            lambda **_kw: ["sh", "-c", "exit 7"]
+        )
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                log_dir = Path(d) / "logs"
+                handle = SubprocessLauncher("copilot").launch(
+                    slice_id="slice-z",
+                    prompt="PROMPT",
+                    worktree=d,
+                    log_dir=str(log_dir),
+                )
+                sentinel = exit_sentinel_path(handle.log_path)
+                for _ in range(50):  # 短輪詢等子進程退出並寫 sentinel（避免 flaky）
+                    if sentinel.is_file() and sentinel.read_text().strip():
+                        break
+                    time.sleep(0.05)
+                # 斷言 MUST 在 with 內（tmpdir 尚未清除）
+                self.assertTrue(sentinel.is_file(), "sentinel exit 檔應由 bash 包裝寫出")
+                self.assertEqual(sentinel.read_text().strip(), "7")
+        finally:
+            launcher_module._ARGV_BUILDERS.clear()
+            launcher_module._ARGV_BUILDERS.update(orig_builders)
+
 
 if __name__ == "__main__":
     unittest.main()
