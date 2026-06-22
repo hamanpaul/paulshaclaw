@@ -800,21 +800,30 @@ def _read_local_observed_aiu(year: int | None = None, month: int | None = None) 
     return aiu_total
 
 
-# Attribution is metric-based per the operator's rule (see the project-usage-assess
-# skill): premium requests -> hamanpaul, AI credits (AIU) -> org-a. events.jsonl
-# does not record the logged-in account, so we do NOT gate on the active gh login.
-_COPILOT_PREMIUM_ACCOUNT = "hamanpaul"
-_COPILOT_AIU_ACCOUNT = "org-a"
+# Attribution is metric-based — premium-request → the configured kind='personal' account,
+# AIU → the configured kind='company' account (config-driven; events.jsonl has no
+# logged-in account so we don't gate on gh login).
 
 
-def _collect_local_observed_usage(allowed_accounts: set[str] | None = None) -> dict[str, int]:
+def _resolve_attribution_accounts(config) -> tuple[str | None, str | None]:
+    """premium-request -> first kind=='personal' account id; AIU -> first kind=='company' account id."""
+    premium = next((a.account_id for a in config.copilot_accounts if a.kind == "personal"), None)
+    aiu = next((a.account_id for a in config.copilot_accounts if a.kind == "company"), None)
+    return premium, aiu
+
+
+def _collect_local_observed_usage(
+    premium_account: str | None,
+    aiu_account: str | None,
+    allowed_accounts: set[str] | None = None,
+) -> dict[str, int]:
     year, month = _current_month_utc()
     usage: dict[str, int] = {}
     premium, aiu = _read_local_observed_metrics(year=year, month=month)
-    if premium > 0:
-        usage[_COPILOT_PREMIUM_ACCOUNT] = premium
-    if aiu > 0:
-        usage[_COPILOT_AIU_ACCOUNT] = aiu
+    if premium > 0 and premium_account:
+        usage[premium_account] = premium
+    if aiu > 0 and aiu_account:
+        usage[aiu_account] = aiu
     if allowed_accounts is not None:
         usage = {key: value for key, value in usage.items() if key in allowed_accounts}
     return usage
@@ -881,7 +890,8 @@ def collect_copilot(
             continue
 
         if resolved_local_observed is None and fetcher is None:
-            resolved_local_observed = _collect_local_observed_usage(allowed_account_ids)
+            premium_account, aiu_account = _resolve_attribution_accounts(config)
+            resolved_local_observed = _collect_local_observed_usage(premium_account, aiu_account, allowed_account_ids)
 
         if resolved_local_observed is not None and account.account_id in resolved_local_observed:
             accounts.append(
