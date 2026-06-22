@@ -303,7 +303,78 @@ class FanoutTests(unittest.TestCase):
         self.assertIn("[PERSONA CONTRACT", command)        # 不再是 "# dispatch ..." 佔位
         self.assertIn("role: builder", command)
         self.assertIn("docs/superpowers/plans/a.md", command)
-        self.assertIn("copilot", command)
+        self.assertNotIn("copilot", command)               # executor wrapping moved to launcher
+
+    def test_dispatch_ready_launches_via_agent_launcher(self) -> None:
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+
+        calls = []
+
+        class _FakeLauncher:
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                calls.append({"slice_id": slice_id, "prompt": prompt, "worktree": worktree})
+                from paulshaclaw.coordinator.launcher import LaunchHandle
+                return LaunchHandle(executor="copilot", session_name=slice_id, pid=123, log_path=f"{log_dir}/x")
+
+        metas = [_meta("slice-a", plan="docs/p.md")]
+        dispatch_ready(
+            metas, is_satisfied=lambda _id: True, dispatcher=_FakeDispatcher(),
+            persona="builder", launcher=_FakeLauncher(),
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["slice_id"], "slice-a")
+        self.assertIn("[PERSONA CONTRACT", calls[0]["prompt"])
+        self.assertIn("docs/p.md", calls[0]["prompt"])
+
+    def test_dispatch_ready_launcher_records_headless_job_without_pane_send(self) -> None:
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+        from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.launcher import LaunchHandle
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        class _FakeSender:
+            def __init__(self):
+                self.sent = []
+
+            def send(self, pane_id, text):
+                self.sent.append((pane_id, text))
+
+        class _FakeWt:
+            def __init__(self):
+                self.created = []
+
+            def create(self, branch):
+                self.created.append(branch)
+                return f"/fake/wt/{branch.replace('/', '-')}"
+
+        class _FakeLauncher:
+            def __init__(self):
+                self.calls = []
+
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                self.calls.append({"slice_id": slice_id, "worktree": worktree, "log_dir": log_dir})
+                return LaunchHandle(executor="copilot", session_name=slice_id, pid=123, log_path=f"{log_dir}/x")
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            sender = _FakeSender()
+            wt = _FakeWt()
+            launcher = _FakeLauncher()
+            disp = Dispatcher(reg, sender, wt)
+            jobs = dispatch_ready(
+                [_meta("slice-a", plan="docs/p.md")],
+                is_satisfied=lambda _id: True,
+                dispatcher=disp,
+                persona="builder",
+                launcher=launcher,
+            )
+
+            self.assertEqual(sender.sent, [])
+            self.assertEqual(wt.created, ["feature/slice-a"])
+            self.assertEqual(launcher.calls[0]["worktree"], "/fake/wt/feature-slice-a")
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(jobs[0]["executor"], "copilot")
+            self.assertEqual(reg.get_job("slice-a-1")["pid"], 123)
 
     def test_dispatch_ready_no_slice_id_not_dispatched(self) -> None:
         from paulshaclaw.coordinator.autonomy import dispatch_ready

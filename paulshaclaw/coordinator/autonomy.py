@@ -6,7 +6,8 @@ from typing import Callable
 
 import yaml
 
-from .contract_command import build_dispatch_command
+from .contract_command import build_dispatch_prompt
+from .launcher import AgentLauncher, LaunchHandle
 
 # is_satisfied predicate 型別：收 slice_id，回該相依是否「已滿足」（可釋放下游）。
 # 判定來源由呼叫者決定（merged-to-main vs handoff gate_status）——#104 留開放。
@@ -207,6 +208,7 @@ def dispatch_ready(
     dispatcher,
     persona: str = "builder",
     git_runner=None,
+    launcher: AgentLauncher | None = None,
 ) -> list[dict]:
     """算就緒集，對每單位經注入的 Phase 2 Dispatcher 各派一筆 job（reuse，不重寫派工）。
 
@@ -221,14 +223,77 @@ def dispatch_ready(
     jobs: list[dict] = []
     for i, m in enumerate(ready):
         slice_id = m["slice_id"]
+        prompt = build_dispatch_prompt(persona, task=slice_id, plan_path=m["plan"])
+        if launcher is not None:
+            worktree = _launcher_worktree(dispatcher, slice_id)
+            log_dir = str(Path("runtime/dispatch") / slice_id)
+            handle = launcher.launch(
+                slice_id=slice_id,
+                prompt=prompt,
+                worktree=worktree,
+                log_dir=log_dir,
+            )
+            job = _record_launcher_job(
+                dispatcher=dispatcher,
+                slice_id=slice_id,
+                persona=persona,
+                worktree=worktree,
+                handle=handle,
+            )
+            jobs.append(job)
+            continue
         kwargs = {
             "task": slice_id,
             "persona": persona,
             "pane_id": f"%{i}",
-            "command": build_dispatch_command(persona, task=slice_id, plan_path=m["plan"]),
+            "command": prompt,
         }
         if git_runner is not None:
             kwargs["git_runner"] = git_runner
         job = dispatcher.dispatch(**kwargs)
         jobs.append(job)
     return jobs
+
+
+def _branch_for_slice(slice_id: str) -> str:
+    return f"feature/{slice_id}"
+
+
+def _launcher_worktree(dispatcher, slice_id: str) -> str:
+    worktree_creator = getattr(dispatcher, "_worktree_creator", None)
+    if worktree_creator is None:
+        return str(Path.cwd())
+    return worktree_creator.create(_branch_for_slice(slice_id))
+
+
+def _record_launcher_job(
+    *,
+    dispatcher,
+    slice_id: str,
+    persona: str,
+    worktree: str,
+    handle: LaunchHandle,
+) -> dict:
+    registry = getattr(dispatcher, "_registry", None)
+    if registry is None:
+        return {
+            "task": slice_id,
+            "persona": persona,
+            "worktree": worktree,
+            "status": "dispatched",
+            "executor": handle.executor,
+            "session_name": handle.session_name,
+            "pid": handle.pid,
+            "log_path": handle.log_path,
+        }
+    return registry.create_job(
+        task=slice_id,
+        persona=persona,
+        branch=_branch_for_slice(slice_id),
+        pane="",
+        worktree=worktree,
+        executor=handle.executor,
+        session_name=handle.session_name,
+        pid=handle.pid,
+        log_path=handle.log_path,
+    )

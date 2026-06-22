@@ -26,13 +26,3 @@ def build_dispatch_prompt(
         f"[PLAN: {plan_path}]\n"
         "請於本 worktree 內讀取上述 plan 並依 persona 契約邊界執行。"
     )
-
-
-def build_dispatch_command(
-    role: str,
-    *,
-    task: str,
-    plan_path: str,
-    catalog: Mapping[str, PersonaContract] | None = None,
-) -> str:
-    return build_dispatch_prompt(role, task=task, plan_path=plan_path, catalog=catalog)
