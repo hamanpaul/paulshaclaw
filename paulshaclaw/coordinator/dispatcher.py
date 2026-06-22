@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import os
 import subprocess
+from pathlib import Path
 from typing import Callable
 
+from .completion import classify_completion
 from .registry import JobRegistry
 from .seams import PaneSender, WorktreeCreator
 
 # git_runner seam：收 git 參數、回 stdout 文字。預設真實作呼 git。
 GitRunner = Callable[[list[str]], str]
+PidWaiter = Callable[[int], int | None]
 
 
 def _default_git_runner(args: list[str]) -> str:
@@ -19,6 +23,33 @@ def _default_git_runner(args: list[str]) -> str:
 
 def _branch_for_task(task: str) -> str:
     return f"feature/{task}"
+
+
+def _default_pid_waiter(pid: int) -> int | None:
+    try:
+        waited_pid, status = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return None
+    if waited_pid == 0:
+        return None
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return 1
+
+
+def _last_nonempty_line(path: str | None) -> str | None:
+    if not path:
+        return None
+    p = Path(path)
+    if not p.is_file():
+        return None
+    last_line = None
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            last_line = line
+    return last_line
 
 
 class Dispatcher:
@@ -88,3 +119,24 @@ class Dispatcher:
         if current != baseline:
             return self._registry.update_status(job_id, "done")
         return job
+
+    def poll_headless_done(
+        self,
+        job_id: str,
+        pid_waiter: PidWaiter | None = None,
+    ) -> dict[str, object]:
+        job = self._registry.get_job(job_id)
+        pid = job.get("pid")
+        if not isinstance(pid, int):
+            return job
+        waiter = pid_waiter or _default_pid_waiter
+        exit_code = waiter(pid)
+        if exit_code is None:
+            return job
+        last_jsonl_line = _last_nonempty_line(job.get("log_path") if isinstance(job.get("log_path"), str) else None)
+        status = classify_completion(exit_code=exit_code, last_jsonl_line=last_jsonl_line)
+        return self._registry.update_headless_result(
+            job_id,
+            status=status,
+            exit_code=exit_code,
+        )

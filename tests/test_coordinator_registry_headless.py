@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from paulshaclaw.coordinator.completion import classify_completion
+from paulshaclaw.coordinator.dispatcher import Dispatcher
 from paulshaclaw.coordinator.registry import JobRegistry
 
 
@@ -46,6 +47,77 @@ class HeadlessRegistryFieldsTests(unittest.TestCase):
             self.assertEqual(job["log_path"], "/logs/slice-a.jsonl")
             self.assertEqual(job["exit_code"], 0)
             self.assertEqual(reg.get_job("slice-a-1")["executor"], "copilot")
+
+
+class HeadlessCompletionPollingTests(unittest.TestCase):
+    def test_poll_headless_done_marks_done_and_persists_exit_code(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "jobs.json"
+            log_path = Path(d) / "slice-a.jsonl"
+            log_path.write_text('{"type":"progress"}\n{"type":"result","ok":true}\n', encoding="utf-8")
+            reg = JobRegistry(state_path=state)
+            reg.create_job(
+                task="slice-a",
+                persona="builder",
+                branch="feature/slice-a",
+                pane="",
+                worktree="/wt/slice-a",
+                executor="copilot",
+                session_name="slice-a",
+                pid=123,
+                log_path=str(log_path),
+            )
+            disp = Dispatcher(reg, pane_sender=None, worktree_creator=None)
+
+            updated = disp.poll_headless_done("slice-a-1", pid_waiter=lambda pid: 0)
+
+            self.assertEqual(updated["status"], "done")
+            self.assertEqual(updated["exit_code"], 0)
+            self.assertEqual(reg.get_job("slice-a-1")["exit_code"], 0)
+
+    def test_poll_headless_done_marks_failed_for_nonzero_exit(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            log_path = Path(d) / "slice-a.jsonl"
+            log_path.write_text("not json\n", encoding="utf-8")
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            reg.create_job(
+                task="slice-a",
+                persona="builder",
+                branch="feature/slice-a",
+                pane="",
+                worktree="/wt/slice-a",
+                executor="copilot",
+                session_name="slice-a",
+                pid=123,
+                log_path=str(log_path),
+            )
+            disp = Dispatcher(reg, pane_sender=None, worktree_creator=None)
+
+            updated = disp.poll_headless_done("slice-a-1", pid_waiter=lambda pid: 2)
+
+            self.assertEqual(updated["status"], "failed")
+            self.assertEqual(updated["exit_code"], 2)
+
+    def test_poll_headless_done_keeps_running_process_dispatched(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            reg.create_job(
+                task="slice-a",
+                persona="builder",
+                branch="feature/slice-a",
+                pane="",
+                worktree="/wt/slice-a",
+                executor="copilot",
+                session_name="slice-a",
+                pid=123,
+                log_path=str(Path(d) / "missing.jsonl"),
+            )
+            disp = Dispatcher(reg, pane_sender=None, worktree_creator=None)
+
+            updated = disp.poll_headless_done("slice-a-1", pid_waiter=lambda pid: None)
+
+            self.assertEqual(updated["status"], "dispatched")
+            self.assertIsNone(updated["exit_code"])
 
 
 if __name__ == "__main__":

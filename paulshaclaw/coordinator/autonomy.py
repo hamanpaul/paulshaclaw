@@ -17,6 +17,14 @@ IsSatisfied = Callable[[str], bool]
 DEFAULT_HANDOFF_DIR = "runtime/handoff"
 
 
+class DispatchReadyError(RuntimeError):
+    def __init__(self, errors: list[tuple[str, Exception]], jobs: list[dict]) -> None:
+        self.errors = tuple(errors)
+        self.jobs = list(jobs)
+        failed = ", ".join(slice_id for slice_id, _ in errors)
+        super().__init__(f"dispatch_ready failed for slice(s): {failed}")
+
+
 # --------------------------------------------------------------------------- #
 # 1) frontmatter 解析（預設 HOLD）
 # --------------------------------------------------------------------------- #
@@ -221,26 +229,30 @@ def dispatch_ready(
     """
     ready = ready_units(metas, is_satisfied)
     jobs: list[dict] = []
+    errors: list[tuple[str, Exception]] = []
     for i, m in enumerate(ready):
         slice_id = m["slice_id"]
         prompt = build_dispatch_prompt(persona, task=slice_id, plan_path=m["plan"])
         if launcher is not None:
-            worktree = _launcher_worktree(dispatcher, slice_id)
-            log_dir = str(Path("runtime/dispatch") / slice_id)
-            handle = launcher.launch(
-                slice_id=slice_id,
-                prompt=prompt,
-                worktree=worktree,
-                log_dir=log_dir,
-            )
-            job = _record_launcher_job(
-                dispatcher=dispatcher,
-                slice_id=slice_id,
-                persona=persona,
-                worktree=worktree,
-                handle=handle,
-            )
-            jobs.append(job)
+            try:
+                worktree = _launcher_worktree(dispatcher, slice_id)
+                log_dir = str(Path("runtime/dispatch") / slice_id)
+                handle = launcher.launch(
+                    slice_id=slice_id,
+                    prompt=prompt,
+                    worktree=worktree,
+                    log_dir=log_dir,
+                )
+                job = _record_launcher_job(
+                    dispatcher=dispatcher,
+                    slice_id=slice_id,
+                    persona=persona,
+                    worktree=worktree,
+                    handle=handle,
+                )
+                jobs.append(job)
+            except Exception as exc:
+                errors.append((slice_id, exc))
             continue
         kwargs = {
             "task": slice_id,
@@ -252,6 +264,8 @@ def dispatch_ready(
             kwargs["git_runner"] = git_runner
         job = dispatcher.dispatch(**kwargs)
         jobs.append(job)
+    if errors:
+        raise DispatchReadyError(errors, jobs)
     return jobs
 
 

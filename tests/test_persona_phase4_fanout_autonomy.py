@@ -376,6 +376,48 @@ class FanoutTests(unittest.TestCase):
             self.assertEqual(jobs[0]["executor"], "copilot")
             self.assertEqual(reg.get_job("slice-a-1")["pid"], 123)
 
+    def test_dispatch_ready_launcher_failure_does_not_block_other_slices(self) -> None:
+        from paulshaclaw.coordinator.autonomy import DispatchReadyError, dispatch_ready
+        from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.launcher import LaunchHandle
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        class _FakeSender:
+            def send(self, pane_id, text):
+                raise AssertionError("launcher path must not send to pane")
+
+        class _FakeWt:
+            def create(self, branch):
+                return f"/fake/wt/{branch.replace('/', '-')}"
+
+        class _FailFirstLauncher:
+            def __init__(self):
+                self.calls = []
+
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                self.calls.append(slice_id)
+                if slice_id == "slice-a":
+                    raise RuntimeError("executor missing")
+                return LaunchHandle(executor="copilot", session_name=slice_id, pid=123, log_path=f"{log_dir}/x")
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            launcher = _FailFirstLauncher()
+            disp = Dispatcher(reg, _FakeSender(), _FakeWt())
+            with self.assertRaises(DispatchReadyError) as ctx:
+                dispatch_ready(
+                    [_meta("slice-a", plan="docs/a.md"), _meta("slice-b", plan="docs/b.md")],
+                    is_satisfied=lambda _id: True,
+                    dispatcher=disp,
+                    persona="builder",
+                    launcher=launcher,
+                )
+
+            self.assertEqual(launcher.calls, ["slice-a", "slice-b"])
+            self.assertEqual([job["task"] for job in ctx.exception.jobs], ["slice-b"])
+            self.assertEqual([job["task"] for job in reg.list_jobs()], ["slice-b"])
+            self.assertIn("slice-a", str(ctx.exception))
+
     def test_dispatch_ready_no_slice_id_not_dispatched(self) -> None:
         from paulshaclaw.coordinator.autonomy import dispatch_ready
 

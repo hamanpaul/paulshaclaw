@@ -15,7 +15,14 @@ class LaunchHandle:
     log_path: str
 
 
-def build_copilot_argv(*, prompt: str, slice_id: str, log_dir: str) -> list[str]:
+def build_copilot_argv(
+    *,
+    prompt: str,
+    slice_id: str,
+    log_dir: str,
+    worktree: str | None = None,
+    remote: str | None = None,
+) -> list[str]:
     return [
         "copilot",
         "-p",
@@ -31,8 +38,15 @@ def build_copilot_argv(*, prompt: str, slice_id: str, log_dir: str) -> list[str]
     ]
 
 
-def build_claude_argv(*, prompt: str, slice_id: str, log_dir: str) -> list[str]:
-    return [
+def build_claude_argv(
+    *,
+    prompt: str,
+    slice_id: str,
+    log_dir: str,
+    worktree: str | None = None,
+    remote: str | None = None,
+) -> list[str]:
+    argv = [
         "claude",
         "-p",
         prompt,
@@ -44,20 +58,33 @@ def build_claude_argv(*, prompt: str, slice_id: str, log_dir: str) -> list[str]:
         "--permission-mode",
         "acceptEdits",
     ]
+    if worktree is not None:
+        argv.extend(["--add-dir", worktree])
+    return argv
 
 
-def build_codex_argv(*, prompt: str, slice_id: str, log_dir: str) -> list[str]:
-    return [
+def build_codex_argv(
+    *,
+    prompt: str,
+    slice_id: str,
+    log_dir: str,
+    worktree: str | None = None,
+    remote: str | None = "psc",
+) -> list[str]:
+    argv = [
         "codex",
         "exec",
         prompt,
         "--remote",
-        "psc",
+        remote or "psc",
         "--json",
         "--dangerously-bypass-approvals-and-sandbox",
         "-o",
         str(Path(log_dir) / "last.json"),
     ]
+    if worktree is not None:
+        argv.extend(["-C", worktree])
+    return argv
 
 
 @runtime_checkable
@@ -82,10 +109,18 @@ _ARGV_BUILDERS = {
 class SubprocessLauncher:
     """真實作：headless subprocess 啟動。測試 MUST 注入 fake，不實體化。"""
 
-    def __init__(self, executor: str = "copilot") -> None:
+    def __init__(
+        self,
+        executor: str = "copilot",
+        *,
+        relay_target: str | None = None,
+        codex_remote: str = "psc",
+    ) -> None:
         if executor not in _ARGV_BUILDERS:
             raise ValueError(f"unknown executor: {executor}")
         self._executor = executor
+        self._relay_target = relay_target
+        self._codex_remote = codex_remote
 
     def launch(self, *, slice_id: str, prompt: str, worktree: str, log_dir: str) -> LaunchHandle:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -93,8 +128,12 @@ class SubprocessLauncher:
             prompt=prompt,
             slice_id=slice_id,
             log_dir=log_dir,
+            worktree=worktree,
+            remote=self._codex_remote,
         )
         env = {**os.environ, "PSC_SLICE_ID": slice_id}
+        if self._relay_target is not None:
+            env["PSC_RELAY_TARGET"] = self._relay_target
         log_path = str(Path(log_dir) / f"{slice_id}.jsonl")
         with open(log_path, "ab") as logf:
             proc = subprocess.Popen(

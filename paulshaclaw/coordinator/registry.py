@@ -131,3 +131,20 @@ class JobRegistry:
                 self._persist()
                 return dict(job)
         raise KeyError(f"job 不存在: {job_id}")
+
+    def update_headless_result(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        exit_code: int,
+    ) -> dict[str, object]:
+        if status not in {"done", "failed"}:
+            raise ValueError("headless result status must be 'done' or 'failed'")
+        for job in self._jobs:
+            if job["job_id"] == job_id:
+                job["status"] = status
+                job["exit_code"] = exit_code
+                self._persist()
+                return dict(job)
+        raise KeyError(f"job 不存在: {job_id}")
