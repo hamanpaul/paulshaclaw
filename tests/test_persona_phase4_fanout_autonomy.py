@@ -291,6 +291,20 @@ class FanoutTests(unittest.TestCase):
         self.assertNotIn("noplan", dispatched_tasks)
         self.assertNotIn("blocked", dispatched_tasks)
 
+    def test_dispatch_ready_command_carries_persona_contract(self) -> None:
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+
+        fake = _FakeDispatcher()
+        metas = [_meta("slice-a", plan="docs/superpowers/plans/a.md")]
+        dispatch_ready(metas, is_satisfied=lambda _id: True, dispatcher=fake, persona="builder")
+
+        self.assertEqual(len(fake.calls), 1)
+        command = fake.calls[0]["command"]
+        self.assertIn("[PERSONA CONTRACT", command)        # 不再是 "# dispatch ..." 佔位
+        self.assertIn("role: builder", command)
+        self.assertIn("docs/superpowers/plans/a.md", command)
+        self.assertIn("copilot", command)
+
     def test_dispatch_ready_no_slice_id_not_dispatched(self) -> None:
         from paulshaclaw.coordinator.autonomy import dispatch_ready
 

@@ -6,6 +6,8 @@ from typing import Callable
 
 import yaml
 
+from .contract_command import build_dispatch_command
+
 # is_satisfied predicate 型別：收 slice_id，回該相依是否「已滿足」（可釋放下游）。
 # 判定來源由呼叫者決定（merged-to-main vs handoff gate_status）——#104 留開放。
 IsSatisfied = Callable[[str], bool]
@@ -223,7 +225,7 @@ def dispatch_ready(
             "task": slice_id,
             "persona": persona,
             "pane_id": f"%{i}",
-            "command": f"# dispatch {slice_id} (plan={m['plan']})",
+            "command": build_dispatch_command(persona, task=slice_id, plan_path=m["plan"]),
         }
         if git_runner is not None:
             kwargs["git_runner"] = git_runner
