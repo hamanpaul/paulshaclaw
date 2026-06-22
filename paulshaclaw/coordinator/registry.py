@@ -84,6 +84,11 @@ class JobRegistry:
         pane: str,
         worktree: str,
         dispatch_head: str | None = None,
+        executor: str | None = None,
+        session_name: str | None = None,
+        pid: int | None = None,
+        log_path: str | None = None,
+        exit_code: int | None = None,
     ) -> dict[str, object]:
         self._seq += 1
         job: dict[str, object] = {
@@ -97,6 +102,11 @@ class JobRegistry:
             # D5：dispatch 當下的 branch head（baseline），持久化於 job 上供
             # 跨進程的 poll_done 比對；取不到則為 None。
             "dispatch_head": dispatch_head,
+            "executor": executor,
+            "session_name": session_name,
+            "pid": pid,
+            "log_path": log_path,
+            "exit_code": exit_code,
             "created_at": _now_iso(),
         }
         self._jobs.append(job)
@@ -118,6 +128,25 @@ class JobRegistry:
         for job in self._jobs:
             if job["job_id"] == job_id:
                 job["status"] = status
+                self._persist()
+                return dict(job)
+        raise KeyError(f"job 不存在: {job_id}")
+
+    def update_headless_result(
+        self,
+        job_id: str,
+        *,
+        status: str,
+        exit_code: int,
+    ) -> dict[str, object]:
+        if status not in {"done", "failed"}:
+            raise ValueError(
+                f"headless 完成結果 status 須為 'done' 或 'failed'，收到: {status!r}"
+            )
+        for job in self._jobs:
+            if job["job_id"] == job_id:
+                job["status"] = status
+                job["exit_code"] = exit_code
                 self._persist()
                 return dict(job)
         raise KeyError(f"job 不存在: {job_id}")

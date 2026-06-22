@@ -6,12 +6,23 @@ from typing import Callable
 
 import yaml
 
+from .contract_command import build_dispatch_prompt
+from .launcher import AgentLauncher, LaunchHandle
+
 # is_satisfied predicate 型別：收 slice_id，回該相依是否「已滿足」（可釋放下游）。
 # 判定來源由呼叫者決定（merged-to-main vs handoff gate_status）——#104 留開放。
 IsSatisfied = Callable[[str], bool]
 
 # Dispatcher duck-type：只需有 dispatch(task, persona, pane_id, command) -> dict（Phase 2 介面）。
 DEFAULT_HANDOFF_DIR = "runtime/handoff"
+
+
+class DispatchReadyError(RuntimeError):
+    def __init__(self, errors: list[tuple[str, Exception]], jobs: list[dict]) -> None:
+        self.errors = tuple(errors)
+        self.jobs = list(jobs)
+        failed = ", ".join(slice_id for slice_id, _ in errors)
+        super().__init__(f"dispatch_ready failed for slice(s): {failed}")
 
 
 # --------------------------------------------------------------------------- #
@@ -199,34 +210,107 @@ def default_is_satisfied(slice_id: str, handoff_dir: str = DEFAULT_HANDOFF_DIR) 
 # --------------------------------------------------------------------------- #
 # 6) dispatch_ready（fan-out，reuse Phase 2 Dispatcher）
 # --------------------------------------------------------------------------- #
+class DispatchReadyRequiresLauncherError(RuntimeError):
+    """fan-out 需 headless launcher 卻未提供時 fail-fast 拋出（zh-tw）。"""
+
+
 def dispatch_ready(
     metas: list[dict],
     is_satisfied: IsSatisfied,
     dispatcher,
     persona: str = "builder",
     git_runner=None,
+    launcher: AgentLauncher | None = None,
 ) -> list[dict]:
-    """算就緒集，對每單位經注入的 Phase 2 Dispatcher 各派一筆 job（reuse，不重寫派工）。
+    """算就緒集，對每單位經注入的 headless AgentLauncher 各啟一個 agent（一單位一 job）。
 
-    一單位一 job；隔離靠 per-worktree/pane（Phase 2 性質），故並行安全。
-    pane_id/command 為佔位（真實 pane 分配與 copilot prompt 拼裝屬 §5 ①，非本層）。
-    git_runner 為可選注入物：給定時透傳給 Dispatcher.dispatch（沿用 Phase 2 既有 seam），
-    讓測試以 fake git_runner 取代真 git（不啟動真 git）；未給定時不傳，沿用
-    dispatcher 自身預設（且相容不收 git_runner 的 fake dispatcher）。
-    回 dispatched jobs。
+    隔離靠 per-worktree headless session，故並行安全。
+
+    fail-fast（reviewer #112-3）：manager 自主 fan-out 一律走 headless launcher。
+    persona 契約 prompt 是多行文字，舊 tmux pane 路徑用 `send-keys -l` 會把每個
+    `\\n` 變成 Enter、把 prompt 打散；故就緒集非空卻無 launcher 時，直接拒絕並
+    指示改用 `--executor`（headless），不再 silently 經 pane 送多行 prompt。
+    （git_runner 為歷史相容參數，headless 路徑不使用。）
+
+    prompt 構建（build_dispatch_prompt）置於 per-slice try/except 內（reviewer #112-2）：
+    未知 role / render 失敗只影響該單位，被收進 errors，不破壞其他就緒單位的派工隔離。
+    回 dispatched jobs；有任何單位失敗 → 收齊後 raise DispatchReadyError（帶成功 jobs）。
     """
     ready = ready_units(metas, is_satisfied)
+    if ready and launcher is None:
+        raise DispatchReadyRequiresLauncherError(
+            "manager 自主 fan-out 需 headless launcher："
+            "persona 契約為多行 prompt，經 tmux pane send-keys -l 會被換行打散。"
+            "請以 --executor（copilot/claude/codex）走 headless 路徑派工。"
+        )
     jobs: list[dict] = []
-    for i, m in enumerate(ready):
+    errors: list[tuple[str, Exception]] = []
+    for m in ready:
         slice_id = m["slice_id"]
-        kwargs = {
+        try:
+            prompt = build_dispatch_prompt(persona, task=slice_id, plan_path=m["plan"])
+            worktree = _launcher_worktree(dispatcher, slice_id)
+            log_dir = str(Path("runtime/dispatch") / slice_id)
+            handle = launcher.launch(
+                slice_id=slice_id,
+                prompt=prompt,
+                worktree=worktree,
+                log_dir=log_dir,
+            )
+            job = _record_launcher_job(
+                dispatcher=dispatcher,
+                slice_id=slice_id,
+                persona=persona,
+                worktree=worktree,
+                handle=handle,
+            )
+            jobs.append(job)
+        except Exception as exc:
+            errors.append((slice_id, exc))
+    if errors:
+        raise DispatchReadyError(errors, jobs)
+    return jobs
+
+
+def _branch_for_slice(slice_id: str) -> str:
+    return f"feature/{slice_id}"
+
+
+def _launcher_worktree(dispatcher, slice_id: str) -> str:
+    worktree_creator = getattr(dispatcher, "_worktree_creator", None)
+    if worktree_creator is None:
+        return str(Path.cwd())
+    return worktree_creator.create(_branch_for_slice(slice_id))
+
+
+def _record_launcher_job(
+    *,
+    dispatcher,
+    slice_id: str,
+    persona: str,
+    worktree: str,
+    handle: LaunchHandle,
+) -> dict:
+    registry = getattr(dispatcher, "_registry", None)
+    if registry is None:
+        return {
             "task": slice_id,
             "persona": persona,
-            "pane_id": f"%{i}",
-            "command": f"# dispatch {slice_id} (plan={m['plan']})",
+            "worktree": worktree,
+            "status": "dispatched",
+            "executor": handle.executor,
+            "session_name": handle.session_name,
+            "pid": handle.pid,
+            "log_path": handle.log_path,
         }
-        if git_runner is not None:
-            kwargs["git_runner"] = git_runner
-        job = dispatcher.dispatch(**kwargs)
-        jobs.append(job)
-    return jobs
+    return registry.create_job(
+        task=slice_id,
+        persona=persona,
+        branch=_branch_for_slice(slice_id),
+        pane="",
+        worktree=worktree,
+        executor=handle.executor,
+        session_name=handle.session_name,
+        pid=handle.pid,
+        log_path=handle.log_path,
+    )
