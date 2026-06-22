@@ -62,6 +62,7 @@ def build_claude_argv(
         "--remote-control",
         "--output-format",
         "stream-json",
+        "--verbose",  # smoke 實證：claude -p + --output-format stream-json 必須帶 --verbose
         "--name",
         slice_id,
         "--permission-mode",
@@ -81,12 +82,12 @@ def build_codex_argv(
     remote: str | None = "psc",
     allow_unsafe: bool = False,
 ) -> list[str]:
+    # smoke 實證：`codex exec` 不接受 `--remote`（unexpected argument）。codex 的 remote
+    # 是獨立的 `remote-control` 子命令/app-server，非 exec 旗標；故 headless exec 不帶 remote。
     argv = [
         "codex",
         "exec",
         prompt,
-        "--remote",
-        remote or "psc",
         "--json",
     ]
     # 高風險：--dangerously-bypass-approvals-and-sandbox 同時關掉核可「與」沙箱。

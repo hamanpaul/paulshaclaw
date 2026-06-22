@@ -79,7 +79,11 @@ class AgentLauncher(Protocol):
 - launcher 啟動時注入 env（`PSC_SLICE_ID=<slice>`、`PSC_RELAY_TARGET=<channel>`）→ hook 繼承 env → script 讀 env + event → 寫進 relay channel（檔/socket/tmux-bridge）→ **復用現有 bro-bridge** 推 Telegram。
 - 語意：`session_start` → 「slice X 派工開始」；`stop` → 「slice X 一輪完成」。task 對應由 env 的 `PSC_SLICE_ID` 直接帶（不需反查 session id）。
 - **待驗（不擋設計）**：copilot/codex 的 hook 是否在 headless 模式 fire（claude 已知 fire）。Phase B 各跑一次 smoke test 實證；若某家 headless 不 fire，該家退回 §5 的 JSONL 監控由 manager 代為 relay。
-- **Smoke status（2026-06-22）**：依本輪實作約束，尚未執行真實 copilot/claude/codex smoke test；目前僅完成 fake launcher / argv / hook unit tests，真 executor 旗標與 hook fire 行為仍列 pending。
+- **Smoke status（2026-06-22，已實測三家）**：
+  - **copilot**：`-p --remote --name --log-dir --output-format json` 全 argv 正常啟動（rc=0）。✅
+  - **claude**：`-p --output-format stream-json` **必須加 `--verbose`**（否則 `Error: ... requires --verbose`）；補後 `--remote-control`+`-p` 共存正常（rc=0）。**headless 下 `SessionStart` hook 確認 fire**、JSONL 帶 `session_id` → relay 機制經實證可行。✅（已修 argv：加 `--verbose`）
+  - **codex**：`codex exec` **不接受 `--remote`**（`error: unexpected argument '--remote'`）。✅（已修 argv：移除 `--remote`）
+  - **仍 pending**：copilot/codex 的 hook 在 headless 是否 fire（需先安裝 §6 的 relay hook 範本到 `~/.copilot/hooks` / `~/.codex/hooks.json` 再觀察）；claude 已證 fire。
 
 ## 7. 資料流
 
@@ -117,8 +121,8 @@ flowchart TB
 ## 10. 風險與待驗
 
 - **headless hook fire（copilot/codex）**：§6 已述，smoke test 實證；不 fire 者退 JSONL 監控 relay。
-- **executor 旗標差異**：claude autonomous mode、codex `--remote <ADDR>` 語意、copilot `--name` 是否足以反查 session —— 各 smoke test 核定。
-- **本輪狀態**：真 executor smoke tests pending；不得把 unit test 結果視為 executor flag / hook fire 實證。
+- **executor 旗標差異**：已 smoke 核定（見 §6 Smoke status）—— claude 需 `--verbose`、codex exec 無 `--remote`、copilot 全 argv OK。copilot `--name` 是否足以反查 session 仍待用（目前以 `--name=slice_id` 設定值為對應鍵）。
+- **本輪狀態**：argv 旗標已三家 smoke 實證並修正；**仍 pending** = copilot/codex 的 hook headless fire（需先安裝 relay hook 範本再觀察；claude 已證 fire）。
 - **codex hook trust**：codex 有 `--dangerously-bypass-hook-trust`；relay hook 須先被 codex 信任或以該旗標跑（自動化情境）。
 - **prompt 體積**：argv 傳超長 prompt 的 OS 上限（`ARG_MAX`）——目前 plan 以路徑參照、prompt 不 inline 全文，風險低；若超限改 stdin（codex 支援 stdin prompt）。
 - **session id 取得**：copilot `--name` 為我方設定值；真 session id 若需 `--connect`，由 JSONL/log 首行解析（待驗）。

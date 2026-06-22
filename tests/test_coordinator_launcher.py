@@ -40,6 +40,7 @@ class ArgvTests(unittest.TestCase):
         self.assertIn("/wt/slice-a", argv)
         self.assertIn("--output-format", argv)
         self.assertIn("stream-json", argv)
+        self.assertIn("--verbose", argv)  # smoke: -p+stream-json 必須帶 --verbose
         self.assertIn("--name", argv)
         self.assertIn("slice-a", argv)
         self.assertIn("--permission-mode", argv)
@@ -56,8 +57,8 @@ class ArgvTests(unittest.TestCase):
         self.assertEqual(argv[0], "codex")
         self.assertIn("exec", argv)
         self.assertIn("PROMPT", argv)
-        self.assertIn("--remote", argv)
-        self.assertIn("unix:/tmp/psc.sock", argv)
+        self.assertNotIn("--remote", argv)  # smoke: codex exec 不吃 --remote（unexpected argument）
+        self.assertNotIn("unix:/tmp/psc.sock", argv)
         self.assertIn("-C", argv)
         self.assertIn("/wt/slice-a", argv)
         self.assertIn("--json", argv)
