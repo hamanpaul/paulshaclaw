@@ -805,7 +805,7 @@ def _read_local_observed_aiu(year: int | None = None, month: int | None = None) 
 # logged-in account so we don't gate on gh login).
 
 
-def _resolve_attribution_accounts(config) -> tuple[str | None, str | None]:
+def _resolve_attribution_accounts(config: CostConfig) -> tuple[str | None, str | None]:
     """premium-request -> first kind=='personal' account id; AIU -> first kind=='company' account id."""
     premium = next((a.account_id for a in config.copilot_accounts if a.kind == "personal"), None)
     aiu = next((a.account_id for a in config.copilot_accounts if a.kind == "company"), None)
