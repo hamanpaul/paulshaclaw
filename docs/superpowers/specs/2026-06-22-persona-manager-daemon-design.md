@@ -154,6 +154,7 @@ class PaneAllocator(Protocol):
 - **copilot 完成偵測（Gap C）**：`--yolo` 跑完的可靠訊號（branch commit vs sentinel）Phase B/D 實測選定；未定前 fallback sentinel 檔。因 idle+shadow，偵測不準的後果僅「job 卡 dispatched」，不傷服務。
 - **WSL `--user` lingering**：timer 在無互動 session 時要跑需 `loginctl enable-linger paul_chen`；start.sh 在 active session 內 start 可不依賴 linger，但開機自啟需確認。Phase C 驗證。
 - **tmux 解耦 vs「tmux 死＝全重啟」**：manager 走 systemd 後不隨 tmux 重啟而重啟——此為刻意取捨（換取失敗域隔離），需回寫 memory `feedback_operational_preferences` / `project_stage2_install_state`。
+- **multi-line prompt 的 pane transport（Phase B）**：`build_dispatch_command` 產出的指令含換行（契約段多行），**不可**逕經 `tmux send-keys -l` 逐字送——literal `\n` 會被當 Enter 提早提交、破壞 `-p` 參數。Phase B 的 `PaneAllocator`/transport 須改用 buffer（`load-buffer`+`paste-buffer`）或檔案投遞等不逐字送 newline 的方式；現有 `seams.TmuxPaneSender`（`send-keys -l`）僅適用單行。Phase A 不觸發（無 `dispatch:auto` 就緒單位、command 僅被測試 fake 消費）。
 - **fixer 身分**：fix 由哪種非 copilot agent 扮演待定；對 persona 無影響（同 builder 契約），但 `build_dispatch_command` 須支援多 executor。
 - **manifest 信任**：CI/gate 讀 `from_role` 決定 scope；改 manifest 降權的風險由「manifest 路徑屬 manager scope、改它即越界」緩解（沿用原設計）。
 
