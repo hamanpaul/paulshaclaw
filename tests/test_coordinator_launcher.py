@@ -63,6 +63,62 @@ class ArgvTests(unittest.TestCase):
         self.assertIn("--json", argv)
         self.assertIn("-o", argv)
 
+    def test_codex_argv_default_has_no_sandbox_bypass(self) -> None:
+        # 預設（allow_unsafe 未開）不得帶 --dangerously-bypass-approvals-and-sandbox（高風險）
+        argv = build_codex_argv(prompt="P", slice_id="s", log_dir="/lg")
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", argv)
+
+    def test_codex_argv_allow_unsafe_adds_sandbox_bypass(self) -> None:
+        # 明確 opt-in allow_unsafe=True 才加入 sandbox bypass flag
+        argv = build_codex_argv(prompt="P", slice_id="s", log_dir="/lg", allow_unsafe=True)
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
+
+    def test_subprocess_launcher_codex_default_no_sandbox_bypass(self) -> None:
+        import shlex
+
+        calls = []
+
+        class _FakeProc:
+            pid = 111
+
+        def _fake_popen(argv, *, cwd, env, stdout, stderr):
+            calls.append({"argv": argv})
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                SubprocessLauncher("codex").launch(
+                    slice_id="s", prompt="P", worktree=d, log_dir=str(Path(d) / "lg"),
+                )
+        finally:
+            launcher_module.subprocess.Popen = original
+        script = calls[0]["argv"][2]
+        self.assertNotIn("--dangerously-bypass-approvals-and-sandbox", script)
+
+    def test_subprocess_launcher_codex_allow_unsafe_adds_sandbox_bypass(self) -> None:
+        calls = []
+
+        class _FakeProc:
+            pid = 222
+
+        def _fake_popen(argv, *, cwd, env, stdout, stderr):
+            calls.append({"argv": argv})
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                SubprocessLauncher("codex", allow_unsafe=True).launch(
+                    slice_id="s", prompt="P", worktree=d, log_dir=str(Path(d) / "lg"),
+                )
+        finally:
+            launcher_module.subprocess.Popen = original
+        script = calls[0]["argv"][2]
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", script)
+
     def test_prompt_is_single_element(self) -> None:
         # prompt 含換行也是單一 argv 元素（headless 的核心保證）
         argv = build_copilot_argv(prompt="line1\nline2", slice_id="s", log_dir="/lg")

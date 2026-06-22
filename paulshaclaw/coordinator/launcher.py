@@ -23,8 +23,11 @@ def build_copilot_argv(
     log_dir: str,
     worktree: str | None = None,
     remote: str | None = None,
+    allow_unsafe: bool = False,
 ) -> list[str]:
-    return [
+    # allow_unsafe（明確 opt-in）才放開 copilot 的全自動授權 --allow-all；
+    # 預設關閉 → 由 executor 自身的互動授權把關（manager 自主派工請設 allow_unsafe=True）。
+    argv = [
         "copilot",
         "-p",
         prompt,
@@ -35,8 +38,10 @@ def build_copilot_argv(
         log_dir,
         "--output-format",
         "json",
-        "--allow-all",
     ]
+    if allow_unsafe:
+        argv.append("--allow-all")
+    return argv
 
 
 def build_claude_argv(
@@ -46,7 +51,10 @@ def build_claude_argv(
     log_dir: str,
     worktree: str | None = None,
     remote: str | None = None,
+    allow_unsafe: bool = False,
 ) -> list[str]:
+    # allow_unsafe（明確 opt-in）→ bypassPermissions（不再逐筆授權）；
+    # 預設用 acceptEdits（仍受權限模式把關，最小放權）。
     argv = [
         "claude",
         "-p",
@@ -57,7 +65,7 @@ def build_claude_argv(
         "--name",
         slice_id,
         "--permission-mode",
-        "acceptEdits",
+        "bypassPermissions" if allow_unsafe else "acceptEdits",
     ]
     if worktree is not None:
         argv.extend(["--add-dir", worktree])
@@ -71,6 +79,7 @@ def build_codex_argv(
     log_dir: str,
     worktree: str | None = None,
     remote: str | None = "psc",
+    allow_unsafe: bool = False,
 ) -> list[str]:
     argv = [
         "codex",
@@ -79,10 +88,13 @@ def build_codex_argv(
         "--remote",
         remote or "psc",
         "--json",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "-o",
-        str(Path(log_dir) / "last.json"),
     ]
+    # 高風險：--dangerously-bypass-approvals-and-sandbox 同時關掉核可「與」沙箱。
+    # 僅在明確 opt-in（allow_unsafe=True，例如 manager 自主全自動派工）時才加入；
+    # 預設關閉，讓 codex 自身的核可/沙箱機制把關。
+    if allow_unsafe:
+        argv.append("--dangerously-bypass-approvals-and-sandbox")
+    argv.extend(["-o", str(Path(log_dir) / "last.json")])
     if worktree is not None:
         argv.extend(["-C", worktree])
     return argv
@@ -116,12 +128,17 @@ class SubprocessLauncher:
         *,
         relay_target: str | None = None,
         codex_remote: str = "psc",
+        allow_unsafe: bool = False,
     ) -> None:
         if executor not in _ARGV_BUILDERS:
             raise ValueError(f"unknown executor: {executor}")
         self._executor = executor
         self._relay_target = relay_target
         self._codex_remote = codex_remote
+        # allow_unsafe（明確 opt-in）：放開各 executor 的全自動授權/沙箱旁路旗標
+        # （codex --dangerously-bypass-approvals-and-sandbox、copilot --allow-all、
+        # claude bypassPermissions）。預設 False，採最小放權，避免無意間關掉沙箱。
+        self._allow_unsafe = allow_unsafe
 
     def launch(self, *, slice_id: str, prompt: str, worktree: str, log_dir: str) -> LaunchHandle:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -131,6 +148,7 @@ class SubprocessLauncher:
             log_dir=log_dir,
             worktree=worktree,
             remote=self._codex_remote,
+            allow_unsafe=self._allow_unsafe,
         )
         env = {**os.environ, "PSC_SLICE_ID": slice_id}
         if self._relay_target is not None:
