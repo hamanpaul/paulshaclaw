@@ -158,9 +158,13 @@ class SubprocessLauncher:
         # 用 shlex.join 安全嵌入內層 argv（prompt 含換行/空白仍為單一 token），
         # sentinel 路徑亦 shlex.quote。poll_headless_done 讀此 sentinel，不再靠 os.waitpid。
         sentinel = str(Path(log_dir) / f"{slice_id}.exit")
+        # 重跑同一 slice_id 前先清掉上一輪殘留：移除舊 exit sentinel、log 以 wb 截斷。
+        # 否則 poll_headless_done 會讀到上一輪的 sentinel / 末筆 JSONL，
+        # 誤判「還沒開始就已完成」（fail-closed：每輪從乾淨狀態起跑）。
+        Path(sentinel).unlink(missing_ok=True)
         script = f'{shlex.join(inner_argv)}; printf %s "$?" > {shlex.quote(sentinel)}'
         argv = ["bash", "-lc", script]
-        with open(log_path, "ab") as logf:
+        with open(log_path, "wb") as logf:
             proc = subprocess.Popen(
                 argv,
                 cwd=worktree,

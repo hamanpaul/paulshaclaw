@@ -195,6 +195,45 @@ class ArgvTests(unittest.TestCase):
         inner = shlex.join(["copilot", "-p", "PROMPT"])
         self.assertIn(inner, script)
 
+    def test_subprocess_launcher_clears_stale_sentinel_and_truncates_log(self) -> None:
+        # 同一 slice_id 重跑：上一輪殘留的 .exit/.jsonl 必須在 launch 前清掉，
+        # 否則 poll_headless_done 會讀到舊 sentinel → 誤判「還沒開始就完成了」。
+        from paulshaclaw.coordinator.dispatcher import exit_sentinel_path
+
+        class _FakeProc:
+            pid = 333
+
+        def _fake_popen(argv, *, cwd, env, stdout, stderr):
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                log_dir = Path(d) / "logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                stale_log = log_dir / "slice-a.jsonl"
+                stale_exit = log_dir / "slice-a.exit"
+                stale_log.write_text("STALE-PREV-ROUND\n", encoding="utf-8")
+                stale_exit.write_text("0", encoding="utf-8")
+
+                handle = SubprocessLauncher("copilot").launch(
+                    slice_id="slice-a",
+                    prompt="PROMPT",
+                    worktree=d,
+                    log_dir=str(log_dir),
+                )
+
+                # 舊 sentinel 在 launch 當下/前已被移除（fail-closed 防誤判完成）
+                self.assertFalse(
+                    exit_sentinel_path(handle.log_path).is_file(),
+                    "stale .exit sentinel must be cleared before launch",
+                )
+                # log 以 wb 開啟（truncate）→ 不含上一輪內容
+                self.assertNotIn("STALE-PREV-ROUND", Path(handle.log_path).read_text())
+        finally:
+            launcher_module.subprocess.Popen = original
+
     def test_subprocess_launcher_sentinel_records_real_exit_code(self) -> None:
         # 真跑 bash -lc 包裝，但內層 argv 覆寫成無害的 `exit 7`（絕不啟動真 copilot/codex），
         # 驗證 sentinel 確實寫下內層命令的真實 exit code（跨進程 durable 機制端到端）。
