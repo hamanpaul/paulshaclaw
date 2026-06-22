@@ -38,6 +38,18 @@ class LoadEnforcementTests(unittest.TestCase):
             p.write_text("enforcement: [unclosed\n", encoding="utf-8")
             self.assertEqual(load_enforcement(p), "shadow")
 
+    def test_unreadable_file_defaults_shadow(self) -> None:
+        # read_text 觸發 OSError（權限/IO）時也須 fail-safe 退 shadow，不可整個崩潰。
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "personas.yaml"
+            p.write_text("enforcement: enforce\nroles: {}\n", encoding="utf-8")
+            with mock.patch.object(
+                Path, "read_text", side_effect=PermissionError("permission denied")
+            ):
+                self.assertEqual(load_enforcement(p), "shadow")
+
 
 if __name__ == "__main__":
     unittest.main()

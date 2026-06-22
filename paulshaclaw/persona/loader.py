@@ -16,15 +16,17 @@ DEFAULT_ENFORCEMENT = "shadow"
 def load_enforcement(path: str | Path | None = None) -> str:
     """讀 personas.yaml 頂層 `enforcement`（全域護欄模式）。
 
-    fail-safe：缺檔／壞 YAML／缺 key／非法值一律退 'shadow'（最保守，
-    永不誤翻 enforce）。僅認字面 'shadow' / 'enforce'。
+    fail-safe：缺檔／壞 YAML／讀檔 I/O 錯（權限/IO）／缺 key／非法值一律退
+    'shadow'（最保守，永不誤翻 enforce）。僅認字面 'shadow' / 'enforce'。
     """
     source = Path(path) if path is not None else DEFAULT_PERSONAS_PATH
     if not source.is_file():
         return DEFAULT_ENFORCEMENT
     try:
         raw = yaml.safe_load(source.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
+    except (yaml.YAMLError, OSError):
+        # OSError：source.read_text 可能因權限/IO 失敗（is_file 與 read 間亦有 TOCTOU）；
+        # 護欄旗標讀取絕不可崩潰，一律 fail-safe 退 shadow。
         return DEFAULT_ENFORCEMENT
     if not isinstance(raw, Mapping):
         return DEFAULT_ENFORCEMENT
