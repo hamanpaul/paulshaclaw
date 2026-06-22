@@ -140,7 +140,9 @@ class JobRegistry:
         exit_code: int,
     ) -> dict[str, object]:
         if status not in {"done", "failed"}:
-            raise ValueError("headless result status must be 'done' or 'failed'")
+            raise ValueError(
+                f"headless 完成結果 status 須為 'done' 或 'failed'，收到: {status!r}"
+            )
         for job in self._jobs:
             if job["job_id"] == job_id:
                 job["status"] = status

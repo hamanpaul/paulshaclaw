@@ -48,6 +48,24 @@ class HeadlessRegistryFieldsTests(unittest.TestCase):
             self.assertEqual(job["exit_code"], 0)
             self.assertEqual(reg.get_job("slice-a-1")["executor"], "copilot")
 
+    def test_update_headless_result_rejects_invalid_status_zh_tw(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            reg.create_job(
+                task="slice-a",
+                persona="builder",
+                branch="feature/slice-a",
+                pane="",
+                worktree="/wt/slice-a",
+                executor="copilot",
+                session_name="slice-a",
+                pid=123,
+                log_path="/logs/slice-a.jsonl",
+            )
+            # 非 done/failed 的 status 須以 zh-tw 拒絕，且帶回收到的值供除錯
+            with self.assertRaisesRegex(ValueError, "running"):
+                reg.update_headless_result("slice-a-1", status="running", exit_code=0)
+
 
 class HeadlessCompletionPollingTests(unittest.TestCase):
     def test_poll_headless_done_marks_done_and_persists_exit_code(self) -> None:
