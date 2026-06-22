@@ -653,7 +653,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "estimated")
         self.assertEqual(provider.accounts[0].source, "local_observed")
         self.assertEqual(provider.accounts[0].used_requests, 12)
-        local_mock.assert_called_once_with({"hamanpaul"})
+        local_mock.assert_called_once_with("hamanpaul", None, {"hamanpaul"})
 
     def test_collect_copilot_fetches_runtime_enterprise_usage_without_injected_fetcher(self) -> None:
         path = self.write_config(
@@ -729,7 +729,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.source_status, "unknown")
         self.assertEqual(provider.accounts[0].source, "unknown")
         self.assertIsNone(provider.accounts[0].used_requests)
-        local_mock.assert_called_once_with({"hamanpaul"})
+        local_mock.assert_called_once_with("hamanpaul", None, {"hamanpaul"})
 
     def test_collect_copilot_marks_unknown_when_no_local_usage(self) -> None:
         cfg = CostConfig(
@@ -784,6 +784,83 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(by_label["haman"].source, "local_observed")
         self.assertEqual(by_label["arc"].used_requests, 55818)  # AI credits (AIU)
         self.assertEqual(by_label["arc"].source, "local_observed")
+
+    def test_collect_copilot_aiu_attributed_to_company_account_in_config(self) -> None:
+        """(a) config 只有 kind=company acme-co；local AIU>0 → 歸屬 acme-co，source=local_observed。"""
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="me", label="me", kind="personal", monthly_allowance=1500,
+                ),
+                cost_config_module.CopilotAccountConfig(
+                    account_id="acme-co", label="acme", kind="company", monthly_allowance=300,
+                ),
+            )
+        )
+
+        with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch("paulshaclaw.cost.providers._read_local_observed_metrics", return_value=(0, 42000)),
+        ):
+            provider = collect_copilot(cfg)
+
+        by_label = {a.label: a for a in provider.accounts}
+        self.assertEqual(by_label["acme"].used_requests, 42000)
+        self.assertEqual(by_label["acme"].source, "local_observed")
+
+    def test_collect_copilot_premium_attributed_to_personal_account_in_config(self) -> None:
+        """(b) config 只有 kind=personal me；local premium>0 → 歸屬 me，source=local_observed。"""
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="me", label="me", kind="personal", monthly_allowance=1500,
+                ),
+            )
+        )
+
+        with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch("paulshaclaw.cost.providers._read_local_observed_metrics", return_value=(99, 0)),
+        ):
+            provider = collect_copilot(cfg)
+
+        self.assertEqual(len(provider.accounts), 1)
+        self.assertEqual(provider.accounts[0].account_id, "me")
+        self.assertEqual(provider.accounts[0].used_requests, 99)
+        self.assertEqual(provider.accounts[0].source, "local_observed")
+
+    def test_collect_copilot_aiu_not_attributed_when_no_company_account(self) -> None:
+        """(c) config 無 company 帳號；local AIU>0 → AIU 不歸屬，不崩潰。"""
+        cfg = CostConfig(
+            copilot_accounts=(
+                cost_config_module.CopilotAccountConfig(
+                    account_id="me", label="me", kind="personal", monthly_allowance=1500,
+                ),
+            )
+        )
+
+        with (
+            patch(
+                "paulshaclaw.cost.providers._fetch_copilot_quota",
+                side_effect=RuntimeError("no quota"),
+            ),
+            patch("paulshaclaw.cost.providers._fetch_account_usage", side_effect=RuntimeError("offline")),
+            patch("paulshaclaw.cost.providers._read_local_observed_metrics", return_value=(0, 55000)),
+        ):
+            provider = collect_copilot(cfg)
+
+        # AIU 無 company 帳號可歸屬 → 帳號 source=unknown，不崩潰
+        self.assertEqual(len(provider.accounts), 1)
+        self.assertIsNone(provider.accounts[0].used_requests)
+        self.assertEqual(provider.accounts[0].source, "unknown")
 
     def test_fetch_copilot_quota_parses_percent_used(self) -> None:
         account = cost_config_module.CopilotAccountConfig(
