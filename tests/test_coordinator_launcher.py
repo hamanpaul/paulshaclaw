@@ -310,9 +310,9 @@ class ArgvTests(unittest.TestCase):
 
 
     def test_copilot_argv_model(self) -> None:
-        argv = build_copilot_argv(prompt="P", slice_id="s", log_dir="/lg", model="haiku-4.5")
+        argv = build_copilot_argv(prompt="P", slice_id="s", log_dir="/lg", model="claude-haiku-4.5")
         self.assertIn("--model", argv)
-        self.assertEqual(argv[argv.index("--model") + 1], "haiku-4.5")
+        self.assertEqual(argv[argv.index("--model") + 1], "claude-haiku-4.5")
 
     def test_argv_no_model_when_unset(self) -> None:
         for build in (build_copilot_argv, build_claude_argv, build_codex_argv):
@@ -339,13 +339,13 @@ class ArgvTests(unittest.TestCase):
         launcher_module.subprocess.Popen = _fake_popen
         try:
             with tempfile.TemporaryDirectory() as d:
-                SubprocessLauncher("copilot", model="haiku-4.5").launch(
+                SubprocessLauncher("copilot", model="claude-haiku-4.5").launch(
                     slice_id="s", prompt="P", worktree=d, log_dir=d
                 )
         finally:
             launcher_module.subprocess.Popen = original
         script = captured["argv"][2]
-        self.assertIn("--model haiku-4.5", script)
+        self.assertIn("--model claude-haiku-4.5", script)
 
     def test_launch_sentinel_is_absolute_cwd_independent(self) -> None:
         # bug：相對 log_dir + 子進程 cwd=worktree → sentinel 寫到 worktree（poller 找不到）。
