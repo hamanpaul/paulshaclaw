@@ -148,6 +148,28 @@ FAKE_TMUX = textwrap.dedent(
 
 
 class StartScriptLifecycleTests(unittest.TestCase):
+    def test_paulshaclaw_module_launches_carry_pythonpath(self) -> None:
+        # Regression for #92: every `python -m paulshaclaw.*` launch in start.sh
+        # must export PYTHONPATH="$REPO" so the (non-editable-installed) package
+        # resolves regardless of the CWD start.sh is invoked from. The
+        # monitor/listener/cockpit launches historically relied on CWD being repo
+        # root and died with ModuleNotFoundError when started from elsewhere
+        # (e.g. `cd scripts && ./start.sh`, a systemd unit, or cron), while the
+        # cost/dream loops survived only because they already set PYTHONPATH.
+        text = START_SH.read_text(encoding="utf-8")
+        missing = [
+            line.strip()
+            for line in text.splitlines()
+            if "-m paulshaclaw." in line
+            and not line.lstrip().startswith("#")
+            and "PYTHONPATH" not in line
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            f"start.sh `-m paulshaclaw.*` launches missing PYTHONPATH=$REPO: {missing}",
+        )
+
     def test_monitor_and_cockpit_start_without_telegram_inputs(self) -> None:
         self._run_lifecycle_test(cockpit_mode="exit", telegram_enabled=False, capture_output=True)
 

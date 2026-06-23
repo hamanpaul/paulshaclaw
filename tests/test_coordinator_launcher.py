@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -273,8 +274,6 @@ class ArgvTests(unittest.TestCase):
     def test_subprocess_launcher_sentinel_records_real_exit_code(self) -> None:
         # 真跑 bash -lc 包裝，但內層 argv 覆寫成無害的 `exit 7`（絕不啟動真 copilot/codex），
         # 驗證 sentinel 確實寫下內層命令的真實 exit code（跨進程 durable 機制端到端）。
-        import time
-
         from paulshaclaw.coordinator.dispatcher import exit_sentinel_path
 
         orig_builders = dict(launcher_module._ARGV_BUILDERS)
@@ -291,10 +290,17 @@ class ArgvTests(unittest.TestCase):
                     log_dir=str(log_dir),
                 )
                 sentinel = exit_sentinel_path(handle.log_path)
-                for _ in range(50):  # 短輪詢等子進程退出並寫 sentinel（避免 flaky）
-                    if sentinel.is_file() and sentinel.read_text().strip():
-                        break
-                    time.sleep(0.05)
+                # 根治 flaky：等包裝子進程「真正結束」再斷言，不靠固定輪詢預算（原本
+                # 50×0.05s=2.5s 在 CI 高負載下會超時 → flaky）。bash 包裝在退出前必已
+                # 寫出 sentinel（launcher：`<inner>; printf %s "$?" > <sentinel>`），故子
+                # 進程一被 reap，sentinel 必然就緒；os.waitpid 同時回收 zombie（消除
+                # 先前的 `subprocess still running` ResourceWarning）。test 進程即 spawn
+                # 該子進程的父進程，故可 waitpid。
+                try:
+                    os.waitpid(handle.pid, 0)
+                except ChildProcessError:
+                    # 已被 subprocess 模組內部回收 → 能被回收代表已結束，sentinel 亦已寫出。
+                    pass
                 # 斷言 MUST 在 with 內（tmpdir 尚未清除）
                 self.assertTrue(sentinel.is_file(), "sentinel exit 檔應由 bash 包裝寫出")
                 self.assertEqual(sentinel.read_text().strip(), "7")
