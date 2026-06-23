@@ -83,7 +83,11 @@ class AgentLauncher(Protocol):
   - **copilot**：`-p --remote --name --log-dir --output-format json` 全 argv 正常啟動（rc=0）。✅
   - **claude**：`-p --output-format stream-json` **必須加 `--verbose`**（否則 `Error: ... requires --verbose`）；補後 `--remote-control`+`-p` 共存正常（rc=0）。**headless 下 `SessionStart` hook 確認 fire**、JSONL 帶 `session_id` → relay 機制經實證可行。✅（已修 argv：加 `--verbose`）
   - **codex**：`codex exec` **不接受 `--remote`**（`error: unexpected argument '--remote'`）。✅（已修 argv：移除 `--remote`）
-  - **仍 pending**：copilot/codex 的 hook 在 headless 是否 fire（需先安裝 §6 的 relay hook 範本到 `~/.copilot/hooks` / `~/.codex/hooks.json` 再觀察）；claude 已證 fire。
+  - **hook headless fire 已全部實證（2026-06-23）**：裝修正版 relay hook 後三家 headless 都 fire 並 relay 帶 slice 標記 ——
+    - copilot：`sessionStart`+`agentStop` ✅。範本 schema 修正：hook 命令用 **`bash`** 鍵（非 `command`）。
+    - codex：`SessionStart`+`Stop` ✅，但 **需 `--dangerously-bypass-hook-trust`**（否則卡信任閘 timeout）。範本 schema 修正：**`SessionStart`/`Stop` CamelCase + 巢狀 `{hooks:[…], matcher}`**（matcher：SessionStart=`startup|clear|compact`、Stop=`.*`）。
+    - 路徑修正：範本改用 `${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh`（相對路徑在 cwd≠repo 不可解）；launcher 注入 `PSC_REPO_ROOT` env。
+    - `build_codex_argv` 於 `allow_unsafe` 時加 `--dangerously-bypass-hook-trust`。
 
 ## 7. 資料流
 
@@ -122,7 +126,7 @@ flowchart TB
 
 - **headless hook fire（copilot/codex）**：§6 已述，smoke test 實證；不 fire 者退 JSONL 監控 relay。
 - **executor 旗標差異**：已 smoke 核定（見 §6 Smoke status）—— claude 需 `--verbose`、codex exec 無 `--remote`、copilot 全 argv OK。copilot `--name` 是否足以反查 session 仍待用（目前以 `--name=slice_id` 設定值為對應鍵）。
-- **本輪狀態**：argv 旗標已三家 smoke 實證並修正；**仍 pending** = copilot/codex 的 hook headless fire（需先安裝 relay hook 範本再觀察；claude 已證 fire）。
+- **本輪狀態**：argv 旗標 + hook headless fire **皆三家 smoke 實證並修正完成**（見 §6 Smoke status）。relay→PaulShiaBro 機制三家可行。
 - **codex hook trust**：codex 有 `--dangerously-bypass-hook-trust`；relay hook 須先被 codex 信任或以該旗標跑（自動化情境）。
 - **prompt 體積**：argv 傳超長 prompt 的 OS 上限（`ARG_MAX`）——目前 plan 以路徑參照、prompt 不 inline 全文，風險低；若超限改 stdin（codex 支援 stdin prompt）。
 - **session id 取得**：copilot `--name` 為我方設定值；真 session id 若需 `--connect`，由 JSONL/log 首行解析（待驗）。

@@ -74,6 +74,41 @@ class ArgvTests(unittest.TestCase):
         argv = build_codex_argv(prompt="P", slice_id="s", log_dir="/lg", allow_unsafe=True)
         self.assertIn("--dangerously-bypass-approvals-and-sandbox", argv)
 
+    def test_codex_argv_default_no_hook_trust_bypass(self) -> None:
+        argv = build_codex_argv(prompt="P", slice_id="s", log_dir="/lg")
+        self.assertNotIn("--dangerously-bypass-hook-trust", argv)
+
+    def test_codex_argv_allow_unsafe_adds_hook_trust_bypass(self) -> None:
+        # smoke 實證：headless codex 帶 relay hook 時，未過信任閘會卡死 timeout。
+        # autonomous（allow_unsafe）派工須一併 bypass hook trust。
+        argv = build_codex_argv(prompt="P", slice_id="s", log_dir="/lg", allow_unsafe=True)
+        self.assertIn("--dangerously-bypass-hook-trust", argv)
+
+    def test_launch_sets_repo_root_env_for_relay_hook(self) -> None:
+        # 相對 relay 路徑在 cwd=worktree(≠repo) 不可解；launcher 注入 PSC_REPO_ROOT
+        # 讓已安裝 hook 的 ${PSC_REPO_ROOT}/scripts/... 可解。
+        calls = []
+
+        class _FakeProc:
+            pid = 222
+
+        def _fake_popen(argv, *, cwd, env, stdout, stderr):
+            calls.append({"env": env})
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                SubprocessLauncher("copilot").launch(
+                    slice_id="s", prompt="P", worktree=d, log_dir=str(Path(d) / "lg"),
+                )
+        finally:
+            launcher_module.subprocess.Popen = original
+        env = calls[0]["env"]
+        self.assertIn("PSC_REPO_ROOT", env)
+        self.assertTrue(env["PSC_REPO_ROOT"])
+
     def test_subprocess_launcher_codex_default_no_sandbox_bypass(self) -> None:
         import shlex
 
