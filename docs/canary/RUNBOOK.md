@@ -14,8 +14,8 @@ trivial 有界 `dispatch:auto` slice 端到端跑一輪，shadow 觀測 dispatch
 python -m paulshaclaw.coordinator tick --specs-dir docs/canary/claude  --executor claude  --allow-unsafe
 # codex（預設 model）
 python -m paulshaclaw.coordinator tick --specs-dir docs/canary/codex   --executor codex   --allow-unsafe
-# copilot（haiku-4.5 測試）
-python -m paulshaclaw.coordinator tick --specs-dir docs/canary/copilot --executor copilot --allow-unsafe --model haiku-4.5
+# copilot（claude-haiku-4.5 測試）
+python -m paulshaclaw.coordinator tick --specs-dir docs/canary/copilot --executor copilot --allow-unsafe --model claude-haiku-4.5
 ```
 
 每家：`tick` 先 fanout（建 worktree + headless 啟動，記 job pid/log），再 complete（poll）。headless agent 為背景進程，通常需再跑 `tick`/`complete` 幾趟讓 `poll_headless_done` 偵測完成：

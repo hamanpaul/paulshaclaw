@@ -235,8 +235,8 @@ coordinator 派工時 SHALL 透過 `build_dispatch_prompt(role, *, task, plan_pa
 
 #### Scenario: --model 傳入 launcher
 
-- **WHEN** 執行 `fanout`/`tick` 帶 `--executor copilot --model haiku-4.5`（未注入 launcher）
-- **THEN** 建立的 `SubprocessLauncher` MUST 帶 `model="haiku-4.5"`
+- **WHEN** 執行 `fanout`/`tick` 帶 `--executor copilot --model claude-haiku-4.5`（未注入 launcher）
+- **THEN** 建立的 `SubprocessLauncher` MUST 帶 `model="claude-haiku-4.5"`
 
 ### Requirement: --allow-unsafe fail-closed 綁定就緒集大小
 

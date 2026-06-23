@@ -65,8 +65,8 @@ TBD - created by archiving change persona-manager-phase-b. Update Purpose after 
 
 #### Scenario: copilot argv 帶 model
 
-- **WHEN** 以 `model="haiku-4.5"` 呼叫 `build_copilot_argv(...)`
-- **THEN** 回傳 argv MUST 含相鄰的 `--model` 與 `haiku-4.5`
+- **WHEN** 以 `model="claude-haiku-4.5"` 呼叫 `build_copilot_argv(...)`
+- **THEN** 回傳 argv MUST 含相鄰的 `--model` 與 `claude-haiku-4.5`
 
 #### Scenario: model 未設不加旗標
 
@@ -75,6 +75,6 @@ TBD - created by archiving change persona-manager-phase-b. Update Purpose after 
 
 #### Scenario: SubprocessLauncher 將 model 傳入 argv builder
 
-- **WHEN** `SubprocessLauncher(executor="copilot", model="haiku-4.5")` 執行 `launch(...)`
-- **THEN** 啟動的 inner argv MUST 含 `--model haiku-4.5`
+- **WHEN** `SubprocessLauncher(executor="copilot", model="claude-haiku-4.5")` 執行 `launch(...)`
+- **THEN** 啟動的 inner argv MUST 含 `--model claude-haiku-4.5`
 
