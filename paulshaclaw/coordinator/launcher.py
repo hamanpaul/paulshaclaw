@@ -95,6 +95,9 @@ def build_codex_argv(
     # 預設關閉，讓 codex 自身的核可/沙箱機制把關。
     if allow_unsafe:
         argv.append("--dangerously-bypass-approvals-and-sandbox")
+        # smoke 實證：headless codex exec 帶（未持久信任的）relay hook 時，會卡在 hook
+        # 信任閘等待輸入 → timeout。autonomous 派工須一併 bypass hook trust 才不會掛住。
+        argv.append("--dangerously-bypass-hook-trust")
     argv.extend(["-o", str(Path(log_dir) / "last.json")])
     if worktree is not None:
         argv.extend(["-C", worktree])
@@ -151,7 +154,14 @@ class SubprocessLauncher:
             remote=self._codex_remote,
             allow_unsafe=self._allow_unsafe,
         )
-        env = {**os.environ, "PSC_SLICE_ID": slice_id}
+        # PSC_REPO_ROOT 讓已安裝 hook 的 `${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh`
+        # 在 cwd=worktree（≠repo）時仍可解（worktree 雖是 repo checkout，但 hook 為全域安裝、
+        # 不可依賴相對 cwd；互動 session 亦不應因相對路徑找不到 script 而報錯）。
+        env = {
+            **os.environ,
+            "PSC_SLICE_ID": slice_id,
+            "PSC_REPO_ROOT": str(Path(__file__).resolve().parents[2]),
+        }
         if self._relay_target is not None:
             env["PSC_RELAY_TARGET"] = self._relay_target
         log_path = str(Path(log_dir) / f"{slice_id}.jsonl")

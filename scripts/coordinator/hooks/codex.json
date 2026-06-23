@@ -1,14 +1,27 @@
 {
-  "version": 1,
   "hooks": {
-    "session_start": [
+    "SessionStart": [
       {
-        "command": "PSC_RELAY_EVENT=session_start scripts/coordinator/psc-relay-hook.sh"
+        "hooks": [
+          {
+            "command": "PSC_RELAY_EVENT=session_start ${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh",
+            "type": "command",
+            "managedBy": "psc-coordinator-relay"
+          }
+        ],
+        "matcher": "startup|clear|compact"
       }
     ],
-    "stop": [
+    "Stop": [
       {
-        "command": "PSC_RELAY_EVENT=stop scripts/coordinator/psc-relay-hook.sh"
+        "hooks": [
+          {
+            "command": "PSC_RELAY_EVENT=stop ${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh",
+            "type": "command",
+            "managedBy": "psc-coordinator-relay"
+          }
+        ],
+        "matcher": ".*"
       }
     ]
   }

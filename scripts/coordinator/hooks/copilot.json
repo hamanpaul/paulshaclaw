@@ -3,12 +3,16 @@
   "hooks": {
     "sessionStart": [
       {
-        "command": "PSC_RELAY_EVENT=session_start scripts/coordinator/psc-relay-hook.sh"
+        "bash": "PSC_RELAY_EVENT=session_start ${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh",
+        "type": "command",
+        "timeoutSec": 10
       }
     ],
     "agentStop": [
       {
-        "command": "PSC_RELAY_EVENT=stop scripts/coordinator/psc-relay-hook.sh"
+        "bash": "PSC_RELAY_EVENT=stop ${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh",
+        "type": "command",
+        "timeoutSec": 10
       }
     ]
   }
