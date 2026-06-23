@@ -12,6 +12,15 @@ from .registry import JobRegistry
 from .seams import PaneSender, ScriptWorktreeCreator, TmuxPaneSender, WorktreeCreator
 
 
+def _resolve_launcher(executor, injected, *, allow_unsafe, model):
+    """注入優先；否則僅在 executor 指定時建 SubprocessLauncher（帶 allow_unsafe/model）。"""
+    if injected is not None:
+        return injected
+    if executor is None:
+        return None
+    return SubprocessLauncher(executor=executor, allow_unsafe=allow_unsafe, model=model)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m paulshaclaw.coordinator")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -39,6 +48,8 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="設定後走 headless launcher 路徑（copilot/claude/codex）；未設則沿用舊 tmux pane 路徑",
     )
+    p_fanout.add_argument("--allow-unsafe", action="store_true")
+    p_fanout.add_argument("--model", default=None)
 
     p_complete = sub.add_parser(
         "complete",
@@ -60,6 +71,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_tick.add_argument("--handoff-dir", default=autonomy.DEFAULT_HANDOFF_DIR)
     p_tick.add_argument("--require-idle", action="store_true")
     p_tick.add_argument("--max-load", type=float, default=1.0)
+    p_tick.add_argument("--allow-unsafe", action="store_true")
+    p_tick.add_argument("--model", default=None)
 
     return parser
 
@@ -113,9 +126,9 @@ def main(
     if args.cmd == "tick":
         disp = Dispatcher(reg, sender, creator)
         metas = autonomy.scan_specs(args.specs_dir)
-        active_launcher = launcher
-        if active_launcher is None and args.executor is not None:
-            active_launcher = SubprocessLauncher(executor=args.executor)
+        active_launcher = _resolve_launcher(
+            args.executor, launcher, allow_unsafe=args.allow_unsafe, model=args.model
+        )
         # is_satisfied 為 None 時交給 run_tick 以 args.handoff_dir 綁定 default 判定，
         # 避免 fanout 側對 DEFAULT_HANDOFF_DIR、complete 側對 args.handoff_dir 的不一致。
         summary = manager.run_tick(
@@ -139,9 +152,9 @@ def main(
             # --executor 設定（或測試注入 launcher）→ 走 headless launcher 路徑：
             # SubprocessLauncher 啟動 agent，dispatch_ready 記 executor/session/pid/log，
             # 且不再經 tmux pane send（與舊路徑互斥，無 double dispatch）。
-            active_launcher = launcher
-            if active_launcher is None and args.executor is not None:
-                active_launcher = SubprocessLauncher(executor=args.executor)
+            active_launcher = _resolve_launcher(
+                args.executor, launcher, allow_unsafe=args.allow_unsafe, model=args.model
+            )
             # git_runner 未注入 → 不傳（沿用 Dispatcher 預設真 git）；測試一律注入 fake
             jobs = autonomy.dispatch_ready(
                 metas, predicate, disp, persona=args.persona,
