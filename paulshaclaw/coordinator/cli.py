@@ -50,6 +50,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="設定後據 dependency graph 觀測算出本趟釋放的下游（released）",
     )
 
+    p_tick = sub.add_parser(
+        "tick",
+        help="完整 manager tick：fanout→complete（idle-gated）",
+    )
+    p_tick.add_argument("--specs-dir", required=True)
+    p_tick.add_argument("--persona", default="builder")
+    p_tick.add_argument("--executor", choices=sorted(_ARGV_BUILDERS), default=None)
+    p_tick.add_argument("--handoff-dir", default=autonomy.DEFAULT_HANDOFF_DIR)
+    p_tick.add_argument("--require-idle", action="store_true")
+    p_tick.add_argument("--max-load", type=float, default=1.0)
+
     return parser
 
 
@@ -96,6 +107,21 @@ def main(
         disp = Dispatcher(reg, sender, creator)
         metas = autonomy.scan_specs(args.specs_dir) if args.specs_dir else None
         summary = manager.complete_tick(disp, handoff_dir=args.handoff_dir, metas=metas)
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0
+
+    if args.cmd == "tick":
+        disp = Dispatcher(reg, sender, creator)
+        metas = autonomy.scan_specs(args.specs_dir)
+        active_launcher = launcher
+        if active_launcher is None and args.executor is not None:
+            active_launcher = SubprocessLauncher(executor=args.executor)
+        predicate = is_satisfied if is_satisfied is not None else autonomy.default_is_satisfied
+        summary = manager.run_tick(
+            disp, metas=metas, launcher=active_launcher, persona=args.persona,
+            is_satisfied=predicate, handoff_dir=args.handoff_dir,
+            require_idle=args.require_idle, max_load=args.max_load,
+        )
         print(json.dumps(summary, ensure_ascii=False))
         return 0
 
