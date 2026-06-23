@@ -116,10 +116,11 @@ def main(
         active_launcher = launcher
         if active_launcher is None and args.executor is not None:
             active_launcher = SubprocessLauncher(executor=args.executor)
-        predicate = is_satisfied if is_satisfied is not None else autonomy.default_is_satisfied
+        # is_satisfied 為 None 時交給 run_tick 以 args.handoff_dir 綁定 default 判定，
+        # 避免 fanout 側對 DEFAULT_HANDOFF_DIR、complete 側對 args.handoff_dir 的不一致。
         summary = manager.run_tick(
             disp, metas=metas, launcher=active_launcher, persona=args.persona,
-            is_satisfied=predicate, handoff_dir=args.handoff_dir,
+            is_satisfied=is_satisfied, handoff_dir=args.handoff_dir,
             require_idle=args.require_idle, max_load=args.max_load,
         )
         print(json.dumps(summary, ensure_ascii=False))

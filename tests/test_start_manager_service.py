@@ -10,6 +10,8 @@ REPO = Path(__file__).resolve().parents[1]
 START_SH = REPO / "scripts" / "start.sh"
 
 # 抽出 start_manager_service 函式單獨跑（避免 source 整支 start.sh 的副作用）
+# NB: `}}` 是 Python str.format() 對字面 `}` 的跳脫；.format() 後 sed pattern
+# 變成 /^}/，只配對行首（未縮排）的函式收尾大括號，正確框出整個函式。
 _HARNESS = """
 set -euo pipefail
 fn="$(sed -n '/^start_manager_service()/,/^}}/p' "{start_sh}")"
