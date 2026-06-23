@@ -309,5 +309,44 @@ class ArgvTests(unittest.TestCase):
             launcher_module._ARGV_BUILDERS.update(orig_builders)
 
 
+    def test_copilot_argv_model(self) -> None:
+        argv = build_copilot_argv(prompt="P", slice_id="s", log_dir="/lg", model="haiku-4.5")
+        self.assertIn("--model", argv)
+        self.assertEqual(argv[argv.index("--model") + 1], "haiku-4.5")
+
+    def test_argv_no_model_when_unset(self) -> None:
+        for build in (build_copilot_argv, build_claude_argv, build_codex_argv):
+            argv = build(prompt="P", slice_id="s", log_dir="/lg")
+            self.assertNotIn("--model", argv, msg=build.__name__)
+
+    def test_claude_codex_argv_model(self) -> None:
+        ca = build_claude_argv(prompt="P", slice_id="s", log_dir="/lg", model="opus")
+        self.assertEqual(ca[ca.index("--model") + 1], "opus")
+        xa = build_codex_argv(prompt="P", slice_id="s", log_dir="/lg", model="gpt-5.4")
+        self.assertEqual(xa[xa.index("--model") + 1], "gpt-5.4")
+
+    def test_subprocess_launcher_passes_model_to_argv(self) -> None:
+        captured = {}
+
+        class _FakeProc:
+            pid = 4321
+
+        def _fake_popen(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                SubprocessLauncher("copilot", model="haiku-4.5").launch(
+                    slice_id="s", prompt="P", worktree=d, log_dir=d
+                )
+        finally:
+            launcher_module.subprocess.Popen = original
+        script = captured["argv"][2]
+        self.assertIn("--model haiku-4.5", script)
+
+
 if __name__ == "__main__":
     unittest.main()
