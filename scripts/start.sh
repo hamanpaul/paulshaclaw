@@ -63,6 +63,7 @@ cleanup() {
       wait "$pid" 2>/dev/null || true
     fi
   done
+  systemctl --user stop "${PSC_INSTANCE:-paulshaclaw}-manager.timer" 2>/dev/null || true
 }
 
 cleanup_term() {
@@ -200,6 +201,26 @@ start_dream_loop() {
   echo "dream pid=$DREAM_PID (interval=${interval}s, root=$dream_root)"
 }
 
+# Phase C: persona manager tick via systemd --user timer. start.sh 不擁有 manager
+# 進程，只 toggle；systemctl --user 不可用（WSL 無 user systemd）→ graceful skip。
+# 停用：PSC_MANAGER_DISABLED=1。
+start_manager_service() {
+  if [[ "${PSC_MANAGER_DISABLED:-0}" == "1" ]]; then
+    echo "manager service disabled (PSC_MANAGER_DISABLED=1)"
+    return 0
+  fi
+  local instance="${PSC_INSTANCE:-paulshaclaw}"
+  if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "manager service skipped: systemctl --user unavailable (WSL no user systemd?)" >&2
+    return 0
+  fi
+  if systemctl --user start "${instance}-manager.timer"; then
+    echo "manager timer started (${instance}-manager.timer)"
+  else
+    echo "manager timer start failed (non-fatal)" >&2
+  fi
+  return 0
+}
 
 # Telegram listener (background when config is present)
 telegram_token_present=0
@@ -241,6 +262,7 @@ sleep 2
 
 # Stage 2: memory dream loop (bound to this start.sh lifecycle)
 start_dream_loop
+start_manager_service
 
 if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"

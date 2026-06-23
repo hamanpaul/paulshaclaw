@@ -90,6 +90,21 @@ _TEMPLATE_CATALOG: tuple[tuple[str, str, str], ...] = (
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
     ),
     (
+        "core",
+        "core/systemd/__INSTANCE__-manager.service.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    (
+        "core",
+        "core/systemd/__INSTANCE__-manager.timer.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    (
+        "core",
+        "core/runtime/__INSTANCE__-manager.env.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    (
         "state",
         "state/config/__INSTANCE__.state.json.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",

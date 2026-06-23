@@ -1,0 +1,12 @@
+[Unit]
+Description=__INSTANCE__ persona manager tick (oneshot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PSC_MANAGER_SPECS_DIR=%h/.agents/specs
+# 只依賴自有 -manager.env（含 PSC_MANAGER_EXECUTOR + installer 注入的 PYTHONPATH）；
+# 不耦合 base __INSTANCE__.env / PSC_STAGE1_CONFIG（manager tick 不需要，避免缺檔即 fail）。
+EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-manager.env
+ExecStart=/usr/bin/env python3 -m paulshaclaw.coordinator tick --require-idle --specs-dir ${PSC_MANAGER_SPECS_DIR} --executor ${PSC_MANAGER_EXECUTOR}

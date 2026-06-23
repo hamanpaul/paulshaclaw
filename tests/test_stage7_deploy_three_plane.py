@@ -187,5 +187,33 @@ class DeployCliTests(unittest.TestCase):
                 self.assertTrue(payload["rollback_checkpoints"])
 
 
+class ManagerUnitCatalogTests(unittest.TestCase):
+    def test_manager_units_present_and_rename(self) -> None:
+        assets = list_template_assets()
+        relpaths = {a.template_relpath for a in assets}
+        for rp in (
+            "core/systemd/__INSTANCE__-manager.service.tmpl",
+            "core/systemd/__INSTANCE__-manager.timer.tmpl",
+            "core/runtime/__INSTANCE__-manager.env.tmpl",
+        ):
+            self.assertIn(rp, relpaths)
+
+        svc = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.service.tmpl")
+        svc_text = svc.template_path.read_text(encoding="utf-8")
+        self.assertIn("Type=oneshot", svc_text)
+        self.assertIn("-m paulshaclaw.coordinator tick", svc_text)
+
+        timer = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.timer.tmpl")
+        timer_text = timer.template_path.read_text(encoding="utf-8")
+        self.assertIn("OnUnitActiveSec", timer_text)
+        self.assertIn("WantedBy=timers.target", timer_text)
+
+        env = next(a for a in assets if a.template_relpath == "core/runtime/__INSTANCE__-manager.env.tmpl")
+        self.assertIn("PSC_MANAGER_EXECUTOR=", env.template_path.read_text(encoding="utf-8"))
+
+        target = resolve_template_target("core/systemd/__INSTANCE__-manager.service.tmpl", instance_name="demo-agent")
+        self.assertEqual(target, "core/systemd/demo-agent-manager.service")
+
+
 if __name__ == "__main__":
     unittest.main()
