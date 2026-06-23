@@ -216,7 +216,7 @@ class CompleteTickGuardTests(unittest.TestCase):
 
 
 class RunTickTests(unittest.TestCase):
-    def test_skips_when_not_idle(self) -> None:
+    def test_not_idle_skips_fanout_but_still_completes(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
             job = _make_job(reg, "x")
@@ -226,11 +226,13 @@ class RunTickTests(unittest.TestCase):
                 disp, metas=[], require_idle=True, max_load=1.0,
                 idle_probe=lambda: (99.0, 99.0, 99.0), handoff_dir=str(hdir), clock=lambda: "T0",
             )
-            self.assertEqual(summary["skipped"], "not-idle")
-            self.assertEqual(summary["completed"], [])
-            self.assertFalse((hdir / "x.json").exists())
+            # fanout 被 idle gate 擋，但完成側仍跑（review F-C）
+            self.assertEqual(summary["dispatch_skipped"], "not-idle")
+            self.assertEqual(summary["dispatched"], [])
+            self.assertEqual(summary["completed"], [{"slice_id": "x", "gate_status": "passed"}])
+            self.assertTrue((hdir / "x.json").exists())
 
-    def test_runs_complete_when_idle(self) -> None:
+    def test_runs_fanout_and_complete_when_idle(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
             job = _make_job(reg, "y")
@@ -240,7 +242,7 @@ class RunTickTests(unittest.TestCase):
                 disp, metas=[], require_idle=True, max_load=1.0,
                 idle_probe=lambda: (0.0, 0.0, 0.0), handoff_dir=str(hdir), clock=lambda: "T0",
             )
-            self.assertFalse(summary["skipped"])
+            self.assertFalse(summary["dispatch_skipped"])
             self.assertEqual(summary["completed"], [{"slice_id": "y", "gate_status": "passed"}])
             self.assertTrue((hdir / "y.json").exists())
 
@@ -255,9 +257,34 @@ class RunTickTests(unittest.TestCase):
                 disp, metas=metas, launcher=None, is_satisfied=lambda s: True,
                 handoff_dir=str(hdir), clock=lambda: "T0",
             )
-            self.assertFalse(summary["skipped"])
+            self.assertFalse(summary["dispatch_skipped"])
             self.assertTrue(any(e.get("stage") == "fanout" for e in summary["errors"]))
             self.assertEqual(summary["completed"], [{"slice_id": "done-slice", "gate_status": "passed"}])
+
+    def test_in_flight_slice_not_redispatched(self) -> None:
+        # slice 已有 dispatched job → 本趟 fanout 不得再對它派工（review F-A 冪等）
+        class _RecordingLauncher:
+            def __init__(self) -> None:
+                self.launched: list[str] = []
+
+            def launch(self, *, slice_id, prompt, worktree, log_dir):  # pragma: no cover
+                self.launched.append(slice_id)
+                raise AssertionError(f"in-flight slice 不應被重派: {slice_id}")
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            _make_job(reg, "s")  # status=dispatched（in-flight）
+            disp = FakeDispatcher(reg, poll_map={})  # s 維持 dispatched
+            hdir = Path(d) / "handoff"
+            launcher = _RecordingLauncher()
+            metas = [{"slice_id": "s", "dispatch": "auto", "plan": "p.md", "depends_on": []}]
+            summary = manager.run_tick(
+                disp, metas=metas, launcher=launcher, is_satisfied=lambda x: True,
+                handoff_dir=str(hdir), clock=lambda: "T0",
+            )
+            self.assertEqual(launcher.launched, [])
+            self.assertEqual(summary["dispatched"], [])
+            self.assertFalse(summary["dispatch_skipped"])
 
 
 if __name__ == "__main__":

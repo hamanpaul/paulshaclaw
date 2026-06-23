@@ -22,6 +22,9 @@ render "$TPL/__INSTANCE__-manager.service.tmpl" "$UNIT_DIR/${INSTANCE}-manager.s
 render "$TPL/__INSTANCE__-manager.timer.tmpl"   "$UNIT_DIR/${INSTANCE}-manager.timer"
 render "$REPO/paulshaclaw/deploy/templates/core/runtime/__INSTANCE__-manager.env.tmpl" \
        "$RUNTIME_DIR/${INSTANCE}-manager.env"
+# 注入 PYTHONPATH=$REPO，讓 source-checkout（非 pip 安裝）下 systemd 跑得起
+# `python3 -m paulshaclaw.coordinator`（review F-B）。
+echo "PYTHONPATH=$REPO" >> "$RUNTIME_DIR/${INSTANCE}-manager.env"
 
 if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
   systemctl --user daemon-reload

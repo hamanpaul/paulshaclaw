@@ -36,7 +36,7 @@ class CliTickTests(unittest.TestCase):
                 )
             self.assertEqual(rc, 0)
             summary = json.loads(buf.getvalue())
-            self.assertEqual(summary["skipped"], "not-idle")
+            self.assertEqual(summary["dispatch_skipped"], "not-idle")
 
 
 if __name__ == "__main__":

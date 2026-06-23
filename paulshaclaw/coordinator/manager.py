@@ -149,30 +149,44 @@ def run_tick(
 ) -> dict:
     """跑完整 manager tick：fanout（dispatch_ready）→ complete_tick。
 
-    require_idle 時以 1-min load average gate（reuse memory.dream.idle，可注入 probe）。
-    fanout 例外（DispatchReadyError / RequiresLauncher / ValueError 環）收進 errors，
-    MUST 仍跑 complete（派工側失敗不阻完成側）。
+    require_idle 時以 1-min load average gate（reuse memory.dream.idle，可注入 probe）——
+    僅擋 fanout（新工作），complete_tick 一律跑。已有 dispatched/running job 的 slice
+    本趟不重派（冪等）。fanout 例外（DispatchReadyError/RequiresLauncher/ValueError 環）
+    收進 errors，不阻 complete。回 {dispatch_skipped, dispatched, completed, errors}。
     """
-    if require_idle and not idle.is_idle(max_load=max_load, probe=idle_probe):
-        return {"skipped": "not-idle", "dispatched": [], "completed": [], "errors": []}
     satisfied = is_satisfied if is_satisfied is not None else _satisfied_pred(handoff_dir)
     dispatched: list = []
     errors: list = []
-    try:
-        dispatched = autonomy.dispatch_ready(
-            metas, satisfied, dispatcher, persona=persona, launcher=launcher
+    # idle gate 只擋「派工側（新工作，會啟 agent，昂貴）」；完成側（poll→manifest，便宜的
+    # 回收/記帳）一律跑，否則高負載時 job 完成/失敗狀態與下游釋放會被埋住（review F-C）。
+    if require_idle and not idle.is_idle(max_load=max_load, probe=idle_probe):
+        dispatch_skipped: str | bool = "not-idle"
+    else:
+        dispatch_skipped = False
+        # 冪等：跳過 registry 中已有 dispatched/running job 的 slice，避免 oneshot+timer
+        # 反覆對同一 slice 重派（review F-A：一 slice 一 job 不變量）。
+        registry = getattr(dispatcher, "_registry", None)
+        active = (
+            {j.get("task") for j in registry.list_jobs() if j.get("status") in IN_FLIGHT_STATUSES}
+            if registry is not None
+            else set()
         )
-    except (
-        autonomy.DispatchReadyError,
-        autonomy.DispatchReadyRequiresLauncherError,
-        ValueError,
-    ) as exc:
-        errors.append({"stage": "fanout", "error": str(exc)})
+        fanout_metas = [m for m in metas if m.get("slice_id") not in active]
+        try:
+            dispatched = autonomy.dispatch_ready(
+                fanout_metas, satisfied, dispatcher, persona=persona, launcher=launcher
+            )
+        except (
+            autonomy.DispatchReadyError,
+            autonomy.DispatchReadyRequiresLauncherError,
+            ValueError,
+        ) as exc:
+            errors.append({"stage": "fanout", "error": str(exc)})
     complete = complete_tick(
         dispatcher, gate_runner=gate_runner, handoff_dir=handoff_dir, metas=metas, clock=clock
     )
     return {
-        "skipped": False,
+        "dispatch_skipped": dispatch_skipped,
         "dispatched": dispatched,
         "completed": complete["completed"],
         "errors": errors + complete["errors"],

@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=PSC_MANAGER_SPECS_DIR=%h/.agents/specs
-EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env
+# 只依賴自有 -manager.env（含 PSC_MANAGER_EXECUTOR + installer 注入的 PYTHONPATH）；
+# 不耦合 base __INSTANCE__.env / PSC_STAGE1_CONFIG（manager tick 不需要，避免缺檔即 fail）。
 EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-manager.env
-Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json
 ExecStart=/usr/bin/env python3 -m paulshaclaw.coordinator tick --require-idle --specs-dir ${PSC_MANAGER_SPECS_DIR} --executor ${PSC_MANAGER_EXECUTOR}
