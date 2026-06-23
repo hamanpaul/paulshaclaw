@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Sequence
 
-from . import autonomy
+from . import autonomy, manager
 from .dispatcher import Dispatcher
 from .launcher import _ARGV_BUILDERS, AgentLauncher, SubprocessLauncher
 from .registry import JobRegistry
@@ -38,6 +38,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=sorted(_ARGV_BUILDERS),
         default=None,
         help="設定後走 headless launcher 路徑（copilot/claude/codex）；未設則沿用舊 tmux pane 路徑",
+    )
+
+    p_complete = sub.add_parser(
+        "complete",
+        help="完成側 tick：輪詢 in-flight job → 寫 handoff manifest → 釋放下游",
+    )
+    p_complete.add_argument("--handoff-dir", default=autonomy.DEFAULT_HANDOFF_DIR)
+    p_complete.add_argument(
+        "--specs-dir", default=None,
+        help="設定後據 dependency graph 觀測算出本趟釋放的下游（released）",
     )
 
     return parser
@@ -80,6 +90,13 @@ def main(
             print(f"錯誤: {exc}", file=sys.stderr)
             return 1
         print(json.dumps(job, ensure_ascii=False))
+        return 0
+
+    if args.cmd == "complete":
+        disp = Dispatcher(reg, sender, creator)
+        metas = autonomy.scan_specs(args.specs_dir) if args.specs_dir else None
+        summary = manager.complete_tick(disp, handoff_dir=args.handoff_dir, metas=metas)
+        print(json.dumps(summary, ensure_ascii=False))
         return 0
 
     if args.cmd in ("ready", "fanout"):
