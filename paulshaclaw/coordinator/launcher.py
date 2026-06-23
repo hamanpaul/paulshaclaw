@@ -24,6 +24,7 @@ def build_copilot_argv(
     worktree: str | None = None,
     remote: str | None = None,
     allow_unsafe: bool = False,
+    model: str | None = None,
 ) -> list[str]:
     # allow_unsafe（明確 opt-in）才放開 copilot 的全自動授權 --allow-all；
     # 預設關閉 → 由 executor 自身的互動授權把關（manager 自主派工請設 allow_unsafe=True）。
@@ -39,6 +40,8 @@ def build_copilot_argv(
         "--output-format",
         "json",
     ]
+    if model is not None:
+        argv += ["--model", model]
     if allow_unsafe:
         argv.append("--allow-all")
     return argv
@@ -52,6 +55,7 @@ def build_claude_argv(
     worktree: str | None = None,
     remote: str | None = None,
     allow_unsafe: bool = False,
+    model: str | None = None,
 ) -> list[str]:
     # allow_unsafe（明確 opt-in）→ bypassPermissions（不再逐筆授權）；
     # 預設用 acceptEdits（仍受權限模式把關，最小放權）。
@@ -68,6 +72,8 @@ def build_claude_argv(
         "--permission-mode",
         "bypassPermissions" if allow_unsafe else "acceptEdits",
     ]
+    if model is not None:
+        argv += ["--model", model]
     if worktree is not None:
         argv.extend(["--add-dir", worktree])
     return argv
@@ -81,6 +87,7 @@ def build_codex_argv(
     worktree: str | None = None,
     remote: str | None = "psc",
     allow_unsafe: bool = False,
+    model: str | None = None,
 ) -> list[str]:
     # smoke 實證：`codex exec` 不接受 `--remote`（unexpected argument）。codex 的 remote
     # 是獨立的 `remote-control` 子命令/app-server，非 exec 旗標；故 headless exec 不帶 remote。
@@ -98,6 +105,8 @@ def build_codex_argv(
         # smoke 實證：headless codex exec 帶（未持久信任的）relay hook 時，會卡在 hook
         # 信任閘等待輸入 → timeout。autonomous 派工須一併 bypass hook trust 才不會掛住。
         argv.append("--dangerously-bypass-hook-trust")
+    if model is not None:
+        argv += ["--model", model]
     argv.extend(["-o", str(Path(log_dir) / "last.json")])
     if worktree is not None:
         argv.extend(["-C", worktree])
@@ -133,6 +142,7 @@ class SubprocessLauncher:
         relay_target: str | None = None,
         codex_remote: str = "psc",
         allow_unsafe: bool = False,
+        model: str | None = None,
     ) -> None:
         if executor not in _ARGV_BUILDERS:
             raise ValueError(f"unknown executor: {executor}")
@@ -143,6 +153,7 @@ class SubprocessLauncher:
         # （codex --dangerously-bypass-approvals-and-sandbox、copilot --allow-all、
         # claude bypassPermissions）。預設 False，採最小放權，避免無意間關掉沙箱。
         self._allow_unsafe = allow_unsafe
+        self._model = model
 
     def launch(self, *, slice_id: str, prompt: str, worktree: str, log_dir: str) -> LaunchHandle:
         Path(log_dir).mkdir(parents=True, exist_ok=True)
@@ -153,6 +164,7 @@ class SubprocessLauncher:
             worktree=worktree,
             remote=self._codex_remote,
             allow_unsafe=self._allow_unsafe,
+            model=self._model,
         )
         # PSC_REPO_ROOT 讓已安裝 hook 的 `${PSC_REPO_ROOT}/scripts/coordinator/psc-relay-hook.sh`
         # 在 cwd=worktree（≠repo）時仍可解（worktree 雖是 repo checkout，但 hook 為全域安裝、
