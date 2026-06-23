@@ -66,3 +66,36 @@ policy_version: 1.0.2
 - **R-19（CI 必須跑測試，FAIL gate）**：repo 存在 `tests/`（含 `test_*.py` / `*_test.py`）時，`.github/workflows/**` 必須有至少一個 workflow 實際執行測試；新增測試套件而 CI 未涵蓋時須同步補上；豁免 label `policy-exempt:ci-tests`。本 repo 已由 `.github/workflows/tests.yml` 滿足。
 - **R-20（workflow policy_version 同步，FAIL gate，無豁免 label）**：workflow 內宣告的 `policy_version` / `POLICY_VERSION` semver 字面值必須與 `.paul-project.yml` 一致。
 - **Exemption 白名單新增**：`policy-exempt:ci-tests`（R-19）。
+
+## 架構與專案慣例（吸收自 copilot-instructions）
+
+### 分階段生命週期（staged lifecycle）
+- Stage 0：工具／命名整理 + OpenSpec・Superpowers 骨架
+- Stage 1：`PaulShiaBro` daemon / TUI / Telegram bot / registry
+- Stage 2：`~/.agents/memory` 記憶基座
+- Stage 3：slash-command 生命週期（artifacts + gates）
+- Stage 4：persona 契約、handoff、護欄
+- Stage 5+：可觀測性、安全、部署加固
+
+### 運作模型
+- **hub-and-spoke**：單一 manager / orchestrator 持有任務權威；worker 做有界執行並回傳 artifact；除非 doc 明示，避免 worker↔worker mesh。
+- **artifact-first / event-first**：prompt 文字非真相源；canonical state 落在 artifacts 與 event log；gate 決策依檔案／schema／事件記錄。
+
+### 命名系統（勿改）
+- `paulshaclaw`：repo｜`PaulShiaBro`：daemon/bot｜`psc`：CLI / env 短名｜`PoHsiaBro`：字型 / glyph 家族
+
+### path split
+- `paulshaclaw/`：repo code 與範本｜`~/.agents/`：私有 runtime 狀態與記憶｜`~/.config/paulshaclaw/`：secret 與機器本地 config
+
+### 生命週期 artifacts
+- `docs/spec.md`、`plan.md`、`roadmap.md`、`test.md`、`task.md`、`todo.md` 各有明確 phase 角色；新增／編輯 docs 沿用既有 zh-TW 用語與 stage 編號，勿自創標籤。
+
+### persona 契約模型（Stage 4）
+- persona = 契約｜agent instance = runtime 執行｜skill = 可復用能力
+
+### 重要架構文件（動工前先讀）
+- `docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md`
+- `docs/research/03.stage3-lifecycle-slash-commands-artifacts-phase-gating-research.md`
+- `docs/research/04.stage4-persona-role-catalog-handoff-guardrails-research.md`
+- `docs/research/01.prompt-define-plan-build-verify-review-ship-resear.md`
+- openspec / superpowers 為工作流骨架，相關改動與 stage docs 保持一致。
