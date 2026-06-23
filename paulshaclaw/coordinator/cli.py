@@ -21,6 +21,19 @@ def _resolve_launcher(executor, injected, *, allow_unsafe, model):
     return SubprocessLauncher(executor=executor, allow_unsafe=allow_unsafe, model=model)
 
 
+def _refuse_unsafe_fanout(metas, predicate, *, allow_unsafe, max_ready=1):
+    """fail-closed：--allow-unsafe 旁路各 executor 的沙箱/核可，故僅允許 ≤max_ready 個就緒
+    slice（canary 一次一個）。就緒集過大（如誤指 specs-dir、或真實 specs 多個 dispatch:auto）
+    時拒絕，避免一次對多個 slice 大量自主越權派工。"""
+    if not allow_unsafe:
+        return
+    ready = autonomy.ready_units(metas, predicate)
+    if len(ready) > max_ready:
+        raise ValueError(
+            f"--allow-unsafe 僅允許 ≤{max_ready} 個就緒 slice（canary 一次一個），實得 {len(ready)}"
+        )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m paulshaclaw.coordinator")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -126,14 +139,22 @@ def main(
     if args.cmd == "tick":
         disp = Dispatcher(reg, sender, creator)
         metas = autonomy.scan_specs(args.specs_dir)
+        # predicate 綁定 args.handoff_dir（避免 fanout 側對 DEFAULT_HANDOFF_DIR、complete
+        # 側對 args.handoff_dir 的不一致）；同一 predicate 餵 unsafe 守門與 run_tick。
+        predicate = is_satisfied if is_satisfied is not None else (
+            lambda s: autonomy.default_is_satisfied(s, handoff_dir=args.handoff_dir)
+        )
+        try:
+            _refuse_unsafe_fanout(metas, predicate, allow_unsafe=args.allow_unsafe)
+        except ValueError as exc:  # --allow-unsafe 就緒集 >1 → fail-closed
+            print(f"錯誤: {exc}", file=sys.stderr)
+            return 1
         active_launcher = _resolve_launcher(
             args.executor, launcher, allow_unsafe=args.allow_unsafe, model=args.model
         )
-        # is_satisfied 為 None 時交給 run_tick 以 args.handoff_dir 綁定 default 判定，
-        # 避免 fanout 側對 DEFAULT_HANDOFF_DIR、complete 側對 args.handoff_dir 的不一致。
         summary = manager.run_tick(
             disp, metas=metas, launcher=active_launcher, persona=args.persona,
-            is_satisfied=is_satisfied, handoff_dir=args.handoff_dir,
+            is_satisfied=predicate, handoff_dir=args.handoff_dir,
             require_idle=args.require_idle, max_load=args.max_load,
         )
         print(json.dumps(summary, ensure_ascii=False))
@@ -149,6 +170,8 @@ def main(
                 return 0
             # fanout：reuse Phase 2 Dispatcher（注入或預設 seam）
             disp = Dispatcher(reg, sender, creator)
+            # --allow-unsafe 旁路沙箱/核可 → fail-closed：就緒集 >1 即拒（避免大量越權派工）。
+            _refuse_unsafe_fanout(metas, predicate, allow_unsafe=args.allow_unsafe)
             # --executor 設定（或測試注入 launcher）→ 走 headless launcher 路徑：
             # SubprocessLauncher 啟動 agent，dispatch_ready 記 executor/session/pid/log，
             # 且不再經 tmux pane send（與舊路徑互斥，無 double dispatch）。

@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from paulshaclaw.coordinator.cli import _resolve_launcher
+from paulshaclaw.coordinator.cli import _refuse_unsafe_fanout, _resolve_launcher
 from paulshaclaw.coordinator.launcher import SubprocessLauncher
+
+
+def _meta(slice_id: str) -> dict:
+    return {"slice_id": slice_id, "dispatch": "auto", "plan": "p.md", "depends_on": []}
 
 
 class ResolveLauncherTests(unittest.TestCase):
@@ -20,6 +24,20 @@ class ResolveLauncherTests(unittest.TestCase):
 
     def test_none_executor_returns_none(self) -> None:
         self.assertIsNone(_resolve_launcher(None, None, allow_unsafe=False, model=None))
+
+
+class RefuseUnsafeFanoutTests(unittest.TestCase):
+    def test_unsafe_refuses_multiple_ready(self) -> None:
+        metas = [_meta("a"), _meta("b")]
+        with self.assertRaises(ValueError):
+            _refuse_unsafe_fanout(metas, lambda s: True, allow_unsafe=True)
+
+    def test_unsafe_allows_single_ready(self) -> None:
+        _refuse_unsafe_fanout([_meta("a")], lambda s: True, allow_unsafe=True)  # 不 raise
+
+    def test_safe_mode_unbounded(self) -> None:
+        metas = [_meta(f"s{i}") for i in range(5)]
+        _refuse_unsafe_fanout(metas, lambda s: True, allow_unsafe=False)  # 不 raise
 
 
 if __name__ == "__main__":

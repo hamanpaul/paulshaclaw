@@ -13,3 +13,17 @@
 
 - **WHEN** 執行 `fanout`/`tick` 帶 `--executor copilot --model haiku-4.5`（未注入 launcher）
 - **THEN** 建立的 `SubprocessLauncher` MUST 帶 `model="haiku-4.5"`
+
+### Requirement: --allow-unsafe fail-closed 綁定就緒集大小
+
+因 `--allow-unsafe` 旁路各 executor 的沙箱/核可，`tick`/`fanout` 在 `--allow-unsafe` 為真時 MUST fail-closed：就緒集（`ready_units`）大於 1 個 slice 時 MUST 拒絕派工並以非零退出（avoid 一次對多個 slice 大量自主越權派工，例如誤指 specs-dir 或真實 specs 含多個 `dispatch:auto`）。`--allow-unsafe` 未設時不施此限。
+
+#### Scenario: unsafe + 多就緒 slice 拒絕
+
+- **WHEN** `--allow-unsafe` 為真且就緒集含 ≥2 個 slice
+- **THEN** MUST 以錯誤退出（exit 1），MUST NOT 派工任何 slice
+
+#### Scenario: unsafe + 單一就緒 slice 放行
+
+- **WHEN** `--allow-unsafe` 為真且就緒集恰為 1 個 slice（canary）
+- **THEN** MUST 正常派工該 slice

@@ -43,7 +43,7 @@ depends_on: [persona-manager-phase-c]
 ## 4. Unit 2 — canary slice + 有界任務
 
 - 專用目錄 `docs/canary/`（或 `runtime/canary/specs/`）放單一 canary spec，frontmatter `dispatch: auto`、`slice_id: canary-pong`、`plan` 指向同檔/小 plan。
-- **plan 內容（有界）**：指示 agent 僅「在其 worktree 內建立 `canary/PONG.md`，內容一行 `pong canary-pong`，不動任何其他檔、完成即停」。
+- **plan 內容（有界）**：指示 agent 僅「在其 worktree 內建立 `tests/canary_pong.md`（**在 builder 契約 `write_paths` 內**），內容一行 `pong`，不動任何其他檔、完成即停」。
 - canary specs dir 與真實 specs 隔離，timer/真實 fanout 不會掃到它。
 
 ## 5. 安全（live 自主 agent 的護欄）
