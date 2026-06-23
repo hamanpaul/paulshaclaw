@@ -19,7 +19,7 @@ coordinator 派工時 SHALL 透過 `build_dispatch_prompt(role, *, task, plan_pa
 - **WHEN** 傳入不存在的 `plan_path`
 - **THEN** 仍正常回傳含該路徑參照的 prompt（不讀檔、不 raise）
 
-### Requirement: fan-out 經 headless launcher 派工而非佔位
+### Requirement: fan-out 派出真契約指令而非佔位
 
 `coordinator.autonomy.dispatch_ready` SHALL 對每個就緒單位以 `build_dispatch_prompt` 產 prompt、再經注入的 `AgentLauncher` headless 啟動 agent，取代先前的佔位註解字串與 pane 送字模型。
 
