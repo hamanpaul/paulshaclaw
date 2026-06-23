@@ -1,0 +1,10 @@
+[Unit]
+Description=__INSTANCE__ persona manager tick timer
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=300
+Unit=__INSTANCE__-manager.service
+
+[Install]
+WantedBy=timers.target
