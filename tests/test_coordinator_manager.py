@@ -215,5 +215,50 @@ class CompleteTickGuardTests(unittest.TestCase):
                 self.assertFalse(hdir.exists() and any(hdir.iterdir()), f"{bad!r} 不應寫出檔案")
 
 
+class RunTickTests(unittest.TestCase):
+    def test_skips_when_not_idle(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "x")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            summary = manager.run_tick(
+                disp, metas=[], require_idle=True, max_load=1.0,
+                idle_probe=lambda: (99.0, 99.0, 99.0), handoff_dir=str(hdir), clock=lambda: "T0",
+            )
+            self.assertEqual(summary["skipped"], "not-idle")
+            self.assertEqual(summary["completed"], [])
+            self.assertFalse((hdir / "x.json").exists())
+
+    def test_runs_complete_when_idle(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "y")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            summary = manager.run_tick(
+                disp, metas=[], require_idle=True, max_load=1.0,
+                idle_probe=lambda: (0.0, 0.0, 0.0), handoff_dir=str(hdir), clock=lambda: "T0",
+            )
+            self.assertFalse(summary["skipped"])
+            self.assertEqual(summary["completed"], [{"slice_id": "y", "gate_status": "passed"}])
+            self.assertTrue((hdir / "y.json").exists())
+
+    def test_fanout_failure_does_not_block_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "done-slice")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            metas = [{"slice_id": "ready-one", "dispatch": "auto", "plan": "p.md", "depends_on": []}]
+            summary = manager.run_tick(
+                disp, metas=metas, launcher=None, is_satisfied=lambda s: True,
+                handoff_dir=str(hdir), clock=lambda: "T0",
+            )
+            self.assertFalse(summary["skipped"])
+            self.assertTrue(any(e.get("stage") == "fanout" for e in summary["errors"]))
+            self.assertEqual(summary["completed"], [{"slice_id": "done-slice", "gate_status": "passed"}])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
 
 from ..persona import gate, handoff
+from ..memory.dream import idle
 from . import autonomy
 
 IN_FLIGHT_STATUSES = frozenset({"dispatched", "running"})
@@ -129,3 +131,49 @@ def complete_tick(
         except ValueError:
             pass
     return summary
+
+
+def run_tick(
+    dispatcher,
+    *,
+    metas: list[dict],
+    launcher=None,
+    persona: str = "builder",
+    is_satisfied=None,
+    gate_runner: GateRunner | None = None,
+    handoff_dir: str = autonomy.DEFAULT_HANDOFF_DIR,
+    require_idle: bool = False,
+    max_load: float = 1.0,
+    idle_probe: Callable[[], tuple] = os.getloadavg,
+    clock: Callable[[], str] = _utcnow,
+) -> dict:
+    """跑完整 manager tick：fanout（dispatch_ready）→ complete_tick。
+
+    require_idle 時以 1-min load average gate（reuse memory.dream.idle，可注入 probe）。
+    fanout 例外（DispatchReadyError / RequiresLauncher / ValueError 環）收進 errors，
+    MUST 仍跑 complete（派工側失敗不阻完成側）。
+    """
+    if require_idle and not idle.is_idle(max_load=max_load, probe=idle_probe):
+        return {"skipped": "not-idle", "dispatched": [], "completed": [], "errors": []}
+    satisfied = is_satisfied if is_satisfied is not None else _satisfied_pred(handoff_dir)
+    dispatched: list = []
+    errors: list = []
+    try:
+        dispatched = autonomy.dispatch_ready(
+            metas, satisfied, dispatcher, persona=persona, launcher=launcher
+        )
+    except (
+        autonomy.DispatchReadyError,
+        autonomy.DispatchReadyRequiresLauncherError,
+        ValueError,
+    ) as exc:
+        errors.append({"stage": "fanout", "error": str(exc)})
+    complete = complete_tick(
+        dispatcher, gate_runner=gate_runner, handoff_dir=handoff_dir, metas=metas, clock=clock
+    )
+    return {
+        "skipped": False,
+        "dispatched": dispatched,
+        "completed": complete["completed"],
+        "errors": errors + complete["errors"],
+    }
