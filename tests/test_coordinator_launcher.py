@@ -347,6 +347,39 @@ class ArgvTests(unittest.TestCase):
         script = captured["argv"][2]
         self.assertIn("--model haiku-4.5", script)
 
+    def test_launch_sentinel_is_absolute_cwd_independent(self) -> None:
+        # bug：相對 log_dir + 子進程 cwd=worktree → sentinel 寫到 worktree（poller 找不到）。
+        # 修：launch 把 log_dir resolve 成絕對 → script 內 sentinel 與回傳 log_path 皆絕對。
+        import os
+        import re as _re
+
+        captured = {}
+
+        class _FakeProc:
+            pid = 5555
+
+        def _fake_popen(argv, **kwargs):
+            captured["argv"] = argv
+            return _FakeProc()
+
+        original = launcher_module.subprocess.Popen
+        original_cwd = os.getcwd()
+        launcher_module.subprocess.Popen = _fake_popen
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                os.chdir(d)  # launcher 在某 cwd，log_dir 給相對路徑
+                handle = SubprocessLauncher("copilot").launch(
+                    slice_id="s", prompt="P", worktree=d, log_dir="runtime/dispatch/s"
+                )
+        finally:
+            os.chdir(original_cwd)
+            launcher_module.subprocess.Popen = original
+        script = captured["argv"][2]
+        m = _re.search(r">\s*(\S*s\.exit)", script)
+        self.assertIsNotNone(m, script)
+        self.assertTrue(m.group(1).startswith("/"), f"sentinel 非絕對: {m.group(1)}")
+        self.assertTrue(handle.log_path.startswith("/"), f"log_path 非絕對: {handle.log_path}")
+
 
 if __name__ == "__main__":
     unittest.main()

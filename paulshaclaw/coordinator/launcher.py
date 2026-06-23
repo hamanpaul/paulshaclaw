@@ -156,6 +156,10 @@ class SubprocessLauncher:
         self._model = model
 
     def launch(self, *, slice_id: str, prompt: str, worktree: str, log_dir: str) -> LaunchHandle:
+        # log_dir resolve 成絕對：sentinel 由子進程的 bash wrapper 以 cwd=worktree 寫入，
+        # 相對路徑會落到 worktree（poller 在他處找不到）→ 完成偵測對 worktree dispatch 失效。
+        # 絕對化後 JSONL / sentinel / 回傳 log_path 皆與 cwd 無關，跨進程 poll 一致。
+        log_dir = str(Path(log_dir).resolve())
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         inner_argv = _ARGV_BUILDERS[self._executor](
             prompt=prompt,
