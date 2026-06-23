@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Protocol
@@ -13,6 +14,16 @@ TERMINAL_STATUSES = frozenset({"done", "failed"})
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _is_safe_slice_id(slice_id) -> bool:
+    """slice_id 用作單一檔名；拒絕路徑分隔/相對跳脫/絕對路徑（fail-closed 防越界寫）。"""
+    return (
+        isinstance(slice_id, str)
+        and bool(slice_id)
+        and slice_id not in (".", "..")
+        and re.fullmatch(r"[A-Za-z0-9._-]+", slice_id) is not None
+    )
 
 
 class GateRunner(Protocol):
@@ -82,8 +93,8 @@ def complete_tick(
                 continue
 
             slice_id = job.get("task")
-            if not (isinstance(slice_id, str) and slice_id):
-                errors.append({"job_id": job_id, "error": f"job 缺合法 task/slice_id: {slice_id!r}"})
+            if not _is_safe_slice_id(slice_id):
+                errors.append({"job_id": job_id, "error": f"job 缺合法/安全 task/slice_id: {slice_id!r}"})
                 continue
             manifest_path = hdir / f"{slice_id}.json"
             if manifest_path.is_file():

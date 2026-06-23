@@ -200,6 +200,20 @@ class CompleteTickGuardTests(unittest.TestCase):
             self.assertEqual(summary["completed"], [{"slice_id": "a", "gate_status": "passed"}])
             self.assertNotIn("released", summary)
 
+    def test_unsafe_slice_id_rejected_no_escape_write(self) -> None:
+        for bad in ["../evil", "/abs/evil", "a/b", "..", ".", "x/../y", "with space"]:
+            with tempfile.TemporaryDirectory() as d:
+                reg = _reg(d)
+                job = _make_job(reg, "ok")
+                reg._jobs[0]["task"] = bad   # 模擬不安全/corrupt slice_id
+                disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+                hdir = Path(d) / "handoff"
+                summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+                self.assertEqual(summary["completed"], [], f"{bad!r} 應被拒")
+                self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
+                # 確認沒有任何檔案被寫到 hdir 外或 hdir 內
+                self.assertFalse(hdir.exists() and any(hdir.iterdir()), f"{bad!r} 不應寫出檔案")
+
 
 if __name__ == "__main__":
     unittest.main()
