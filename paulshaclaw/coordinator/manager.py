@@ -26,6 +26,8 @@ def _default_gate_runner(job: dict) -> dict | None:
     if not (isinstance(branch, str) and branch and isinstance(base, str) and base):
         return None
     role = job.get("persona") if isinstance(job.get("persona"), str) else "builder"
+    # branch 為 ref 名（非 commit sha）是刻意的：git 在 eval 當下把 base...branch
+    # 解析成該 branch 的 HEAD。shadow-only，任何失敗皆降級為 None（不阻釋放）。
     try:
         changed = gate.compute_changed_paths(base, branch)
     except Exception:
@@ -45,7 +47,9 @@ def complete_tick(
     metas: list[dict] | None = None,
     clock: Callable[[], str] = _utcnow,
 ) -> dict:
-    registry = dispatcher._registry
+    registry = getattr(dispatcher, "_registry", None)
+    if registry is None:
+        raise RuntimeError("complete_tick 需 dispatcher._registry（fail-closed）")
     runner = gate_runner if gate_runner is not None else _default_gate_runner
     hdir = Path(handoff_dir)
 
@@ -53,11 +57,16 @@ def complete_tick(
     completed: list[dict] = []
     errors: list[dict] = []
 
+    def _ready_ids() -> set[str]:
+        return {m["slice_id"] for m in autonomy.ready_units(metas, _satisfied_pred(handoff_dir))}
+
+    released_ok = metas is not None
     before_ready: set[str] = set()
-    if metas is not None:
-        before_ready = {
-            m["slice_id"] for m in autonomy.ready_units(metas, _satisfied_pred(handoff_dir))
-        }
+    if released_ok:
+        try:
+            before_ready = _ready_ids()
+        except ValueError:
+            released_ok = False  # metas 有環/重複 → released 觀測停用，不擋完成側
 
     for snapshot in registry.list_jobs():
         job_id = snapshot["job_id"]
@@ -73,6 +82,9 @@ def complete_tick(
                 continue
 
             slice_id = job.get("task")
+            if not (isinstance(slice_id, str) and slice_id):
+                errors.append({"job_id": job_id, "error": f"job 缺合法 task/slice_id: {slice_id!r}"})
+                continue
             manifest_path = hdir / f"{slice_id}.json"
             if manifest_path.is_file():
                 continue  # 冪等：已寫過
@@ -100,9 +112,9 @@ def complete_tick(
             errors.append({"job_id": job_id, "error": str(exc)})
 
     summary: dict = {"polled": polled, "completed": completed, "errors": errors}
-    if metas is not None:
-        after_ready = {
-            m["slice_id"] for m in autonomy.ready_units(metas, _satisfied_pred(handoff_dir))
-        }
-        summary["released"] = sorted(after_ready - before_ready)
+    if released_ok:
+        try:
+            summary["released"] = sorted(_ready_ids() - before_ready)
+        except ValueError:
+            pass
     return summary

@@ -89,8 +89,8 @@ class CompleteTickReconcileTests(unittest.TestCase):
     def test_terminal_job_missing_manifest_is_reconciled(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
-            _make_job(reg, "slice-d")
-            reg.update_headless_result("slice-d-1", status="done", exit_code=0)
+            job = _make_job(reg, "slice-d")
+            reg.update_headless_result(job["job_id"], status="done", exit_code=0)
             disp = FakeDispatcher(reg, poll_map={})
             hdir = Path(d) / "handoff"
             summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
@@ -168,6 +168,37 @@ class CompleteTickErrorAndReleaseTests(unittest.TestCase):
             self.assertIn("down", summary["released"])
             from paulshaclaw.coordinator import autonomy
             self.assertTrue(autonomy.default_is_satisfied("up", handoff_dir=str(hdir)))
+
+
+class CompleteTickGuardTests(unittest.TestCase):
+    def test_job_without_valid_slice_id_goes_to_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-x")
+            # 直接污染 registry 內部 job 的 task 成 None，模擬 corrupt 狀態
+            reg._jobs[0]["task"] = None
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+            self.assertFalse((hdir / "None.json").exists())
+            self.assertEqual(summary["completed"], [])
+            self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
+
+    def test_cyclic_metas_does_not_crash_tick(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "a")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            cyclic = [
+                {"slice_id": "a", "dispatch": "auto", "plan": "pa.md", "depends_on": ["b"]},
+                {"slice_id": "b", "dispatch": "auto", "plan": "pb.md", "depends_on": ["a"]},
+            ]
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), metas=cyclic, clock=lambda: "T0")
+            # 完成側仍寫出 manifest；released 因環被停用而省略
+            self.assertTrue((hdir / "a.json").exists())
+            self.assertEqual(summary["completed"], [{"slice_id": "a", "gate_status": "passed"}])
+            self.assertNotIn("released", summary)
 
 
 if __name__ == "__main__":
