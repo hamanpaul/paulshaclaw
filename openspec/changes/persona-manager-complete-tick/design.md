@@ -35,3 +35,10 @@ Phase B（#112）落地了 coordinator 派工側：`autonomy.dispatch_ready` 算
 ## Open Questions
 
 - #104：depends_on 滿足來源長期是否改 merged-to-main——本票先採 handoff gate_status，介面保留可換。
+
+## 已知限制（對抗式 review，留 Phase C）
+
+對抗式 review 揭露三項，皆落在 dispatch 側 / retry 語意（#121 明訂 Phase C non-goal），文件化 + follow-up，不擴本票 scope：
+- **#131**：`_default_gate_runner` 需 `dispatch_head`，但 headless 派工未存 baseline → 真實 job `gate_verdict` 恒 null（downstream 釋放靠 exit-code，不受影響）。
+- **#132**：manifest 僅以 slice_id 為 key，Phase C retry/requeue（同 slice 多 job）下舊結果會卡住新結果。
+- `handoff.write_manifest` 非原子寫（persona 模組既有問題），Phase C systemd 常駐前處理。

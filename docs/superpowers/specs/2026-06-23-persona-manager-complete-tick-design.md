@@ -128,3 +128,14 @@ reuse：`dispatcher.poll_headless_done`、`dispatcher._registry.list_jobs`、`pe
 | `tests/test_coordinator_cli.py` | Modify/Create | `complete` 子命令 smoke |
 
 純新增 + CLI 一個子命令，不改派工側既有行為。
+
+## 8. 已知限制（對抗式 review 揭露，留 Phase C）
+
+> 來源：#121 codex 對抗式 review。兩項修正都落在 dispatch 側 / retry 語意（#121 明訂 Phase C non-goal），故文件化並開 follow-up，不在本票擴 scope。
+
+- **shadow gate 對真實 headless job 形同失明（[#131]）**：`_default_gate_runner` 需 `job["dispatch_head"]`，但派工側 `_record_launcher_job` 未為 headless job 持久化 baseline，故真實 job 的 `gate_verdict` 恒 `null`。downstream 釋放靠 exit-code，不受影響；但 shadow 觀測對真正要完成的 job 無效。修正＝派工側存 baseline，屬 Phase C / #124 enforce 前置。
+- **manifest idempotency 僅以 slice_id 為 key（[#132]）**：reconciliation/冪等不檢查 job_id/attempt。單 slice 單終態 job 下正確；Phase C 加入 retry/requeue（同 slice 多 job）後，list 順序會讓舊結果卡住新結果。修正＝manifest 納入 job identity 或 per-attempt + active pointer，屬 Phase C retry 落地前置。
+- **`handoff.write_manifest` 非原子寫**：`persona/handoff.py` 既有行為（直接 `write_text`，非 `os.replace`）；crash 中途可能留半檔。屬 persona 模組既有問題、跨 #121 範圍，Phase C systemd 常駐前一併處理。
+
+[#131]: https://github.com/hamanpaul/paulshaclaw/issues/131
+[#132]: https://github.com/hamanpaul/paulshaclaw/issues/132
