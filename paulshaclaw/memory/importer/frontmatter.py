@@ -27,7 +27,19 @@ def _required_value(value: object, default: str = "_unknown") -> str:
     return rendered if rendered else default
 
 
+# YAML plain scalars may not start with an indicator char (flow markers, block
+# markers, etc.); a leading '[' or '{' otherwise opens an unterminated flow
+# collection. See #139.
+_YAML_INDICATOR_STARTS = ("[", "]", "{", "}", ",", "&", "*", "!", "|", ">", "%", "@", "`", "#", "\"", "'")
+
+
 def _needs_yaml_quotes(value: str) -> bool:
+    if value != value.strip():
+        return True
+    if value[:1] in _YAML_INDICATOR_STARTS:
+        return True
+    if value[:2] in ("- ", "? ", ": ") or value in ("-", "?", ":"):
+        return True
     return any(marker in value for marker in (": ", "#", "\"", "'", "\n", "\r"))
 
 

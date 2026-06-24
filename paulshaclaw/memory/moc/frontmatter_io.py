@@ -20,9 +20,14 @@ def read(text: str) -> tuple[dict[str, Any], str]:
     body = "".join(lines[end + 1:])
     try:
         import yaml
-        data = yaml.safe_load(block) or {}
     except ModuleNotFoundError:
-        data = {}
+        return {}, body
+    try:
+        data = yaml.safe_load(block) or {}
+    except yaml.YAMLError:
+        # Malformed frontmatter is a data condition, not a crash: a single poison-pill
+        # slice must not abort the whole MOC rebuild. Treat as no metadata (#139).
+        return {}, body
     return (data if isinstance(data, dict) else {}), body
 
 
@@ -53,9 +58,25 @@ def _scalar(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     s = str(value)
-    # Quote strings that start with [ or contain special YAML characters
-    if s.startswith("[") or s.startswith("{") or ":" in s or "#" in s:
-        return f'"{s}"'
+    # Quote strings that open a flow collection, carry YAML special chars, or hold
+    # embedded quotes/newlines. When quoting, escape so the double-quoted scalar
+    # round-trips through yaml.safe_load instead of producing broken YAML (#139).
+    if (
+        s.startswith(("[", "]", "{", "}", "'", '"', "!", "&", "*", "@", "`", "|", ">", "%"))
+        or ":" in s
+        or "#" in s
+        or '"' in s
+        or "\n" in s
+        or "\r" in s
+        or s != s.strip()
+    ):
+        escaped = (
+            s.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+        )
+        return f'"{escaped}"'
     return s
 
 

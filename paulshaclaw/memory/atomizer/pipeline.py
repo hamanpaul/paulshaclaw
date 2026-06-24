@@ -30,9 +30,14 @@ def _parse_frontmatter(text: str) -> tuple[Mapping[str, Any] | None, str]:
     body = "\n".join(lines[end + 1:])
     try:
         import yaml  # type: ignore[import-not-found]
-        data = yaml.safe_load(block)
     except ModuleNotFoundError:
-        data = None
+        return None, body
+    try:
+        data = yaml.safe_load(block)
+    except yaml.YAMLError:
+        # Malformed frontmatter: return the unparseable sentinel so the caller skips
+        # this one doc (recording a warning) instead of aborting the atomize pass (#139).
+        return None, body
     if not isinstance(data, dict):
         return None, body
     return data, body
