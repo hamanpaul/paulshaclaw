@@ -27,7 +27,8 @@ def test_url_project_session_is_not_skipped(tmp_path):
     (inbox / "s1.md").write_text(
         "---\nmemory_layer: inbox\nproject: github.com/hamanpaul/serialwrap\n"
         "source_agent: claude-code\nsource_session: s1\ncaptured_at: 2026-06-16\n---\n"
-        "## Summary\nUART 修復\n\n## Prompts\n1. 修 UART\n",
+        "## Summary\nUART 修復\n\n## 修復內容\n"
+        "UART 修復：重設 baud rate 並修正 FIFO 溢位處理，已驗證收斂。\n",
         encoding="utf-8",
     )
     cfg, config_hash = load_config()
@@ -49,7 +50,7 @@ def test_url_project_session_promotes_to_knowledge_with_content(tmp_path):
     (inbox / "s1.md").write_text(
         "---\nmemory_layer: inbox\nproject: github.com/hamanpaul/serialwrap\n"
         "source_agent: claude-code\nsource_session: s1\ncaptured_at: 2026-06-16\n---\n"
-        "## Summary\nUART 修復完成\n\n## Prompts\n1. 修 UART\n",
+        "## Summary\nUART 修復\n\n## 修復內容\nUART 修復完成：重設 baud rate 並修正 FIFO 溢位處理。\n",
         encoding="utf-8",
     )
     cfg, config_hash = load_config()
@@ -100,7 +101,7 @@ def test_session_title_propagates_to_knowledge_slices(tmp_path):
     (inbox / "s1.md").write_text(
         "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude-code\n"
         "source_session: s1\ncaptured_at: 2026-06-16\ntitle: 修復 UART 升級流程\n---\n"
-        "## Summary\n修復 UART 升級流程\n\n## Prompts\n1. 修 UART\n",
+        "## 升級流程\n修復 UART 升級流程：先備份再刷寫，驗證 checksum 後重啟確認。\n",
         encoding="utf-8",
     )
     cfg, config_hash = load_config()

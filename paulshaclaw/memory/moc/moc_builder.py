@@ -31,7 +31,11 @@ def _active_slices(memory_root: Path) -> list[tuple[str, str, str, str, str, str
         return rows
     candidates: list[tuple[str, str, str, str, str, str, str]] = []
     for path in sorted(knowledge.rglob("*.md")):
-        fm, _ = fio.read(path.read_text(encoding="utf-8"))
+        try:
+            fm, _ = fio.read(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            # Unreadable/non-UTF-8 slice: skip, never let one poison-pill abort the MOC build.
+            continue
         if fm.get("memory_layer") != "knowledge":
             continue
         sid = fm.get("slice_id")

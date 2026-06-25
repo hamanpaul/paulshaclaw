@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..ledger import processing, relations
+from ..noise import classify_noise
 from . import slice_frontmatter, splitter
 from .config import AtomizerConfig, is_safe_path_component, sanitize_project_component
 from .llm_promoter import LLMPromoter, PromoteError
@@ -334,8 +335,9 @@ def _read_fragment(path: Path) -> Fragment | None:
 
 def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now: str,
                   dry_run: bool, promoter: Promoter, warnings: list[str],
-                  dry_run_fragments: dict[str, list[Fragment]]) -> int:
+                  dry_run_fragments: dict[str, list[Fragment]]) -> tuple[int, int]:
     slices_written = 0
+    noise_dropped = 0
 
     # In dry_run mode, process the fragments from split pass
     if dry_run and dry_run_fragments:
@@ -356,8 +358,14 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
                     break
             if has_error:
                 continue
-            slices_written += len(promoted)
-        return slices_written
+            for slice_ in promoted:
+                verdict = classify_noise(slice_.frontmatter, slice_.body)
+                if verdict.is_noise:
+                    noise_dropped += 1
+                    LOGGER.info("atomize: dropped noise slice %s:%s (%s)", session_key, slice_.slice_id, verdict.reason)
+                    continue
+                slices_written += 1
+        return slices_written, noise_dropped
 
     events = processing.fold_events(memory_root)
     for session_key, event in events.items():
@@ -436,6 +444,11 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
             warnings.append(f"session {session_key}: {exc}; session {session_key} left in split")
             continue
         for slice_, referenced_fragments in prepared_writes:
+            verdict = classify_noise(slice_.frontmatter, slice_.body)
+            if verdict.is_noise:
+                noise_dropped += 1
+                LOGGER.info("atomize: dropped noise slice %s:%s (%s)", session_key, slice_.slice_id, verdict.reason)
+                continue
             knowledge_path = _knowledge_path_for(
                 memory_root, sanitize_project_component(str(slice_.frontmatter["project"])), slice_.slice_id
             )
@@ -482,7 +495,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
         )
         _archive_fragments(memory_root, [frag_path for frag_path, _ in fragments], now)
         _clear_cache_key(memory_root, cache_key)
-    return slices_written
+    return slices_written, noise_dropped
 
 
 def run(memory_root: Path, *, config: AtomizerConfig, config_hash: str, now: str,
@@ -490,9 +503,10 @@ def run(memory_root: Path, *, config: AtomizerConfig, config_hash: str, now: str
     promoter = promoter or IdentityPromoter()
     warnings: list[str] = []
     split, dry_run_fragments = _split_pass(memory_root, config, config_hash, now, dry_run, warnings)
-    slices = _promote_pass(memory_root, config, config_hash, now, dry_run, promoter, warnings, dry_run_fragments)
+    slices, noise_dropped = _promote_pass(memory_root, config, config_hash, now, dry_run, promoter, warnings, dry_run_fragments)
     return {
         "summary": {"split_sessions": split, "slices": slices, "skipped": len(warnings),
+                    "noise_dropped": noise_dropped,
                     "config_hash": config_hash, "dry_run": dry_run},
         "warnings": warnings,
     }
