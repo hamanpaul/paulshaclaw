@@ -815,6 +815,25 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("真實技術內容", kept_body)
             self.assertNotIn("使用者招呼與啟動 session", kept_body)
 
+    def test_dry_run_counts_noise_without_writing(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "inbox" / "sessions" / "claude" / "2026-06-25" / "s10.md"
+            raw.parent.mkdir(parents=True, exist_ok=True)
+            raw.write_text(
+                "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude\n"
+                "source_session: s10\nsource_artifact: session\n"
+                'captured_at: "2026-06-25T00:00:00Z"\n'
+                "provenance:\n  repo: r\n  commit: c\n  path: p\n---\n"
+                "## CWD\n/home/paul_chen\n"
+                "## Real Topic\n這是一段足夠長的真實技術內容，描述某個具體結論與其理由說明。\n",
+                encoding="utf-8")
+            cfg, h = atomizer_config.load_config(override_path=None)
+            result = pipeline.run(root, config=cfg, config_hash=h, now="2026-06-25T03:00:00Z", dry_run=True)
+            self.assertEqual(result["summary"]["noise_dropped"], 1)   # ## CWD structural-echo
+            self.assertEqual(result["summary"]["slices"], 1)          # ## Real Topic kept
+            self.assertFalse(list((root / "knowledge").rglob("*.md")))  # dry-run writes nothing
+
 
 _RAW_TITLED = """---
 memory_layer: inbox

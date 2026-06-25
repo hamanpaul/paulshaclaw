@@ -358,15 +358,13 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
                     break
             if has_error:
                 continue
-            kept = 0
             for slice_ in promoted:
                 verdict = classify_noise(slice_.frontmatter, slice_.body)
                 if verdict.is_noise:
                     noise_dropped += 1
                     warnings.append(f"{session_key}: dropped noise slice {slice_.slice_id} ({verdict.reason})")
                     continue
-                kept += 1
-            slices_written += kept
+                slices_written += 1
         return slices_written, noise_dropped
 
     events = processing.fold_events(memory_root)
