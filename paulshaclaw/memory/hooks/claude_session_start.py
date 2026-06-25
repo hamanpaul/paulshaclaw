@@ -22,7 +22,7 @@ TOOL = "claude-code"
 
 def main() -> int:
     from paulshaclaw.memory.hooks._wakeup_common import (
-        compute_brief,
+        compute_brief_and_record,
         log_warn,
         memory_root,
         read_payload,
@@ -33,7 +33,8 @@ def main() -> int:
 
     try:
         cwd = payload.get("cwd")
-        brief = compute_brief(root, cwd)
+        session_id = str(payload.get("session_id") or "unknown")
+        brief = compute_brief_and_record(root, TOOL, session_id, cwd)
 
         # Claude SessionStart shape: hookSpecificOutput with hookEventName and additionalContext
         output = {
