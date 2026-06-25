@@ -88,6 +88,17 @@ class MocTwoLayerTests(unittest.TestCase):
             self.assertIn("- (未分組)", moc)
             self.assertIn("alpha--sl-x", moc)
 
+    def test_untitled_atom_falls_through_to_session_title(self):
+        # #146: atom_title 'untitled' (title-gen failed) must be treated as no-title so the
+        # meaningful session_title surfaces as the label instead of the literal 'untitled'.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice_full(root, "sl-u1", "prplos-core", "claude:s1", "修正 start.sh 啟動", "untitled")
+            moc_builder.build_mocs(root, now="2026-06-17T00:00:00Z")
+            moc = (root / "knowledge" / "prplos-core-moc.md").read_text(encoding="utf-8")
+            self.assertIn("[[untitled--sl-u1|修正 start.sh 啟動]]", moc)
+            self.assertNotIn("|untitled]]", moc)
+
     def test_wiki_keeps_project_attribution_and_no_cross_project_collapse(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
