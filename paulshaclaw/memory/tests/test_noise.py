@@ -60,6 +60,38 @@ class ClassifyNoiseTests(unittest.TestCase):
         verdict = classify_noise({}, body)
         self.assertFalse(verdict.is_noise, verdict.reason)
 
+    def test_importer_exclusive_heading_is_noise_even_with_multiline_content(self):
+        # `## Prompts` / `## CWD` / `## Source` / `## Touched files` / `## Referenced artifacts`
+        # are importer-template-exclusive section names — never a real standalone knowledge
+        # atom — so they are structural-echo regardless of how many prose lines follow.
+        body = (
+            "## Prompts\n"
+            "1. # AGENTS.md instructions for /home/paul_chen\n\n"
+            "<INSTRUCTIONS>\n你是高度自主的互動式 CLI Agent。\n專長為嵌入式系統。\n</INSTRUCTIONS>\n"
+            "2. 修 UART\n"
+        )
+        verdict = classify_noise({}, body)
+        self.assertTrue(verdict.is_noise, verdict.reason)
+        self.assertEqual(verdict.reason, "structural-echo:Prompts")
+
+    def test_summary_guard_still_protects_real_multiline_summary(self):
+        # The ≤1-prose-line guard remains ONLY for `## Summary`, the one heading that
+        # legitimately appears in real notes.
+        body = (
+            "## Summary\n第一段真實結論說明背景與動機。\n"
+            "第二段補充技術細節與取捨。\n第三段給出後續步驟。\n"
+        )
+        verdict = classify_noise({}, body)
+        self.assertFalse(verdict.is_noise, verdict.reason)
+
+    def test_session_metadata_heading_is_noise(self):
+        for heading in ("### Session Metadata", "## Session Information", "# Session Metadata"):
+            body = (heading + "\n- **Session ID**: `019ef36c-4a13-7231`\n"
+                    "- **Working Directory**: `/home/paul_chen/prj`\n- **Tool**: `copilot-cli`\n")
+            verdict = classify_noise({}, body)
+            self.assertTrue(verdict.is_noise, heading)
+            self.assertTrue(verdict.reason.startswith("structural-echo"), verdict.reason)
+
     def test_note_quoting_placeholder_phrase_mid_body_is_kept(self):
         # A real note that discusses the placeholder text (not opens with it) is kept.
         body = (
