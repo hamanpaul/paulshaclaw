@@ -20,6 +20,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from paulshaclaw.memory.usage import CITATION_PREAMBLE, extract_offered
+
 
 def memory_root() -> Path:
     """Resolve memory root from PSC_MEMORY_ROOT env var or default."""
@@ -138,3 +140,26 @@ def fire_importer(root: Path, tool: str, queue_path: Path) -> None:
         )
     except Exception as exc:
         log_warn(root, tool, f"importer trigger failed: {exc}")
+
+
+def compute_brief_and_record(root: Path, tool: str, session_id: str, cwd: str | None) -> str:
+    """Compute brief, prepend citation preamble, record offered slices. Best-effort."""
+    brief = compute_brief(root, cwd)
+    if not brief:
+        return ""
+    try:
+        offered = extract_offered(brief)
+        wakeup_dir = root / "runtime" / "wakeup"
+        wakeup_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "session_id": session_id, "tool": tool,
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "offered": [{"id": sid, "title": title} for sid, title in offered],
+        }
+        path = wakeup_dir / f"{tool}__{sanitize_id(session_id)}.json"
+        tmp = path.with_name(f".{path.name}.tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+    except Exception as exc:  # best-effort: never break the brief
+        log_warn(root, tool, f"failed to record offered: {exc}")
+    return CITATION_PREAMBLE + brief
