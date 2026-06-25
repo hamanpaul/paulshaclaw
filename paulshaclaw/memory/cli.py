@@ -4,10 +4,15 @@ import argparse
 import json
 import re
 import sys
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
 from . import policy as memory_policy
+from .moc import frontmatter_io as _fio
+from .moc import moc_builder as _moc_builder
+from .noise import classify_noise
 
 BOUNDARY = "raw_to_distilled"
 
@@ -129,6 +134,16 @@ def _build_parser() -> argparse.ArgumentParser:
     syncback_check.add_argument("--now", default=None)
     syncback_check.set_defaults(func=_syncback)
 
+    knowledge = memory_subparsers.add_parser("knowledge")
+    knowledge_subparsers = knowledge.add_subparsers(dest="knowledge_command", required=True)
+    prune = knowledge_subparsers.add_parser("prune-noise")
+    prune.add_argument("--memory-root", required=True)
+    prune.add_argument("--now", default=None)
+    group = prune.add_mutually_exclusive_group()
+    group.add_argument("--dry-run", action="store_true")
+    group.add_argument("--apply", action="store_true")
+    prune.set_defaults(func=_prune_noise)
+
     return parser
 
 
@@ -230,6 +245,47 @@ def _syncback(args: argparse.Namespace) -> int:
     from .syncback import cli as syncback_cli
 
     return syncback_cli.run(args)
+
+
+def _prune_noise(args: argparse.Namespace) -> int:
+    root = Path(args.memory_root)
+    now = args.now or datetime.now(timezone.utc).isoformat()
+    apply = bool(getattr(args, "apply", False))
+    knowledge = root / "knowledge"
+    rows: list[dict] = []
+    for path in sorted(knowledge.rglob("*.md")):
+        if path.name.endswith("-moc.md"):
+            continue
+        fm, body = _fio.read(path.read_text(encoding="utf-8"))
+        if fm.get("memory_layer") != "knowledge":
+            continue
+        verdict = classify_noise(fm, body)
+        if not verdict.is_noise:
+            continue
+        row = {"slice_id": str(fm.get("slice_id", "")), "project": str(fm.get("project", "")),
+               "path": str(path), "reason": verdict.reason, "status": "dry-run"}
+        if apply:
+            try:
+                path.unlink()
+                row["status"] = "deleted"
+            except OSError as exc:
+                row["status"] = "error"
+                row["error"] = str(exc)
+        rows.append(row)
+
+    ledger_dir = root / "runtime" / "ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    safe_now = now.replace(":", "").replace("+", "_")
+    manifest = ledger_dir / f"prune-{safe_now}.jsonl"
+    manifest.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+
+    if apply and any(r["status"] == "deleted" for r in rows):
+        _moc_builder.build_mocs(root, now=now)
+
+    stats = Counter(r["reason"] for r in rows)
+    print(json.dumps({"scanned_noise": len(rows), "applied": apply, "by_reason": dict(stats),
+                      "manifest": str(manifest)}, ensure_ascii=False))
+    return 0
 
 
 def _load_policy(override_path: str | None):
