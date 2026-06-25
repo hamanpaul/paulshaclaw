@@ -49,6 +49,26 @@ class PruneNoiseTests(unittest.TestCase):
             self.assertTrue(any(r["reason"].startswith("structural-echo") for r in rows))
             self.assertTrue((root / "knowledge" / "p-moc.md").exists())
 
+    def test_apply_isolates_unreadable_file_without_deleting_it(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            noise, good = self._seed(root)
+            bad = root / "knowledge" / "p" / "bad--sl-x.md"
+            bad.write_bytes(b"\xff\xfe not utf8")
+            rc = main(["memory", "knowledge", "prune-noise", "--memory-root", str(root),
+                       "--now", "2026-06-25T00:00:00Z", "--apply"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(good.exists())
+            self.assertFalse(noise.exists())
+            self.assertTrue(bad.exists())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl"))
+            self.assertEqual(len(manifests), 1)
+            rows = [json.loads(l) for l in manifests[0].read_text().splitlines() if l.strip()]
+            bad_rows = [r for r in rows if r["path"] == str(bad)]
+            self.assertEqual(len(bad_rows), 1)
+            self.assertEqual(bad_rows[0]["status"], "error")
+            self.assertEqual(bad_rows[0]["reason"], "unreadable")
+
 
 if __name__ == "__main__":
     unittest.main()

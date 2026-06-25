@@ -249,14 +249,20 @@ def _syncback(args: argparse.Namespace) -> int:
 
 def _prune_noise(args: argparse.Namespace) -> int:
     root = Path(args.memory_root)
-    now = args.now or datetime.now(timezone.utc).isoformat()
+    now = (args.now or datetime.now(timezone.utc).isoformat()).replace("+00:00", "Z")
     apply = bool(getattr(args, "apply", False))
     knowledge = root / "knowledge"
     rows: list[dict] = []
     for path in sorted(knowledge.rglob("*.md")):
         if path.name.endswith("-moc.md"):
             continue
-        fm, body = _fio.read(path.read_text(encoding="utf-8"))
+        try:
+            fm, body = _fio.read(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as exc:
+            # Unreadable/non-UTF-8 slice: cannot classify, so never delete it.
+            rows.append({"slice_id": "", "project": "", "path": str(path),
+                         "reason": "unreadable", "status": "error", "error": str(exc)})
+            continue
         if fm.get("memory_layer") != "knowledge":
             continue
         verdict = classify_noise(fm, body)
@@ -275,7 +281,7 @@ def _prune_noise(args: argparse.Namespace) -> int:
 
     ledger_dir = root / "runtime" / "ledger"
     ledger_dir.mkdir(parents=True, exist_ok=True)
-    safe_now = now.replace(":", "").replace("+", "_")
+    safe_now = now.replace(":", "")  # strip ':' for filesystem-safe filename; Z-normalized so no '+'
     manifest = ledger_dir / f"prune-{safe_now}.jsonl"
     manifest.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
 
