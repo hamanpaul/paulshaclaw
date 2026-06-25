@@ -68,9 +68,11 @@ classify_noise(frontmatter: dict, body: str) -> NoiseVerdict(is_noise: bool, rea
    `## CWD` / `## Source` / `## Prompts` / `## Touched files` / `## Referenced artifacts` / `## Summary`
    （reason=`structural-echo:<section>`）。判定僅看第一行 heading，不需推斷段落範圍，
    對得上實據（`## CWD\n/home/...`、`## Prompts\n- (none)`、`## Summary\n使用者招呼...`）。
-2. **empty**：body strip 後 < 40 字（reason=`empty`）。
-3. **placeholder**：body 含 `(無內容)` / `尚未收到您的具體需求` / `目前尚未收到`，或本體僅 `- (none)` / `(unknown)`（reason=`placeholder`）。
+2. **placeholder**：body 含 `(無內容)` / `尚未收到您的具體需求` / `目前尚未收到`，或本體僅 `- (none)` / `(unknown)`（reason=`placeholder`）。
+3. **empty**：body 去除標題行（`#`..）與空白行後無實質內容（reason=`empty`）。涵蓋真正空白與**純標題片段**（如 `# Session <uuid>`，46 字）。**MUST NOT 以字元長度門檻判定。**
 4. 其餘 → is_noise=False（含 `untitled--` 真內容、短但真實 fact）。
+
+> **設計修正（2026-06-25，實作中發現）**：原訂 `empty = body < 40 字` 在產生端會誤刪真實短內容（30 字 CJK 真結論），且因 `# Session <uuid>` 為 46 字反而漏抓。改為 content-based「只剩標題/空白」後，live 實測 noise 命中由 831（含 9 誤刪風險）升為 988（hollow 166 全為純標題片段），零誤刪——更忠於「以內容為準、不誤刪」。
 
 classifier 只看 `body`（與 frontmatter 的 atom_title/title/project 解耦），確保「以內容為準」。
 

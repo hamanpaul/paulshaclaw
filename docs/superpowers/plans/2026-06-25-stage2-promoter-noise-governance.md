@@ -49,8 +49,14 @@ class ClassifyNoiseTests(unittest.TestCase):
             self.assertTrue(verdict.is_noise, section)
             self.assertEqual(verdict.reason, f"structural-echo:{section}")
 
-    def test_empty_body_is_noise(self):
-        verdict = classify_noise({"atom_title": "x"}, "tiny\n")
+    def test_heading_only_body_is_noise(self):
+        # 純標題片段（無正文）→ empty；長度不重要（此例 46 字 > 40）。
+        verdict = classify_noise({"atom_title": "x"}, "# Session dcbb8041-29ef-4a9f-a9e7-c408a65cbf20\n")
+        self.assertTrue(verdict.is_noise)
+        self.assertEqual(verdict.reason, "empty")
+
+    def test_blank_body_is_noise(self):
+        verdict = classify_noise({}, "   \n\n")
         self.assertTrue(verdict.is_noise)
         self.assertEqual(verdict.reason, "empty")
 
@@ -101,10 +107,11 @@ _STRUCTURAL_SECTIONS = (
 )
 _STRUCTURAL_FIRST_LINE = {f"## {name}": name for name in _STRUCTURAL_SECTIONS}
 
-_EMPTY_THRESHOLD = 40
+import re as _re
+_HEADING_LINE = _re.compile(r"^#{1,6}\s")
 
 _PLACEHOLDER_PHRASES = ("(無內容)", "尚未收到您的具體需求", "目前尚未收到")
-_BARE_PLACEHOLDERS = {"- (none)", "(none)", "(unknown)", "(無內容)"}
+_BARE_PLACEHOLDERS = {"- (none)", "(none)", "(unknown)"}
 
 
 @dataclass(frozen=True)
@@ -113,8 +120,14 @@ class NoiseVerdict:
     reason: str
 
 
-def _strip_body(body: str) -> str:
-    return body.strip()
+def _is_hollow(stripped: str) -> bool:
+    """True when nothing but markdown heading lines / blanks remains (content-based,
+    NOT a length threshold) — covers真正空白與純標題片段（如 `# Session <uuid>`）。"""
+    for line in stripped.splitlines():
+        s = line.strip()
+        if s and not _HEADING_LINE.match(s):
+            return False
+    return True
 
 
 def classify_noise(frontmatter: Mapping[str, object], body: str) -> NoiseVerdict:
@@ -122,23 +135,26 @@ def classify_noise(frontmatter: Mapping[str, object], body: str) -> NoiseVerdict
 
     frontmatter is accepted for interface symmetry but intentionally unused so
     that untitled / no-project slices with real bodies are not mis-dropped.
+    Order: structural-echo → placeholder → empty(hollow). NO length threshold.
     """
     del frontmatter
-    stripped = _strip_body(body)
+    stripped = body.strip()
 
     first_line = stripped.splitlines()[0].strip() if stripped else ""
     section = _STRUCTURAL_FIRST_LINE.get(first_line)
     if section is not None:
         return NoiseVerdict(True, f"structural-echo:{section}")
 
-    if len(stripped) < _EMPTY_THRESHOLD:
-        return NoiseVerdict(True, "empty")
-
     if stripped in _BARE_PLACEHOLDERS or any(p in stripped for p in _PLACEHOLDER_PHRASES):
         return NoiseVerdict(True, "placeholder")
 
+    if _is_hollow(stripped):
+        return NoiseVerdict(True, "empty")
+
     return NoiseVerdict(False, "")
 ```
+
+> **修正（2026-06-25 實作中）**：`empty` 由「< 40 字長度門檻」改為 content-based「只剩標題/空白」（`_is_hollow`）。原長度門檻會誤刪真實短內容、又漏抓 46 字的 `# Session <uuid>`。下方 `test_empty_body_is_noise` 隨之改為 heading-only 案例（見 Task 1 commit `7cfdce0` 後的修正）。
 
 - [ ] **Step 4: Run test to verify it passes**
 
