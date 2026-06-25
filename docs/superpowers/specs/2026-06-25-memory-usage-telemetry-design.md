@@ -67,14 +67,15 @@ extract_matched(assistant_text: str, offered: list[tuple[str, str]]) -> set[str]
 - append `runtime/ledger/memory_usage.jsonl`：
   ```json
   {"ts": "...", "session_id": "...", "tool": "claude-code", "project": "...",
-   "offered": 64, "cited": ["sl-..."], "matched": ["sl-..."]}
+   "offered": ["sl-...", "sl-..."], "cited": ["sl-..."], "matched": ["sl-..."]}
   ```
+  > **ledger event 必須存 offered slice id 陣列（非僅數量）**，使 ledger **自足**——CLI 算 per-slice `offered_count`、`never-used`（offered 但未 cited/matched）只讀 ledger，不依賴易失的 `runtime/wakeup/*.json`。wakeup 檔僅為 SessionStart→SessionEnd 的傳遞媒介，可被清理而不損及歷史 telemetry（#148 adversarial review finding）。
 - 全程 best-effort，沿 #141 韌性：任何錯誤只 log，hook 照常 exit 0、擷取/import 不受影響。
 
 ### ④ CLI `psc memory usage`
 
-- `memory usage --memory-root <root> [--since <iso>] [--json]`：聚合 `memory_usage.jsonl` → 每 slice 的 `offered_count / cited_count / matched_count / last_used`，依 cited 降冪。
-- 另給彙總：總 session 數、平均每 session cited/matched、從未被 used 的 offered slice 數（給未來 decay 用）。
+- `memory usage --memory-root <root> [--since <iso>] [--json]`：**僅讀 `memory_usage.jsonl`**（self-sufficient，不 join wakeup 檔）→ 每 slice 的 `offered_count / cited_count / matched_count / last_used`，依 cited 降冪。
+- 另給彙總：總 session 數、平均每 session cited/matched、**從未被 used 的 offered slice 數**（offered_count>0 且 cited+matched=0，給未來 decay 用）。
 
 ### ⑤ 資料流
 
@@ -94,8 +95,8 @@ CLI: memory usage → 聚合報告（per-slice + 彙總）
 ## 6. 測試（TDD）
 
 - **usage.py 單元**：`extract_offered` 從樣本 brief 抽正確 (id,title)；`extract_cited` 認 `[[sl-id]]` 與裸 `sl-id`、過濾非 offered；`extract_matched` 認標題出現、排除已 cited、忽略過短/空標題；**注入的 brief 文字本身不算 used**（給 assistant-only 文字才算）。
-- **SessionEnd 整合**：給 offered 檔 + 假 transcript（含 assistant cite 與 user 文字）→ 正確寫出 memory_usage event；缺 offered/transcript → 不寫 event、不報錯。
-- **CLI**：聚合樣本 ledger → per-slice 計數與彙總正確；`--since` 過濾。
+- **SessionEnd 整合**：給 offered 檔 + 假 transcript（含 assistant cite 與 user 文字）→ 正確寫出 memory_usage event（event 內 `offered` 為 id 陣列）；缺 offered 檔 / 缺 transcript → 不寫 event、不報錯。
+- **CLI**：聚合樣本 ledger → per-slice 計數與彙總正確；`--since` 過濾；**offered-but-unused slice 出現在報告且計入 never-used**；ledger 自足——即使 `runtime/wakeup/*.json` 全不存在，報告仍正確（不依賴 wakeup 檔）。
 
 ## 7. 驗收
 
