@@ -103,6 +103,17 @@ def main() -> int:
         return 0
 
     _fire_importer(root, queue_path)
+
+    try:
+        from paulshaclaw.memory.usage_ledger import record_session_usage
+        record_session_usage(
+            root, TOOL, session_id,
+            str(payload.get("project") or payload.get("cwd") or ""),
+            payload.get("transcript_path"),
+        )
+    except Exception:
+        pass
+
     return 0
 
 

@@ -22,7 +22,7 @@ TOOL = "copilot-cli"
 
 def main() -> int:
     from paulshaclaw.memory.hooks._wakeup_common import (
-        compute_brief,
+        compute_brief_and_record,
         log_warn,
         memory_root,
         read_payload,
@@ -32,9 +32,10 @@ def main() -> int:
     payload = read_payload(root, TOOL)
 
     try:
-        # Normalize camelCase cwd
+        # Normalize camelCase cwd / session id
         cwd = payload.get("cwd") or payload.get("workingDirectory")
-        brief = compute_brief(root, cwd)
+        session_id = str(payload.get("session_id") or payload.get("sessionId") or "unknown")
+        brief = compute_brief_and_record(root, TOOL, session_id, cwd)
 
         # Copilot sessionStart shape: additionalContext directly
         output = {

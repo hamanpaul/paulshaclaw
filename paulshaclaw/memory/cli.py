@@ -144,6 +144,12 @@ def _build_parser() -> argparse.ArgumentParser:
     group.add_argument("--apply", action="store_true")
     prune.set_defaults(func=_prune_noise)
 
+    usage_p = memory_subparsers.add_parser("usage")
+    usage_p.add_argument("--memory-root", required=True)
+    usage_p.add_argument("--since", default=None)
+    usage_p.add_argument("--json", action="store_true")
+    usage_p.set_defaults(func=_memory_usage)
+
     return parser
 
 
@@ -311,6 +317,67 @@ def _prune_noise(args: argparse.Namespace) -> int:
     stats = Counter(r["reason"] for r in rows)
     print(json.dumps({"scanned_noise": len(rows), "applied": apply, "by_reason": dict(stats),
                       "manifest": str(manifest)}, ensure_ascii=False))
+    return 0
+
+
+def _memory_usage(args: argparse.Namespace) -> int:
+    from collections import defaultdict
+
+    ledger = Path(args.memory_root) / "runtime" / "ledger" / "memory_usage.jsonl"
+    rows = []
+    if ledger.exists():
+        for line in ledger.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                e = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if args.since and str(e.get("ts", "")) < args.since:
+                continue
+            rows.append(e)
+
+    agg = defaultdict(lambda: {"offered_count": 0, "cited_count": 0, "matched_count": 0, "last_used": ""})
+    for e in rows:
+        ts = str(e.get("ts", ""))
+        for sid in e.get("offered", []):
+            agg[sid]["offered_count"] += 1
+        for sid in e.get("cited", []):
+            agg[sid]["cited_count"] += 1
+            if ts > agg[sid]["last_used"]:
+                agg[sid]["last_used"] = ts
+        for sid in e.get("matched", []):
+            agg[sid]["matched_count"] += 1
+            if ts > agg[sid]["last_used"]:
+                agg[sid]["last_used"] = ts
+
+    slices = [{"slice_id": sid, **v} for sid, v in agg.items()]
+    slices.sort(key=lambda s: (s["cited_count"], s["matched_count"]), reverse=True)
+    never_used = sum(
+        1 for s in slices
+        if s["offered_count"] > 0 and s["cited_count"] == 0 and s["matched_count"] == 0
+    )
+    n = len(rows)
+    total_cited = sum(len(e.get("cited", [])) for e in rows)
+    total_matched = sum(len(e.get("matched", [])) for e in rows)
+    summary = {
+        "sessions": n, "slices": len(slices), "never_used": never_used,
+        "avg_cited_per_session": round(total_cited / n, 3) if n else 0.0,
+        "avg_matched_per_session": round(total_matched / n, 3) if n else 0.0,
+    }
+    report = {"summary": summary, "slices": slices}
+
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False))
+    else:
+        print(f"sessions={summary['sessions']} slices={summary['slices']} "
+              f"never_used={summary['never_used']} "
+              f"avg_cited/session={summary['avg_cited_per_session']} "
+              f"avg_matched/session={summary['avg_matched_per_session']}")
+        for s in slices[:30]:
+            print(f"  {s['slice_id']}  offered={s['offered_count']} cited={s['cited_count']} "
+                  f"matched={s['matched_count']} last_used={s['last_used']}")
     return 0
 
 
