@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Iterable, Mapping
 
 # importer/frontmatter.render_markdown 的結構段落 heading。importer-exclusive 的段落名
 # 永遠不會是合法的獨立知識原子標題，故無條件視為 echo；`Summary` 在真筆記中常見，
@@ -82,18 +82,103 @@ def _opens_with_placeholder(stripped: str) -> bool:
     return any(p in head for p in _PLACEHOLDER_PHRASES)
 
 
+# --- doc-fragment detection (#147): verbatim overlap with agent-instruction docs ---
+
+# A doc-fragment is a knowledge slice whose body is a verbatim section of an
+# agent-instruction document (CLAUDE.md / AGENTS.md / GEMINI.md). The signal is
+# deliberately content-overlap (not a bare "## N." heading regex) so a real note
+# that merely uses numbered sub-sections is never mis-deleted. Detection needs a
+# DocCorpus; without one the rule is inert (back-compat).
+_DOC_FRAGMENT_MIN_CONTENT_HITS = 2
+
+
+def _normalize_line(line: str) -> str:
+    """Collapse internal whitespace so verbatim comparison is robust to reflow."""
+    return re.sub(r"\s+", " ", line.strip())
+
+
+def _heading_text(line: str) -> str | None:
+    """For a markdown heading line, return its normalized heading text; else None."""
+    if not _HEADING_LINE.match(line):
+        return None
+    return _normalize_line(line.lstrip("#").strip())
+
+
+@dataclass(frozen=True)
+class DocCorpus:
+    """Normalized verbatim line/heading sets of agent-instruction documents."""
+
+    headings: frozenset[str]
+    lines: frozenset[str]
+
+    def __bool__(self) -> bool:
+        return bool(self.lines)
+
+
+def build_corpus(texts: Iterable[str]) -> DocCorpus:
+    """Build a DocCorpus from raw instruction-document texts (pure, no IO)."""
+    headings: set[str] = set()
+    lines: set[str] = set()
+    for text in texts:
+        for raw in text.splitlines():
+            s = raw.strip()
+            if not s:
+                continue
+            lines.add(_normalize_line(s))
+            head = _heading_text(s)
+            if head:
+                headings.add(head)
+    return DocCorpus(frozenset(headings), frozenset(lines))
+
+
+def _is_doc_fragment(stripped: str, corpus: "DocCorpus | None") -> bool:
+    """True iff the body is a verbatim section of the instruction corpus.
+
+    Requires: first non-blank line is a heading whose text is in the corpus, AND
+    at least ``_DOC_FRAGMENT_MIN_CONTENT_HITS`` of the following content lines are
+    verbatim corpus lines. Trailing session noise appended after the section does
+    not matter (we count hits, not a contiguous prefix), since instruction docs
+    drift over time and fragments often carry appended chatter.
+    """
+    if not corpus:
+        return False
+    content = [s for s in (ln.strip() for ln in stripped.splitlines()) if s]
+    if not content:
+        return False
+    head = _heading_text(content[0])
+    if head is None or head not in corpus.headings:
+        return False
+    hits = 0
+    for line in content[1:]:
+        if _normalize_line(line) in corpus.lines:
+            hits += 1
+            if hits >= _DOC_FRAGMENT_MIN_CONTENT_HITS:
+                return True
+    return False
+
+
 @dataclass(frozen=True)
 class NoiseVerdict:
     is_noise: bool
     reason: str
 
 
-def classify_noise(frontmatter: Mapping[str, object], body: str) -> NoiseVerdict:
+def classify_noise(
+    frontmatter: Mapping[str, object],
+    body: str,
+    *,
+    doc_corpus: "DocCorpus | None" = None,
+) -> NoiseVerdict:
     """Classify a knowledge slice as noise using ONLY its body content.
 
     frontmatter is accepted for interface symmetry but intentionally unused so
     that untitled / no-project slices with real bodies are not mis-dropped.
     Deletion-grade: each rule is shaped to avoid removing real knowledge (#139).
+
+    ``doc_corpus`` (optional) enables doc-fragment detection (#147): when a
+    non-empty corpus of agent-instruction documents is supplied, a slice whose
+    body is a verbatim section of those docs is classified ``doc-fragment``.
+    Omitting it (or passing an empty corpus) leaves prior behavior unchanged.
     """
     del frontmatter
     stripped = body.strip()
@@ -107,5 +192,8 @@ def classify_noise(frontmatter: Mapping[str, object], body: str) -> NoiseVerdict
 
     if _is_hollow(stripped):
         return NoiseVerdict(True, "empty")
+
+    if _is_doc_fragment(stripped, doc_corpus):
+        return NoiseVerdict(True, "doc-fragment")
 
     return NoiseVerdict(False, "")

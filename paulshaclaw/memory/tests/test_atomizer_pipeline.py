@@ -147,6 +147,42 @@ class ExplodingPromoter(Promoter):
 
 
 class PipelineTests(unittest.TestCase):
+    _RAW_DOC_FRAGMENT = (
+        "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude\n"
+        "source_session: sdoc\nsource_artifact: research\ncaptured_at: \"2026-05-31T00:00:00Z\"\n"
+        "provenance:\n  repo: paulshaclaw\n  commit: c\n  path: AGENTS.md\n---\n"
+        "## 動工前\n- [ ] 確認當前分支不是 `main`\n- [ ] 跨多子項先用 `git worktree` 拆開\n"
+    )
+
+    def _seed_doc_fragment(self, root: Path) -> None:
+        raw = root / "inbox" / "research" / "claude" / "2026-05-31" / "sdoc.md"
+        raw.parent.mkdir(parents=True, exist_ok=True)
+        raw.write_text(self._RAW_DOC_FRAGMENT, encoding="utf-8")
+
+    def test_doc_fragment_dropped_at_produce_time_with_corpus(self):
+        from paulshaclaw.memory.noise import build_corpus
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed_doc_fragment(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            corpus = build_corpus([
+                "## 動工前\n- [ ] 確認當前分支不是 `main`\n- [ ] 跨多子項先用 `git worktree` 拆開\n"])
+            result = pipeline.run(root, config=cfg, config_hash=h,
+                                  now="2026-05-31T03:00:00Z", doc_corpus=corpus)
+            self.assertEqual(result["summary"]["noise_dropped"], 1)
+            self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
+            # source fragment still archived (session promoted, not stuck)
+            self.assertEqual(list((root / "inbox" / "_slices").rglob("*.md")), [])
+
+    def test_doc_fragment_kept_without_corpus(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed_doc_fragment(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            result = pipeline.run(root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z")
+            self.assertEqual(result["summary"]["noise_dropped"], 0)
+            self.assertEqual(len(list((root / "knowledge").rglob("*.md"))), 1)
+
     def test_split_pass_creates_fragments_and_archives_raw(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -69,6 +69,10 @@ def _build_parser() -> argparse.ArgumentParser:
     atomize.add_argument("--override", default=None)
     atomize.add_argument("--promoter", choices=["identity", "llm"], default=None)
     atomize.add_argument("--agent-command", default=None)
+    atomize.add_argument(
+        "--instruction-root", action="append", default=None,
+        help="agent-instruction doc root/file; when given, drops doc-fragment slices "
+             "(verbatim instruction-doc sections) at produce time. Repeatable.")
     atomize.add_argument("--dry-run", action="store_true")
     atomize.set_defaults(func=_atomize)
 
@@ -139,10 +143,34 @@ def _build_parser() -> argparse.ArgumentParser:
     prune = knowledge_subparsers.add_parser("prune-noise")
     prune.add_argument("--memory-root", required=True)
     prune.add_argument("--now", default=None)
+    prune.add_argument(
+        "--instruction-root", action="append", default=None,
+        help="agent-instruction doc root/file (CLAUDE.md/AGENTS.md/GEMINI.md). Repeatable. "
+             "When given, enables doc-fragment pruning against that corpus; omit to disable.")
+    prune.add_argument(
+        "--project", action="append", default=None,
+        help="restrict pruning to these project(s). Repeatable; omit to scan all projects.")
     group = prune.add_mutually_exclusive_group()
     group.add_argument("--dry-run", action="store_true")
     group.add_argument("--apply", action="store_true")
     prune.set_defaults(func=_prune_noise)
+
+    retitle = knowledge_subparsers.add_parser("retitle-untitled")
+    retitle.add_argument("--memory-root", required=True)
+    retitle.add_argument("--now", default=None)
+    retitle.add_argument(
+        "--instruction-root", action="append", default=None,
+        help="agent-instruction doc root/file; builds the doc-fragment guard corpus so "
+             "instruction fragments are skipped (left for prune-noise) instead of retitled.")
+    retitle.add_argument("--agent-command", default=None,
+                         help="override the title-distillation command (default: gemma4 wrapper).")
+    retitle.add_argument(
+        "--project", action="append", default=None,
+        help="restrict retitling to these project(s). Repeatable; omit to scan all projects.")
+    rgroup = retitle.add_mutually_exclusive_group()
+    rgroup.add_argument("--dry-run", action="store_true")
+    rgroup.add_argument("--apply", action="store_true")
+    retitle.set_defaults(func=_retitle_untitled)
 
     usage_p = memory_subparsers.add_parser("usage")
     usage_p.add_argument("--memory-root", required=True)
@@ -262,9 +290,13 @@ def _write_manifest(manifest: Path, rows: list[dict]) -> None:
 
 
 def _prune_noise(args: argparse.Namespace) -> int:
+    from .instruction_corpus import corpus_for_roots
+
     root = Path(args.memory_root)
     now = (args.now or datetime.now(timezone.utc).isoformat()).replace("+00:00", "Z")
     apply = bool(getattr(args, "apply", False))
+    corpus = corpus_for_roots(getattr(args, "instruction_root", None))
+    projects = getattr(args, "project", None)
     knowledge = root / "knowledge"
 
     # Phase 1: scan + classify only. No deletes yet — build the full candidate list.
@@ -275,13 +307,18 @@ def _prune_noise(args: argparse.Namespace) -> int:
         try:
             fm, body = _fio.read(path.read_text(encoding="utf-8"))
         except (OSError, UnicodeDecodeError) as exc:
-            # Unreadable/non-UTF-8 slice: cannot classify, so never delete it.
+            # Unreadable/non-UTF-8 slice: cannot classify, so never delete it. When a
+            # project filter is set we cannot confirm scope, so skip rather than record.
+            if projects:
+                continue
             rows.append({"slice_id": "", "project": "", "path": str(path),
                          "reason": "unreadable", "status": "error", "error": str(exc)})
             continue
         if fm.get("memory_layer") != "knowledge":
             continue
-        verdict = classify_noise(fm, body)
+        if projects and str(fm.get("project", "")) not in projects:
+            continue
+        verdict = classify_noise(fm, body, doc_corpus=corpus)
         if not verdict.is_noise:
             continue
         rows.append({"slice_id": str(fm.get("slice_id", "")), "project": str(fm.get("project", "")),
@@ -317,6 +354,31 @@ def _prune_noise(args: argparse.Namespace) -> int:
     stats = Counter(r["reason"] for r in rows)
     print(json.dumps({"scanned_noise": len(rows), "applied": apply, "by_reason": dict(stats),
                       "manifest": str(manifest)}, ensure_ascii=False))
+    return 0
+
+
+def _retitle_untitled(args: argparse.Namespace) -> int:
+    from . import retitle as retitle_mod
+    from .importer.title import generate_atom_title
+
+    from .instruction_corpus import corpus_for_roots
+
+    root = Path(args.memory_root)
+    now = (args.now or datetime.now(timezone.utc).isoformat()).replace("+00:00", "Z")
+    apply = bool(getattr(args, "apply", False))
+    corpus = corpus_for_roots(getattr(args, "instruction_root", None))
+
+    command = getattr(args, "agent_command", None)
+    title_kwargs = {"command": tuple(command.split())} if command else {}
+
+    def distill(body: str):
+        title, _source = generate_atom_title(body, **title_kwargs)
+        return title
+
+    summary = retitle_mod.retitle_untitled(
+        root, now=now, apply=apply, distill=distill, doc_corpus=corpus,
+        projects=getattr(args, "project", None))
+    print(json.dumps(summary, ensure_ascii=False))
     return 0
 
 

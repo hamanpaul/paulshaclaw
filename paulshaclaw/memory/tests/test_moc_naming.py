@@ -20,6 +20,20 @@ class NamingTests(unittest.TestCase):
     def test_slugify(self):
         self.assertEqual(naming.slugify("PWHM FSM States!"), "pwhm-fsm-states")
 
+    def test_slugify_preserves_cjk(self):
+        # #151: pure-CJK titles must not collapse to "untitled"; CJK is kept verbatim.
+        self.assertEqual(naming.slugify("動工前"), "動工前")
+        self.assertEqual(naming.slugify("修正 start.sh 啟動時 PYTHONPATH"), "修正-start-sh-啟動時-pythonpath")
+
+    def test_slugify_ascii_unchanged(self):
+        # Existing ASCII slugs are unaffected (zero churn on existing slices).
+        self.assertEqual(naming.slugify("CI gating note"), "ci-gating-note")
+        self.assertEqual(naming.slugify("6. 自主維護規則（agent-managed）"), "6-自主維護規則-agent-managed")
+
+    def test_slugify_punctuation_only_falls_back(self):
+        self.assertEqual(naming.slugify("---"), "untitled")
+        self.assertEqual(naming.slugify(""), "untitled")
+
     def test_reconcile_renames_to_title_slice(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
