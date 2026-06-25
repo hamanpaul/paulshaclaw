@@ -6,11 +6,14 @@ import re
 from dataclasses import dataclass
 from typing import Mapping
 
-# importer/frontmatter.render_markdown 的結構段落 heading。
-_STRUCTURAL_SECTIONS = (
-    "CWD", "Source", "Prompts", "Touched files", "Referenced artifacts", "Summary",
-)
-_STRUCTURAL_FIRST_LINE = {f"## {name}": name for name in _STRUCTURAL_SECTIONS}
+# importer/frontmatter.render_markdown 的結構段落 heading。importer-exclusive 的段落名
+# 永遠不會是合法的獨立知識原子標題，故無條件視為 echo；`Summary` 在真筆記中常見，
+# 需「散文行 ≤1」guard 以免誤刪（#139 finding 3）。
+_IMPORTER_EXCLUSIVE = ("CWD", "Source", "Prompts", "Touched files", "Referenced artifacts")
+_IMPORTER_EXCLUSIVE_FIRST_LINE = {f"## {name}": name for name in _IMPORTER_EXCLUSIVE}
+_GUARDED_SECTIONS = {f"## {name}": name for name in ("Summary",)}
+# 另一種 session metadata 區塊格式（copilot-cli 等），純元資料、非知識。
+_SESSION_META_LINE = re.compile(r"^#{1,6}\s+Session\s+(?:Metadata|Information)\b")
 
 _HEADING_LINE = re.compile(r"^#{1,6}\s")
 _LIST_ITEM = re.compile(r"^(?:[-*+]\s|\d+[.)]\s)")
@@ -50,18 +53,26 @@ def _is_hollow(stripped: str) -> bool:
 def _structural_echo_section(stripped: str) -> str | None:
     """Return the structural section name iff the body is an importer-template echo.
 
-    Requires the first line to be a structural heading AND the body to carry no
-    substantial prose (≤1 prose line). Importer sections are a path / list / one
-    short line; a real note that merely *starts* with `## Summary` but then has
-    multiple prose lines is NOT an echo and must be kept (#139 finding 3).
+    importer-exclusive headings (`## CWD/## Source/## Prompts/## Touched files/
+    ## Referenced artifacts`) and session-metadata blocks are unconditional echoes —
+    those section names never head a real standalone knowledge atom. `## Summary`
+    is common in real notes, so it is an echo only when the body carries no
+    substantial prose (≤1 prose line), keeping multi-paragraph summaries (#139 finding 3).
     """
     first_line = stripped.splitlines()[0].strip() if stripped else ""
-    section = _STRUCTURAL_FIRST_LINE.get(first_line)
-    if section is None:
-        return None
-    if len(_content_lines(stripped)) > 1:
-        return None
-    return section
+
+    section = _IMPORTER_EXCLUSIVE_FIRST_LINE.get(first_line)
+    if section is not None:
+        return section
+
+    if _SESSION_META_LINE.match(first_line):
+        return "SessionMetadata"
+
+    guarded = _GUARDED_SECTIONS.get(first_line)
+    if guarded is not None and len(_content_lines(stripped)) <= 1:
+        return guarded
+
+    return None
 
 
 def _opens_with_placeholder(stripped: str) -> bool:

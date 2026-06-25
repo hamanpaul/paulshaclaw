@@ -5,12 +5,17 @@
 ## Requirements
 ### Requirement: 以 body 內容判定 noise
 
-系統 SHALL 提供純函式 `classify_noise(frontmatter, body)`，回傳 `(is_noise, reason)`，且判定**僅依 body 內容**，不依賴 frontmatter 的 `atom_title` / `title` / `project`。判定規則依序為：(1) body strip 後第一行為 importer 結構 heading（`## CWD` / `## Source` / `## Prompts` / `## Touched files` / `## Referenced artifacts` / `## Summary`）**且全文散文行（非標題、非清單）≤1** → `structural-echo`；(2) body **開頭附近**（前 12 字內）含 `尚未收到您的具體需求` / `目前尚未收到` / `(無內容)`，或本體僅 `- (none)` / `(unknown)` → `placeholder`；(3) body 去除標題行（`#`..）與空白行後無實質內容（涵蓋純標題片段如 `# Session <uuid>` 與真正空白）→ `empty`；皆不命中則非 noise。判定 SHALL 為 content-based，MUST NOT 以字元長度門檻判定。因 classifier 同時用於 hard-delete 路徑，規則 SHALL 為 deletion-grade：以 ≤1 散文行限制 structural-echo、以開頭偵測限制 placeholder，避免誤刪「以 `## Summary` 開頭但有多段真內容」或「引用 placeholder 字串」的真筆記。
+系統 SHALL 提供純函式 `classify_noise(frontmatter, body)`，回傳 `(is_noise, reason)`，且判定**僅依 body 內容**，不依賴 frontmatter 的 `atom_title` / `title` / `project`。判定規則依序為：(1) **structural-echo**——(a) body 第一行為 importer-exclusive 結構 heading（`## CWD` / `## Source` / `## Prompts` / `## Touched files` / `## Referenced artifacts`）或 session metadata 區塊（`#{1,6} Session Metadata|Information`）→ **無條件** echo（這些段落名永遠不是合法的獨立知識原子標題）；(b) body 第一行為 `## Summary`（真筆記常見）→ 僅當散文行（非標題、非清單）≤1 時才 echo；(2) body **開頭附近**（前 12 字內）含 `尚未收到您的具體需求` / `目前尚未收到` / `(無內容)`，或本體僅 `- (none)` / `(unknown)` → `placeholder`；(3) body 去除標題行（`#`..）與空白行後無實質內容（涵蓋純標題片段如 `# Session <uuid>` 與真正空白）→ `empty`；皆不命中則非 noise。判定 SHALL 為 content-based，MUST NOT 以字元長度門檻判定。因 classifier 同時用於 hard-delete 路徑，規則 SHALL 為 deletion-grade：`## Summary` 的 ≤1 散文行 guard 與 placeholder 的開頭偵測，避免誤刪「以 `## Summary` 開頭但有多段真內容」或「引用 placeholder 字串」的真筆記。
 
-#### Scenario: 結構段落 echo 判為 noise
+#### Scenario: importer-exclusive 結構段落無條件判為 noise
 
-- **WHEN** slice body 第一行為 `## CWD`、`## Prompts`、`## Source`、`## Touched files`、`## Referenced artifacts` 或 `## Summary`，且散文行 ≤1
+- **WHEN** slice body 第一行為 `## CWD`、`## Prompts`、`## Source`、`## Touched files`、`## Referenced artifacts`，或為 `Session Metadata` / `Session Information` 區塊（不論其後內容多寡）
 - **THEN** `classify_noise` SHALL 回 `is_noise=True` 且 `reason` 為 `structural-echo:<section>`
+
+#### Scenario: `## Summary` 僅在淺內容時判為 noise
+
+- **WHEN** slice body 第一行為 `## Summary` 且散文行 ≤1
+- **THEN** `classify_noise` SHALL 回 `is_noise=True` 且 `reason` 為 `structural-echo:Summary`
 
 #### Scenario: 純標題片段與 placeholder 判為 noise
 
@@ -22,9 +27,9 @@
 - **WHEN** slice body 為非標題、非 placeholder 的真實短句（例如 30 字的技術結論）
 - **THEN** `classify_noise` SHALL 回 `is_noise=False`（判定 MUST NOT 依字元長度門檻）
 
-#### Scenario: 以結構 heading 開頭但有多段真內容者保留
+#### Scenario: 以 `## Summary` 開頭但有多段真內容者保留
 
-- **WHEN** slice body 第一行為 `## Summary` 等結構 heading，但其後含 ≥2 行真實散文
+- **WHEN** slice body 第一行為 `## Summary`，但其後含 ≥2 行真實散文
 - **THEN** `classify_noise` SHALL 回 `is_noise=False`（非 structural-echo，防 hard-delete 誤刪）
 
 #### Scenario: 引用 placeholder 字串的真筆記保留
