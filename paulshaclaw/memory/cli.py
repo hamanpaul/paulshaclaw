@@ -247,11 +247,21 @@ def _syncback(args: argparse.Namespace) -> int:
     return syncback_cli.run(args)
 
 
+def _write_manifest(manifest: Path, rows: list[dict]) -> None:
+    # Atomic replace so the manifest is never left half-written (#139 finding 2).
+    payload = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    tmp = manifest.with_name(f".{manifest.name}.tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(manifest)
+
+
 def _prune_noise(args: argparse.Namespace) -> int:
     root = Path(args.memory_root)
     now = (args.now or datetime.now(timezone.utc).isoformat()).replace("+00:00", "Z")
     apply = bool(getattr(args, "apply", False))
     knowledge = root / "knowledge"
+
+    # Phase 1: scan + classify only. No deletes yet — build the full candidate list.
     rows: list[dict] = []
     for path in sorted(knowledge.rglob("*.md")):
         if path.name.endswith("-moc.md"):
@@ -268,25 +278,35 @@ def _prune_noise(args: argparse.Namespace) -> int:
         verdict = classify_noise(fm, body)
         if not verdict.is_noise:
             continue
-        row = {"slice_id": str(fm.get("slice_id", "")), "project": str(fm.get("project", "")),
-               "path": str(path), "reason": verdict.reason, "status": "dry-run"}
-        if apply:
-            try:
-                path.unlink()
-                row["status"] = "deleted"
-            except OSError as exc:
-                row["status"] = "error"
-                row["error"] = str(exc)
-        rows.append(row)
+        rows.append({"slice_id": str(fm.get("slice_id", "")), "project": str(fm.get("project", "")),
+                     "path": str(path), "reason": verdict.reason,
+                     "status": "planned" if apply else "dry-run"})
 
     ledger_dir = root / "runtime" / "ledger"
     ledger_dir.mkdir(parents=True, exist_ok=True)
     safe_now = now.replace(":", "")  # strip ':' for filesystem-safe filename; Z-normalized so no '+'
     manifest = ledger_dir / f"prune-{safe_now}.jsonl"
-    manifest.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
 
-    if apply and any(r["status"] == "deleted" for r in rows):
-        _moc_builder.build_mocs(root, now=now)
+    # Phase 2: persist the planned manifest BEFORE any unlink, so a later failure can
+    # never leave deletes without a durable audit record (#139 finding 2).
+    _write_manifest(manifest, rows)
+
+    # Phase 3: delete, updating each row's status, then atomically rewrite the manifest.
+    if apply:
+        deleted = False
+        for row in rows:
+            if row["status"] != "planned":
+                continue
+            try:
+                Path(row["path"]).unlink()
+                row["status"] = "deleted"
+                deleted = True
+            except OSError as exc:
+                row["status"] = "error"
+                row["error"] = str(exc)
+        _write_manifest(manifest, rows)
+        if deleted:
+            _moc_builder.build_mocs(root, now=now)
 
     stats = Counter(r["reason"] for r in rows)
     print(json.dumps({"scanned_noise": len(rows), "applied": apply, "by_reason": dict(stats),

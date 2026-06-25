@@ -48,6 +48,28 @@ class ClassifyNoiseTests(unittest.TestCase):
         verdict = classify_noise({}, "這是一段足夠長的真實技術內容，描述某個具體結論與其理由說明。\n")
         self.assertFalse(verdict.is_noise)
 
+    def test_structural_heading_with_substantial_prose_is_kept(self):
+        # A real distilled note that merely *starts* with `## Summary` but carries
+        # multiple prose lines must NOT be deleted as structural-echo (#139 finding 3).
+        body = (
+            "## Summary\n"
+            "本次調查確認 dream 管線停擺的根因是 frontmatter escaping。\n"
+            "atomize 與 moc 兩個 pass 因單一 poison-pill 檔整批 ParserError。\n"
+            "修法是 per-file 隔離加寫入端 YAML escaping，兩者缺一不可。\n"
+        )
+        verdict = classify_noise({}, body)
+        self.assertFalse(verdict.is_noise, verdict.reason)
+
+    def test_note_quoting_placeholder_phrase_mid_body_is_kept(self):
+        # A real note that discusses the placeholder text (not opens with it) is kept.
+        body = (
+            "noise classifier 的 placeholder 規則設計：\n"
+            "當 session 沒有實際內容時，importer 會寫入「尚未收到您的具體需求」這類佔位字串，"
+            "因此 classifier 需在 body 開頭附近偵測到該字串才判為 placeholder，避免誤刪引用它的真筆記。\n"
+        )
+        verdict = classify_noise({}, body)
+        self.assertFalse(verdict.is_noise, verdict.reason)
+
 
 if __name__ == "__main__":
     unittest.main()

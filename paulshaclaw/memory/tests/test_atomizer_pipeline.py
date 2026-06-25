@@ -815,6 +815,26 @@ class PipelineTests(unittest.TestCase):
             self.assertIn("真實技術內容", kept_body)
             self.assertNotIn("使用者招呼與啟動 session", kept_body)
 
+    def test_noise_drops_do_not_inflate_skipped_or_warnings(self):
+        # #139 finding 1: intentional noise drops must NOT count as health-affecting
+        # `skipped`/`warnings`, else a normal noise-filtering run looks degraded (partial).
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "inbox" / "sessions" / "claude" / "2026-06-25" / "s11.md"
+            raw.parent.mkdir(parents=True, exist_ok=True)
+            raw.write_text(
+                "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude\n"
+                "source_session: s11\nsource_artifact: session\n"
+                'captured_at: "2026-06-25T00:00:00Z"\n'
+                "provenance:\n  repo: r\n  commit: c\n  path: p\n---\n"
+                "## CWD\n/home/paul_chen\n## Touched files\n- (none)\n",
+                encoding="utf-8")
+            cfg, h = atomizer_config.load_config(override_path=None)
+            result = pipeline.run(root, config=cfg, config_hash=h, now="2026-06-25T03:00:00Z")
+            self.assertGreaterEqual(result["summary"]["noise_dropped"], 1)
+            self.assertEqual(result["summary"]["skipped"], 0)
+            self.assertFalse(any("noise" in w for w in result["warnings"]))
+
     def test_dry_run_counts_noise_without_writing(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

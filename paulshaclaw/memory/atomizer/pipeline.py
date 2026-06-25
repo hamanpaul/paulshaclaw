@@ -362,7 +362,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
                 verdict = classify_noise(slice_.frontmatter, slice_.body)
                 if verdict.is_noise:
                     noise_dropped += 1
-                    warnings.append(f"{session_key}: dropped noise slice {slice_.slice_id} ({verdict.reason})")
+                    LOGGER.info("atomize: dropped noise slice %s:%s (%s)", session_key, slice_.slice_id, verdict.reason)
                     continue
                 slices_written += 1
         return slices_written, noise_dropped
@@ -447,7 +447,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
             verdict = classify_noise(slice_.frontmatter, slice_.body)
             if verdict.is_noise:
                 noise_dropped += 1
-                warnings.append(f"session {session_key}: dropped noise slice {slice_.slice_id} ({verdict.reason})")
+                LOGGER.info("atomize: dropped noise slice %s:%s (%s)", session_key, slice_.slice_id, verdict.reason)
                 continue
             knowledge_path = _knowledge_path_for(
                 memory_root, sanitize_project_component(str(slice_.frontmatter["project"])), slice_.slice_id

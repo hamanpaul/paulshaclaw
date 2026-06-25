@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from paulshaclaw.memory.cli import main
 
@@ -48,6 +50,29 @@ class PruneNoiseTests(unittest.TestCase):
             rows = [json.loads(l) for l in manifests[0].read_text().splitlines() if l.strip()]
             self.assertTrue(any(r["reason"].startswith("structural-echo") for r in rows))
             self.assertTrue((root / "knowledge" / "p-moc.md").exists())
+
+    def test_durable_manifest_exists_before_any_delete(self):
+        # #139 finding 2: a durable manifest of intended deletions must be written
+        # BEFORE any unlink, so a later write failure can't leave deletes unaudited.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed(root)
+            ledger = root / "runtime" / "ledger"
+            real_unlink = pathlib.Path.unlink
+            manifest_present_at_first_unlink = []
+
+            def spy_unlink(self_path, *a, **k):
+                manifest_present_at_first_unlink.append(
+                    bool(list(ledger.glob("prune-*.jsonl"))) if ledger.exists() else False)
+                return real_unlink(self_path, *a, **k)
+
+            with mock.patch.object(pathlib.Path, "unlink", spy_unlink):
+                rc = main(["memory", "knowledge", "prune-noise", "--memory-root", str(root),
+                           "--now", "2026-06-25T00:00:00Z", "--apply"])
+            self.assertEqual(rc, 0)
+            self.assertTrue(manifest_present_at_first_unlink, "expected at least one unlink")
+            self.assertTrue(manifest_present_at_first_unlink[0],
+                            "manifest must exist before the first delete")
 
     def test_apply_isolates_unreadable_file_without_deleting_it(self):
         with TemporaryDirectory() as tmp:
