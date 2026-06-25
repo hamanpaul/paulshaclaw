@@ -358,14 +358,23 @@ def _memory_usage(args: argparse.Namespace) -> int:
         1 for s in slices
         if s["offered_count"] > 0 and s["cited_count"] == 0 and s["matched_count"] == 0
     )
-    summary = {"sessions": len(rows), "slices": len(slices), "never_used": never_used}
+    n = len(rows)
+    total_cited = sum(len(e.get("cited", [])) for e in rows)
+    total_matched = sum(len(e.get("matched", [])) for e in rows)
+    summary = {
+        "sessions": n, "slices": len(slices), "never_used": never_used,
+        "avg_cited_per_session": round(total_cited / n, 3) if n else 0.0,
+        "avg_matched_per_session": round(total_matched / n, 3) if n else 0.0,
+    }
     report = {"summary": summary, "slices": slices}
 
     if args.json:
         print(json.dumps(report, ensure_ascii=False))
     else:
         print(f"sessions={summary['sessions']} slices={summary['slices']} "
-              f"never_used={summary['never_used']}")
+              f"never_used={summary['never_used']} "
+              f"avg_cited/session={summary['avg_cited_per_session']} "
+              f"avg_matched/session={summary['avg_matched_per_session']}")
         for s in slices[:30]:
             print(f"  {s['slice_id']}  offered={s['offered_count']} cited={s['cited_count']} "
                   f"matched={s['matched_count']} last_used={s['last_used']}")

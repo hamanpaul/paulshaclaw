@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .hooks._wakeup_common import sanitize_id  # single source of the offered-file id sanitizer
 from .usage import extract_cited, extract_matched
-
-_SANITIZE = re.compile(r"[/\\:]+")
 
 
 def _assistant_text(transcript_path: Path) -> str:
@@ -38,7 +36,7 @@ def _assistant_text(transcript_path: Path) -> str:
 def record_session_usage(root: Path, tool: str, session_id: str, project: str,
                          transcript_path: str | None) -> None:
     try:
-        sid = _SANITIZE.sub("__", session_id)
+        sid = sanitize_id(session_id)
         offered_file = root / "runtime" / "wakeup" / f"{tool}__{sid}.json"
         if not offered_file.exists() or not transcript_path:
             return

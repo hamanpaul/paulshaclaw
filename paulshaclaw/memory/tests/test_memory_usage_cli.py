@@ -37,6 +37,9 @@ class UsageCliTests(unittest.TestCase):
             self.assertEqual(by["sl-bbb"]["offered_count"], 2)
             self.assertEqual(by["sl-bbb"]["cited_count"], 0)
             self.assertEqual(out["summary"]["never_used"], 1)
+            # 2 sessions, 1 cited total, 0 matched total
+            self.assertEqual(out["summary"]["avg_cited_per_session"], 0.5)
+            self.assertEqual(out["summary"]["avg_matched_per_session"], 0.0)
 
     def test_works_without_wakeup_files(self):
         with TemporaryDirectory() as tmp:
