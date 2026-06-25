@@ -9,6 +9,17 @@ from ..ledger import retrieval_set
 from . import frontmatter_io as fio
 
 
+# Placeholder titles that should be treated as "no title" so a meaningful fallback
+# (session_title → basename) surfaces instead (#146).
+_NON_TITLES = {"untitled", "(無內容)", "(none)", "(unknown)"}
+
+
+def _meaningful_title(title: str) -> str:
+    """Return the title unless it is empty or a known placeholder non-title; then ''."""
+    t = (title or "").strip()
+    return "" if not t or t.lower() in _NON_TITLES else t
+
+
 def alias_link(stem: str, title: str) -> str:
     """Render a wikilink target aliased to the session title when one is present.
 
@@ -68,7 +79,7 @@ def _hierarchy_lines(
     lines: list[str] = []
     for key in order:
         group = by_key[key]
-        session_title = group[0][5]
+        session_title = _meaningful_title(group[0][5])
         if session_title:
             parent = session_title
         elif key[1]:           # has a session key but no title
@@ -77,7 +88,7 @@ def _hierarchy_lines(
             parent = "(未分組)"
         lines.append(f"- {parent}")
         for sid, project, basename, kind, sk, st, at in group:
-            label = at or st or basename
+            label = _meaningful_title(at) or _meaningful_title(st) or basename
             suffix = f"{project} · {kind}" if show_project else kind
             lines.append(f"  - [[{alias_link(basename, label)}]] — {suffix}")
     return lines
