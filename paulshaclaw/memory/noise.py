@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -11,10 +12,23 @@ _STRUCTURAL_SECTIONS = (
 )
 _STRUCTURAL_FIRST_LINE = {f"## {name}": name for name in _STRUCTURAL_SECTIONS}
 
-_EMPTY_THRESHOLD = 40
+_HEADING_LINE = re.compile(r"^#{1,6}\s")
 
 _PLACEHOLDER_PHRASES = ("(無內容)", "尚未收到您的具體需求", "目前尚未收到")
 _BARE_PLACEHOLDERS = {"- (none)", "(none)", "(unknown)"}
+
+
+def _is_hollow(stripped: str) -> bool:
+    """True when nothing but markdown heading lines / blanks remains.
+
+    Content-based (NOT a length threshold): covers真正空白與純標題片段
+    （如 `# Session <uuid>`）。
+    """
+    for line in stripped.splitlines():
+        s = line.strip()
+        if s and not _HEADING_LINE.match(s):
+            return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -40,7 +54,7 @@ def classify_noise(frontmatter: Mapping[str, object], body: str) -> NoiseVerdict
     if stripped in _BARE_PLACEHOLDERS or any(p in stripped for p in _PLACEHOLDER_PHRASES):
         return NoiseVerdict(True, "placeholder")
 
-    if len(stripped) < _EMPTY_THRESHOLD:
+    if _is_hollow(stripped):
         return NoiseVerdict(True, "empty")
 
     return NoiseVerdict(False, "")

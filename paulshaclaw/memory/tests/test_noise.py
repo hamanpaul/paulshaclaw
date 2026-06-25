@@ -14,8 +14,13 @@ class ClassifyNoiseTests(unittest.TestCase):
             self.assertTrue(verdict.is_noise, section)
             self.assertEqual(verdict.reason, f"structural-echo:{section}")
 
-    def test_empty_body_is_noise(self):
-        verdict = classify_noise({"atom_title": "x"}, "tiny\n")
+    def test_heading_only_body_is_noise(self):
+        verdict = classify_noise({"atom_title": "x"}, "# Session dcbb8041-29ef-4a9f-a9e7-c408a65cbf20\n")
+        self.assertTrue(verdict.is_noise)
+        self.assertEqual(verdict.reason, "empty")
+
+    def test_blank_body_is_noise(self):
+        verdict = classify_noise({}, "   \n\n")
         self.assertTrue(verdict.is_noise)
         self.assertEqual(verdict.reason, "empty")
 
@@ -38,18 +43,10 @@ class ClassifyNoiseTests(unittest.TestCase):
         verdict = classify_noise({"atom_title": "ci-gating"}, body)
         self.assertFalse(verdict.is_noise)
 
-    def test_empty_threshold_boundary(self):
-        # 真實、非 placeholder、非結構段落的 body，長度剛好跨越 40 字元門檻。
-        below = "merge 前先跑 unit 與 integration 測試才算完成。"  # strip 後 36 字
-        self.assertLess(len(below.strip()), 40)
-        verdict_below = classify_noise({"atom_title": "x"}, below + "\n")
-        self.assertTrue(verdict_below.is_noise)
-        self.assertEqual(verdict_below.reason, "empty")
-
-        above = "merge 前先跑 unit 與 integration 測試，未綠不得宣告完成喔。"  # strip 後 42 字
-        self.assertGreater(len(above.strip()), 40)
-        verdict_above = classify_noise({"atom_title": "x"}, above + "\n")
-        self.assertFalse(verdict_above.is_noise)
+    def test_real_short_content_is_kept_regardless_of_length(self):
+        # 30-char CJK real conclusion — must survive (no length threshold).
+        verdict = classify_noise({}, "這是一段足夠長的真實技術內容，描述某個具體結論與其理由說明。\n")
+        self.assertFalse(verdict.is_noise)
 
 
 if __name__ == "__main__":
