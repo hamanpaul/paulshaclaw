@@ -789,6 +789,33 @@ class PipelineTests(unittest.TestCase):
             )
 
 
+    def test_structural_echo_slice_is_dropped_as_noise(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "inbox" / "sessions" / "claude" / "2026-06-25" / "s9.md"
+            raw.parent.mkdir(parents=True, exist_ok=True)
+            raw.write_text(
+                "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude\n"
+                "source_session: s9\nsource_artifact: session\n"
+                'captured_at: "2026-06-25T00:00:00Z"\n'
+                "provenance:\n  repo: r\n  commit: c\n  path: p\n---\n"
+                "## Summary\n使用者招呼與啟動 session\n"
+                "## Real Topic\n這是一段足夠長的真實技術內容，描述某個具體結論與其理由說明。\n",
+                encoding="utf-8")
+            cfg, h = atomizer_config.load_config(override_path=None)
+            result = pipeline.run(root, config=cfg, config_hash=h, now="2026-06-25T03:00:00Z")
+            # The ## Summary fragment is structural-echo noise → dropped; ## Real Topic kept.
+            # (atomize writes by slice_id; the title-- prefix is added later by the moc rename
+            # pass, so assert on body content, not filename.)
+            self.assertEqual(result["summary"]["noise_dropped"], 1)
+            self.assertEqual(result["summary"]["slices"], 1)
+            kept = list((root / "knowledge").rglob("*.md"))
+            self.assertEqual(len(kept), 1)
+            kept_body = kept[0].read_text(encoding="utf-8")
+            self.assertIn("真實技術內容", kept_body)
+            self.assertNotIn("使用者招呼與啟動 session", kept_body)
+
+
 _RAW_TITLED = """---
 memory_layer: inbox
 project: paulshaclaw
