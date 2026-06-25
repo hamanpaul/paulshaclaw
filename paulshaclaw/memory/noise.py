@@ -14,7 +14,7 @@ _STRUCTURAL_FIRST_LINE = {f"## {name}": name for name in _STRUCTURAL_SECTIONS}
 _EMPTY_THRESHOLD = 40
 
 _PLACEHOLDER_PHRASES = ("(無內容)", "尚未收到您的具體需求", "目前尚未收到")
-_BARE_PLACEHOLDERS = {"- (none)", "(none)", "(unknown)", "(無內容)"}
+_BARE_PLACEHOLDERS = {"- (none)", "(none)", "(unknown)"}
 
 
 @dataclass(frozen=True)
