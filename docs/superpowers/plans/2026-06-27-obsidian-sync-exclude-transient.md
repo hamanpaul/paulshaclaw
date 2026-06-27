@@ -92,10 +92,10 @@ Expected: `Excluded folders:` 列出 6 層且**不含 knowledge**；本機 `ls` 
 ## Task 3: 固化 `ensure_excluded_folders` 進 guard（程式變更 + redeploy）
 
 **Files:**
-- Modify: `ref/custom-skills/obs-service-wsl-handler/bin/obsidian_sync_guard.sh`（live source；於 `clear_terminal_stop_flag` 後插入）
+- Modify: `ref/custom-skills/obs-service-wsl-handler/bin/obsidian_sync_guard.sh`（於 `clear_terminal_stop_flag` 後插入）
 - Redeploy: 複製到 `~/.local/bin/obsidian_sync_guard.sh`
 
-> 說明：guard 是 vendored 外部 skill 的 live 副本（與 deployed 完全一致）。在此加冪等補設最 DRY（config/vault/OB_BIN 此處已解析）。若日後要避免與 upstream 分歧，替代法為 systemd drop-in `ExecStartPre`（記錄於此，不採用）。
+> ⚠️ 版控落點：`ref/` 在 paulshaclaw 的 `.gitignore`（External reference repos）內，且 `ref/custom-skills` 是**獨立 repo** `github.com/hamanpaul/custom-skills`。故 guard 改動**不進 paulshaclaw**，而是 commit/PR 至 custom-skills（→ PR custom-skills#14）。在此加冪等補設最 DRY（config/vault/OB_BIN 此處已解析）。若日後要避免與 upstream 分歧，替代法為 systemd drop-in `ExecStartPre`（記錄於此，不採用）。
 
 - [ ] **Step 1: 在 guard 插入 PSC_EXCLUDED_FOLDERS 常數與函式**
 
@@ -164,11 +164,15 @@ grep -a "excluded-folders already satisfied\|applying excluded-folders" ~/.local
 ```
 Expected: log 出現 `excluded-folders already satisfied`（因 Task 2 已設）。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Commit（在 custom-skills repo，非 paulshaclaw）**
 
 ```bash
-git add ref/custom-skills/obs-service-wsl-handler/bin/obsidian_sync_guard.sh
-git commit -m "feat(memory): #153 guard 啟動時冪等補設 ob excluded-folders（固化）"
+cd ref/custom-skills
+git checkout -b feature/obs-sync-excluded-folders
+git add obs-service-wsl-handler/bin/obsidian_sync_guard.sh
+git commit -m "feat(obs-service-wsl-handler): guard 啟動時冪等補設 ob excluded-folders"
+git push -u origin feature/obs-sync-excluded-folders
+gh pr create --base main ...   # → custom-skills#14（body 註 Ref: hamanpaul/paulshaclaw#153）
 ```
 
 ---
@@ -213,4 +217,4 @@ gh pr create --base main --head feature/153-obsidian-sync-exclude-transient \
 - **Spec coverage：** §6.1→Task 2；§6.2→Task 1(備份)+Task 4(清理)；§6.3→Task 3；§7 風險（順序、金鑰、格式）已落在各 Task 前提與驗證；§8 不改動→各 Task 皆無結構變更。✓
 - **Placeholder scan：** 無 TBD；Task 3 含完整 shell。✓
 - **一致性：** 6 層 CSV 在 header / Task 2 / Task 3 / Task 4 完全一致。✓
-- **本次執行範圍：** 依使用者指示，現在只做 **Task 1 + Task 2**；Task 3（固化）、Task 4（使用者 Windows 刪）、Task 5（PR）為後續。
+- **執行狀態：** Task 1（備份）/ Task 2（排除生效）/ Task 3（固化→custom-skills#14）/ Task 4（使用者 Windows 已刪，遠端清理已傳播、本機零損失）皆完成；Task 5：paulshaclaw PR（spec+plan，Closes #153）+ custom-skills#14。
