@@ -74,6 +74,43 @@ class PruneNoiseTests(unittest.TestCase):
             self.assertTrue(manifest_present_at_first_unlink[0],
                             "manifest must exist before the first delete")
 
+    def test_doc_fragment_pruned_only_when_instruction_root_given(self):
+        # With an instruction doc supplied as corpus, a verbatim section slice is
+        # pruned as doc-fragment; a real note not in the corpus survives. Without
+        # any --instruction-root that points at real docs, the rule stays inert.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docdir = Path(tmp) / "docs"
+            docdir.mkdir()
+            (docdir / "AGENTS.md").write_text(
+                "## 動工前\n- [ ] 確認當前分支不是 `main`\n- [ ] 跨多子項先用 `git worktree` 拆開\n",
+                encoding="utf-8")
+            frag = _slice(root, "p", "untitled--sl-f1.md",
+                          "## 動工前\n- [ ] 確認當前分支不是 `main`\n- [ ] 跨多子項先用 `git worktree` 拆開")
+            good = _slice(root, "p", "real--sl-g2.md",
+                          "本專案的 UART2 在 pinmux 設錯時會靜默失效，需用 devmem 確認暫存器。")
+            rc = main(["memory", "knowledge", "prune-noise", "--memory-root", str(root),
+                       "--now", "2026-06-25T00:00:00Z", "--instruction-root", str(docdir),
+                       "--apply"])
+            self.assertEqual(rc, 0)
+            self.assertFalse(frag.exists())
+            self.assertTrue(good.exists())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl"))
+            rows = [json.loads(l) for l in manifests[0].read_text().splitlines() if l.strip()]
+            self.assertTrue(any(r["reason"] == "doc-fragment" for r in rows))
+
+    def test_project_filter_limits_scope(self):
+        # --project restricts pruning to the named projects; other projects untouched.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            keep = _slice(root, "other", "cwd--sl-o1.md", "## CWD\n/home/paul_chen")
+            drop = _slice(root, "p", "cwd--sl-p1.md", "## CWD\n/home/paul_chen")
+            rc = main(["memory", "knowledge", "prune-noise", "--memory-root", str(root),
+                       "--now", "2026-06-25T00:00:00Z", "--project", "p", "--apply"])
+            self.assertEqual(rc, 0)
+            self.assertFalse(drop.exists())
+            self.assertTrue(keep.exists())   # 'other' project not in scope
+
     def test_apply_isolates_unreadable_file_without_deleting_it(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

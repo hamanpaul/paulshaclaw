@@ -2,7 +2,22 @@ from __future__ import annotations
 
 import unittest
 
-from paulshaclaw.memory.noise import classify_noise
+from paulshaclaw.memory.noise import build_corpus, classify_noise
+
+
+# A fake agent-instruction document (CLAUDE.md/AGENTS.md shape) used as verbatim corpus.
+_INSTRUCTION_DOC = (
+    "# Project instructions\n"
+    "## 6. 自主維護規則（agent-managed）\n"
+    "- [multi_agent_devflow] 多線開發任務先由 master agent 拆出 todo 與 boundary。\n"
+    "- [scope_violation] 子 agent 寫入超出宣告 scope 時必須先中止該寫入。\n"
+    "## 動工前\n"
+    "- [ ] 確認當前分支不是 `main`\n"
+    "- [ ] 若本任務跨多個子項，先建議用 `git worktree` 拆開\n"
+    "## 1. 薄核心原則\n"
+    "- 路由：依任務型態載入對應 skills。\n"
+    "- 硬規範：安全、不可破壞、品質底線。\n"
+)
 
 
 class ClassifyNoiseTests(unittest.TestCase):
@@ -101,6 +116,63 @@ class ClassifyNoiseTests(unittest.TestCase):
         )
         verdict = classify_noise({}, body)
         self.assertFalse(verdict.is_noise, verdict.reason)
+
+
+class DocFragmentTests(unittest.TestCase):
+    def setUp(self):
+        self.corpus = build_corpus([_INSTRUCTION_DOC])
+
+    def test_numbered_instruction_section_is_doc_fragment(self):
+        # `## 6. ...` 章節 + ≥2 逐字內容行命中語料；尾部 session 雜訊不影響判定。
+        body = (
+            "## 6. 自主維護規則（agent-managed）\n"
+            "- [multi_agent_devflow] 多線開發任務先由 master agent 拆出 todo 與 boundary。\n"
+            "- [scope_violation] 子 agent 寫入超出宣告 scope 時必須先中止該寫入。\n"
+            "</INSTRUCTIONS>\n2. 不相關的 session 對話雜訊。\n"
+        )
+        verdict = classify_noise({}, body, doc_corpus=self.corpus)
+        self.assertTrue(verdict.is_noise, verdict.reason)
+        self.assertEqual(verdict.reason, "doc-fragment")
+
+    def test_non_numbered_agents_section_is_doc_fragment(self):
+        body = (
+            "## 動工前\n"
+            "- [ ] 確認當前分支不是 `main`\n"
+            "- [ ] 若本任務跨多個子項，先建議用 `git worktree` 拆開\n"
+        )
+        verdict = classify_noise({"title": "untitled"}, body, doc_corpus=self.corpus)
+        self.assertTrue(verdict.is_noise, verdict.reason)
+        self.assertEqual(verdict.reason, "doc-fragment")
+
+    def test_real_numbered_note_not_in_corpus_is_kept(self):
+        # 編號 heading 但內容為原創、未逐字命中語料 → 不可誤刪。
+        body = (
+            "## 1. 背景\n"
+            "本研究探討一個全新的、語料中不存在的技術問題與其取捨。\n"
+            "第二段給出原創的結論與後續步驟。\n"
+        )
+        verdict = classify_noise({}, body, doc_corpus=self.corpus)
+        self.assertFalse(verdict.is_noise, verdict.reason)
+
+    def test_heading_match_but_single_content_hit_is_kept(self):
+        # heading 命中、但僅 1 條內容行命中語料（< 2）→ 保守保留。
+        body = (
+            "## 1. 薄核心原則\n"
+            "- 路由：依任務型態載入對應 skills。\n"
+            "這是一段語料中不存在的原創補充說明文字。\n"
+        )
+        verdict = classify_noise({}, body, doc_corpus=self.corpus)
+        self.assertFalse(verdict.is_noise, verdict.reason)
+
+    def test_without_corpus_doc_fragment_rule_is_inert(self):
+        # 不傳 doc_corpus 時，doc-fragment 規則不啟用；該 body 非既有三類 → 非 noise。
+        body = (
+            "## 6. 自主維護規則（agent-managed）\n"
+            "- [multi_agent_devflow] 多線開發任務先由 master agent 拆出 todo 與 boundary。\n"
+            "- [scope_violation] 子 agent 寫入超出宣告 scope 時必須先中止該寫入。\n"
+        )
+        self.assertFalse(classify_noise({}, body).is_noise)
+        self.assertFalse(classify_noise({}, body, doc_corpus=build_corpus([])).is_noise)
 
 
 if __name__ == "__main__":

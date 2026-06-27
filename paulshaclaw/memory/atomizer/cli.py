@@ -101,6 +101,12 @@ def _build_promoter(
     )
 
 
+def _instruction_corpus(args: argparse.Namespace):
+    # opt-in: no roots -> inert (empty) corpus, doc-fragment dropping stays off
+    from ..instruction_corpus import corpus_for_roots
+    return corpus_for_roots(getattr(args, "instruction_root", None))
+
+
 def run(args: argparse.Namespace) -> int:
     override = args.override if getattr(args, "override", None) else atomizer_config._DEFAULT_SENTINEL
     config, config_hash = atomizer_config.load_config(override_path=override)
@@ -113,6 +119,7 @@ def run(args: argparse.Namespace) -> int:
         now=args.now,
         dry_run=args.dry_run,
         promoter=promoter,
+        doc_corpus=_instruction_corpus(args),
     )
     print(json.dumps(result, sort_keys=True, indent=2))
     return 0

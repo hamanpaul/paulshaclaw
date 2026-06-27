@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ..ledger import processing, relations
-from ..noise import classify_noise
+from ..noise import DocCorpus, classify_noise
 from . import slice_frontmatter, splitter
 from .config import AtomizerConfig, is_safe_path_component, sanitize_project_component
 from .llm_promoter import LLMPromoter, PromoteError
@@ -335,7 +335,8 @@ def _read_fragment(path: Path) -> Fragment | None:
 
 def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, now: str,
                   dry_run: bool, promoter: Promoter, warnings: list[str],
-                  dry_run_fragments: dict[str, list[Fragment]]) -> tuple[int, int]:
+                  dry_run_fragments: dict[str, list[Fragment]],
+                  doc_corpus: "DocCorpus | None" = None) -> tuple[int, int]:
     slices_written = 0
     noise_dropped = 0
 
@@ -359,7 +360,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
             if has_error:
                 continue
             for slice_ in promoted:
-                verdict = classify_noise(slice_.frontmatter, slice_.body)
+                verdict = classify_noise(slice_.frontmatter, slice_.body, doc_corpus=doc_corpus)
                 if verdict.is_noise:
                     noise_dropped += 1
                     LOGGER.info("atomize: dropped noise slice %s:%s (%s)", session_key, slice_.slice_id, verdict.reason)
@@ -444,7 +445,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
             warnings.append(f"session {session_key}: {exc}; session {session_key} left in split")
             continue
         for slice_, referenced_fragments in prepared_writes:
-            verdict = classify_noise(slice_.frontmatter, slice_.body)
+            verdict = classify_noise(slice_.frontmatter, slice_.body, doc_corpus=doc_corpus)
             if verdict.is_noise:
                 noise_dropped += 1
                 LOGGER.info("atomize: dropped noise slice %s:%s (%s)", session_key, slice_.slice_id, verdict.reason)
@@ -499,11 +500,12 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
 
 
 def run(memory_root: Path, *, config: AtomizerConfig, config_hash: str, now: str,
-        dry_run: bool = False, promoter: Promoter | None = None) -> dict[str, Any]:
+        dry_run: bool = False, promoter: Promoter | None = None,
+        doc_corpus: "DocCorpus | None" = None) -> dict[str, Any]:
     promoter = promoter or IdentityPromoter()
     warnings: list[str] = []
     split, dry_run_fragments = _split_pass(memory_root, config, config_hash, now, dry_run, warnings)
-    slices, noise_dropped = _promote_pass(memory_root, config, config_hash, now, dry_run, promoter, warnings, dry_run_fragments)
+    slices, noise_dropped = _promote_pass(memory_root, config, config_hash, now, dry_run, promoter, warnings, dry_run_fragments, doc_corpus)
     return {
         "summary": {"split_sessions": split, "slices": slices, "skipped": len(warnings),
                     "noise_dropped": noise_dropped,

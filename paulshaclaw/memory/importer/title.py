@@ -23,6 +23,10 @@ _PROMPT = (
     "請用繁體中文為以下工作 session 下一個標題，最多 20 個字、單行、不要標點或引號：\n\n"
     "使用者需求：{prompt}\n\n助理結論：{summary}\n\n標題："
 )
+_ATOM_PROMPT = (
+    "請用繁體中文為以下筆記內容下一個精簡標題，最多 20 個字、單行、不要標點或引號：\n\n"
+    "{body}\n\n標題："
+)
 
 
 def _truncate(text: str, limit: int = _MAX) -> str:
@@ -87,6 +91,33 @@ def generate_title(
     except Exception:
         pass
     return _truncate(first_prompt) or _truncate(summary) or "(無內容)", "fallback"
+
+
+def generate_atom_title(
+    body: str,
+    *,
+    command: tuple[str, ...] = _DEFAULT_COMMAND,
+    timeout: int = 60,
+    runner: Callable[[str, tuple[str, ...], int], str] | None = None,
+) -> tuple[str | None, str]:
+    """Distill a <=20-char zh-TW title from a note body via gemma4.
+
+    Returns (title, source). On a reachable backend that yields a non-empty title,
+    source is 'gemma4'. When the backend is offline or yields nothing usable,
+    returns (None, 'offline') so callers can skip rather than stamp a junk title —
+    a one-shot retitle migration must not invent titles when the LLM is down (#151).
+    """
+    if not body.strip():
+        return None, "offline"
+    runner = runner or _default_runner
+    text = _ATOM_PROMPT.format(body=body[:1000])
+    try:
+        title = _truncate(runner(text, command, timeout))
+    except Exception:
+        return None, "offline"
+    if title:
+        return title, "gemma4"
+    return None, "offline"
 
 
 def _cache_path(memory_root: str | Path, session_id: str) -> Path:

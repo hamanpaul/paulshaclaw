@@ -7,12 +7,15 @@ from typing import Any
 from paulshaclaw.memory.moc import frontmatter_io
 
 
-_SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+# Keep Unicode word chars (letters incl. CJK, digits, underscore); fold every run
+# of other chars (punctuation, whitespace, symbols) to a single hyphen. Preserving
+# CJK is what stops pure-CJK titles collapsing to "untitled" (#151).
+_SLUG_STRIP = re.compile(r"[^\w]+", re.UNICODE)
 
 
 def slugify(title: str) -> str:
-    """Convert title to kebab-case slug."""
-    slug = _SLUG_STRIP.sub("-", title.strip().lower()).strip("-")
+    """Convert title to a slug, preserving CJK/Unicode letters; kebab-case ASCII."""
+    slug = _SLUG_STRIP.sub("-", title.strip().lower()).strip("-_")
     return slug or "untitled"
 
 
