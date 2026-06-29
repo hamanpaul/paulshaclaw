@@ -385,48 +385,54 @@ def _retitle_untitled(args: argparse.Namespace) -> int:
 def _memory_usage(args: argparse.Namespace) -> int:
     from collections import defaultdict
 
-    ledger = Path(args.memory_root) / "runtime" / "ledger" / "memory_usage.jsonl"
-    rows = []
-    if ledger.exists():
-        for line in ledger.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                e = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if args.since and str(e.get("ts", "")) < args.since:
-                continue
-            rows.append(e)
+    root = Path(args.memory_root)
+    led = root / "runtime" / "ledger"
 
-    agg = defaultdict(lambda: {"offered_count": 0, "cited_count": 0, "matched_count": 0, "last_used": ""})
-    for e in rows:
+    def _read_jsonl(p):
+        out = []
+        if p.exists():
+            for line in p.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if args.since and str(e.get("ts", "")) < args.since:
+                    continue
+                out.append(e)
+        return out
+
+    offered_rows = _read_jsonl(led / "offered.jsonl")
+    used_rows = [e for e in _read_jsonl(led / "memory_usage.jsonl") if e.get("source") == "read"]
+
+    agg = defaultdict(lambda: {"offered_count": 0, "read_count": 0, "last_read": ""})
+    sessions = set()
+    for e in offered_rows:
+        sessions.add(e.get("session_id"))
+        for o in e.get("offered", []):
+            sid = o.get("sl_id") if isinstance(o, dict) else o
+            if sid:
+                agg[sid]["offered_count"] += 1
+    for e in used_rows:
+        sid = e.get("sl_id")
+        if not sid:
+            continue
         ts = str(e.get("ts", ""))
-        for sid in e.get("offered", []):
-            agg[sid]["offered_count"] += 1
-        for sid in e.get("cited", []):
-            agg[sid]["cited_count"] += 1
-            if ts > agg[sid]["last_used"]:
-                agg[sid]["last_used"] = ts
-        for sid in e.get("matched", []):
-            agg[sid]["matched_count"] += 1
-            if ts > agg[sid]["last_used"]:
-                agg[sid]["last_used"] = ts
+        agg[sid]["read_count"] += 1
+        if ts > agg[sid]["last_read"]:
+            agg[sid]["last_read"] = ts
 
     slices = [{"slice_id": sid, **v} for sid, v in agg.items()]
-    slices.sort(key=lambda s: (s["cited_count"], s["matched_count"]), reverse=True)
-    never_used = sum(
-        1 for s in slices
-        if s["offered_count"] > 0 and s["cited_count"] == 0 and s["matched_count"] == 0
-    )
-    n = len(rows)
-    total_cited = sum(len(e.get("cited", [])) for e in rows)
-    total_matched = sum(len(e.get("matched", [])) for e in rows)
+    slices.sort(key=lambda s: (s["read_count"], s["offered_count"]), reverse=True)
+    never_read = sum(1 for s in slices if s["offered_count"] > 0 and s["read_count"] == 0)
+    n = len(sessions)
+    total_reads = len(used_rows)
     summary = {
-        "sessions": n, "slices": len(slices), "never_used": never_used,
-        "avg_cited_per_session": round(total_cited / n, 3) if n else 0.0,
-        "avg_matched_per_session": round(total_matched / n, 3) if n else 0.0,
+        "sessions": n, "slices": len(slices), "never_read": never_read,
+        "total_reads": total_reads,
+        "avg_reads_per_session": round(total_reads / n, 3) if n else 0.0,
     }
     report = {"summary": summary, "slices": slices}
 
@@ -434,12 +440,11 @@ def _memory_usage(args: argparse.Namespace) -> int:
         print(json.dumps(report, ensure_ascii=False))
     else:
         print(f"sessions={summary['sessions']} slices={summary['slices']} "
-              f"never_used={summary['never_used']} "
-              f"avg_cited/session={summary['avg_cited_per_session']} "
-              f"avg_matched/session={summary['avg_matched_per_session']}")
+              f"never_read={summary['never_read']} total_reads={summary['total_reads']} "
+              f"avg_reads/session={summary['avg_reads_per_session']}")
         for s in slices[:30]:
-            print(f"  {s['slice_id']}  offered={s['offered_count']} cited={s['cited_count']} "
-                  f"matched={s['matched_count']} last_used={s['last_used']}")
+            print(f"  {s['slice_id']}  offered={s['offered_count']} "
+                  f"read={s['read_count']} last_read={s['last_read']}")
     return 0
 
 
