@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Claude Code PostToolUse(Read) hook: record read-based memory usage attribution.
 
-When a Read targets a path under <memory_root>/knowledge/, append a `used` event
-(source="read", offered=bool) to memory_usage.jsonl. Any error -> no event, exit 0.
+memory-consumer: when a Read targets a path under the memory knowledge layer, append
+a `used` event (source="read", offered=bool) to memory_usage.jsonl. The slice content
+read is passed through policy.check_boundary (best-effort). Any error -> no event, exit 0.
 """
 from __future__ import annotations
 
@@ -21,16 +22,13 @@ _SLICE_FM = re.compile(r"^slice_id:\s*(\S+)", re.MULTILINE)
 _PROJECT_FM = re.compile(r"^project:\s*(\S+)", re.MULTILINE)
 
 
-def _frontmatter_field(path: Path, pattern: re.Pattern) -> str:
-    try:
-        head = path.read_text(encoding="utf-8", errors="ignore")[:2000]
-    except Exception:
-        return ""
-    m = pattern.search(head)
+def _match(text: str, pattern: re.Pattern) -> str:
+    m = pattern.search(text or "")
     return m.group(1).strip().strip("'\"") if m else ""
 
 
 def main() -> int:
+    from paulshaclaw.memory import policy  # memory-consumer: boundary-aware
     from paulshaclaw.memory.hooks._wakeup_common import (
         log_warn, memory_root, read_payload, sanitize_id,
     )
@@ -50,16 +48,39 @@ def main() -> int:
 
         session_id = str(payload.get("session_id") or "unknown")
         mpath = root / "runtime" / "wakeup" / f"{TOOL}__{sanitize_id(session_id)}.offered.json"
-        by_path = {}
+        by_path: dict = {}
         if mpath.exists():
             try:
                 by_path = json.loads(mpath.read_text(encoding="utf-8")).get("by_path", {})
             except Exception:
                 by_path = {}
 
-        sl_id = by_path.get(str(p)) or _frontmatter_field(p, _SLICE_FM)
-        offered = str(p) in by_path
-        project = _frontmatter_field(p, _PROJECT_FM)
+        # Offered-map keys are the verbatim shortlist paths (as build_index stored them,
+        # i.e. the un-resolved memory_root path). The agent Reads that exact string, but a
+        # symlinked memory root means str(p) (resolved) differs — so match raw / normalized
+        # / resolved candidates, else genuinely-offered reads mis-record offered=False.
+        candidates = [str(fp), str(Path(fp)), str(p)]
+        sl_id_offered = next((by_path[c] for c in candidates if c in by_path), "")
+        offered = bool(sl_id_offered)
+
+        head = ""
+        try:
+            head = p.read_text(encoding="utf-8", errors="ignore")[:2000]
+        except Exception:
+            head = ""
+        project = _match(head, _PROJECT_FM)
+        # Boundary-check the slice content we read (best-effort; content is already
+        # distilled upstream, so on failure we proceed rather than drop attribution).
+        try:
+            head = policy.check_boundary(
+                "external_to_raw", head,
+                project_slug=project or "_unknown", session_ref=session_id,
+            ).text
+        except Exception:
+            pass
+
+        sl_id = sl_id_offered or _match(head, _SLICE_FM)
+        project = project or _match(head, _PROJECT_FM)
 
         ev = {"ts": datetime.now(timezone.utc).isoformat(), "session_id": session_id,
               "tool": TOOL, "project": project, "sl_id": sl_id, "path": str(p),

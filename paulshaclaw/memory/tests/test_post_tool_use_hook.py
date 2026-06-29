@@ -54,3 +54,20 @@ def test_non_read_tool_no_event(tmp_path):
     _run(tmp_path, {"hook_event_name": "PostToolUse", "session_id": "s1", "tool_name": "Bash",
                     "tool_input": {"command": "ls"}, "cwd": "/x"})
     assert _events(tmp_path) == []
+
+
+def test_read_offered_under_symlinked_memory_root(tmp_path):
+    # Production: ~/.agents/memory is a symlink. build_index stores the UN-resolved path
+    # in the offered map; the agent Reads that same string; the hook must still match.
+    real = tmp_path / "real"
+    (real / "knowledge" / "proj").mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    note = link / "knowledge" / "proj" / "a.md"  # un-resolved (symlinked) path
+    note.write_text("---\nslice_id: sl-cccccccccccccccc\nproject: proj\n---\nx\n", encoding="utf-8")
+    _map(link, "s2", str(note), "sl-cccccccccccccccc")
+    _run(link, {"hook_event_name": "PostToolUse", "session_id": "s2", "tool_name": "Read",
+                "tool_input": {"file_path": str(note)}, "cwd": "/x"})
+    ev = _events(link)
+    assert len(ev) == 1 and ev[0]["offered"] is True
+    assert ev[0]["sl_id"] == "sl-cccccccccccccccc"
