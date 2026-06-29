@@ -407,6 +407,10 @@ class InstallerTest(unittest.TestCase):
             "copilot_session_start.py",
             "claude_precompact.py",
             "copilot_precompact.py",
+            # Consumption-loop hooks
+            "claude_user_prompt_submit.py",
+            "claude_post_tool_use.py",
+            "_shortlist_common.py",
         ):
             deployed = self.memory_root / "hooks" / script
             self.assertTrue(deployed.exists(), f"{script} not deployed")
@@ -464,6 +468,35 @@ class InstallerTest(unittest.TestCase):
         self.assertTrue(any("claude_precompact.py" in c for c in pre_commands), f"claude_precompact.py not found: {pre_commands}")
         self.assertTrue(any(f"PSC_MEMORY_ROOT={self.memory_root}" in c for c in start_commands), f"PSC_MEMORY_ROOT missing in SessionStart: {start_commands}")
         self.assertTrue(any(f"PSC_CONFIG_ROOT={self.config_root}" in c for c in start_commands), f"PSC_CONFIG_ROOT missing in SessionStart: {start_commands}")
+
+    def test_full_install_wires_consumption_loop_hooks(self):
+        """UserPromptSubmit + PostToolUse(matcher=Read) managed entries are registered,
+        coexist with a pre-existing UserPromptSubmit hook, and are idempotent."""
+        settings_path = self.config_root / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        # seed a pre-existing (non-managed) UserPromptSubmit hook, as in production (codegraph)
+        settings_path.write_text(json.dumps({"hooks": {"UserPromptSubmit": [
+            {"hooks": [{"type": "command", "command": "codegraph prompt-hook"}]}]}}), encoding="utf-8")
+
+        self.assertEqual(_run_install(self.base_args).returncode, 0)
+        self.assertEqual(_run_install(self.base_args).returncode, 0)  # idempotent re-run
+        settings = json.loads(settings_path.read_text())
+        hooks = settings.get("hooks", {})
+
+        ups = [h for e in hooks.get("UserPromptSubmit", []) for h in e.get("hooks", [])]
+        ups_cmds = [h.get("command", "") for h in ups]
+        self.assertTrue(any(c == "codegraph prompt-hook" for c in ups_cmds), "codegraph hook lost")
+        self.assertEqual(
+            sum("claude_user_prompt_submit.py" in c for c in ups_cmds), 1,
+            f"UserPromptSubmit memory hook not exactly-once: {ups_cmds}")
+
+        ptu_entries = hooks.get("PostToolUse", [])
+        read_mem = [
+            h for e in ptu_entries if e.get("matcher") == "Read"
+            for h in e.get("hooks", []) if "claude_post_tool_use.py" in h.get("command", "")
+        ]
+        self.assertEqual(len(read_mem), 1, f"PostToolUse(Read) memory hook not exactly-once: {ptu_entries}")
+        self.assertEqual(read_mem[0].get("managedBy"), "paulsha-memory")
 
     def test_full_install_writes_copilot_sessionstart_and_precompact_arrays(self):
         """Assert Copilot config contains sessionStart and preCompact arrays."""

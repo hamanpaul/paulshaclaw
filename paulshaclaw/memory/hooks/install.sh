@@ -167,7 +167,8 @@ hooks_src_dir="${repo_root}/paulshaclaw/memory/hooks"
 for script in install.sh uninstall.sh \
   claude_session_end.py codex_session_end.py copilot_session_end.py \
   _wakeup_common.py _bootstrap.py claude_session_start.py codex_session_start.py \
-  copilot_session_start.py claude_precompact.py copilot_precompact.py; do
+  copilot_session_start.py claude_precompact.py copilot_precompact.py \
+  claude_user_prompt_submit.py claude_post_tool_use.py _shortlist_common.py; do
   src="${hooks_src_dir}/${script}"
   dst="${memory_root}/hooks/${script}"
   if [[ -f "$src" ]]; then
@@ -198,6 +199,8 @@ install -d -m 700 "$(dirname "$claude_settings")"
 claude_session_end_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_session_end.py"
 claude_session_start_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_session_start.py"
 claude_precompact_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_precompact.py"
+claude_user_prompt_submit_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_user_prompt_submit.py"
+claude_post_tool_use_cmd="${hook_env_prefix} ${venv_python} ${hook_dir}/claude_post_tool_use.py"
 
 # Read existing JSON or start fresh
 if [[ -f "$claude_settings" ]]; then
@@ -207,7 +210,8 @@ else
 fi
 
 python3 - "$claude_settings" "$existing_claude" \
-  "$claude_session_end_cmd" "$claude_session_start_cmd" "$claude_precompact_cmd" <<'PYEOF'
+  "$claude_session_end_cmd" "$claude_session_start_cmd" "$claude_precompact_cmd" \
+  "$claude_user_prompt_submit_cmd" "$claude_post_tool_use_cmd" <<'PYEOF'
 import json, sys
 
 settings_path = sys.argv[1]
@@ -215,6 +219,8 @@ existing_json = sys.argv[2]
 session_end_cmd = sys.argv[3]
 session_start_cmd = sys.argv[4]
 precompact_cmd = sys.argv[5]
+user_prompt_submit_cmd = sys.argv[6]
+post_tool_use_cmd = sys.argv[7]
 
 try:
     settings = json.loads(existing_json)
@@ -252,7 +258,7 @@ def _is_managed_claude_hook(hook, script_markers):
         return False
     return any(parts[1].endswith(f"/hooks/{marker}") for marker in script_markers)
 
-def _reconcile_event(event_name, hook_command, script_marker):
+def _reconcile_event(event_name, hook_command, script_marker, matcher=""):
     """Reconcile a Claude hook event, removing old managed entries and adding the new one."""
     event_list = hooks.setdefault(event_name, [])
     if not isinstance(event_list, list):
@@ -276,13 +282,13 @@ def _reconcile_event(event_name, hook_command, script_marker):
         ]
         updated_entry = dict(entry)
         updated_entry["hooks"] = kept_hooks
-        if updated_entry.get("matcher", "") == "" and target_entry is None:
+        if updated_entry.get("matcher", "") == matcher and target_entry is None:
             target_entry = updated_entry
         if kept_hooks:
             updated_entries.append(updated_entry)
-    
+
     if target_entry is None:
-        target_entry = {"matcher": "", "hooks": []}
+        target_entry = {"matcher": matcher, "hooks": []}
         updated_entries.append(target_entry)
     
     target_entry["hooks"].append(
@@ -300,6 +306,8 @@ def _reconcile_event(event_name, hook_command, script_marker):
 _reconcile_event("SessionEnd", session_end_cmd, "claude_session_end.py")
 _reconcile_event("SessionStart", session_start_cmd, "claude_session_start.py")
 _reconcile_event("PreCompact", precompact_cmd, "claude_precompact.py")
+_reconcile_event("UserPromptSubmit", user_prompt_submit_cmd, "claude_user_prompt_submit.py")
+_reconcile_event("PostToolUse", post_tool_use_cmd, "claude_post_tool_use.py", matcher="Read")
 
 with open(settings_path, "w", encoding="utf-8") as f:
     json.dump(settings, f, indent=2, sort_keys=True)

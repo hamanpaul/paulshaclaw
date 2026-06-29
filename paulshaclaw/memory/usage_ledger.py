@@ -1,4 +1,9 @@
-"""Read offered + assistant transcript → memory_usage.jsonl event. Best-effort IO (#148)."""
+"""DEPRECATED: SessionEnd cited/matched `used` recorder (#148).
+
+`record_session_usage` is no longer wired (claude_session_end stopped calling it
+with the consumption-loop change); the `used` signal is now read-based via the
+PostToolUse(Read) hook. Retained for backward-compat only; may be removed later.
+"""
 
 from __future__ import annotations
 

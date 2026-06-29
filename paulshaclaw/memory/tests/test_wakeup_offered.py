@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,23 +8,35 @@ from unittest import mock
 from paulshaclaw.memory.hooks import _wakeup_common as wc
 
 
-class WakeupOfferedTests(unittest.TestCase):
-    def test_non_empty_brief_gets_preamble_and_writes_offered(self):
-        brief = "# wake\n- [[foo--sl-1234567890abcdef|Some Title]] — spec\n"
+class WakeupOrientationTests(unittest.TestCase):
+    def test_orientation_returned_and_no_session_offered_file(self):
+        orientation = (
+            "# 記憶 — proj\n\n記憶系統已啟用（本專案約 2 筆 knowledge）。"
+            "與當前任務相關的記憶會在每次 prompt 後以短清單浮現；用 Read 開啟清單中列出的絕對路徑即取全文。"
+        )
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with mock.patch.object(wc, "compute_brief", return_value=brief):
+            with mock.patch(
+                "paulshaclaw.memory.importer.project_resolver.resolve_project",
+                return_value="proj",
+            ), mock.patch(
+                "paulshaclaw.memory.wakeup.builder.build_orientation",
+                return_value=orientation,
+            ):
                 out = wc.compute_brief_and_record(root, "claude-code", "sess1", cwd="/x")
-            self.assertTrue(out.startswith("> 記憶使用追蹤"))
-            offered_file = root / "runtime" / "wakeup" / "claude-code__sess1.json"
-            self.assertTrue(offered_file.exists())
-            data = json.loads(offered_file.read_text(encoding="utf-8"))
-            self.assertEqual(data["offered"], [{"id": "sl-1234567890abcdef", "title": "Some Title"}])
+            # orientation is returned verbatim — no citation preamble prepended
+            self.assertEqual(out, orientation)
+            self.assertIn("Read", out)
+            # SessionStart no longer writes a session-wide offered file
+            self.assertFalse((root / "runtime" / "wakeup" / "claude-code__sess1.json").exists())
 
-    def test_empty_brief_no_preamble_no_file(self):
+    def test_unresolved_project_returns_empty_and_no_file(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
-            with mock.patch.object(wc, "compute_brief", return_value=""):
+            with mock.patch(
+                "paulshaclaw.memory.importer.project_resolver.resolve_project",
+                return_value="_unknown",
+            ):
                 out = wc.compute_brief_and_record(root, "claude-code", "sess2", cwd="/x")
             self.assertEqual(out, "")
             self.assertFalse((root / "runtime" / "wakeup" / "claude-code__sess2.json").exists())

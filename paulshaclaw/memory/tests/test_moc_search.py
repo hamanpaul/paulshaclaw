@@ -127,5 +127,49 @@ class SearchTests(unittest.TestCase):
         return rows
 
 
+def test_build_index_and_search_return_path(tmp_path):
+    from paulshaclaw.memory.moc import search as S
+    mr = tmp_path
+    k = mr / "knowledge" / "proj"
+    k.mkdir(parents=True)
+    note = k / "serialwrap.md"
+    note.write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-aaaaaaaaaaaaaaaa\n"
+        "project: proj\ntitle: SerialWrap\ncaptured_at: '2026-06-29T00:00:00Z'\n---\n"
+        "SerialWrap 執行抽象設計\n", encoding="utf-8")
+    S.build_index(mr, link_weights={})
+    hits = S.search(mr, '"SerialWrap"', project="proj", limit=5, include_decayed=True)
+    assert hits and hits[0]["slice_id"] == "sl-aaaaaaaaaaaaaaaa"
+    assert hits[0]["path"] == str(note)
+
+
+def test_build_index_excludes_noise_and_pool(tmp_path):
+    from paulshaclaw.memory.moc import search as S
+    from paulshaclaw.memory.noise import build_corpus
+    mr = tmp_path
+    k = mr / "knowledge" / "proj"; k.mkdir(parents=True)
+    # clean note
+    (k / "good.md").write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-good00000000000\nproject: proj\n"
+        "title: Good\nartifact_kind: spec\ncaptured_at: '2026-06-29T00:00:00Z'\n---\n真實 知識 內容\n",
+        encoding="utf-8")
+    # review-record (pool-excluded)
+    (k / "rev.md").write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-rev000000000000\nproject: proj\n"
+        "title: PR Review\nartifact_kind: review\ncaptured_at: '2026-06-29T00:00:00Z'\n---\nreview body\n",
+        encoding="utf-8")
+    # structural-echo noise (classify_noise)
+    (k / "echo.md").write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-echo00000000000\nproject: proj\n"
+        "title: X\nartifact_kind: report\ncaptured_at: '2026-06-29T00:00:00Z'\n---\n## CWD\n/tmp\n",
+        encoding="utf-8")
+    S.build_index(mr, link_weights={}, doc_corpus=build_corpus([]))
+    ids = {h["slice_id"] for h in S.search(mr, '"知識" OR "review" OR "CWD"',
+                                           project="proj", limit=10, include_decayed=True)}
+    assert "sl-good00000000000" in ids
+    assert "sl-rev000000000000" not in ids   # pool-excluded
+    assert "sl-echo00000000000" not in ids    # classify_noise
+
+
 if __name__ == "__main__":
     unittest.main()

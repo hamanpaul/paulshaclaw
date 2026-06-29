@@ -6,14 +6,13 @@ session start across claude / codex / copilot, install-independent hook
 bootstrap, hybrid project resolution from the session working directory,
 and installer wiring for the codex SessionStart hook.
 ## Requirements
-
 ### Requirement: Wake-up brief read-back injection
 
-On session start, the memory wake-up hook SHALL resolve the session's project, build a deterministic brief from that project's distilled memory, and return it to the agent as injected context. When the project cannot be resolved or has no memory, the hook SHALL return empty context. The hook SHALL NOT block, fail, or otherwise disrupt the agent session.
+On session start, the memory wake-up hook SHALL resolve the session's project and return a concise **orientation** as injected context: a short note that memory is active for the project (with active note count) and that task-relevant memories will surface per-prompt as a shortlist whose listed absolute paths the agent can Read to consume. The SessionStart brief SHALL NOT dump the project MOC or a large recent-slices list, and SHALL NOT prepend a 16-hex citation preamble. When the project cannot be resolved or has no memory, the hook SHALL return empty context. The hook SHALL NOT block, fail, or otherwise disrupt the agent session.
 
-#### Scenario: Known project yields a non-empty brief
+#### Scenario: Known project yields a concise orientation
 - **WHEN** a session starts in a directory that resolves to a project with existing knowledge atoms
-- **THEN** the hook returns injected context containing that project's MOC and recent slices, and the agent receives it at session start
+- **THEN** the hook returns injected context that is a short orientation (memory active, note count, per-prompt shortlist + Read-to-consume hint) and does NOT contain a full project MOC dump or a 16-hex citation preamble
 
 #### Scenario: Unknown or empty project yields empty context
 - **WHEN** a session starts in a directory that resolves to no project, or to a project with no atoms
@@ -70,3 +69,4 @@ Every memory hook SHALL be fail-safe: on any error it MUST write a warning to th
 #### Scenario: Hook error does not disrupt the session
 - **WHEN** a wake-up hook encounters any error while resolving the project or building the brief
 - **THEN** it logs the warning, emits empty injected context, exits zero, and the agent session is unaffected
+

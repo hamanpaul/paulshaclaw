@@ -1,8 +1,5 @@
-# stage2-memory-usage-telemetry Specification
+## MODIFIED Requirements
 
-## Purpose
-TBD - created by archiving change stage2-memory-usage-telemetry. Update Purpose after archive.
-## Requirements
 ### Requirement: usage 訊號擷取純函式
 
 系統 SHALL 於 `paulshaclaw/memory/usage.py` 保留純函式 `extract_offered(brief)`（從含 `[[stem--sl-id|title]]` wikilink 的文字抽 `(slice_id, title)`），供相容與工具用途。`extract_cited` / `extract_matched`（逐字 `sl-id` 回吐 / 標題逐字命中）SHALL 標記為 **deprecated、非規範**：二者 MUST NOT 再作為 `used` 主訊號（主訊號改為 read-based 歸因，見 `stage2-memory-read-attribution`）；保留僅為向後相容，得於後續另案移除。所有保留函式 MUST 為純函式、對畸形輸入回空集合而不丟例外。
@@ -27,3 +24,14 @@ TBD - created by archiving change stage2-memory-usage-telemetry. Update Purpose 
 - **WHEN** ledger 含某 slice 的 `source:"read"` used 事件
 - **THEN** 該 slice 的 `read_count` SHALL ≥1 且 `last_read` SHALL 反映最近事件時間
 
+## REMOVED Requirements
+
+### Requirement: SessionStart 記錄 offered 並提示引用
+
+**Reason**: 16-hex 引用前言（要 agent 回吐 `[[sl-id]]`）驅動假 0（RCA：6 session 全 cited:[]），且 SessionStart 在任務未知前注入無法做任務相關性。
+**Migration**: 引用前言移除；offered 改由 `stage2-memory-prompt-retrieval` 於 UserPromptSubmit per-prompt 記錄（含 sl_id+絕對路徑）。SessionStart brief 改為極簡 orientation（見 `stage2-memory-readback`），不再寫 session-wide offered 集。
+
+### Requirement: claude SessionEnd 擷取 used 並寫 durable ledger
+
+**Reason**: 逐字 `extract_cited`（要 agent 貼 16-hex id）/ `extract_matched`（標題逐字命中、47% 標題為佔位 `# AGENTS.md instruct`、~17% CJK 被砍斷）結構上無法偵測自然的 paraphrase 使用，產生假 0 為儀器地板。
+**Migration**: `used` 改由 `stage2-memory-read-attribution` 的 PostToolUse(Read) read-based 事件記錄（`source:"read"`），no-op/短 session 因「無 prompt→無 offered→無 used」自然不再產假 0 列。

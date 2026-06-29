@@ -197,3 +197,20 @@ def classify_noise(
         return NoiseVerdict(True, "doc-fragment")
 
     return NoiseVerdict(False, "")
+
+
+def pool_exclude_reason(frontmatter: Mapping[str, object]) -> str | None:
+    """Frontmatter-level, NON-deletion pool exclusion (canary/review). Returns a
+    reason string to keep a slice out of the retrieval pool, or None to keep it.
+
+    Distinct from classify_noise (body-based, deletion-grade): this only hides a
+    slice from search/shortlist; the file is never deleted, so the bar is looser.
+    """
+    kind = str(frontmatter.get("artifact_kind") or "").strip().lower()
+    if kind == "review":
+        return "review-record"
+    blob = " ".join(str(frontmatter.get(k, "")) for k in
+                    ("atom_title", "title", "session_title")).lower()
+    if kind == "task" and ("canary" in blob or "smoke" in blob):
+        return "canary-fixture"
+    return None
