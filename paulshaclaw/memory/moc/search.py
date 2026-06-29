@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..ledger import lifecycle
 from ..ledger import retrieval_set
+from ..noise import classify_noise, pool_exclude_reason
 from . import frontmatter_io as fio
 
 INDEX_WRITE_BATCH_SIZE = 100
@@ -19,7 +20,8 @@ def index_path(memory_root: Path) -> Path:
     return memory_root / "runtime" / "indexes" / "retrieval.db"
 
 
-def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
+def build_index(memory_root: Path, link_weights: dict[str, int],
+                doc_corpus: "object | None" = None) -> None:
     path = index_path(memory_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -65,6 +67,10 @@ def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
                     continue
                 sid = fm.get("slice_id")
                 if not sid:
+                    continue
+                if pool_exclude_reason(fm) is not None:
+                    continue
+                if classify_noise(fm, body, doc_corpus=doc_corpus).is_noise:
                     continue
                 rows.append((str(sid), str(fm.get("project", "")), str(fm.get("title", "")),
                              " ".join(fm.get("tags", []) if isinstance(fm.get("tags"), list) else []),

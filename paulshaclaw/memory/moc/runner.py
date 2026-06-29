@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .. import instruction_corpus
 from . import faceout, linker, moc_builder, naming, search
 
 
@@ -17,7 +18,7 @@ def run_moc(memory_root: Path, now: str) -> dict[str, Any]:
     moc_builder.build_mocs(memory_root, now)
     faceout.mark_faceout(memory_root)
     try:
-        search.build_index(memory_root, weights)
+        search.build_index(memory_root, weights, doc_corpus=instruction_corpus.load_corpus())
         indexed = True
     except Exception as exc:
         warnings.append(f"search index skipped: {exc}")
