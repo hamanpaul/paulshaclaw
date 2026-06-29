@@ -175,5 +175,17 @@ class DocFragmentTests(unittest.TestCase):
         self.assertFalse(classify_noise({}, body, doc_corpus=build_corpus([])).is_noise)
 
 
+def test_pool_exclude_reason_review_and_canary():
+    from paulshaclaw.memory.noise import pool_exclude_reason
+    assert pool_exclude_reason({"artifact_kind": "review"}) == "review-record"
+    assert pool_exclude_reason(
+        {"artifact_kind": "task", "atom_title": "canary-claude task context"}) == "canary-fixture"
+    assert pool_exclude_reason(
+        {"artifact_kind": "task", "session_title": "smoke test execution"}) == "canary-fixture"
+    # real knowledge is not excluded
+    assert pool_exclude_reason({"artifact_kind": "spec", "atom_title": "LLM Atomizer"}) is None
+    assert pool_exclude_reason({"artifact_kind": "task", "atom_title": "build P4 split"}) is None
+
+
 if __name__ == "__main__":
     unittest.main()
