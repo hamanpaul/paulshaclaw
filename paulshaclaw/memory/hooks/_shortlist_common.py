@@ -34,9 +34,10 @@ def _summary(path: str) -> str:
 def _redact(root: Path, tool: str, project: str, session_ref: str, text: str) -> str:
     """Boundary-check memory content before it is injected to the agent (memory-consumer).
 
-    Uses policy.check_boundary; best-effort and fail-OPEN: the slices are already
-    distilled at capture (raw_to_distilled), so on any policy/redaction error we
-    inject the original text rather than drop a useful shortlist.
+    Uses policy.check_boundary and FAILS CLOSED: if the safety check is unavailable
+    (any policy load/runtime error) we return "" so no un-redacted memory text reaches
+    the model context. check_boundary loads a default policy and succeeds in normal
+    operation, so this only suppresses the shortlist on a genuine redaction failure.
     """
     try:
         from paulshaclaw.memory import policy
@@ -45,8 +46,8 @@ def _redact(root: Path, tool: str, project: str, session_ref: str, text: str) ->
             session_ref=session_ref,
         ).text
     except Exception as exc:
-        log_warn(root, tool, f"shortlist redaction skipped: {exc}")
-        return text
+        log_warn(root, tool, f"shortlist redaction failed; suppressing shortlist: {exc}")
+        return ""
 
 
 def _record_offered(root: Path, tool: str, session_id: str, project: str,
@@ -102,6 +103,10 @@ def build_shortlist_and_record(root: Path, tool: str, session_id: str,
         for h in hits:
             h["summary"] = _summary(h.get("path", ""))
         block = _redact(root, tool, project, session_id, format_shortlist(hits))
+        if not block:
+            # fail-closed: redaction suppressed the shortlist -> inject nothing and do
+            # NOT record offered (nothing was surfaced to the agent).
+            return ""
         offered = [(h["slice_id"], h["path"]) for h in hits if h.get("path")]
         _record_offered(root, tool, session_id, project, offered)
         return block

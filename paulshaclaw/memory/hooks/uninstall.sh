@@ -75,7 +75,8 @@ try:
 except Exception:
     sys.exit(0)
 
-script_markers = ["claude_session_end.py", "claude_session_start.py", "claude_precompact.py"]
+script_markers = ["claude_session_end.py", "claude_session_start.py", "claude_precompact.py",
+                  "claude_user_prompt_submit.py", "claude_post_tool_use.py"]
 
 def _command_parts(command):
     parts = command.strip().split()
@@ -123,7 +124,7 @@ def _filter_event(event_name):
     return filtered
 
 settings.setdefault("hooks", {})
-for event_name in ["SessionEnd", "SessionStart", "PreCompact"]:
+for event_name in ["SessionEnd", "SessionStart", "PreCompact", "UserPromptSubmit", "PostToolUse"]:
     settings["hooks"][event_name] = _filter_event(event_name)
 
 with open(settings_path, "w", encoding="utf-8") as f:

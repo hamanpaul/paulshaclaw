@@ -45,3 +45,20 @@ def test_shortlist_no_match_returns_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(SC, "resolve_project", lambda cwd, memory_root: "proj")
     _seed(tmp_path)
     assert SC.build_shortlist_and_record(tmp_path, "claude-code", "s", cwd="/x", prompt="zzzznomatch") == ""
+
+
+def test_shortlist_fails_closed_when_redaction_raises(tmp_path, monkeypatch):
+    # If the boundary/redaction check is unavailable, NO un-redacted memory text is
+    # injected and NOTHING is recorded as offered (fail-closed).
+    monkeypatch.setattr(SC, "resolve_project", lambda cwd, memory_root: "proj")
+    _seed(tmp_path)
+    import paulshaclaw.memory.policy as pol
+
+    def _boom(*a, **k):
+        raise RuntimeError("policy unavailable")
+
+    monkeypatch.setattr(pol, "check_boundary", _boom)
+    out = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidX", cwd="/x", prompt="SerialWrap 執行")
+    assert out == ""  # no shortlist injected
+    assert not (tmp_path / "runtime" / "ledger" / "offered.jsonl").exists()
+    assert not (tmp_path / "runtime" / "wakeup" / "claude-code__sidX.offered.json").exists()
