@@ -127,5 +127,21 @@ class SearchTests(unittest.TestCase):
         return rows
 
 
+def test_build_index_and_search_return_path(tmp_path):
+    from paulshaclaw.memory.moc import search as S
+    mr = tmp_path
+    k = mr / "knowledge" / "proj"
+    k.mkdir(parents=True)
+    note = k / "serialwrap.md"
+    note.write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-aaaaaaaaaaaaaaaa\n"
+        "project: proj\ntitle: SerialWrap\ncaptured_at: '2026-06-29T00:00:00Z'\n---\n"
+        "SerialWrap 執行抽象設計\n", encoding="utf-8")
+    S.build_index(mr, link_weights={})
+    hits = S.search(mr, '"SerialWrap"', project="proj", limit=5, include_decayed=True)
+    assert hits and hits[0]["slice_id"] == "sl-aaaaaaaaaaaaaaaa"
+    assert hits[0]["path"] == str(note)
+
+
 if __name__ == "__main__":
     unittest.main()

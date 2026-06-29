@@ -29,11 +29,11 @@ def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
         conn.execute("CREATE VIRTUAL TABLE slices_fts USING fts5("
                      "slice_id UNINDEXED, project, title, tags, body, tokenize='unicode61')")
         conn.execute("CREATE TABLE slice_meta (slice_id TEXT PRIMARY KEY, project TEXT, "
-                     "captured_at TEXT, active INTEGER, link_weight INTEGER)")
+                     "captured_at TEXT, active INTEGER, link_weight INTEGER, path TEXT)")
         knowledge = memory_root / "knowledge"
         events = lifecycle.read_events(memory_root)
 
-        def flush_batch(rows: list[tuple[str, str, str, str, str, str]]) -> None:
+        def flush_batch(rows: list[tuple[str, str, str, str, str, str, str]]) -> None:
             if not rows:
                 return
             active = set(
@@ -45,17 +45,19 @@ def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
             )
             conn.executemany(
                 "INSERT INTO slices_fts VALUES (?,?,?,?,?)",
-                [(sid, project, title, tags, body) for sid, project, title, tags, body, _captured_at in rows],
+                [(sid, project, title, tags, body)
+                 for sid, project, title, tags, body, _captured_at, _path in rows],
             )
             conn.executemany(
-                "INSERT INTO slice_meta VALUES (?,?,?,?,?)",
+                "INSERT INTO slice_meta VALUES (?,?,?,?,?,?)",
                 [
-                    (sid, project, captured_at, 1 if sid in active else 0, link_weights.get(sid, 0))
-                    for sid, project, _title, _tags, _body, captured_at in rows
+                    (sid, project, captured_at, 1 if sid in active else 0,
+                     link_weights.get(sid, 0), fpath)
+                    for sid, project, _title, _tags, _body, captured_at, fpath in rows
                 ],
             )
 
-        rows: list[tuple[str, str, str, str, str, str]] = []
+        rows: list[tuple[str, str, str, str, str, str, str]] = []
         if knowledge.exists():
             for fpath in sorted(knowledge.rglob("*.md")):
                 fm, body = fio.read(fpath.read_text(encoding="utf-8"))
@@ -66,7 +68,7 @@ def build_index(memory_root: Path, link_weights: dict[str, int]) -> None:
                     continue
                 rows.append((str(sid), str(fm.get("project", "")), str(fm.get("title", "")),
                              " ".join(fm.get("tags", []) if isinstance(fm.get("tags"), list) else []),
-                             body, str(fm.get("captured_at", ""))))
+                             body, str(fm.get("captured_at", "")), str(fpath)))
                 if len(rows) >= INDEX_WRITE_BATCH_SIZE:
                     flush_batch(rows)
                     rows.clear()
@@ -83,7 +85,8 @@ def search(memory_root: Path, query: str, *, project: str | None, limit: int,
         raise SearchIndexError("search index not built; run the dream/moc pass first")
     conn = sqlite3.connect(path)
     try:
-        sql = ("SELECT f.slice_id, m.project, f.title, bm25(slices_fts) AS bm, m.link_weight, m.active "
+        sql = ("SELECT f.slice_id, m.project, f.title, bm25(slices_fts) AS bm, "
+               "m.link_weight, m.active, m.path "
                "FROM slices_fts f JOIN slice_meta m ON m.slice_id = f.slice_id "
                "WHERE slices_fts MATCH ?")
         params: list[object] = [query]
@@ -99,4 +102,5 @@ def search(memory_root: Path, query: str, *, project: str | None, limit: int,
         conn.close()
     # rank: lower bm25 is better; add link_weight boost. (recency omitted for determinism in MVP test.)
     ranked = sorted(rows, key=lambda r: (r[3] - 0.1 * (r[4] or 0)))
-    return [{"slice_id": r[0], "project": r[1], "title": r[2], "score": r[3]} for r in ranked[:limit]]
+    return [{"slice_id": r[0], "project": r[1], "title": r[2], "score": r[3], "path": r[6]}
+            for r in ranked[:limit]]
