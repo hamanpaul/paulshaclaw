@@ -371,5 +371,21 @@ class WakeupBuilderTests(unittest.TestCase):
             self.assertEqual(requested_limits, [64, 50])
 
 
+def test_build_orientation_concise(tmp_path):
+    from paulshaclaw.memory.wakeup.builder import build_orientation
+    k = tmp_path / "knowledge" / "proj"; k.mkdir(parents=True)
+    (k / "a.md").write_text("---\nmemory_layer: knowledge\nslice_id: sl-a\n---\nx\n", encoding="utf-8")
+    (k / "b.md").write_text("---\nmemory_layer: knowledge\nslice_id: sl-b\n---\ny\n", encoding="utf-8")
+    (k / "proj-moc.md").write_text("# moc\n", encoding="utf-8")  # excluded from count
+    out = build_orientation(tmp_path, "proj")
+    assert "Read" in out and "2" in out
+    assert "## Map" not in out and "[[" not in out  # no MOC dump, no wikilinks
+
+
+def test_build_orientation_empty_when_no_notes(tmp_path):
+    from paulshaclaw.memory.wakeup.builder import build_orientation
+    assert build_orientation(tmp_path, "proj") == ""
+
+
 if __name__ == "__main__":
     unittest.main()

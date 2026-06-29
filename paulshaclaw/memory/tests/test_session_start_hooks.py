@@ -180,9 +180,9 @@ class SessionStartHooksTest(unittest.TestCase):
         brief = output["hookSpecificOutput"]["additionalContext"]
         self.assertIsInstance(brief, str)
         # When MOC and slices are present, brief should be non-empty and include wake-up header and MOC text
-        self.assertTrue(len(brief) > 0, "expected non-empty brief when MOC/slices present")
-        self.assertIn("Memory wake-up", brief)
-        self.assertIn("Test MOC content", brief)
+        self.assertTrue(len(brief) > 0, "expected non-empty orientation when notes present")
+        self.assertIn("記憶系統已啟用", brief)
+        self.assertIn("Read", brief)
 
     def test_claude_session_start_quiet_when_project_unresolved(self):
         """No output when project is _unknown or empty."""
@@ -243,9 +243,9 @@ class SessionStartHooksTest(unittest.TestCase):
         self.assertIn("additionalContext", output)
         brief = output["additionalContext"]
         self.assertIsInstance(brief, str)
-        self.assertTrue(len(brief) > 0, "expected non-empty brief when MOC/slices present")
-        self.assertIn("Memory wake-up", brief)
-        self.assertIn("Test MOC content", brief)
+        self.assertTrue(len(brief) > 0, "expected non-empty orientation when notes present")
+        self.assertIn("記憶系統已啟用", brief)
+        self.assertIn("Read", brief)
 
     def test_copilot_session_start_quiet_when_project_unresolved(self):
         """No output when project is _unknown or empty."""
@@ -290,9 +290,9 @@ class SessionStartHooksTest(unittest.TestCase):
         self.assertIn("hookSpecificOutput", output)
         brief = output["hookSpecificOutput"]["additionalContext"]
         self.assertIsInstance(brief, str)
-        self.assertTrue(len(brief) > 0, "expected non-empty brief when MOC/slices present")
-        self.assertIn("Memory wake-up", brief)
-        self.assertIn("Test MOC content", brief)
+        self.assertTrue(len(brief) > 0, "expected non-empty orientation when notes present")
+        self.assertIn("記憶系統已啟用", brief)
+        self.assertIn("Read", brief)
 
     def test_codex_session_start_exits_zero_on_non_object_json(self):
         result = _run_hook("codex_session_start.py", [], extra_env=self._env())

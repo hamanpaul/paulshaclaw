@@ -315,3 +315,19 @@ def build_brief(memory_root: Path, project: str, *, now: str, k: int = 8, char_b
                 # as last resort, truncate the result to budget
                 return clamp(result, char_budget)
             return result
+
+
+def build_orientation(memory_root, project: str) -> str:
+    """Concise SessionStart orientation (no MOC dump). '' when project has no notes."""
+    from pathlib import Path as _Path
+    from ..atomizer.config import sanitize_project_component
+    safe = sanitize_project_component(project)
+    pdir = _Path(memory_root) / "knowledge" / safe
+    n = 0
+    if pdir.exists():
+        n = sum(1 for p in pdir.glob("*.md") if not p.name.endswith("-moc.md"))
+    if n == 0:
+        return ""
+    return (f"# 記憶 — {project}\n\n"
+            f"記憶系統已啟用（本專案約 {n} 筆 knowledge）。與當前任務相關的記憶會在每次 "
+            f"prompt 後以短清單浮現；用 Read 開啟清單中列出的絕對路徑即取全文。")
