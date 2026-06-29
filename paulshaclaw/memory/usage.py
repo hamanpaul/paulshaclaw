@@ -1,15 +1,17 @@
-"""Memory consumption telemetry helpers (#148). Pure functions, no IO."""
+"""Memory consumption telemetry helpers (#148). Pure functions, no IO.
+
+DEPRECATED signal path: extract_cited / extract_matched were the original `used`
+detectors. They are NON-NORMATIVE as of the consumption-loop change — they could
+only fire on an agent echoing an opaque 16-hex id or a verbatim title, which drove
+false 0s. The `used` signal is now read-based (PostToolUse(Read), capability
+stage2-memory-read-attribution). These remain only for backward-compat and may be
+removed in a follow-up. extract_offered is retained for compatibility/tooling.
+"""
 
 from __future__ import annotations
 
 import re
 from typing import Iterable
-
-# Prepended to a non-empty wake-up brief so agents can mark which memories they used.
-CITATION_PREAMBLE = (
-    "> 記憶使用追蹤：若你在本次工作中參考了下列任一條記憶，請在回覆中標註其 "
-    "`[[sl-xxxxxxxxxxxxxxxx]]`（16-hex id），以便評估記憶實際效用。\n\n"
-)
 
 # Assumes canonical lowercase 16-hex slice ids (production slice_id is "sl-" + sha[:16]).
 _SLICE_ID = re.compile(r"sl-[0-9a-f]{16}")
@@ -32,7 +34,8 @@ def extract_offered(brief: str) -> list[tuple[str, str]]:
 
 
 def extract_cited(assistant_text: str, offered_ids: Iterable[str]) -> set[str]:
-    """Slice ids the agent explicitly referenced (in [[..]] or bare) that were offered."""
+    """DEPRECATED (non-normative): slice ids the agent echoed (in [[..]] or bare) that
+    were offered. No longer the `used` signal — see module docstring."""
     offered = set(offered_ids)
     return {sid for sid in _SLICE_ID.findall(assistant_text or "") if sid in offered}
 
@@ -40,7 +43,8 @@ def extract_cited(assistant_text: str, offered_ids: Iterable[str]) -> set[str]:
 def extract_matched(
     assistant_text: str, offered: Iterable[tuple[str, str]], *, exclude: Iterable[str] = ()
 ) -> set[str]:
-    """Offered ids whose (>=8 char) title appears verbatim in assistant text, minus exclude."""
+    """DEPRECATED (non-normative): offered ids whose (>=8 char) title appears verbatim in
+    assistant text, minus exclude. No longer the `used` signal — see module docstring."""
     text = assistant_text or ""
     skip = set(exclude)
     out: set[str] = set()

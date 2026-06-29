@@ -37,3 +37,11 @@ def test_format_shortlist_lines():
 
 def test_format_shortlist_empty_is_empty_string():
     assert format_shortlist([]) == ""
+
+
+def test_to_fts_query_drops_stopwords():
+    q = to_fts_query("how do I fix the login bug")
+    assert '"fix"' in q and '"login"' in q and '"bug"' in q
+    assert '"how"' not in q and '"the"' not in q and '"do"' not in q
+    # a stopword-only prompt yields no query -> caller injects nothing
+    assert to_fts_query("please help me with this") == ""

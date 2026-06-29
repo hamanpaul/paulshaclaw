@@ -31,6 +31,24 @@ def _summary(path: str) -> str:
     return ""
 
 
+def _redact(root: Path, tool: str, project: str, session_ref: str, text: str) -> str:
+    """Boundary-check memory content before it is injected to the agent (memory-consumer).
+
+    Uses policy.check_boundary; best-effort and fail-OPEN: the slices are already
+    distilled at capture (raw_to_distilled), so on any policy/redaction error we
+    inject the original text rather than drop a useful shortlist.
+    """
+    try:
+        from paulshaclaw.memory import policy
+        return policy.check_boundary(
+            "external_to_raw", text, project_slug=project or "_unknown",
+            session_ref=session_ref,
+        ).text
+    except Exception as exc:
+        log_warn(root, tool, f"shortlist redaction skipped: {exc}")
+        return text
+
+
 def _record_offered(root: Path, tool: str, session_id: str, project: str,
                     offered: list[tuple[str, str]]) -> None:
     """Append offered ledger + accumulate per-session sl_id<->path map. Best-effort."""
@@ -83,7 +101,7 @@ def build_shortlist_and_record(root: Path, tool: str, session_id: str,
             return ""
         for h in hits:
             h["summary"] = _summary(h.get("path", ""))
-        block = format_shortlist(hits)
+        block = _redact(root, tool, project, session_id, format_shortlist(hits))
         offered = [(h["slice_id"], h["path"]) for h in hits if h.get("path")]
         _record_offered(root, tool, session_id, project, offered)
         return block

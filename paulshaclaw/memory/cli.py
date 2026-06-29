@@ -416,9 +416,10 @@ def _memory_usage(args: argparse.Namespace) -> int:
             if sid:
                 agg[sid]["offered_count"] += 1
     for e in used_rows:
-        sid = e.get("sl_id")
-        if not sid:
-            continue
+        # Count the session even when the read was not from an offered/attributable
+        # slice, so avg_reads_per_session is not skewed by offered-only session counting.
+        sessions.add(e.get("session_id"))
+        sid = e.get("sl_id") or "(unattributed)"
         ts = str(e.get("ts", ""))
         agg[sid]["read_count"] += 1
         if ts > agg[sid]["last_read"]:

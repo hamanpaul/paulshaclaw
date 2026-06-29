@@ -325,7 +325,8 @@ def build_orientation(memory_root, project: str) -> str:
     pdir = _Path(memory_root) / "knowledge" / safe
     n = 0
     if pdir.exists():
-        n = sum(1 for p in pdir.glob("*.md") if not p.name.endswith("-moc.md"))
+        # rglob for parity with build_index's knowledge walk (count is approximate, "約").
+        n = sum(1 for p in pdir.rglob("*.md") if not p.name.endswith("-moc.md"))
     if n == 0:
         return ""
     return (f"# 記憶 — {project}\n\n"
