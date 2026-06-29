@@ -214,6 +214,17 @@ start_manager_service() {
     echo "manager service skipped: systemctl --user unavailable (WSL no user systemd?)" >&2
     return 0
   fi
+  # #155: timer unit 若未從 deploy/templates 實例化到 ~/.config/systemd/user，
+  # 直接 `systemctl start` 會 Unit-not-found。首次啟動先跑 installer
+  # （render→daemon-reload→enable --now）；已安裝則不重裝，只 toggle。
+  local installer="${PSC_MANAGER_INSTALLER:-${script_dir:-.}/coordinator/install-manager-units.sh}"
+  if [[ ! -f "$HOME/.config/systemd/user/${instance}-manager.timer" ]]; then
+    echo "manager timer unit 未安裝，執行 install-manager-units.sh ..."
+    if ! "${installer}" "${instance}"; then
+      echo "manager units install failed (non-fatal)" >&2
+      return 0
+    fi
+  fi
   if systemctl --user start "${instance}-manager.timer"; then
     echo "manager timer started (${instance}-manager.timer)"
   else

@@ -32,6 +32,18 @@ def _write_stub(d: Path, name: str, body: str) -> None:
     p.chmod(0o755)
 
 
+def _systemctl_ok(sd: Path, log: Path) -> None:
+    """systemctl 樁：所有子命令成功，並把 argv 記到 log。"""
+    _write_stub(sd, "systemctl", f'echo "$*" >> "{log}"\nexit 0\n')
+
+
+def _make_unit(home: Path, instance: str) -> None:
+    """模擬 timer unit 已實例化到 ~/.config/systemd/user。"""
+    unit_dir = home / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    (unit_dir / f"{instance}-manager.timer").write_text("[Timer]\n", encoding="utf-8")
+
+
 class StartManagerServiceTests(unittest.TestCase):
     def test_disabled_skips(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -51,15 +63,61 @@ class StartManagerServiceTests(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stderr)
             self.assertIn("skipped", res.stderr + res.stdout)
 
-    def test_starts_timer(self) -> None:
+    def test_starts_timer_when_unit_present(self) -> None:
+        # unit 已安裝 → 不重裝，直接 start
         with tempfile.TemporaryDirectory() as d:
-            sd = Path(d)
-            log = sd / "calls.log"
-            _write_stub(sd, "systemctl", f'echo "$*" >> "{log}"\nexit 0\n')
-            res = _run(sd, {"PSC_INSTANCE": "demo"})
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            _make_unit(home, "demo")
+            sd = root / "stub"
+            sd.mkdir()
+            calls = root / "calls.log"
+            _systemctl_ok(sd, calls)
+            installer_log = root / "installer.log"
+            installer = root / "installer.sh"
+            _write_stub(installer.parent, installer.name, f'echo "INSTALL $*" >> "{installer_log}"\nexit 0\n')
+            res = _run(sd, {"PSC_INSTANCE": "demo", "HOME": str(home), "PSC_MANAGER_INSTALLER": str(installer)})
             self.assertEqual(res.returncode, 0, res.stderr)
-            calls = log.read_text(encoding="utf-8") if log.exists() else ""
-            self.assertIn("--user start demo-manager.timer", calls)
+            self.assertIn("--user start demo-manager.timer", calls.read_text(encoding="utf-8"))
+            self.assertFalse(installer_log.exists(), "unit 已存在不應重裝")
+
+    def test_installs_when_unit_absent(self) -> None:
+        # unit 未實例化 → 先跑 installer，再 start（修 #155）
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            sd = root / "stub"
+            sd.mkdir()
+            calls = root / "calls.log"
+            _systemctl_ok(sd, calls)
+            installer_log = root / "installer.log"
+            installer = root / "installer.sh"
+            _write_stub(installer.parent, installer.name, f'echo "INSTALL $*" >> "{installer_log}"\nexit 0\n')
+            res = _run(sd, {"PSC_INSTANCE": "demo", "HOME": str(home), "PSC_MANAGER_INSTALLER": str(installer)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertTrue(installer_log.exists(), "unit 不存在時必須呼叫 installer")
+            self.assertIn("INSTALL demo", installer_log.read_text(encoding="utf-8"))
+            self.assertIn("--user start demo-manager.timer", calls.read_text(encoding="utf-8"))
+
+    def test_install_failure_non_fatal(self) -> None:
+        # installer 失敗 → graceful（returncode 0），且不嘗試 start
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            home = root / "home"
+            home.mkdir()
+            sd = root / "stub"
+            sd.mkdir()
+            calls = root / "calls.log"
+            _systemctl_ok(sd, calls)
+            installer = root / "installer.sh"
+            _write_stub(installer.parent, installer.name, "exit 1\n")
+            res = _run(sd, {"PSC_INSTANCE": "demo", "HOME": str(home), "PSC_MANAGER_INSTALLER": str(installer)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            calls_text = calls.read_text(encoding="utf-8") if calls.exists() else ""
+            self.assertNotIn("--user start demo-manager.timer", calls_text)
+            self.assertIn("install failed", res.stderr + res.stdout)
 
 
 if __name__ == "__main__":
