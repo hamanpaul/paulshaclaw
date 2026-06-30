@@ -3,6 +3,8 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 
+from . import branding
+
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
@@ -123,6 +125,7 @@ class CockpitApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static("", id="brand-banner")  # 破蝦哥 🦞 banner（issue #116）；內容於 on_mount 填入
         with Horizontal():
             with Vertical(id="left-pane"):
                 yield Static("", id="active-slot")
@@ -133,6 +136,15 @@ class CockpitApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
+        # 吉祥物（破蝦哥 🦞）品牌（issue #116）：標題前綴 + 置頂 banner C。皆 fail-soft，絕不擋 TUI 啟動。
+        try:
+            self.title = branding.cockpit_title()
+        except Exception:
+            pass
+        try:
+            self.query_one("#brand-banner", Static).update(self._brand_banner_renderable())
+        except Exception:
+            pass
         self._refresh_widgets()
         # Keep the work list live: re-read panes on a fixed interval (bounded
         # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
@@ -148,6 +160,16 @@ class CockpitApp(App[None]):
         except Exception:
             # fallback stubs may not support focus; ignore
             pass
+
+    def _brand_banner_renderable(self):
+        """破蝦哥 banner C；有 rich 時用 Text.from_ansi 上色，否則回純字串（NO_COLOR 已去色）。"""
+        art = branding.banner("c")
+        try:
+            from rich.text import Text
+
+            return Text.from_ansi(art)
+        except Exception:
+            return art
 
     def on_list_view_highlighted(self, event: object) -> None:
         try:
