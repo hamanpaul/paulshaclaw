@@ -12,4 +12,11 @@ if [[ -n "$target" ]]; then
   printf '%s\n' "$msg" >>"$target" 2>/dev/null || true
 fi
 
+# #120 Half 1: 僅 manager 派工（launcher 注入 PSC_SLICE_ID）才推 Telegram；
+# 互動 session 無 slice → no-op，避免灌爆。broadcast（不帶 --source-user-id）。
+reply_bridge="${PSC_REPLY_BRIDGE:-$HOME/.agents/skills/bro/scripts/reply_bridge.py}"
+if [[ "$slice" != "unknown" && -f "$reply_bridge" ]]; then
+  python3 "$reply_bridge" --text "$msg" >/dev/null 2>&1 || true
+fi
+
 exit 0
