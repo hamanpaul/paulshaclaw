@@ -289,6 +289,49 @@ class RunTickTests(unittest.TestCase):
             self.assertEqual(summary["dispatched"], [])
             self.assertFalse(summary["dispatch_skipped"])
 
+    def test_reaper_result_recorded_in_summary(self) -> None:
+        # 收尾 janitor（#161）：傳入 reaper → complete 後呼叫一次，結果進 summary["reaped"]
+        calls = []
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "z")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            summary = manager.run_tick(
+                disp, metas=[], handoff_dir=str(hdir), clock=lambda: "T0",
+                reaper=lambda: calls.append(1) or {"ran": True, "applied": True, "returncode": 0},
+            )
+            self.assertEqual(calls, [1])
+            self.assertEqual(summary["reaped"], {"ran": True, "applied": True, "returncode": 0})
+            self.assertEqual(summary["completed"], [{"slice_id": "z", "gate_status": "passed"}])
+
+    def test_reaper_exception_does_not_break_tick(self) -> None:
+        # janitor 失敗一律不破壞 tick：reaped=None、errors 收 stage=reap、完成側照常
+        def _boom():
+            raise RuntimeError("reap 爆炸")
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "w")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            summary = manager.run_tick(
+                disp, metas=[], handoff_dir=str(hdir), clock=lambda: "T0", reaper=_boom,
+            )
+            self.assertIsNone(summary["reaped"])
+            self.assertTrue(any(e.get("stage") == "reap" for e in summary["errors"]))
+            self.assertEqual(summary["completed"], [{"slice_id": "w", "gate_status": "passed"}])
+
+    def test_no_reaper_disables_janitor(self) -> None:
+        # 預設不傳 reaper → reaped=None，且不產生 reap 相關 error（單測不誤觸真實回收）
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            disp = FakeDispatcher(reg, poll_map={})
+            hdir = Path(d) / "handoff"
+            summary = manager.run_tick(disp, metas=[], handoff_dir=str(hdir), clock=lambda: "T0")
+            self.assertIsNone(summary["reaped"])
+            self.assertFalse(any(e.get("stage") == "reap" for e in summary["errors"]))
+
 
 class _HeadlessDispatcher:
     """有 _registry 的 fake：供 dispatch_ready 記 job + complete_tick poll。"""

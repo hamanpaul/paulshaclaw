@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Sequence
 
-from . import autonomy, manager
+from . import autonomy, broker_reaper, manager
 from .dispatcher import Dispatcher
 from .launcher import _ARGV_BUILDERS, AgentLauncher, SubprocessLauncher
 from .registry import JobRegistry
@@ -86,6 +86,10 @@ def _build_parser() -> argparse.ArgumentParser:
     p_tick.add_argument("--max-load", type=float, default=1.0)
     p_tick.add_argument("--allow-unsafe", action="store_true")
     p_tick.add_argument("--model", default=None)
+    p_tick.add_argument(
+        "--no-reap", dest="reap", action="store_false", default=True,
+        help="關閉收尾孤兒 codex broker 回收（預設開；issue #161）",
+    )
 
     return parser
 
@@ -99,6 +103,7 @@ def main(
     is_satisfied=None,
     git_runner=None,
     launcher: AgentLauncher | None = None,
+    reaper=None,
 ) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -152,10 +157,18 @@ def main(
         active_launcher = _resolve_launcher(
             args.executor, launcher, allow_unsafe=args.allow_unsafe, model=args.model
         )
+        # 收尾 janitor（issue #161）：預設開（--no-reap 關）。注入優先（測試），否則接固化腳本。
+        if args.reap:
+            active_reaper = reaper if reaper is not None else (
+                lambda: broker_reaper.reap_orphan_brokers(apply=True)
+            )
+        else:
+            active_reaper = None
         summary = manager.run_tick(
             disp, metas=metas, launcher=active_launcher, persona=args.persona,
             is_satisfied=predicate, handoff_dir=args.handoff_dir,
             require_idle=args.require_idle, max_load=args.max_load,
+            reaper=active_reaper,
         )
         print(json.dumps(summary, ensure_ascii=False))
         return 0
