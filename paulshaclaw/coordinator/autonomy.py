@@ -7,6 +7,7 @@ from typing import Callable
 import yaml
 
 from .contract_command import build_dispatch_prompt
+from .dispatcher import _default_git_runner
 from .launcher import AgentLauncher, LaunchHandle
 
 # is_satisfied predicate 型別：收 slice_id，回該相依是否「已滿足」（可釋放下游）。
@@ -235,6 +236,11 @@ def dispatch_ready(
     prompt 構建（build_dispatch_prompt）置於 per-slice try/except 內（reviewer #112-2）：
     未知 role / render 失敗只影響該單位，被收進 errors，不破壞其他就緒單位的派工隔離。
     回 dispatched jobs；有任何單位失敗 → 收齊後 raise DispatchReadyError（帶成功 jobs）。
+
+    dispatch_head baseline（#131）：worktree 建好、launch 前取 `feature/<slice>` 的
+    branch head 持久化於 job，complete_tick 的預設 shadow gate 才有 base 可算
+    `compute_changed_paths(base, branch)`；取不到（git 例外）→ None，shadow 降級不阻釋放。
+    git_runner 注入即沿用（預設 `_default_git_runner`，與 dispatcher.dispatch 同源）。
     """
     ready = ready_units(metas, is_satisfied)
     if ready and launcher is None:
@@ -243,6 +249,7 @@ def dispatch_ready(
             "persona 契約為多行 prompt，經 tmux pane send-keys -l 會被換行打散。"
             "請以 --executor（copilot/claude/codex）走 headless 路徑派工。"
         )
+    runner = git_runner or _default_git_runner
     jobs: list[dict] = []
     errors: list[tuple[str, Exception]] = []
     for m in ready:
@@ -250,6 +257,11 @@ def dispatch_ready(
         try:
             prompt = build_dispatch_prompt(persona, task=slice_id, plan_path=m["plan"])
             worktree = _launcher_worktree(dispatcher, slice_id)
+            # baseline 須在 agent 動工前取（launch 前），否則含進 agent 的 commit → 空 diff。
+            try:
+                dispatch_head: str | None = runner(["rev-parse", _branch_for_slice(slice_id)])
+            except Exception:
+                dispatch_head = None
             log_dir = str(Path("runtime/dispatch") / slice_id)
             handle = launcher.launch(
                 slice_id=slice_id,
@@ -263,6 +275,7 @@ def dispatch_ready(
                 persona=persona,
                 worktree=worktree,
                 handle=handle,
+                dispatch_head=dispatch_head,
             )
             jobs.append(job)
         except Exception as exc:
@@ -290,6 +303,7 @@ def _record_launcher_job(
     persona: str,
     worktree: str,
     handle: LaunchHandle,
+    dispatch_head: str | None = None,
 ) -> dict:
     registry = getattr(dispatcher, "_registry", None)
     if registry is None:
@@ -298,6 +312,7 @@ def _record_launcher_job(
             "persona": persona,
             "worktree": worktree,
             "status": "dispatched",
+            "dispatch_head": dispatch_head,
             "executor": handle.executor,
             "session_name": handle.session_name,
             "pid": handle.pid,
@@ -309,6 +324,7 @@ def _record_launcher_job(
         branch=_branch_for_slice(slice_id),
         pane="",
         worktree=worktree,
+        dispatch_head=dispatch_head,
         executor=handle.executor,
         session_name=handle.session_name,
         pid=handle.pid,
