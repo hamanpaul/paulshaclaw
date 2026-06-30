@@ -146,16 +146,6 @@ class CockpitApp(App[None]):
         except Exception:
             pass
         self._refresh_widgets()
-
-    def _brand_banner_renderable(self):
-        """破蝦哥 banner C；有 rich 時用 Text.from_ansi 上色，否則回純字串（NO_COLOR 已去色）。"""
-        art = branding.banner("c")
-        try:
-            from rich.text import Text
-
-            return Text.from_ansi(art)
-        except Exception:
-            return art
         # Keep the work list live: re-read panes on a fixed interval (bounded
         # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
         # set_interval; only that absence is tolerated, real errors surface.
@@ -170,6 +160,16 @@ class CockpitApp(App[None]):
         except Exception:
             # fallback stubs may not support focus; ignore
             pass
+
+    def _brand_banner_renderable(self):
+        """破蝦哥 banner C；有 rich 時用 Text.from_ansi 上色，否則回純字串（NO_COLOR 已去色）。"""
+        art = branding.banner("c")
+        try:
+            from rich.text import Text
+
+            return Text.from_ansi(art)
+        except Exception:
+            return art
 
     def on_list_view_highlighted(self, event: object) -> None:
         try:
