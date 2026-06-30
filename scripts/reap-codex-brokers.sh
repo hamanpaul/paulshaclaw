@@ -27,7 +27,8 @@ for arg in "$@"; do
     --apply)   APPLY=1 ;;
     --dry-run) APPLY=0 ;;
     -h|--help)
-      sed -n 's/^# \{0,1\}//p' "$0"
+      # 跳過 shebang（第 1 行），只印開頭註解區塊
+      tail -n +2 "$0" | sed -n 's/^# \{0,1\}//p'
       exit 0 ;;
     *)
       printf '未知參數: %s\n' "$arg" >&2
@@ -51,9 +52,11 @@ mapfile -t ORPHANS < <(printf '%s\n' "$SNAP" | awk '
     args = ""
     for (i = 3; i <= NF; i++) args = args (i > 3 ? " " : "") $i
     PPID[pid] = ppid
-    # reaper：init / systemd / pid 1（涵蓋 WSL 的 /init 子收割鏈與一般 Linux 的 PID 1）
-    if (pid == 1 || args ~ /\/sbin\/init/ || args ~ /^\/init/ || args ~ /^init/ || args ~ /systemd/)
-      REAPER[pid] = 1
+    # reaper：取 args 第一個 token 的 basename，為 init / systemd 即視為收割者
+    #   （涵蓋 /sbin/init、WSL /init 子收割鏈、systemd --user 子收割，以及 PID 1）。
+    #   以 exe basename 比對，避免 args 任意處含 "systemd"/"init" 字樣的行程被誤判成 reaper。
+    exe = args; sub(/ .*/, "", exe); sub(/.*\//, "", exe)
+    if (pid == 1 || exe == "init" || exe == "systemd") REAPER[pid] = 1
     if (args ~ /app-server-broker\.mjs serve/) BROKER[pid] = args
   }
   END {

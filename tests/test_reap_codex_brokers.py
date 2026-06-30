@@ -23,11 +23,15 @@ SNAPSHOT_LINES = [
     "1 0 /sbin/init",
     "2 1 /init",
     "1177 2 /init",  # WSL 子收割鏈
+    "300 1 /usr/lib/systemd/systemd --user",                    # systemd --user 子收割（pid != 1）
+    "400 4999 node /home/x/systemd-notify-helper.js",           # args 含 "systemd" 但 exe=node → 非 reaper
     "4999 4000 -bash",
     "5000 4999 /home/x/.nvm/versions/node/v22.20.0/bin/claude",  # 活 session
     f"8001 1177 {_BROKER.format(sock='cxc-AAA', cwd='/home/x/prj/.worktrees/feat-a')}",  # 孤兒(WSL /init)
     f"8002 1 {_BROKER.format(sock='cxc-BBB', cwd='/home/x/prj/.worktrees/feat-b')}",     # 孤兒(PID 1)
     f"8003 5000 {_BROKER.format(sock='cxc-CCC', cwd='/home/x/prj/main')}",               # 活：parent=活 claude
+    f"8004 300 {_BROKER.format(sock='cxc-DDD', cwd='/home/x/prj/.worktrees/feat-d')}",   # 孤兒(systemd --user 子收割)
+    f"8005 400 {_BROKER.format(sock='cxc-EEE', cwd='/home/x/prj/.worktrees/feat-e')}",   # 不殺：parent exe=node，非 reaper
     "9000 8001 node /home/x/.npm/_npx/abc/node_modules/.bin/mcp-server-memory",          # 雜訊
 ]
 
@@ -53,8 +57,10 @@ def test_dry_run_lists_orphans_excludes_live(tmp_path):
     res = _run(snap)  # 預設 dry-run
     assert res.returncode == 0, res.stderr
     out = res.stdout
-    assert "8001" in out and "8002" in out            # 兩個孤兒都列出
+    assert "8001" in out and "8002" in out            # /init、PID 1 孤兒
+    assert "8004" in out                              # systemd --user 子收割的孤兒也列出
     assert "8003" not in out                          # 活 session 的 broker 不能被列
+    assert "8005" not in out                          # parent exe=node（非 reaper）→ 不可誤判為孤兒
     assert "/home/x/prj/.worktrees/feat-a" in out     # cwd 解析正確
     assert "/home/x/prj/.worktrees/feat-b" in out
     assert "dry-run" in out
@@ -81,7 +87,8 @@ def test_apply_sigterms_only_orphans(tmp_path):
     res = _run(snap, "--apply", env_extra={"REAP_KILL_CMD": str(killer)})
     assert res.returncode == 0, res.stderr
     killed = sorted(kill_log.read_text(encoding="utf-8").split())
-    assert killed == ["8001", "8002"]  # 只殺孤兒，活 session 的 8003 不動
+    # 只殺孤兒（/init、PID 1、systemd --user 子收割）；活 8003、誤判防護 8005 不動
+    assert killed == ["8001", "8002", "8004"]
 
 
 def test_no_orphans_is_clean_exit(tmp_path):
@@ -99,3 +106,4 @@ def test_help_exits_zero(tmp_path):
     )
     assert res.returncode == 0
     assert "app-server-broker" in res.stdout
+    assert "/usr/bin/env bash" not in res.stdout  # shebang 不得漏進 help 輸出
