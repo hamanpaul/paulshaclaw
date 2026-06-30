@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
 from paulshaclaw.coordinator import manager
+from paulshaclaw.coordinator.autonomy import dispatch_ready
 from paulshaclaw.coordinator.registry import JobRegistry
 
 
@@ -285,6 +288,116 @@ class RunTickTests(unittest.TestCase):
             self.assertEqual(launcher.launched, [])
             self.assertEqual(summary["dispatched"], [])
             self.assertFalse(summary["dispatch_skipped"])
+
+
+class _HeadlessDispatcher:
+    """有 _registry 的 fake：供 dispatch_ready 記 job + complete_tick poll。"""
+
+    def __init__(self, registry: JobRegistry) -> None:
+        self._registry = registry
+
+    def poll_headless_done(self, job_id: str) -> dict:
+        return self._registry.update_headless_result(job_id, status="done", exit_code=0)
+
+
+class _RecordingLauncher:
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    def launch(self, *, slice_id, prompt, worktree, log_dir):
+        from paulshaclaw.coordinator.launcher import LaunchHandle
+
+        self.calls.append({"slice_id": slice_id, "worktree": worktree})
+        return LaunchHandle(
+            executor="copilot", session_name=slice_id, pid=100 + len(self.calls),
+            log_path=f"{log_dir}/{slice_id}.jsonl",
+        )
+
+
+class DispatchHeadBaselineTests(unittest.TestCase):
+    """#131：headless 派工側須持久化 dispatch_head，否則 complete_tick 的
+    預設 shadow gate 對真實 headless job 恒回 null（對要完成的 job 形同失明）。"""
+
+    def test_dispatch_ready_persists_dispatch_head(self) -> None:
+        # 注入 git_runner 回固定 baseline → 應寫進 job 與 registry（修前為 None）
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            disp = _HeadlessDispatcher(reg)
+            launcher = _RecordingLauncher()
+            metas = [{"slice_id": "slice-x", "dispatch": "auto", "plan": "p.md", "depends_on": []}]
+            jobs = dispatch_ready(
+                metas, is_satisfied=lambda _id: True, dispatcher=disp,
+                launcher=launcher, git_runner=lambda args: "BASE_SHA",
+            )
+            self.assertEqual(len(jobs), 1)
+            self.assertEqual(jobs[0]["dispatch_head"], "BASE_SHA")
+            self.assertEqual(reg.list_jobs()[0]["dispatch_head"], "BASE_SHA")
+
+    def test_dispatch_ready_git_failure_records_none_not_crash(self) -> None:
+        # baseline 取不到（git 例外）→ dispatch_head=None，但不破壞派工（graceful）
+        def boom(args):
+            raise RuntimeError("git 爆炸")
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            disp = _HeadlessDispatcher(reg)
+            launcher = _RecordingLauncher()
+            metas = [{"slice_id": "slice-y", "dispatch": "auto", "plan": "p.md", "depends_on": []}]
+            jobs = dispatch_ready(
+                metas, is_satisfied=lambda _id: True, dispatcher=disp,
+                launcher=launcher, git_runner=boom,
+            )
+            self.assertEqual(len(jobs), 1)
+            self.assertIsNone(jobs[0]["dispatch_head"])
+
+    def test_default_gate_verdict_non_null_after_dispatch_through_pipeline(self) -> None:
+        # 整合：dispatch_ready 記 baseline → branch 出現新 commit → complete_tick
+        # 走「預設」gate runner → 有 git diff 時 verdict 非 null（#131 核心斷言）。
+        with tempfile.TemporaryDirectory() as d:
+            repo = Path(d) / "repo"
+            repo.mkdir()
+
+            def git(*args: str) -> str:
+                return subprocess.run(
+                    ["git", "-C", str(repo), *args],
+                    capture_output=True, text=True, check=True,
+                ).stdout.strip()
+
+            git("init", "-q")
+            git("config", "user.email", "t@example.com")
+            git("config", "user.name", "tester")
+            (repo / "seed.txt").write_text("0\n", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-qm", "C0")
+            git("branch", "feature/slice-x")  # baseline 落在 C0
+
+            reg = JobRegistry(state_path=repo / "jobs.json")
+            disp = _HeadlessDispatcher(reg)
+            launcher = _RecordingLauncher()
+            metas = [{"slice_id": "slice-x", "dispatch": "auto", "plan": "p.md", "depends_on": []}]
+            jobs = dispatch_ready(
+                metas, is_satisfied=lambda _id: True, dispatcher=disp,
+                launcher=launcher, git_runner=lambda args: git(*args),
+            )
+            self.assertTrue(jobs[0]["dispatch_head"], "baseline 應非 null")
+
+            # 模擬 agent 在 branch 上完成工作（新增 commit C1）
+            git("checkout", "-q", "feature/slice-x")
+            (repo / "seed.txt").write_text("1\n", encoding="utf-8")
+            git("add", "-A")
+            git("commit", "-qm", "C1")
+
+            hdir = repo / "handoff"
+            cwd = os.getcwd()
+            os.chdir(repo)  # 預設 gate runner 的 git diff 無 -C，需在 repo 內跑
+            try:
+                manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+            finally:
+                os.chdir(cwd)
+
+            manifest = json.loads((hdir / "slice-x.json").read_text(encoding="utf-8"))
+            self.assertIsNotNone(manifest["gate_verdict"], "#131：預設 gate 不應再恒 null")
+            self.assertIn("seed.txt", manifest["gate_verdict"]["changed_paths"])
 
 
 if __name__ == "__main__":

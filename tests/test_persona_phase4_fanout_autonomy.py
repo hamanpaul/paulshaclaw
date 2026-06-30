@@ -572,6 +572,12 @@ class FanoutTests(unittest.TestCase):
             disp = Dispatcher(reg, sender, _FakeWt())
             launcher = _FakeLauncher()
             metas = [_meta("real-a", depends_on=[]), _meta("real-b", depends_on=[])]
+            git_calls: list = []
+
+            def _fake_git(args):  # 注入 baseline runner，避免起真 git（#131）
+                git_calls.append(list(args))
+                return "BASE_SHA"
+
             _subprocess.run = _spy_run
             try:
                 jobs = dispatch_ready(
@@ -579,6 +585,7 @@ class FanoutTests(unittest.TestCase):
                     is_satisfied=lambda _id: True,
                     dispatcher=disp,
                     launcher=launcher,
+                    git_runner=_fake_git,
                 )
             finally:
                 _subprocess.run = orig_run
@@ -587,7 +594,12 @@ class FanoutTests(unittest.TestCase):
             self.assertEqual(len(reg.list_jobs()), 2)
             self.assertEqual(launcher.calls, ["real-a", "real-b"])
             self.assertEqual(sender.sent, [])   # headless：不送 tmux pane
-            self.assertEqual(real_calls, [])     # 全程不啟動真 git
+            self.assertEqual(real_calls, [])     # 注入 git_runner → 全程不啟動真 git
+            # #131：baseline 經注入 runner 取得（launch 前讀 branch head）並持久化於 job
+            self.assertEqual(
+                git_calls, [["rev-parse", "feature/real-a"], ["rev-parse", "feature/real-b"]]
+            )
+            self.assertEqual({j["dispatch_head"] for j in jobs}, {"BASE_SHA"})
 
 
 # --------------------------------------------------------------------------- #
@@ -663,6 +675,7 @@ class CliTests(unittest.TestCase):
                         worktree_creator=_FakeWt(),
                         is_satisfied=lambda _id: True,  # up 滿足 → fa, fb 都就緒
                         launcher=launcher,
+                        git_runner=lambda args: "BASE_SHA",  # 注入 baseline runner（#131）
                     )
             finally:
                 _subprocess.run = orig_run
@@ -672,7 +685,9 @@ class CliTests(unittest.TestCase):
             self.assertEqual(len(reg.list_jobs()), 2)
             self.assertEqual(sorted(launcher.calls), ["fa", "fb"])
             self.assertEqual(sender.sent, [])   # headless：不送 tmux pane
-            self.assertEqual(real_calls, [])     # 全程不啟動真 git
+            self.assertEqual(real_calls, [])     # 注入 git_runner → 全程不啟動真 git
+            # #131：baseline 持久化（注入 runner 回固定 sha）
+            self.assertEqual({j["dispatch_head"] for j in reg.list_jobs()}, {"BASE_SHA"})
 
     def test_main_fanout_executor_uses_headless_launcher_no_pane_send(self) -> None:
         from paulshaclaw.coordinator.cli import main
