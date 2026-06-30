@@ -66,6 +66,23 @@ class PlatformResolveTests(unittest.TestCase):
         self.assertEqual(prompts[-1], "[bro:7] hi")
         self.assertEqual(reply, "yo")
 
+    def test_copilot_accepts_camelcase_session_id(self):
+        # adversarial finding：copilot agentStop payload 用 camelCase sessionId
+        captured = {}
+        orig = mod.read_copilot_history
+
+        def fake(root, sid):
+            captured["sid"] = sid
+            return {"user_prompts": ["[bro:9] hi"], "assistant_summary": "ok"}
+
+        mod.read_copilot_history = fake
+        try:
+            prompts, reply = mod.resolve("copilot", {"sessionId": "cop-1"})
+        finally:
+            mod.read_copilot_history = orig
+        self.assertEqual(captured["sid"], "cop-1")
+        self.assertEqual(reply, "ok")
+
     def test_codex_reply_from_payload_missing_key_is_none(self):
         orig = mod.read_codex_rollout
         mod.read_codex_rollout = lambda p: {"user_prompts": ["[bro:7] hi"]}

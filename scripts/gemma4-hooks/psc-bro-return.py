@@ -60,7 +60,9 @@ def _discover_user_id(prompts: list[str]) -> int | None:
 def resolve(platform: str, event: dict) -> tuple[list[str], str | None]:
     """回 (user_prompts, reply)。reply=None 代表讀不到（skip）、"" 代表真無輸出。"""
     if platform == "copilot":
-        sid = str(event.get("session_id") or "")
+        # copilot agentStop payload 用 camelCase sessionId（見 copilot adapter / fixtures）；
+        # 兩種鍵都收，否則 sid 空 → read_copilot_history 找不到 → 回程靜默 no-op。
+        sid = str(event.get("session_id") or event.get("sessionId") or "")
         data = read_copilot_history(Path.home(), sid)
         prompts = data.get("user_prompts", []) or []
         if not prompts and sid:
