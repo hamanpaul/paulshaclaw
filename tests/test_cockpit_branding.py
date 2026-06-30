@@ -23,10 +23,10 @@ class TitleTests(unittest.TestCase):
 
 
 class BannerTests(unittest.TestCase):
-    def test_default_variant_is_c_mini(self) -> None:
+    def test_default_variant_is_c(self) -> None:
         self.assertEqual(branding.banner(), branding.banner("c"))
-        # C 迷你版為 3 行（含末尾換行）
-        self.assertEqual(branding.banner("c", color=False).count("\n"), 3)
+        # C 為 5 列：觸鬚 / 頭(鉗+臉+菸) / 金鏈 / 身體+公事包 / 尾
+        self.assertEqual(branding.banner("c", color=False).count("\n"), 5)
 
     def test_unknown_variant_falls_back_to_c(self) -> None:
         self.assertEqual(branding.banner("zzz", color=False), branding.banner("c", color=False))
@@ -35,10 +35,12 @@ class BannerTests(unittest.TestCase):
         self.assertIn("\x1b[", branding.banner("c", color=True))
         plain = branding.banner("c", color=False)
         self.assertNotIn("\x1b[", plain)
-        # 去色後仍保留破蝦哥識別字元：墨鏡臉 (⌐■_■) + 叼菸 y + 金鏈 ◦○◦
+        # 去色後仍保留破蝦哥識別字元：墨鏡臉 (⌐■_■) + 叼菸 y + 金鏈 ◦◦◦ + 公事包 [▪] + 尾 ◢▀◣
         self.assertIn("⌐■_■", plain)
         self.assertIn("y", plain)
-        self.assertIn("◦○◦", plain)
+        self.assertIn("◦◦◦", plain)
+        self.assertIn("[▪]", plain)
+        self.assertIn("◢▀◣", plain)
 
     def test_strip_ansi_idempotent_and_complete(self) -> None:
         once = branding.strip_ansi(branding.banner_a())
