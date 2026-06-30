@@ -1,59 +1,55 @@
-"""Cockpit 吉祥物（破蝦哥 / PoHsiaBro 🦞）品牌呈現（issue #116）。
+"""Cockpit 吉祥物（破蝦哥 / PoHsiaBro）品牌呈現（issue #116）。
 
-ASCII banner art 移植自既有設計稿 ``docs/research/lobster_banner.py``（A/B/C 三尺寸）——
-此處為 runtime 單一真相源；docs/research 版保留為設計稿。純函式 + fail-soft：
-任何呈現都不得影響 TUI 啟動，並尊重 ``NO_COLOR``。
+顏文字風龍蝦：觸鬚 ʅ ʃ（蝦）+ 墨鏡臉 (⌐■_■)（酷）+ 螯 ⋑ ⋐（蝦）+ 叼菸冒煙 y~（幫）
++ 金鏈 ◦○◦（財）。橘色三階色盤取自 ui-ux-pro-max design-system（playful orange）。
+純函式 + fail-soft：任何呈現都不得影響 TUI 啟動，並尊重 ``NO_COLOR``。
 
-cockpit 目前固定用 C（迷你蝦）置頂；A/B 一併移植備未來寬窗 / Telegram / daemon boot 用。
+cockpit 固定用 C（mini）置頂；A/B 為同識別的放大版（寬窗 / Telegram / daemon boot 備用）。
+字元集刻意收斂在已驗證可渲染者：ʅ ʃ ⋑ ⋐ ⌐ ■ _ y ~ ◦ ○ ( ) 與 ASCII。
 """
 from __future__ import annotations
 
 import os
 import re
 
-LOBSTER_EMOJI = "\U0001f99e"  # 🦞 標準 emoji，作為 Header 標題前綴
+LOBSTER_EMOJI = "\U0001f99e"  # 🦞 Header 標題前綴
 BASE_TITLE = "PaulShiaBro Stage 11 Cockpit"
 
-# ANSI palette（同設計稿）
-_R = "\033[38;5;203m"            # 紅殼
-_RB = "\033[1;38;5;203m"         # 粗紅
-_G = "\033[1;38;5;220m"          # 金項鍊
-_K = "\033[48;5;235;38;5;235m"   # 黑墨鏡
-_W = "\033[1;37m"                # 觸鬚/亮線
-_S = "\033[2;37m"                # 煙霧
-_Y = "\033[38;5;136m"            # 雪茄
-_B = "\033[38;5;94m"             # 公事包棕
+# ANSI palette（映射 ui-ux-pro-max design-system 色盤）
+_ANT = "\033[38;5;215m"          # 觸鬚（淺橘）
+_OR = "\033[1;38;5;208m"         # 殼 / 螯（橘）#F97316
+_GD = "\033[1;38;5;220m"         # 金鏈
+_BK = "\033[1;38;5;236m"         # 墨鏡（深）
+_CIG = "\033[38;5;180m"          # 菸身（淺褐）
+_SMK = "\033[2;37m"              # 煙
 _X = "\033[0m"                   # reset
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
-def banner_a() -> str:
+def banner_a() -> str:  # 完整版（寬窗）：觸鬚 + 臉 + 叼菸 + 金鏈 + 節肢尾
     return (
-        f"{_W}     ╲╲        ╱╱\n"
-        f"{_W}      ╲╲      ╱╱\n"
-        f"{_RB}       ▄▄████▄▄\n"
-        f"{_RB}     ◣█  {_K}▀▀{_X}{_RB}  {_K}▀▀{_X}{_RB}  █◢  {_Y}━▓{_S}≈≈≈>{_X}\n"
-        f"{_RB}      ▀█▄━━━━━▄█▀\n"
-        f"{_G}         $$$$$$$\n"
-        f"{_B}         ▐ ▪▪ ▌{_X}\n"
+        f"{_ANT}    ʅ     ʃ{_X}\n"
+        f"{_OR}   ⋑({_BK}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~~{_X}\n"
+        f"{_GD}     ◦○○○◦{_X}\n"
+        f"{_OR}     )))))){_X}\n"
     )
 
 
-def banner_b() -> str:
+def banner_b() -> str:  # 中版
     return (
-        f"{_W}    ╲╲  ╱╱\n"
-        f"{_RB}   ◣▄██▀██▄◢  {_Y}━▓{_S}≈>{_X}\n"
-        f"{_RB}   █ {_K}▀▀{_X}{_RB} {_K}▀▀{_X}{_RB} █\n"
-        f"{_RB}    ▀{_G}$$$$${_RB}▀  {_B}[▫]{_X}\n"
+        f"{_ANT}   ʅ   ʃ{_X}\n"
+        f"{_OR}  ⋑({_BK}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~{_X}\n"
+        f"{_GD}    ◦○○◦{_X}\n"
+        f"{_OR}    )))){_X}\n"
     )
 
 
-def banner_c() -> str:
+def banner_c() -> str:  # mini（cockpit 置頂用）
     return (
-        f"{_W}  ╲╱\n"
-        f"{_RB} ◣{_K}▀▀{_X}{_RB}◢{_Y}≈>{_X}\n"
-        f"{_G}  ${_B}[▫]{_X}\n"
+        f"{_ANT}  ʅ   ʃ{_X}\n"
+        f"{_OR}⋑({_BK}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~{_X}\n"
+        f"{_GD}   ◦○◦{_X}\n"
     )
 
 

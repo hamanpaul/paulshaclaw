@@ -35,9 +35,10 @@ class BannerTests(unittest.TestCase):
         self.assertIn("\x1b[", branding.banner("c", color=True))
         plain = branding.banner("c", color=False)
         self.assertNotIn("\x1b[", plain)
-        # 去色後仍保留蝦的視覺字元（墨鏡 ▀、雪茄 ≈>）
-        self.assertIn("▀▀", plain)
-        self.assertIn("≈>", plain)
+        # 去色後仍保留破蝦哥識別字元：墨鏡臉 (⌐■_■) + 叼菸 y + 金鏈 ◦○◦
+        self.assertIn("⌐■_■", plain)
+        self.assertIn("y", plain)
+        self.assertIn("◦○◦", plain)
 
     def test_strip_ansi_idempotent_and_complete(self) -> None:
         once = branding.strip_ansi(branding.banner_a())
