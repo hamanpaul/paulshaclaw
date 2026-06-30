@@ -146,13 +146,19 @@ def run_tick(
     max_load: float = 1.0,
     idle_probe: Callable[[], tuple] = os.getloadavg,
     clock: Callable[[], str] = _utcnow,
+    reaper: Callable[[], dict] | None = None,
 ) -> dict:
-    """跑完整 manager tick：fanout（dispatch_ready）→ complete_tick。
+    """跑完整 manager tick：fanout（dispatch_ready）→ complete_tick →（可選）收尾 janitor。
 
     require_idle 時以 1-min load average gate（reuse memory.dream.idle，可注入 probe）——
     僅擋 fanout（新工作），complete_tick 一律跑。已有 dispatched/running job 的 slice
     本趟不重派（冪等）。fanout 例外（DispatchReadyError/RequiresLauncher/ValueError 環）
-    收進 errors，不阻 complete。回 {dispatch_skipped, dispatched, completed, errors}。
+    收進 errors，不阻 complete。
+
+    reaper 為收尾 janitor（issue #161）：傳入時於 complete 後呼叫一次以回收孤兒 codex
+    broker（多 worktree 派工殘留），其回傳放 summary["reaped"]；任何例外收進 errors（stage=reap），
+    不破壞 tick。預設 None（不啟用）——避免單測誤觸真實行程回收；production 由 CLI 接上。
+    回 {dispatch_skipped, dispatched, completed, errors, reaped}。
     """
     satisfied = is_satisfied if is_satisfied is not None else _satisfied_pred(handoff_dir)
     dispatched: list = []
@@ -185,9 +191,19 @@ def run_tick(
     complete = complete_tick(
         dispatcher, gate_runner=gate_runner, handoff_dir=handoff_dir, metas=metas, clock=clock
     )
+    # 收尾 janitor（issue #161）：回收孤兒 codex broker。失敗一律不破壞 tick——
+    # 收進 errors（stage=reap），狀態放 summary["reaped"]。
+    reaped = None
+    reap_errors: list = []
+    if reaper is not None:
+        try:
+            reaped = reaper()
+        except Exception as exc:
+            reap_errors.append({"stage": "reap", "error": str(exc)})
     return {
         "dispatch_skipped": dispatch_skipped,
         "dispatched": dispatched,
         "completed": complete["completed"],
-        "errors": errors + complete["errors"],
+        "errors": errors + complete["errors"] + reap_errors,
+        "reaped": reaped,
     }
