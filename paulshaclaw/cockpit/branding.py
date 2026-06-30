@@ -19,7 +19,7 @@ BASE_TITLE = "PaulShiaBro Stage 11 Cockpit"
 _ANT = "\033[38;5;215m"          # 觸鬚（淺橘）
 _OR = "\033[1;38;5;208m"         # 殼 / 螯（橘）#F97316
 _GD = "\033[1;38;5;220m"         # 金鏈
-_BK = "\033[1;38;5;236m"         # 墨鏡（深）
+_GLS = "\033[1;38;5;231m"        # 墨鏡鏡片（亮白反光，黑底終端機才看得到）
 _CIG = "\033[38;5;180m"          # 菸身（淺褐）
 _SMK = "\033[2;37m"              # 煙
 _X = "\033[0m"                   # reset
@@ -30,7 +30,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 def banner_a() -> str:  # 完整版（寬窗）：觸鬚 + 臉 + 叼菸 + 金鏈 + 節肢尾
     return (
         f"{_ANT}    ʅ     ʃ{_X}\n"
-        f"{_OR}   ⋑({_BK}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~~{_X}\n"
+        f"{_OR}   ⋑({_GLS}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~~{_X}\n"
         f"{_GD}     ◦○○○◦{_X}\n"
         f"{_OR}     )))))){_X}\n"
     )
@@ -39,7 +39,7 @@ def banner_a() -> str:  # 完整版（寬窗）：觸鬚 + 臉 + 叼菸 + 金鏈
 def banner_b() -> str:  # 中版
     return (
         f"{_ANT}   ʅ   ʃ{_X}\n"
-        f"{_OR}  ⋑({_BK}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~{_X}\n"
+        f"{_OR}  ⋑({_GLS}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~{_X}\n"
         f"{_GD}    ◦○○◦{_X}\n"
         f"{_OR}    )))){_X}\n"
     )
@@ -48,7 +48,7 @@ def banner_b() -> str:  # 中版
 def banner_c() -> str:  # mini（cockpit 置頂用）
     return (
         f"{_ANT}  ʅ   ʃ{_X}\n"
-        f"{_OR}⋑({_BK}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~{_X}\n"
+        f"{_OR}⋑({_GLS}⌐■_■{_OR})⋐{_X} {_CIG}y{_SMK}~{_X}\n"
         f"{_GD}   ◦○◦{_X}\n"
     )
 
