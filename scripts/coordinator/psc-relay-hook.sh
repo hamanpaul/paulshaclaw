@@ -14,9 +14,11 @@ fi
 
 # #120 Half 1: 僅 manager 派工（launcher 注入 PSC_SLICE_ID）才推 Telegram；
 # 互動 session 無 slice → no-op，避免灌爆。broadcast（不帶 --source-user-id）。
+# review I-1：codex inner command 無 outer timeoutSec，故 `timeout` 設硬上限，
+# 避免 reply_bridge 卡住吊死 hook（`|| true` 已吞非零，含 timeout 的 124）。
 reply_bridge="${PSC_REPLY_BRIDGE:-$HOME/.agents/skills/bro/scripts/reply_bridge.py}"
 if [[ "$slice" != "unknown" && -f "$reply_bridge" ]]; then
-  python3 "$reply_bridge" --text "$msg" >/dev/null 2>&1 || true
+  timeout 8 python3 "$reply_bridge" --text "$msg" >/dev/null 2>&1 || true
 fi
 
 exit 0

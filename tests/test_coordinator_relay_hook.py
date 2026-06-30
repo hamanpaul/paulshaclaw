@@ -77,6 +77,18 @@ class RelayHookTests(unittest.TestCase):
             subprocess.run(["bash", HOOK], env=env, check=True)
             self.assertFalse(log.exists())
 
+    def test_empty_slice_does_not_push(self) -> None:
+        # review m-1：PSC_SLICE_ID="" 經 ${:-unknown} → "unknown" → no-op（與 unset 同）
+        with tempfile.TemporaryDirectory() as d:
+            stub = Path(d) / "bridge.py"
+            _write_stub(stub)
+            log = Path(d) / "bridge.log"
+            env = {**os.environ, "PSC_SLICE_ID": "", "PSC_RELAY_EVENT": "stop",
+                   "PSC_RELAY_TARGET": str(Path(d) / "relay.out"),
+                   "PSC_REPLY_BRIDGE": str(stub), "BRIDGE_LOG": str(log)}
+            subprocess.run(["bash", HOOK], env=env, check=True)
+            self.assertFalse(log.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
