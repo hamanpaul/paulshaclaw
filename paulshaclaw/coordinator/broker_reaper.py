@@ -29,14 +29,23 @@ def reap_orphan_brokers(
     script = Path(script_path)
     if not script.is_file():
         return {"ran": False, "reason": "script-not-found", "script": str(script)}
-    cmd = ["bash", str(script)] + (["--apply"] if apply else [])
-    try:
-        proc = runner(cmd, capture_output=True, text=True, timeout=timeout, check=False)
-    except Exception as exc:  # subprocess 失敗 / 逾時：吞掉，janitor 不破 tick
-        return {"ran": False, "reason": f"exec-error: {exc}"}
-    return {
-        "ran": True,
-        "applied": apply,
-        "returncode": proc.returncode,
-        "output": (proc.stdout or "").strip(),
-    }
+cmd = ["bash", str(script)] + (["--apply"] if apply else [])
+try:
+    proc = runner(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        check=False,
+    )
+except Exception as exc:  # subprocess 失敗 / 逾時：吞掉，janitor 不破 tick
+    return {"ran": False, "reason": f"exec-error: {exc}"}
+return {
+    "ran": True,
+    "applied": apply,
+    "returncode": proc.returncode,
+    "output": (proc.stdout or "").strip(),
+    "stderr": (getattr(proc, "stderr", "") or "").strip(),
+}
