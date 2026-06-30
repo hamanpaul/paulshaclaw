@@ -37,5 +37,30 @@ class HookTemplateSchemaTests(unittest.TestCase):
             self.assertIn("PSC_REPO_ROOT", (HOOKS / f).read_text(encoding="utf-8"))
 
 
+class BroReturnEntryTests(unittest.TestCase):
+    def test_codex_stop_has_bro_return_and_preserves_relay(self) -> None:
+        d = json.loads((HOOKS / "codex.json").read_text(encoding="utf-8"))
+        hooks = d["hooks"]["Stop"][0]["hooks"]
+        cmds = [h.get("command", "") for h in hooks]
+        # existing relay preserved
+        self.assertTrue(any("psc-relay-hook.sh" in c for c in cmds), "relay entry must be preserved")
+        # new bro-return entry
+        self.assertTrue(any("psc-bro-return.py --platform codex" in c for c in cmds),
+                        "codex Stop must register psc-bro-return --platform codex")
+        bro = next(h for h in hooks if "psc-bro-return.py" in h.get("command", ""))
+        self.assertEqual(bro.get("managedBy"), "psc-bro-return")
+        self.assertIn("${PSC_REPO_ROOT}", bro["command"])
+
+    def test_copilot_agentstop_has_bro_return_and_preserves_relay(self) -> None:
+        d = json.loads((HOOKS / "copilot.json").read_text(encoding="utf-8"))
+        arr = d["hooks"]["agentStop"]
+        cmds = [h.get("bash", "") for h in arr]
+        self.assertTrue(any("psc-relay-hook.sh" in c for c in cmds), "relay entry must be preserved")
+        self.assertTrue(any("psc-bro-return.py --platform copilot" in c for c in cmds),
+                        "copilot agentStop must register psc-bro-return --platform copilot")
+        bro = next(h for h in arr if "psc-bro-return.py" in h.get("bash", ""))
+        self.assertIn("${PSC_REPO_ROOT}", bro["bash"])
+
+
 if __name__ == "__main__":
     unittest.main()
