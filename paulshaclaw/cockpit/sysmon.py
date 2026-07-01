@@ -232,7 +232,8 @@ def _meter_bar(segments, width, overlay, color, *, empty_color=_DIM):
     """htop 風 meter：左起以分段色 ``|`` 填滿，右對齊把 ``overlay``（實際用量／百分比）疊進長條內。
 
     變色邏輯（同 htop）：overlay 每個字元沿用其底層 cell 顏色——落在填色段→該段色、落在空白→中性
-    可讀色，使數字與長條融為一體。回 ``'[' + body + ']'``。fail-soft：width 過窄則截斷 overlay。
+    可讀色，使數字與長條融為一體。回 ``'[' + body + ']'``。
+    fail-soft：width 過窄時保留 overlay 右側（尾端，如 used/total 的 total），合右對齊語意。
     """
     width = max(1, width)
     chars = [" "] * width
@@ -247,9 +248,9 @@ def _meter_bar(segments, width, overlay, color, *, empty_color=_DIM):
             colors[c] = col
         prev_cell = cur_cell
     filled_before = [ch == "|" for ch in chars]
-    # 2) 右對齊疊 overlay；數字顏色沿用底層（填色段色 / 空白處中性色）
+    # 2) 右對齊疊 overlay；width 過窄時保留右側尾端（used/total 的 total）以合右對齊語意（Copilot review PR #170）
     if overlay:
-        text = overlay[:width]
+        text = overlay[-width:]
         start = width - len(text)
         for offset, ch in enumerate(text):
             pos = start + offset

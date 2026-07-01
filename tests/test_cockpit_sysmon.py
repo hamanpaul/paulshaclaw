@@ -183,6 +183,12 @@ class FormatTests(unittest.TestCase):
         self.assertIn("3.6G/9.7G", bar)
         self.assertTrue(bar.rstrip("]").endswith("3.6G/9.7G"))  # 右對齊在長條末
 
+    def test_meter_bar_narrow_keeps_right_of_overlay(self):
+        # width 過窄 → 右對齊截斷保留尾端（total 那側；Copilot review PR #170）
+        bar = sysmon._meter_bar([], 5, "3.60G/9.71G", color=False)
+        self.assertEqual(bar, "[9.71G]")
+        self.assertNotIn("3.60", bar)
+
     def test_meter_bar_overlay_colored_by_underlying_segment(self):
         # 變色邏輯：填色段仍在；overlay 落在空白處以中性色（_TXT）呈現
         bar = sysmon._meter_bar([(0.5, sysmon._GREEN)], 20, "USED/TOTAL", color=True)
