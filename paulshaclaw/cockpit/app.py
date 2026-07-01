@@ -244,9 +244,9 @@ class CockpitApp(App[None]):
                 width = 0
         if width <= 0:
             width = 80
-        # 每監控列固定開銷：label(3)+space+"["+"]" = 6（用量/百分比已疊進長條內，無尾隨欄）；
-        # 再扣 banner 欄+間距。長條變寬留給 overlay 文字（如 '3.60G/9.71G'）。
-        return max(4, min(200, width - self._MON_COL - self._MON_GAP - 6))
+        # 每監控列固定開銷：label(3)+space+"["+"]"+space+percent(4) = 11（百分比在 ] 右側）；
+        # 再扣 banner 欄+間距。長條內仍疊 used/total（Mem/Swp）。
+        return max(4, min(200, width - self._MON_COL - self._MON_GAP - 11))
 
     def _compose_banner_stats(self, banner_lines, stat_lines):
         """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。"""

@@ -220,8 +220,9 @@ def _human_kb(kb) -> str:
     return f"{s}{units[i]}"
 
 
-def _pct_overlay(pct) -> str:
-    return "--" if pct is None else f"{round(pct)}%"
+def _pctstr(pct) -> str:
+    """尾隨百分比欄（置於 ``]`` 右側）：固定 4 寬以四欄對齊。None → ``'  --'``。"""
+    return "  --" if pct is None else f"{round(pct):3d}%"
 
 
 def _mbs(bps):
@@ -274,15 +275,16 @@ def _meter_bar(segments, width, overlay, color, *, empty_color=_DIM):
 
 
 def format_stat_lines(stats: dict, *, bar_width: int = 12, color: bool | None = None) -> list[str]:
-    """組出 5 列 htop 風監控字串：實際用量（Mem/Swp 的 used/total）或百分比（CPU/I/O）右對齊疊進
-    長條內、依底層分段上色（同 htop，無尾隨百分比欄）。``bar_width`` 為長條可用寬（呼叫端依 pane 寬算）。"""
+    """組出 5 列 htop 風監控字串：Mem/Swp 於長條內右對齊疊實際用量 used/total（依底層分段上色）；
+    四欄（CPU/Mem/Swp/I/O）百分比一律置於 ``]`` 右側對齊。``bar_width`` 為長條可用寬（呼叫端依 pane 寬算）。"""
     if color is None:
         color = not os.environ.get("NO_COLOR")
     lbl = (lambda s: f"{_LBL}{s}{_X}") if color else (lambda s: s)
     net_c = (lambda s: f"{_NET}{s}{_X}") if color else (lambda s: s)
 
-    def line(label, segs, overlay):
-        return f"{lbl(label)} {_meter_bar(segs, bar_width, overlay, color)}"
+    def line(label, segs, overlay, pct):
+        # 長條內疊用量（Mem/Swp）或留空（CPU/I/O）；百分比一律置於 ] 右側、四欄對齊。
+        return f"{lbl(label)} {_meter_bar(segs, bar_width, overlay, color)} {_pctstr(pct)}"
 
     cpu, mem, swap = stats.get("cpu"), stats.get("mem"), stats.get("swap")
     cpu_segs = ([(cpu["user"] / 100, _GREEN), (cpu["nice"] / 100, _BLUE),
@@ -300,10 +302,10 @@ def format_stat_lines(stats: dict, *, bar_width: int = 12, color: bool | None = 
     swap_txt = f"{_human_kb(swap['used'])}/{_human_kb(swap['total'])}" if swap else "--"
 
     return [
-        line("CPU", cpu_segs, _pct_overlay(cpu["pct"] if cpu else None)),
-        line("Mem", mem_segs, mem_txt),
-        line("Swp", swap_segs, swap_txt),
-        line("I/O", io_segs, _pct_overlay(io)),
+        line("CPU", cpu_segs, "", cpu["pct"] if cpu else None),
+        line("Mem", mem_segs, mem_txt, mem["pct"] if mem else None),
+        line("Swp", swap_segs, swap_txt, swap["pct"] if swap else None),
+        line("I/O", io_segs, "", io),
         f"{lbl('Net')} {net_c('↓' + _mbs(stats.get('net_rx_bps')))} "
         f"{net_c('↑' + _mbs(stats.get('net_tx_bps')))} MB/s",
     ]
