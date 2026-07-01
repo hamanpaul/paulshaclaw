@@ -95,10 +95,10 @@ class CockpitApp(App[None]):
         self.actions = actions
         self.pane_loader = pane_loader
         self.preview_loader = preview_loader
-        # 系統監控（issue：banner 右側 htop 風）：CPU% 需 /proc/stat 兩次取樣差值，
-        # 故保留上一次快照；_last_cpu 存最後有效讀數，避免快速重刷時 Δ太小閃 "--"。
-        self._cpu_prev = None
-        self._last_cpu = None
+        # 系統監控（banner 右側 htop 風）：CPU%/IO%/Net 速率需前後快照差值，故保留上次快照；
+        # _last_stats 存最後有效讀數，None 時沿用以避免快速重刷閃爍。
+        self._mon_prev = None
+        self._last_stats: dict = {}
         # Last-rendered work-list content, so we skip rebuilding (and flickering)
         # the list on refreshes that didn't change it.
         self._last_work_items: tuple[str, ...] | None = None
@@ -162,19 +162,26 @@ class CockpitApp(App[None]):
             # fallback stubs may not support focus; ignore
             pass
 
-    def _brand_banner_renderable(self):
-        """破蝦哥 banner C + 右側 htop 風系統監控（CPU/Mem/Swp/Tasks）。
+    _MON_COL = 15   # banner 各列補到的固定可見寬
+    _MON_GAP = 2    # banner 與監控列間距
 
-        監控 fail-soft：讀 /proc 失敗則只顯示 banner。有 rich 時 Text.from_ansi 上色。
+    def _brand_banner_renderable(self):
+        """破蝦哥 banner C + 右側 htop 風系統監控（CPU/Mem/Swp/I/O 橫條 + Net 速率）。
+
+        橫條寬隨終端寬度自適應；監控 fail-soft：讀 /proc 失敗則只顯示 banner。
         """
         banner_lines = branding.banner("c").rstrip("\n").split("\n")
         stat_lines: list[str] = []
         try:
-            stats, self._cpu_prev = sysmon.read_stats(self._cpu_prev)
-            if stats.get("cpu") is not None:
-                self._last_cpu = stats["cpu"]
-            stats["cpu"] = self._last_cpu  # 顯示最後有效讀數，避免閃爍
-            stat_lines = sysmon.format_stat_lines(stats)
+            cur = sysmon.read_snapshot()
+            stats = sysmon.compute_stats(self._mon_prev, cur)
+            self._mon_prev = cur
+            for k, v in stats.items():  # None → 沿用上次有效值，避免閃爍
+                if v is None and k in self._last_stats:
+                    stats[k] = self._last_stats[k]
+                elif v is not None:
+                    self._last_stats[k] = v
+            stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
         except Exception:
             stat_lines = []
         composed = self._compose_banner_stats(banner_lines, stat_lines)
@@ -185,15 +192,25 @@ class CockpitApp(App[None]):
         except Exception:
             return composed
 
-    @staticmethod
-    def _compose_banner_stats(banner_lines, stat_lines, *, col=15, gap=2):
+    def _monitor_bar_width(self) -> int:
+        """依終端寬度算橫條可用寬，讓 bar 撐到右緣（htop 風）。取不到寬度時退回 12。"""
+        try:
+            width = int(self.size.width)
+        except Exception:
+            width = 0
+        if width <= 0:
+            width = 80
+        # 每監控列固定開銷：label(3)+space+"["+"]"+space+percent(4) = 11；再扣 banner 欄+間距。
+        return max(4, min(80, width - self._MON_COL - self._MON_GAP - 11))
+
+    def _compose_banner_stats(self, banner_lines, stat_lines):
         """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。"""
         out = []
         for i, bline in enumerate(banner_lines):
             visible = branding.strip_ansi(bline)
-            row = bline + " " * max(0, col - len(visible))
+            row = bline + " " * max(0, self._MON_COL - len(visible))
             if i < len(stat_lines):
-                row += " " * gap + stat_lines[i]
+                row += " " * self._MON_GAP + stat_lines[i]
             out.append(row)
         return "\n".join(out) + "\n"
 

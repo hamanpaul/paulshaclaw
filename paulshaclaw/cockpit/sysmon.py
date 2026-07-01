@@ -1,12 +1,18 @@
-"""Cockpit 頂部系統監控（htop 風：CPU 整體均值 / Mem / Swap / Tasks），讀 /proc。
+"""Cockpit 頂部系統監控（htop 風），讀 /proc。
 
-純函式 + fail-soft：/proc 讀取或解析失敗一律回可安全略過的結果，絕不影響 TUI。
-CPU% 需兩次 /proc/stat 取樣差值，故 read_stats 需帶入上一次的 cpu 快照。
+呈現 5 列，對齊破蝦哥 banner 5 列：
+  CPU / Mem / Swp / I/O 用 ``[bar] NN%``（bar 寬由呼叫端依終端寬度給）；
+  Net 顯示上下行速率 ``↓X ↑Y MB/s``（不用 %）。
+
+CPU% / I/O% / Net 速率皆需兩次取樣差值，故採「快照」模型：
+``read_snapshot()`` 取一次原始計數 + 單調時鐘，``compute_stats(prev, cur)`` 算出可讀數值。
+純函式 + fail-soft：任何 /proc 讀取或解析失敗都回可安全略過的結果，絕不影響 TUI。
 """
 from __future__ import annotations
 
 import os
 import re
+import time
 
 # htop 風配色（依使用率門檻）
 _GREEN = "\033[38;5;46m"
@@ -14,7 +20,10 @@ _YELLOW = "\033[38;5;226m"
 _RED = "\033[38;5;196m"
 _DIM = "\033[38;5;240m"
 _LBL = "\033[1;38;5;250m"
+_NET = "\033[38;5;45m"
 _X = "\033[0m"
+
+_WHOLE_DISK = re.compile(r"^(sd[a-z]+|nvme\d+n\d+|vd[a-z]+|xvd[a-z]+|mmcblk\d+)$")
 
 
 def _read(path: str) -> str:
@@ -35,24 +44,43 @@ def parse_cpu_total(stat_text: str):
                 return None
             if len(nums) < 5:
                 return None
-            idle = nums[3] + nums[4]  # idle + iowait
-            return (sum(nums), idle)
+            return (sum(nums), nums[3] + nums[4])  # total, idle+iowait
     return None
 
 
-def cpu_percent(prev, cur):
-    """兩次 (total, idle) 快照算整體 CPU 使用率 %；prev/cur 缺或 Δ總量≤0 回 None。"""
-    if not prev or not cur:
-        return None
-    d_total = cur[0] - prev[0]
-    d_idle = cur[1] - prev[1]
-    if d_total <= 0:
-        return None
-    return max(0.0, min(100.0, (1.0 - d_idle / d_total) * 100.0))
+def parse_disk_ioticks(text: str):
+    """加總各實體磁碟 io_ticks（/proc/diskstats 第 13 欄，ms doing I/O）；無資料回 None。"""
+    total = None
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) > 12 and _WHOLE_DISK.match(f[2]):
+            try:
+                total = (total or 0) + int(f[12])
+            except ValueError:
+                pass
+    return total
+
+
+def parse_netdev(text: str):
+    """加總非 lo 介面的 (rx_bytes, tx_bytes)；無資料回 None。"""
+    rx = tx = None
+    for line in text.splitlines():
+        if ":" not in line:
+            continue
+        name, _, rest = line.partition(":")
+        if name.strip() == "lo":
+            continue
+        f = rest.split()
+        if len(f) >= 9:
+            try:
+                rx = (rx or 0) + int(f[0])
+                tx = (tx or 0) + int(f[8])
+            except ValueError:
+                pass
+    return None if rx is None else (rx, tx)
 
 
 def parse_meminfo(text: str) -> dict:
-    """回 dict（kB）：MemTotal / MemAvailable / SwapTotal / SwapFree 等；缺項略過。"""
     out: dict[str, int] = {}
     for line in text.splitlines():
         m = re.match(r"(\w+):\s+(\d+)\s*kB", line)
@@ -61,34 +89,59 @@ def parse_meminfo(text: str) -> dict:
     return out
 
 
-def parse_tasks(loadavg_text: str):
-    """自 /proc/loadavg 第 4 欄 ``running/total`` 回 (running, total)；失敗回 None。"""
-    parts = loadavg_text.split()
-    if len(parts) >= 4 and "/" in parts[3]:
-        r, _, t = parts[3].partition("/")
-        try:
-            return (int(r), int(t))
-        except ValueError:
-            return None
-    return None
+def read_snapshot(proc: str = "/proc", *, clock=time.monotonic) -> dict:
+    """取一次原始計數快照（含單調時鐘）。fail-soft：缺項為 None。"""
+    return {
+        "t": clock(),
+        "cpu": parse_cpu_total(_read(f"{proc}/stat")),
+        "io": parse_disk_ioticks(_read(f"{proc}/diskstats")),
+        "net": parse_netdev(_read(f"{proc}/net/dev")),
+        "mem": parse_meminfo(_read(f"{proc}/meminfo")),
+    }
 
 
-def read_stats(cpu_prev=None, proc: str = "/proc"):
-    """讀一次系統狀態。回 ``(stats, cpu_snapshot)``；stats 缺項為 None。fail-soft。"""
-    cur_cpu = parse_cpu_total(_read(f"{proc}/stat"))
-    mem = parse_meminfo(_read(f"{proc}/meminfo"))
-    tasks = parse_tasks(_read(f"{proc}/loadavg"))
+def _pct(prev_v, cur_v, span):
+    """差值 / span * 100，夾在 0~100；缺值或 span≤0 回 None。"""
+    if prev_v is None or cur_v is None or not span or span <= 0:
+        return None
+    d = cur_v - prev_v
+    if d < 0:
+        return None
+    return max(0.0, min(100.0, d / span * 100.0))
+
+
+def compute_stats(prev: dict | None, cur: dict) -> dict:
+    """由前後兩快照算出可讀數值 dict。fail-soft：缺值為 None。"""
+    dt = (cur["t"] - prev["t"]) if prev else None
+
+    cpu = None
+    if prev and prev.get("cpu") and cur.get("cpu"):
+        d_total = cur["cpu"][0] - prev["cpu"][0]
+        cpu = _pct(prev["cpu"][1], cur["cpu"][1], d_total)
+        cpu = (100.0 - cpu) if cpu is not None else None  # idle 佔比 → 使用率
+
+    io = None
+    if prev and dt:
+        io = _pct(prev.get("io"), cur.get("io"), dt * 1000.0)  # io_ticks(ms) / 間隔(ms)
+
+    net_rx = net_tx = None
+    if prev and dt and dt > 0 and prev.get("net") and cur.get("net"):
+        drx = cur["net"][0] - prev["net"][0]
+        dtx = cur["net"][1] - prev["net"][1]
+        if drx >= 0 and dtx >= 0:
+            net_rx, net_tx = drx / dt, dtx / dt  # bytes/s
+
+    mem = cur.get("mem") or {}
     mt, ma = mem.get("MemTotal"), mem.get("MemAvailable")
     st, sf = mem.get("SwapTotal"), mem.get("SwapFree")
-    stats = {
-        "cpu": cpu_percent(cpu_prev, cur_cpu),
-        "mem_used_kb": (mt - ma) if mt is not None and ma is not None else None,
-        "mem_total_kb": mt,
-        "swap_used_kb": (st - sf) if st is not None and sf is not None else None,
-        "swap_total_kb": st,
-        "tasks": tasks,
+    return {
+        "cpu": cpu,
+        "mem": ((mt - ma) / mt * 100.0) if mt and ma is not None else None,
+        "swap": ((st - sf) / st * 100.0) if st and sf is not None else None,
+        "io": io,
+        "net_rx_bps": net_rx,
+        "net_tx_bps": net_tx,
     }
-    return stats, cur_cpu
 
 
 def _hue(pct):
@@ -98,35 +151,35 @@ def _hue(pct):
 
 
 def _bar(pct, width, color):
+    width = max(1, width)
     if pct is None:
-        body = "?" * width
+        body = "?" * width if width > 1 else "?"
         return f"[{_DIM}{body}{_X}]" if color else f"[{body}]"
-    filled = int(round(pct / 100.0 * width))
-    filled = max(0, min(width, filled))
+    filled = max(0, min(width, int(round(pct / 100.0 * width))))
     body = "|" * filled + " " * (width - filled)
     return f"[{_hue(pct)}{body}{_X}]" if color else f"[{body}]"
 
 
-def _gb(kb):
-    return f"{kb / 1024 / 1024:.1f}G" if kb is not None else "?"
+def _bar_line(label, pct, width, color, lbl):
+    val = "  --" if pct is None else f"{round(pct):3d}%"
+    return f"{lbl(label)} {_bar(pct, width, color)} {val}"
 
 
-def format_stat_lines(stats: dict, *, color: bool | None = None, bar: int = 8) -> list[str]:
-    """組出 4 列 htop 風監控字串：CPU / Mem / Swp / Tasks。``color`` 預設依 NO_COLOR。"""
+def _mbs(bps):
+    return "--" if bps is None else f"{bps / 1e6:.1f}"
+
+
+def format_stat_lines(stats: dict, *, bar_width: int = 12, color: bool | None = None) -> list[str]:
+    """組出 5 列監控字串。``bar_width`` 為橫條可用寬（呼叫端依終端寬度算）。"""
     if color is None:
         color = not os.environ.get("NO_COLOR")
     lbl = (lambda s: f"{_LBL}{s}{_X}") if color else (lambda s: s)
-
-    cpu = stats.get("cpu")
-    mt, mu = stats.get("mem_total_kb"), stats.get("mem_used_kb")
-    st, su = stats.get("swap_total_kb"), stats.get("swap_used_kb")
-    mp = (mu / mt * 100.0) if mt and mu is not None else None
-    sp = (su / st * 100.0) if st and su is not None else None
-    tasks = stats.get("tasks")
-
+    net_c = (lambda s: f"{_NET}{s}{_X}") if color else (lambda s: s)
     return [
-        f"{lbl('CPU')} {_bar(cpu, bar, color)} {'  --' if cpu is None else f'{cpu:4.1f}%'}",
-        f"{lbl('Mem')} {_bar(mp, bar, color)} {_gb(mu)}/{_gb(mt)}",
-        f"{lbl('Swp')} {_bar(sp, bar, color)} {_gb(su)}/{_gb(st)}",
-        f"{lbl('Tasks')} {tasks[1]} ({tasks[0]} run)" if tasks else f"{lbl('Tasks')} --",
+        _bar_line("CPU", stats.get("cpu"), bar_width, color, lbl),
+        _bar_line("Mem", stats.get("mem"), bar_width, color, lbl),
+        _bar_line("Swp", stats.get("swap"), bar_width, color, lbl),
+        _bar_line("I/O", stats.get("io"), bar_width, color, lbl),
+        f"{lbl('Net')} {net_c('↓' + _mbs(stats.get('net_rx_bps')))} "
+        f"{net_c('↑' + _mbs(stats.get('net_tx_bps')))} MB/s",
     ]
