@@ -14,7 +14,7 @@ import os
 import re
 
 LOBSTER_EMOJI = "\U0001f99e"  # 🦞 Header 標題前綴
-BASE_TITLE = "PaulShiaBro Stage 11 Cockpit"
+BASE_TITLE = "PaulShiaBro Cockpit"
 
 # ANSI palette（映射 ui-ux-pro-max design-system 色盤）
 _ANT = "\033[38;5;215m"          # 觸鬚（淺橘）
@@ -74,5 +74,5 @@ def banner(variant: str = "c", *, color: bool | None = None) -> str:
 
 
 def cockpit_title(base: str = BASE_TITLE) -> str:
-    """Header 標題：``🦞 PaulShiaBro Stage 11 Cockpit``。"""
+    """Header 標題：``🦞 PaulShiaBro Cockpit``。"""
     return f"{LOBSTER_EMOJI} {base}"

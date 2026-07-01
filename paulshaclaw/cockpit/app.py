@@ -107,7 +107,7 @@ SYSMON_INTERVAL_SECONDS = 1.5
 
 
 class CockpitApp(App[None]):
-    TITLE = "PaulShiaBro Stage 11 Cockpit"
+    TITLE = "PaulShiaBro Cockpit"
     # 視覺設計系統（OLED slate + run-green）：與模組同層的 cockpit.tcss。
     # textual 未安裝時只是個字串類別屬性，不影響 import；安裝時才載入套用。
     CSS_PATH = "cockpit.tcss"
