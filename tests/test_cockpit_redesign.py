@@ -9,6 +9,7 @@ import os
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from paulshaclaw.cockpit import app as cockpit_app
 from paulshaclaw.cockpit.app import (
@@ -103,8 +104,12 @@ class TuiTableViewTests(unittest.TestCase):
             SimpleNamespace(pane_id="%2", title="net", task_id="perf", status="failed"),
         ))
 
-    def test_plain_has_box_borders_and_status_glyphs(self) -> None:
-        out = render_pane_task_view(self._config(), color=False)
+    @staticmethod
+    def _stream(*, encoding: str, tty: bool):
+        return SimpleNamespace(encoding=encoding, isatty=lambda: tty)
+
+    def test_unicode_mode_has_box_borders_and_status_glyphs(self) -> None:
+        out = render_pane_task_view(self._config(), color=False, unicode=True)
         self.assertIn("╭", out)
         self.assertIn("│", out)
         self.assertIn("╰", out)
@@ -113,16 +118,40 @@ class TuiTableViewTests(unittest.TestCase):
         self.assertNotIn("\x1b[", out)  # color=False → 無 ANSI
 
     def test_color_true_emits_ansi_but_keeps_cell_text(self) -> None:
-        out = render_pane_task_view(self._config(), color=True)
+        out = render_pane_task_view(self._config(), color=True, unicode=True)
         self.assertIn("\x1b[", out)
         self.assertIn("stage1-core", out)  # task 欄不著色，子字串完整
         self.assertIn("%1", out)
 
-    def test_no_color_env_strips_ansi_by_default(self) -> None:
-        from unittest.mock import patch
+    def test_auto_ascii_safe_under_c_locale_tty(self) -> None:
+        # 回歸（Codex review #168）：ascii 編碼的 TTY → 自動退回純 ASCII，不得含框線/glyph，
+        # 且整串可用 ascii 編碼（等同 LC_ALL=C / PYTHONUTF8=0 不會 UnicodeEncodeError）。
+        with patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "NO_COLOR"}, clear=True):
+            out = render_pane_task_view(self._config(), stream=self._stream(encoding="ascii", tty=True))
+        self.assertTrue(out.isascii())
+        out.encode("ascii")  # 不得拋 UnicodeEncodeError
+        self.assertNotIn("╭", out)
+        self.assertNotIn("●", out)
+        self.assertIn("+", out)
+        self.assertIn("running", out)
+        self.assertIn("failed", out)
 
+    def test_auto_redirected_non_tty_has_no_ansi_even_without_no_color(self) -> None:
+        # 回歸（Codex review #168）：非 TTY（pipe/log/Telegram）即使 NO_COLOR 未設，也不得洩 ANSI，
+        # 且退回 ASCII 邊框。
+        with patch.dict(os.environ, {k: v for k, v in os.environ.items() if k != "NO_COLOR"}, clear=True):
+            out = render_pane_task_view(self._config(), stream=self._stream(encoding="utf-8", tty=False))
+        self.assertNotIn("\x1b[", out)
+        self.assertNotIn("╭", out)
+        self.assertIn("+", out)
+
+    def test_explicit_color_overrides_non_tty(self) -> None:
+        out = render_pane_task_view(self._config(), color=True, stream=self._stream(encoding="utf-8", tty=False))
+        self.assertIn("\x1b[", out)  # 呼叫端顯式要求 → 覆寫 TTY 閘
+
+    def test_no_color_env_strips_ansi_on_tty(self) -> None:
         with patch.dict(os.environ, {"NO_COLOR": "1"}):
-            out = render_pane_task_view(self._config())
+            out = render_pane_task_view(self._config(), stream=self._stream(encoding="utf-8", tty=True))
         self.assertNotIn("\x1b[", out)
 
 
