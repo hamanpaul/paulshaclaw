@@ -10,14 +10,28 @@ def choose_startup_slot(
     *,
     cockpit_pane_id: str,
     cockpit_session_name: str,
-) -> SlotAnchor:
+) -> SlotAnchor | None:
+    """The active slot = the largest non-cockpit pane **in the cockpit's own window**.
+
+    Candidates elsewhere (other windows/sessions) remain selectable in the work list,
+    but "active / in front of me" is a per-window notion: a bigger pane in a window the
+    operator isn't looking at must not become the swap target (that made Enter appear to
+    do nothing / swap panes across windows). Falls back to session-scope only when the
+    cockpit pane's window can't be determined. Returns None (not raise) when the cockpit
+    is alone in its window — the cockpit still runs, swap just has nowhere to land.
+    """
+    cockpit_window = next(
+        (pane.window_index for pane in panes if pane.pane_id == cockpit_pane_id), None
+    )
     candidates = tuple(
         pane
         for pane in panes
-        if pane.pane_id != cockpit_pane_id and pane.session_name == cockpit_session_name
+        if pane.pane_id != cockpit_pane_id
+        and pane.session_name == cockpit_session_name
+        and (cockpit_window is None or pane.window_index == cockpit_window)
     )
     if not candidates:
-        raise ValueError("no non-cockpit panes available for Stage 11 active slot")
+        return None
     winner = max(candidates, key=lambda pane: (pane.area, pane.width, pane.height, pane.pane_id))
     return winner.anchor
 
@@ -26,10 +40,13 @@ def choose_startup_slot(
 class CockpitState:
     cockpit_pane_id: str
     cockpit_session_name: str
-    slot_anchor: SlotAnchor
+    slot_anchor: SlotAnchor | None
     panes: tuple[PaneRecord, ...]
     selected_index: int
     degraded_reason: str | None
+    # The cockpit pane's window; the active slot is scoped to this window (None = unknown
+    # → fall back to session-scope). Stable for the session; carried through refresh.
+    cockpit_window_index: str | None = None
 
     @classmethod
     def from_panes(
@@ -39,6 +56,9 @@ class CockpitState:
         cockpit_pane_id: str,
         cockpit_session_name: str,
     ) -> "CockpitState":
+        cockpit_window_index = next(
+            (pane.window_index for pane in panes if pane.pane_id == cockpit_pane_id), None
+        )
         return cls(
             cockpit_pane_id=cockpit_pane_id,
             cockpit_session_name=cockpit_session_name,
@@ -50,12 +70,18 @@ class CockpitState:
             panes=panes,
             selected_index=0,
             degraded_reason=None,
+            cockpit_window_index=cockpit_window_index,
         )
 
     def _is_active_slot_pane(self, pane: PaneRecord) -> bool:
         return (
-            pane.pane_id != self.cockpit_pane_id
+            self.slot_anchor is not None
+            and pane.pane_id != self.cockpit_pane_id
             and pane.session_name == self.cockpit_session_name
+            and (
+                self.cockpit_window_index is None
+                or pane.window_index == self.cockpit_window_index
+            )
             and pane.anchor == self.slot_anchor
         )
 
@@ -113,6 +139,7 @@ class CockpitState:
             panes=self.panes,
             selected_index=next_index,
             degraded_reason=self.degraded_reason,
+            cockpit_window_index=self.cockpit_window_index,
         )
 
     def refresh(self, panes: tuple[PaneRecord, ...]) -> "CockpitState":
@@ -124,6 +151,7 @@ class CockpitState:
             panes=panes,
             selected_index=self.selected_index,
             degraded_reason=None,
+            cockpit_window_index=self.cockpit_window_index,
         )
         candidate_count = len(refreshed.candidate_section)
         next_index = self.selected_index
@@ -146,4 +174,5 @@ class CockpitState:
             panes=panes,
             selected_index=next_index,
             degraded_reason=None if active_exists else "active-slot-lost",
+            cockpit_window_index=self.cockpit_window_index,
         )
