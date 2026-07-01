@@ -193,15 +193,21 @@ class CockpitApp(App[None]):
             return composed
 
     def _monitor_bar_width(self) -> int:
-        """依終端寬度算橫條可用寬，讓 bar 撐到右緣（htop 風）。取不到寬度時退回 12。"""
-        try:
-            width = int(self.size.width)
+        """依 banner pane 寬度算橫條可用寬，讓 bar 撐到 pane 右緣（htop 風）。取不到寬度退回 80。"""
+        width = 0
+        try:  # 優先用 brand-banner widget 自身寬度（= pane 內容寬）
+            width = int(self.query_one("#brand-banner").size.width)
         except Exception:
-            width = 0
+            pass
+        if width <= 0:
+            try:
+                width = int(self.size.width)
+            except Exception:
+                width = 0
         if width <= 0:
             width = 80
         # 每監控列固定開銷：label(3)+space+"["+"]"+space+percent(4) = 11；再扣 banner 欄+間距。
-        return max(4, min(80, width - self._MON_COL - self._MON_GAP - 11))
+        return max(4, min(200, width - self._MON_COL - self._MON_GAP - 11))
 
     def _compose_banner_stats(self, banner_lines, stat_lines):
         """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。"""
