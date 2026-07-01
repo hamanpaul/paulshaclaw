@@ -197,40 +197,91 @@ def _hue(pct):
     return _GREEN if pct < 50 else _YELLOW if pct < 80 else _RED
 
 
-def _seg_bar(segments, width, color):
-    """分段色橫條。segments=[(frac_of_bar, color), ...]（frac 為佔整條的比例，總和≤1）。"""
-    width = max(1, width)
-    if not color:
-        filled = min(width, round(sum(f for f, _ in segments) * width))
-        return "[" + "|" * filled + " " * (width - filled) + "]"
-    body, prev_cell, acc = "", 0, 0.0
-    for frac, col in segments:
-        acc += frac
-        cur_cell = min(width, int(round(acc * width)))
-        n = max(0, cur_cell - prev_cell)
-        if n:
-            body += f"{col}{'|' * n}{_X}"
-        prev_cell = cur_cell
-    return "[" + body + " " * (width - prev_cell) + "]"
+_TXT = _LBL   # overlay 數字落在長條空白處時的可讀中性色
 
 
-def _pctstr(pct):
-    return "  --" if pct is None else f"{round(pct):3d}%"
+def _human_kb(kb) -> str:
+    """kB → 人類可讀（base-1024，K/M/G/T/P）；htop 風精度：<10 兩位、<100 一位、否則整數。
+    ``None`` → ``'--'``。例：4300→'4.20M'、10182000→'9.71G'。"""
+    if kb is None:
+        return "--"
+    v = float(kb)
+    units = ("K", "M", "G", "T", "P")
+    i = 0
+    while v >= 1024.0 and i < len(units) - 1:
+        v /= 1024.0
+        i += 1
+    if v >= 100:
+        s = f"{v:.0f}"
+    elif v >= 10:
+        s = f"{v:.1f}"
+    else:
+        s = f"{v:.2f}"
+    return f"{s}{units[i]}"
+
+
+def _pct_overlay(pct) -> str:
+    return "--" if pct is None else f"{round(pct)}%"
 
 
 def _mbs(bps):
     return "--" if bps is None else f"{bps / 1e6:.1f}"
 
 
+def _meter_bar(segments, width, overlay, color, *, empty_color=_DIM):
+    """htop 風 meter：左起以分段色 ``|`` 填滿，右對齊把 ``overlay``（實際用量／百分比）疊進長條內。
+
+    變色邏輯（同 htop）：overlay 每個字元沿用其底層 cell 顏色——落在填色段→該段色、落在空白→中性
+    可讀色，使數字與長條融為一體。回 ``'[' + body + ']'``。fail-soft：width 過窄則截斷 overlay。
+    """
+    width = max(1, width)
+    chars = [" "] * width
+    colors = [empty_color] * width
+    # 1) 分段填色（左起）
+    acc, prev_cell = 0.0, 0
+    for frac, col in segments:
+        acc += frac
+        cur_cell = min(width, int(round(acc * width)))
+        for c in range(prev_cell, cur_cell):
+            chars[c] = "|"
+            colors[c] = col
+        prev_cell = cur_cell
+    filled_before = [ch == "|" for ch in chars]
+    # 2) 右對齊疊 overlay；數字顏色沿用底層（填色段色 / 空白處中性色）
+    if overlay:
+        text = overlay[:width]
+        start = width - len(text)
+        for offset, ch in enumerate(text):
+            pos = start + offset
+            chars[pos] = ch
+            if not filled_before[pos]:
+                colors[pos] = _TXT
+    # 3) 組字串
+    if not color:
+        return "[" + "".join(chars) + "]"
+    body, run_col, run = "", None, ""
+    for ch, col in zip(chars, colors):
+        if col == run_col:
+            run += ch
+        else:
+            if run:
+                body += f"{run_col}{run}{_X}"
+            run_col, run = col, ch
+    if run:
+        body += f"{run_col}{run}{_X}"
+    return "[" + body + "]"
+
+
 def format_stat_lines(stats: dict, *, bar_width: int = 12, color: bool | None = None) -> list[str]:
-    """組出 5 列 htop 風監控字串。``bar_width`` 為橫條可用寬（呼叫端依 pane 寬算）。"""
+    """組出 5 列 htop 風監控字串：實際用量（Mem/Swp 的 used/total）或百分比（CPU/I/O）右對齊疊進
+    長條內、依底層分段上色（同 htop，無尾隨百分比欄）。``bar_width`` 為長條可用寬（呼叫端依 pane 寬算）。"""
     if color is None:
         color = not os.environ.get("NO_COLOR")
     lbl = (lambda s: f"{_LBL}{s}{_X}") if color else (lambda s: s)
     net_c = (lambda s: f"{_NET}{s}{_X}") if color else (lambda s: s)
 
-    def line(label, segs, pct):
-        return f"{lbl(label)} {_seg_bar(segs, bar_width, color)} {_pctstr(pct)}"
+    def line(label, segs, overlay):
+        return f"{lbl(label)} {_meter_bar(segs, bar_width, overlay, color)}"
 
     cpu, mem, swap = stats.get("cpu"), stats.get("mem"), stats.get("swap")
     cpu_segs = ([(cpu["user"] / 100, _GREEN), (cpu["nice"] / 100, _BLUE),
@@ -243,11 +294,15 @@ def format_stat_lines(stats: dict, *, bar_width: int = 12, color: bool | None = 
     io = stats.get("io")
     io_segs = [(io / 100, _hue(io))] if io is not None else []
 
+    # Mem/Swp 疊實際用量 used/total（htop 風）；CPU/I/O 疊百分比。
+    mem_txt = f"{_human_kb(mem['used'])}/{_human_kb(mem['total'])}" if mem else "--"
+    swap_txt = f"{_human_kb(swap['used'])}/{_human_kb(swap['total'])}" if swap else "--"
+
     return [
-        line("CPU", cpu_segs, cpu["pct"] if cpu else None),
-        line("Mem", mem_segs, mem["pct"] if mem else None),
-        line("Swp", swap_segs, swap["pct"] if swap else None),
-        line("I/O", io_segs, io),
+        line("CPU", cpu_segs, _pct_overlay(cpu["pct"] if cpu else None)),
+        line("Mem", mem_segs, mem_txt),
+        line("Swp", swap_segs, swap_txt),
+        line("I/O", io_segs, _pct_overlay(io)),
         f"{lbl('Net')} {net_c('↓' + _mbs(stats.get('net_rx_bps')))} "
         f"{net_c('↑' + _mbs(stats.get('net_tx_bps')))} MB/s",
     ]
