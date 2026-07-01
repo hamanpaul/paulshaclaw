@@ -95,6 +95,48 @@ class ComputeTests(unittest.TestCase):
         self.assertTrue(all(s[k] is None for k in ("cpu", "mem", "swap", "io", "net_rx_bps")))
 
 
+class MergeStaleTests(unittest.TestCase):
+    """回歸：valid → missing → 短暫 bridge → 持久缺樣降級 '--'（Codex adversarial review）。"""
+
+    def test_bridges_one_miss_then_clears(self):
+        last, stale = {}, {}
+        self.assertEqual(sysmon.merge_stale({"cpu": 50.0}, last, stale)["cpu"], 50.0)
+        # 第 1 次缺樣：bridge 上次有效值（避免偶發缺樣閃爍）
+        self.assertEqual(sysmon.merge_stale({"cpu": None}, last, stale, tolerance=1)["cpu"], 50.0)
+        # 第 2 次連續缺樣：超過容忍 → 降級為 None（顯示 '--'，非假遙測）
+        self.assertIsNone(sysmon.merge_stale({"cpu": None}, last, stale, tolerance=1)["cpu"])
+        # 持續缺樣不會回頭顯示舊值
+        self.assertIsNone(sysmon.merge_stale({"cpu": None}, last, stale, tolerance=1)["cpu"])
+
+    def test_valid_sample_resets_counter(self):
+        last, stale = {}, {}
+        sysmon.merge_stale({"cpu": 50.0}, last, stale)
+        sysmon.merge_stale({"cpu": None}, last, stale, tolerance=1)   # count=1（bridge）
+        self.assertEqual(sysmon.merge_stale({"cpu": 70.0}, last, stale)["cpu"], 70.0)  # reset
+        self.assertEqual(stale["cpu"], 0)
+        # reset 後又可 bridge 一次新值
+        self.assertEqual(sysmon.merge_stale({"cpu": None}, last, stale, tolerance=1)["cpu"], 70.0)
+
+    def test_none_without_history_stays_none(self):
+        self.assertIsNone(sysmon.merge_stale({"io": None}, {}, {})["io"])
+
+    def test_tolerance_zero_clears_immediately(self):
+        last, stale = {}, {}
+        sysmon.merge_stale({"cpu": 50.0}, last, stale)
+        self.assertIsNone(sysmon.merge_stale({"cpu": None}, last, stale, tolerance=0)["cpu"])
+
+    def test_cleared_metric_renders_dashes(self):
+        # 端到端：持久缺樣經 merge → format 顯示 '--'（非舊值）
+        last, stale = {}, {}
+        sysmon.merge_stale({"cpu": {"user": 30.0, "nice": 0.0, "system": 10.0, "pct": 40.0}}, last, stale)
+        merged = sysmon.merge_stale({"cpu": None}, last, stale, tolerance=0)
+        line = sysmon.format_stat_lines(
+            {**{"mem": None, "swap": None, "io": None, "net_rx_bps": None, "net_tx_bps": None}, **merged},
+            bar_width=8, color=False)[0]
+        self.assertIn("--", line)
+        self.assertNotIn("40%", line)
+
+
 class FormatTests(unittest.TestCase):
     STATS = {
         "cpu": {"user": 30.0, "nice": 5.0, "system": 10.0, "pct": 45.0},

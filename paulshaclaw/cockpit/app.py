@@ -98,7 +98,8 @@ class CockpitApp(App[None]):
         # 系統監控（banner 右側 htop 風）：CPU%/IO%/Net 速率需前後快照差值，故保留上次快照；
         # _last_stats 存最後有效讀數，None 時沿用以避免快速重刷閃爍。
         self._mon_prev = None
-        self._last_stats: dict = {}
+        self._last_stats: dict = {}   # 最後有效讀數（bridge 偶發缺樣）
+        self._stale: dict = {}        # 各項連續缺樣次數（超過容忍即降級為 '--'）
         # Last-rendered work-list content, so we skip rebuilding (and flickering)
         # the list on refreshes that didn't change it.
         self._last_work_items: tuple[str, ...] | None = None
@@ -176,11 +177,8 @@ class CockpitApp(App[None]):
             cur = sysmon.read_snapshot()
             stats = sysmon.compute_stats(self._mon_prev, cur)
             self._mon_prev = cur
-            for k, v in stats.items():  # None → 沿用上次有效值，避免閃爍
-                if v is None and k in self._last_stats:
-                    stats[k] = self._last_stats[k]
-                elif v is not None:
-                    self._last_stats[k] = v
+            # None 短暫沿用上次有效值以 bridge 偶發缺樣；但持久缺樣即降級為 '--'（不顯示假遙測）。
+            stats = sysmon.merge_stale(stats, self._last_stats, self._stale)
             stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
         except Exception:
             stat_lines = []

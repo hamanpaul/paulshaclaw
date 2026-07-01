@@ -169,6 +169,24 @@ def compute_stats(prev: dict | None, cur: dict) -> dict:
     }
 
 
+def merge_stale(stats: dict, last_good: dict, stale_counts: dict, *, tolerance: int = 1) -> dict:
+    """None 值短暫沿用上次有效值以 bridge 偶發缺樣（如 dt≤0、單次 counter-reset），
+    但連續缺樣超過 ``tolerance`` 次即維持 None → 顯示 '--'（degraded）。
+
+    這是刻意設計：避免 /proc 持久失效（來源消失/介面不見）卻長期顯示舊值＝假遙測
+    （Codex adversarial review）。就地更新 ``last_good`` / ``stale_counts``。回合併後 dict。
+    """
+    merged = dict(stats)
+    for k, v in stats.items():
+        if v is not None:
+            last_good[k] = v
+            stale_counts[k] = 0
+        else:
+            stale_counts[k] = stale_counts.get(k, 0) + 1
+            merged[k] = last_good[k] if (k in last_good and stale_counts[k] <= tolerance) else None
+    return merged
+
+
 # ---- 呈現 ----
 
 def _hue(pct):
