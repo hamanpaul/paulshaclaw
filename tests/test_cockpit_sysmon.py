@@ -156,14 +156,17 @@ class FormatTests(unittest.TestCase):
         lines = sysmon.format_stat_lines(self.STATS, bar_width=24, color=False)
         self.assertEqual(len(lines), 5)
         self.assertTrue(lines[0].startswith("CPU") and "45%" in lines[0])
-        # Mem/Swp 疊實際用量 used/total（htop 風），不再顯示百分比
+        # Mem/Swp：bar 內疊 used/total，百分比在 ] 右側
         self.assertTrue(lines[1].startswith("Mem"))
         self.assertIn("4.20M/9.77M", lines[1])
-        self.assertNotIn("60%", lines[1])
+        self.assertTrue(lines[1].rstrip().endswith("60%"))
         self.assertTrue(lines[2].startswith("Swp"))
         self.assertIn("1.46M/7.81M", lines[2])
-        self.assertNotIn("25%", lines[2])
+        self.assertTrue(lines[2].rstrip().endswith("25%"))
         self.assertTrue(lines[3].startswith("I/O") and "30%" in lines[3])
+        # 四欄百分比皆在 ] 右側
+        for ln in lines[:4]:
+            self.assertGreater(ln.rfind("%"), ln.rfind("]"))
         self.assertTrue(lines[4].startswith("Net"))
         self.assertIn("↓3.4", lines[4])
         self.assertIn("↑0.8", lines[4])
@@ -207,13 +210,13 @@ class FormatTests(unittest.TestCase):
         self.assertIn(sysmon._YELLOW, swp)
 
     def test_bar_width_scales(self):
-        # io=100 → 幾乎填滿（右側 4 格被 '100%' 疊掉）；io=0 → 全空、顯示 '0%'
+        # io=100 → 長條全滿（內部無 overlay），百分比在 ] 右；io=0 → 全空、'0%' 在右
         full = sysmon.format_stat_lines({**self.STATS, "io": 100.0}, bar_width=20, color=False)[3]
-        self.assertIn("100%", full)
-        self.assertGreaterEqual(full.count("|"), 15)
+        self.assertIn("|" * 20, full)
+        self.assertTrue(full.rstrip().endswith("100%"))
         empty = sysmon.format_stat_lines({**self.STATS, "io": 0.0}, bar_width=20, color=False)[3]
         self.assertNotIn("|", empty)
-        self.assertIn("0%", empty)
+        self.assertTrue(empty.rstrip().endswith("0%"))
 
     def test_no_color_env(self):
         with patch.dict(os.environ, {"NO_COLOR": "1"}):
