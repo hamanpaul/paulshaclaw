@@ -1,0 +1,106 @@
+/* PaulShiaBro Stage 11 Cockpit — 視覺設計系統（ui-ux-pro-max design-system：Dark Mode / OLED）
+ *
+ * 色盤（"Code dark + run green"）：
+ *   #0F172A  背景（deep slate）        #1E293B  面板 / Header・Footer 底
+ *   #475569  邊框                       #F8FAFC  主前景文字   #94A3B8 次前景
+ *   #22C55E  run-green（accent / 執行中 / 焦點）
+ *   #EF4444  failed-red（destructive）  #FBBF24 warning-amber
+ *   #F97316  破蝦哥 lobster-orange（品牌強調）
+ *
+ * 走「精緻面板」方向：保留原版面與 widget id / 互動，僅加邊框面板、標題與語意色。
+ * 屬性皆限用 Textual 0.61 已支援者，避免 CSS parse 失敗擋掉整個 TUI。
+ */
+
+Screen {
+    background: #0F172A;
+    color: #F8FAFC;
+}
+
+/* Header：品牌橘標題列（🦞 PaulShiaBro Stage 11 Cockpit） */
+Header {
+    background: #1E293B;
+    color: #F97316;
+    text-style: bold;
+}
+
+/* Footer：暗底、快捷鍵綠字 */
+Footer {
+    background: #1E293B;
+    color: #94A3B8;
+}
+Footer > .footer--key {
+    background: #0F172A;
+    color: #22C55E;
+    text-style: bold;
+}
+Footer > .footer--description {
+    color: #CBD5E1;
+}
+
+/* 破蝦哥 banner + 右側 htop 風系統監控：品牌橘框面板 */
+#brand-banner {
+    height: auto;
+    padding: 0 1;
+    background: #0F172A;
+    border: round #F97316;
+    border-title-align: left;
+    border-subtitle-align: right;
+}
+
+#main-row {
+    height: 1fr;
+}
+#left-pane {
+    width: 2fr;
+}
+#right-pane {
+    width: 3fr;
+}
+
+/* WORK · panes 工作清單（ACTIVE pane 為首列，見 app.py） */
+#work-list {
+    height: 1fr;
+    padding: 0 1;
+    background: #0F172A;
+    border: round #475569;
+    border-title-align: left;
+    border-subtitle-align: right;
+}
+#work-list:focus {
+    border: round #22C55E;
+}
+
+/* DETAIL · 選中 pane */
+#pane-detail {
+    height: 1fr;
+    padding: 0 1;
+    background: #0F172A;
+    border: round #475569;
+    border-title-align: left;
+}
+
+/* JOBS · 全域工作狀態 */
+#global-jobs {
+    height: auto;
+    max-height: 10;
+    padding: 0 1;
+    background: #0F172A;
+    border: round #475569;
+    border-title-align: left;
+    border-subtitle-align: right;
+}
+
+/* ? 說明 modal：置中、品牌橘框卡片 */
+HelpModal {
+    align: center middle;
+}
+#help-modal {
+    width: 66;
+    height: auto;
+    padding: 1 2;
+    background: #1E293B;
+    color: #F8FAFC;
+    border: round #F97316;
+    border-title-align: center;
+    border-subtitle-align: center;
+}

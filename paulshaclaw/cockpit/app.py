@@ -60,6 +60,39 @@ def pane_display_label(pane: PaneRecord) -> str:
     return f"{pane.session_name}:{pane.window_index} {pane.pane_id} {pane.display_summary}"
 
 
+# 語意狀態樣式（ui-ux-pro-max design-system 色盤）：狀態 → (glyph, rich 顏色)。
+# running/success 綠、failed/error 紅、blocked/pending 琥珀、done 收斂為淡灰（去強調），
+# 未知狀態退回中性點。純函式，供工作清單／DETAIL／JOBS 上色與單測共用。
+_STATUS_STYLE: dict[str, tuple[str, str]] = {
+    "running": ("●", "#22C55E"),
+    "active": ("●", "#22C55E"),
+    "success": ("✓", "#22C55E"),
+    "passed": ("✓", "#22C55E"),
+    "ok": ("✓", "#22C55E"),
+    "done": ("✓", "#64748B"),
+    "completed": ("✓", "#64748B"),
+    "failed": ("✗", "#EF4444"),
+    "error": ("✗", "#EF4444"),
+    "blocked": ("◼", "#FBBF24"),
+    "pending": ("◔", "#FBBF24"),
+    "queued": ("◔", "#94A3B8"),
+    "unmapped": ("·", "#64748B"),
+}
+_STATUS_DEFAULT: tuple[str, str] = ("•", "#94A3B8")
+
+
+def status_style(status: str) -> tuple[str, str]:
+    """狀態字串 → (glyph, rich 顏色)。大小寫不敏感；未知狀態退回中性點。"""
+    return _STATUS_STYLE.get((status or "").strip().lower(), _STATUS_DEFAULT)
+
+
+def format_session_summary(state: CockpitState) -> str:
+    """banner 副標：``main · 12 panes · 3 sess``（cockpit pane 不計入 panes 數）。"""
+    others = [pane for pane in state.panes if pane.pane_id != state.cockpit_pane_id]
+    sessions = {pane.session_name for pane in state.panes}
+    return f"{state.cockpit_session_name} · {len(others)} panes · {len(sessions)} sess"
+
+
 # How often the cockpit re-reads the tmux pane list so the work summary stays
 # live. Kept at 30s so the periodic redraw isn't a visible flicker; each tick is
 # bounded anyway (one `list-panes`, a tiny `ps` only for title-less minicom
@@ -70,6 +103,9 @@ REFRESH_INTERVAL_SECONDS = 30.0
 
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Stage 11 Cockpit"
+    # 視覺設計系統（OLED slate + run-green）：與模組同層的 cockpit.tcss。
+    # textual 未安裝時只是個字串類別屬性，不影響 import；安裝時才載入套用。
+    CSS_PATH = "cockpit.tcss"
     BINDINGS = [
         Binding("up", "move_up", "↑/↓ 選擇"),
         Binding("down", "move_down", "↑/↓ 選擇"),
@@ -131,9 +167,8 @@ class CockpitApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("", id="brand-banner")  # 破蝦哥 🦞 banner（issue #116）；內容於 on_mount 填入
-        with Horizontal():
+        with Horizontal(id="main-row"):
             with Vertical(id="left-pane"):
-                yield Static("", id="active-slot")
                 yield ListView(id="work-list")
             with Vertical(id="right-pane"):
                 yield Static("", id="pane-detail")
@@ -350,75 +385,167 @@ class CockpitApp(App[None]):
                 return pane.preview
         return pane.preview
 
-    def _work_list_items(self, active: PaneRecord | None) -> tuple[str, ...]:
-        items: list[str] = []
+    def _text(self, segments: list[tuple[str, str]]):
+        """把 (文字, rich 樣式) 片段組成 rich Text；rich 缺席（textual stub 環境）則退回純字串。
+
+        以 append 逐段上色而非 console markup，避免 pane 標題含 ``[node]`` / ``[▪]`` 之類方括號
+        被當成 markup tag 誤解析（fail-soft：任何錯誤都退回純文字，絕不擋刷新）。
+        """
+        plain = "".join(text for text, _ in segments)
+        try:
+            from rich.text import Text
+
+            out = Text()
+            for text, style in segments:
+                out.append(text, style=style or "")
+            return out
+        except Exception:
+            return plain
+
+    def _pane_status(self, pane: PaneRecord) -> tuple[str, str, str]:
+        """(glyph, 顏色, 狀態字) — 取該 pane 首個 job 狀態；無 job 回空字（不顯示尾綴）。"""
+        jobs = self.jobs_by_pane.get(pane.pane_id, ())
+        if not jobs:
+            return ("", "#94A3B8", "")
+        status = jobs[0].status or ""
+        glyph, color = status_style(status)
+        return (glyph, color, status)
+
+    def _work_row_segments(self, active: PaneRecord | None) -> list[list[tuple[str, str]]]:
+        """工作清單每列的上色片段（順序＝顯示順序）；純字串 key 與彩色 renderable 皆由此衍生，
+        確保去閃爍比對（key）與實際上色（Text）永遠一致。"""
+        rows: list[list[tuple[str, str]]] = []
         if active is not None:
-            items.append(f"[ACTIVE] {pane_display_label(active)}")
+            rows.append(
+                [
+                    ("● ", "bold #22C55E"),
+                    (f"ACTIVE  {pane_display_label(active)}", "bold #22C55E"),
+                ]
+            )
         selected = self.state.selected_pane
         for pane in self.state.candidate_section:
-            prefix = ">" if selected and pane.pane_id == selected.pane_id else " "
-            items.append(f"{prefix} {pane_display_label(pane)}")
-        return tuple(items)
+            is_selected = bool(selected and pane.pane_id == selected.pane_id)
+            marker = "›" if is_selected else " "
+            glyph, color, name = self._pane_status(pane)
+            segs: list[tuple[str, str]] = [
+                (f"{marker} ", "bold #22C55E" if is_selected else "#475569"),
+                (pane_display_label(pane), "bold #F8FAFC" if is_selected else "#CBD5E1"),
+            ]
+            if name:
+                segs.append((f"  {glyph} {name}", color))
+            rows.append(segs)
+        return rows
+
+    def _work_list_items(self, active: PaneRecord | None) -> tuple[str, ...]:
+        # 純文字投影：作為去閃爍比對 key，同時是 rich 缺席時的 fallback 呈現。
+        return tuple(
+            "".join(text for text, _ in segs) for segs in self._work_row_segments(active)
+        )
+
+    def _work_list_renderables(self, active: PaneRecord | None) -> list:
+        return [self._text(segs) for segs in self._work_row_segments(active)]
 
     def _refresh_widgets(self) -> None:
+        # ACTIVE pane 不再另設狀態條——它就是 WORK 清單首列（綠色 ● ACTIVE）；
+        # 「無 active」的降級訊號改由 WORK 面板副標的琥珀 ⚠ 呈現，不再重複一條 bar。
         active = self.state.active_pane
-        active_text = (
-            "<missing>"
-            if active is None
-            else f"ACTIVE {pane_display_label(active)} {active.command}"
-        )
-        self.query_one("#active-slot", Static).update(active_text)
 
-        # Only rebuild the work list when its content (labels + selection marker)
-        # actually changed, so an idle periodic refresh doesn't visibly flicker
-        # the list. The detail/preview below still updates every refresh.
+        # Only rebuild the work list when its content (labels + selection marker
+        # + per-pane status) actually changed, so an idle periodic refresh doesn't
+        # visibly flicker the list. The detail/preview below still updates every
+        # refresh. The plain-string key mirrors the coloured Text row-for-row.
         items = self._work_list_items(active)
         if items != self._last_work_items:
             self._last_work_items = items
             work_list = self.query_one("#work-list", ListView)
             work_list.clear()
-            for line in items:
-                work_list.append(ListItem(Static(line)))
+            for renderable in self._work_list_renderables(active):
+                work_list.append(ListItem(Static(renderable)))
             try:
                 work_list.index = self._selected_list_index()
             except Exception:
                 pass
+            subtitle = (
+                f"⚠ {self.state.degraded_reason}"
+                if self.state.degraded_reason
+                else f"{len(self.state.candidate_section)} panes"
+            )
+            self._set_border(work_list, "WORK · panes", subtitle)
 
         selected = self.state.selected_pane
+        detail_widget = self.query_one("#pane-detail", Static)
         if selected is None:
-            detail_text = "\n".join(
+            self._set_border(detail_widget, "DETAIL", None)
+            detail_renderable = self._text(
                 [
-                    "No candidate panes",
-                    f"state: {self.state.degraded_reason or 'ok'}",
+                    ("No candidate panes\n", "#94A3B8"),
+                    *self._state_segment(),
                 ]
             )
         else:
+            self._set_border(
+                detail_widget, f"DETAIL · {selected.pane_id}", selected.display_summary
+            )
+            segs: list[tuple[str, str]] = [
+                (f"{selected.pane_id} ", "bold #F8FAFC"),
+                (selected.display_summary, "#F8FAFC"),
+                (
+                    f"  {selected.command} · {selected.session_name}:"
+                    f"{selected.window_index} · {selected.width}×{selected.height}\n",
+                    "#64748B",
+                ),
+            ]
+            for line in self._selected_preview(selected):
+                segs.append((f"{line}\n", "#94A3B8"))
             jobs = self.jobs_by_pane.get(selected.pane_id, ())
             if jobs:
-                job_lines = [f"{job.source}:{job.status}:{job.trace_id or '-'}" for job in jobs]
+                for job in jobs:
+                    glyph, color = status_style(job.status)
+                    segs.append(
+                        (f"{glyph} {job.source}:{job.status} {job.trace_id or '-'}\n", color)
+                    )
             else:
-                job_lines = ["job-state: unmapped"]
-            detail_text = "\n".join(
-                [
-                    f"{selected.pane_id} {selected.display_summary}",
-                    *self._selected_preview(selected),
-                    *job_lines,
-                    f"state: {self.state.degraded_reason or 'ok'}",
-                ]
-            )
-        self.query_one("#pane-detail", Static).update(detail_text)
-        all_jobs = [job for items in self.jobs_by_pane.values() for job in items]
+                segs.append(("· job-state: unmapped\n", "#64748B"))
+            segs.extend(self._state_segment())
+            detail_renderable = self._text(segs)
+        detail_widget.update(detail_renderable)
+
+        all_jobs = [job for jobs in self.jobs_by_pane.values() for job in jobs]
+        jobs_widget = self.query_one("#global-jobs", Static)
         if all_jobs:
-            global_jobs_text = "\n".join(
-                f"{job.pane_id or '-'} {job.status} {job.trace_id or '-'}"
-                for job in all_jobs[:10]
-            )
+            self._set_border(jobs_widget, "JOBS", f"{len(all_jobs)} total")
+            job_segs: list[tuple[str, str]] = []
+            for job in all_jobs[:10]:
+                glyph, color = status_style(job.status)
+                job_segs.append((f"{job.pane_id or '-':>4} ", "#94A3B8"))
+                job_segs.append((f"{glyph} {job.status:<8} ", color))
+                job_segs.append((f"{job.trace_id or '-'}\n", "#64748B"))
+            jobs_renderable = self._text(job_segs)
         else:
-            global_jobs_text = "jobs loaded: 0"
-        self.query_one("#global-jobs", Static).update(global_jobs_text)
+            self._set_border(jobs_widget, "JOBS", "0 total")
+            jobs_renderable = self._text([("jobs loaded: 0", "#64748B")])
+        jobs_widget.update(jobs_renderable)
 
         # 破蝦哥 banner + 右側系統監控（每 tick live 刷新）。fail-soft：任何錯誤都不擋刷新。
         try:
-            self.query_one("#brand-banner", Static).update(self._brand_banner_renderable())
+            banner = self.query_one("#brand-banner", Static)
+            self._set_border(banner, "🦞 破蝦哥 · Cockpit", format_session_summary(self.state))
+            banner.update(self._brand_banner_renderable())
+        except Exception:
+            pass
+
+    def _state_segment(self) -> list[tuple[str, str]]:
+        """DETAIL 底部 ``state:`` 行片段：ok 綠、降級琥珀。"""
+        reason = self.state.degraded_reason
+        return [(f"state: {reason or 'ok'}", "bold #FBBF24" if reason else "#22C55E")]
+
+    @staticmethod
+    def _set_border(widget: object, title: str, subtitle: str | None) -> None:
+        """設面板邊框標題／副標；``subtitle=None``（或空字串）明確清空副標——避免殘留上一狀態
+        的舊摘要（如 DETAIL 由選取態切回無候選態時副標仍顯示前一個 pane；Copilot review PR #168）。
+        stub 或未掛載時 fail-soft。"""
+        try:
+            widget.border_title = title
+            widget.border_subtitle = subtitle or ""
         except Exception:
             pass

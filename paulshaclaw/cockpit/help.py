@@ -59,7 +59,14 @@ class HelpModal(ModalScreen[None]):
         )
 
     def compose(self) -> ComposeResult:
-        yield Static(self.help_text, id="help-modal")
+        card = Static(self.help_text, id="help-modal")
+        # 面板化：品牌橘框卡片 + 標題/副標（cockpit.tcss 上色）。stub 無此屬性則略過。
+        try:
+            card.border_title = "🦞 Cockpit · 說明"
+            card.border_subtitle = "esc 關閉"
+        except Exception:
+            pass
+        yield card
 
     def action_dismiss_help(self) -> None:
         callback = getattr(self.app, "_on_help_closed", None)
