@@ -341,6 +341,57 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIsNone(state.active_pane)
         self.assertIn("%9", [pane.pane_id for pane in state.candidate_section])
 
+    def test_refresh_recovers_active_when_slot_pane_resized(self) -> None:
+        # 硬化（finding 1）：slot pane 被 resize 使 geometry 不再吻合啟動 anchor → refresh 重新推導 →
+        # active 自癒，不會永久卡在 active-slot-lost。
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", left=0, top=0, width=100, height=24),
+            pane_record("%1", session_name="main", window_index="0", title="slot", left=0, top=25, width=100, height=24),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+        self.assertEqual(state.active_pane.pane_id, "%1")
+
+        resized = state.refresh((
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", left=0, top=0, width=100, height=24),
+            pane_record("%1", session_name="main", window_index="0", title="slot", left=0, top=25, width=100, height=30),
+        ))
+        self.assertEqual(resized.active_pane.pane_id, "%1")
+        self.assertIsNone(resized.degraded_reason)
+
+    def test_refresh_rederives_cockpit_window_after_renumber(self) -> None:
+        # 硬化（finding 2）：window 被 renumber（0→3）→ refresh 重新推導 cockpit window → active 仍找得到。
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", left=0, top=0, width=100, height=24),
+            pane_record("%1", session_name="main", window_index="0", title="slot", left=0, top=25, width=100, height=24),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+        self.assertEqual(state.cockpit_window_index, "0")
+
+        renumbered = state.refresh((
+            pane_record("%0", session_name="main", window_index="3", title="cockpit", left=0, top=0, width=100, height=24),
+            pane_record("%1", session_name="main", window_index="3", title="slot", left=0, top=25, width=100, height=24),
+        ))
+        self.assertEqual(renumbered.cockpit_window_index, "3")
+        self.assertEqual(renumbered.active_pane.pane_id, "%1")
+        self.assertIsNone(renumbered.degraded_reason)
+
+    def test_refresh_acquires_slot_after_pane_added_to_lone_cockpit_window(self) -> None:
+        # 硬化（finding 3）：開機時 cockpit 獨佔 window（slot None）→ 之後 split 出新 pane → refresh 取得 slot。
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", width=100, height=40),
+            pane_record("%9", session_name="main", window_index="1", title="elsewhere", width=100, height=40),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+        self.assertIsNone(state.active_pane)
+
+        grown = state.refresh((
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", left=0, top=0, width=100, height=20),
+            pane_record("%5", session_name="main", window_index="0", title="new", left=0, top=21, width=100, height=19),
+            pane_record("%9", session_name="main", window_index="1", title="elsewhere", width=100, height=40),
+        ))
+        self.assertEqual(grown.active_pane.pane_id, "%5")
+        self.assertIsNone(grown.degraded_reason)
+
     def test_refresh_promotes_cross_window_pane_swapped_into_slot(self) -> None:
         # 跨 window swap 後：被選的 %9 移進 cockpit window 的 slot geom → reconcile 後成為 active。
         panes = (

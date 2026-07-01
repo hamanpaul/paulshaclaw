@@ -144,15 +144,39 @@ class CockpitState:
 
     def refresh(self, panes: tuple[PaneRecord, ...]) -> "CockpitState":
         previous_selected = self.selected_pane
-        refreshed = CockpitState(
-            cockpit_pane_id=self.cockpit_pane_id,
-            cockpit_session_name=self.cockpit_session_name,
-            slot_anchor=self.slot_anchor,
-            panes=panes,
-            selected_index=self.selected_index,
-            degraded_reason=None,
-            cockpit_window_index=self.cockpit_window_index,
+        # Self-heal against live layout changes (adversarial-review findings 1/2/3):
+        # re-derive the cockpit's window from the fresh snapshot (survives window
+        # renumber/move), and if the current slot no longer maps to a pane
+        # (resize/zoom/split, or we started alone and panes have since appeared)
+        # re-pick it — so swapping recovers instead of staying permanently degraded.
+        # A slot that still maps to a pane is kept, so a pane swapped into it
+        # predictably remains active.
+        cockpit_window = next(
+            (pane.window_index for pane in panes if pane.pane_id == self.cockpit_pane_id),
+            self.cockpit_window_index,
         )
+
+        def _rebuilt(anchor: SlotAnchor | None) -> "CockpitState":
+            return CockpitState(
+                cockpit_pane_id=self.cockpit_pane_id,
+                cockpit_session_name=self.cockpit_session_name,
+                slot_anchor=anchor,
+                panes=panes,
+                selected_index=self.selected_index,
+                degraded_reason=None,
+                cockpit_window_index=cockpit_window,
+            )
+
+        refreshed = _rebuilt(self.slot_anchor)
+        if refreshed.active_pane is None:
+            recovered = choose_startup_slot(
+                panes,
+                cockpit_pane_id=self.cockpit_pane_id,
+                cockpit_session_name=self.cockpit_session_name,
+            )
+            if recovered is not None:
+                refreshed = _rebuilt(recovered)
+
         candidate_count = len(refreshed.candidate_section)
         next_index = self.selected_index
         if candidate_count == 0:
@@ -170,9 +194,9 @@ class CockpitState:
         return CockpitState(
             cockpit_pane_id=self.cockpit_pane_id,
             cockpit_session_name=self.cockpit_session_name,
-            slot_anchor=self.slot_anchor,
+            slot_anchor=refreshed.slot_anchor,
             panes=panes,
             selected_index=next_index,
             degraded_reason=None if active_exists else "active-slot-lost",
-            cockpit_window_index=self.cockpit_window_index,
+            cockpit_window_index=cockpit_window,
         )
