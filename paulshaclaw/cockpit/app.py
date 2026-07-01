@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 
-from . import branding
+from . import branding, sysmon
 
 try:
     from textual.app import App, ComposeResult
@@ -95,6 +95,10 @@ class CockpitApp(App[None]):
         self.actions = actions
         self.pane_loader = pane_loader
         self.preview_loader = preview_loader
+        # 系統監控（issue：banner 右側 htop 風）：CPU% 需 /proc/stat 兩次取樣差值，
+        # 故保留上一次快照；_last_cpu 存最後有效讀數，避免快速重刷時 Δ太小閃 "--"。
+        self._cpu_prev = None
+        self._last_cpu = None
         # Last-rendered work-list content, so we skip rebuilding (and flickering)
         # the list on refreshes that didn't change it.
         self._last_work_items: tuple[str, ...] | None = None
@@ -141,10 +145,7 @@ class CockpitApp(App[None]):
             self.title = branding.cockpit_title()
         except Exception:
             pass
-        try:
-            self.query_one("#brand-banner", Static).update(self._brand_banner_renderable())
-        except Exception:
-            pass
+        # brand-banner（+ 系統監控）由 _refresh_widgets 統一填入並每 tick 刷新。
         self._refresh_widgets()
         # Keep the work list live: re-read panes on a fixed interval (bounded
         # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
@@ -162,14 +163,39 @@ class CockpitApp(App[None]):
             pass
 
     def _brand_banner_renderable(self):
-        """破蝦哥 banner C；有 rich 時用 Text.from_ansi 上色，否則回純字串（NO_COLOR 已去色）。"""
-        art = branding.banner("c")
+        """破蝦哥 banner C + 右側 htop 風系統監控（CPU/Mem/Swp/Tasks）。
+
+        監控 fail-soft：讀 /proc 失敗則只顯示 banner。有 rich 時 Text.from_ansi 上色。
+        """
+        banner_lines = branding.banner("c").rstrip("\n").split("\n")
+        stat_lines: list[str] = []
+        try:
+            stats, self._cpu_prev = sysmon.read_stats(self._cpu_prev)
+            if stats.get("cpu") is not None:
+                self._last_cpu = stats["cpu"]
+            stats["cpu"] = self._last_cpu  # 顯示最後有效讀數，避免閃爍
+            stat_lines = sysmon.format_stat_lines(stats)
+        except Exception:
+            stat_lines = []
+        composed = self._compose_banner_stats(banner_lines, stat_lines)
         try:
             from rich.text import Text
 
-            return Text.from_ansi(art)
+            return Text.from_ansi(composed)
         except Exception:
-            return art
+            return composed
+
+    @staticmethod
+    def _compose_banner_stats(banner_lines, stat_lines, *, col=15, gap=2):
+        """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。"""
+        out = []
+        for i, bline in enumerate(banner_lines):
+            visible = branding.strip_ansi(bline)
+            row = bline + " " * max(0, col - len(visible))
+            if i < len(stat_lines):
+                row += " " * gap + stat_lines[i]
+            out.append(row)
+        return "\n".join(out) + "\n"
 
     def on_list_view_highlighted(self, event: object) -> None:
         try:
@@ -369,3 +395,9 @@ class CockpitApp(App[None]):
         else:
             global_jobs_text = "jobs loaded: 0"
         self.query_one("#global-jobs", Static).update(global_jobs_text)
+
+        # 破蝦哥 banner + 右側系統監控（每 tick live 刷新）。fail-soft：任何錯誤都不擋刷新。
+        try:
+            self.query_one("#brand-banner", Static).update(self._brand_banner_renderable())
+        except Exception:
+            pass
