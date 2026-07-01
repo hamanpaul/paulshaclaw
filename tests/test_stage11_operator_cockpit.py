@@ -22,7 +22,12 @@ except Exception:  # ModuleNotFoundError or other import-time issues
 
 from paulshaclaw.cockpit.actions import LayoutActionService
 from paulshaclaw.cockpit import __main__ as cockpit_main
-from paulshaclaw.cockpit.app import REFRESH_INTERVAL_SECONDS, CockpitApp, pane_display_label
+from paulshaclaw.cockpit.app import (
+    REFRESH_INTERVAL_SECONDS,
+    SYSMON_INTERVAL_SECONDS,
+    CockpitApp,
+    pane_display_label,
+)
 from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
@@ -183,13 +188,30 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(panes[0].pane_tty, "/dev/pts/7")
         self.assertEqual(panes[0].command, "minicom")
 
-    def test_on_mount_schedules_periodic_refresh(self) -> None:
+    def test_on_mount_schedules_pane_and_sysmon_ticks(self) -> None:
+        # 兩段式節奏（htop 風）：慢 tick 重載 tmux panes、快 tick 只刷 /proc 系統監控。
         app = self._minimal_app()
         with patch.object(app, "_refresh_widgets"), patch.object(app, "set_interval") as set_interval:
             app.on_mount()
-        set_interval.assert_called_once()
-        self.assertEqual(set_interval.call_args.args[0], REFRESH_INTERVAL_SECONDS)
-        self.assertEqual(set_interval.call_args.args[1], app._on_refresh_tick)
+        scheduled = {call.args[1]: call.args[0] for call in set_interval.call_args_list}
+        self.assertEqual(scheduled.get(app._on_refresh_tick), REFRESH_INTERVAL_SECONDS)
+        self.assertEqual(scheduled.get(app._on_sysmon_tick), SYSMON_INTERVAL_SECONDS)
+        # sysmon tick 必須比 pane 重載快，才是「即時」監控
+        self.assertLess(SYSMON_INTERVAL_SECONDS, REFRESH_INTERVAL_SECONDS)
+
+    def test_sysmon_tick_updates_banner_without_reloading_panes(self) -> None:
+        # 高頻 tick 只讀 /proc 就地更新 banner，不得 fork tmux（不吃資源的關鍵）。
+        reloads = {"n": 0}
+
+        def loader(**kwargs):
+            reloads["n"] += 1
+            return self._minimal_panes()
+
+        app = self._minimal_app(pane_loader=loader)
+        with patch.object(app, "_refresh_banner") as refresh_banner:
+            app._on_sysmon_tick()
+        refresh_banner.assert_called_once()
+        self.assertEqual(reloads["n"], 0)
 
     def test_refresh_skips_work_list_rebuild_when_content_unchanged(self) -> None:
         panes = (

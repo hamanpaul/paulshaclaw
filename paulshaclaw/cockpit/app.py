@@ -100,6 +100,11 @@ def format_session_summary(state: CockpitState) -> str:
 # reads, so it can't pile up the way an unbounded scan would.
 REFRESH_INTERVAL_SECONDS = 30.0
 
+# htop 風系統監控要「即時但不吃資源」：把「高頻 /proc 監控」與「低頻 tmux pane 重載」拆成兩個 tick。
+# 這條只讀 /proc（CPU/Mem/Swp/I/O/Net）＋就地更新 banner 一個 widget——不 fork tmux、不重建清單，
+# 故能用 htop 的 ~1.5s 步調而幾乎不佔資源；就地 update + 固定寬橫條 → Textual 只重繪變動的 cell，不閃。
+SYSMON_INTERVAL_SECONDS = 1.5
+
 
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Stage 11 Cockpit"
@@ -183,11 +188,11 @@ class CockpitApp(App[None]):
             pass
         # brand-banner（+ 系統監控）由 _refresh_widgets 統一填入並每 tick 刷新。
         self._refresh_widgets()
-        # Keep the work list live: re-read panes on a fixed interval (bounded
-        # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
-        # set_interval; only that absence is tolerated, real errors surface.
+        # 兩段式節奏（htop 風）：慢 tick 重載 tmux pane 清單（fork 較重、panes 不常變）；
+        # 快 tick 只讀 /proc 就地刷新系統監控（極輕、不閃）。textual stub 無 set_interval，僅容忍其缺席。
         try:
             self.set_interval(REFRESH_INTERVAL_SECONDS, self._on_refresh_tick)
+            self.set_interval(SYSMON_INTERVAL_SECONDS, self._on_sysmon_tick)
         except AttributeError:
             pass
         # Ensure a focusable widget is focused so Pilot key presses reach the app
@@ -276,6 +281,21 @@ class CockpitApp(App[None]):
 
     def _on_refresh_tick(self) -> None:
         self._reconcile_state(light=True)
+
+    def _on_sysmon_tick(self) -> None:
+        """高頻（htop 步調）系統監控刷新：只讀 /proc 就地更新 banner，不碰 tmux、不重建清單，
+        故極輕；就地 update + 固定寬橫條 → 只重繪變動 cell，不閃。"""
+        self._refresh_banner()
+
+    def _refresh_banner(self) -> None:
+        """就地更新破蝦哥 banner + htop 風系統監控。供 widget 全刷與高頻 sysmon tick 共用。
+        fail-soft：任何 /proc 讀取或呈現錯誤都不擋刷新。"""
+        try:
+            banner = self.query_one("#brand-banner", Static)
+            self._set_border(banner, "🦞 破蝦哥 · Cockpit", format_session_summary(self.state))
+            banner.update(self._brand_banner_renderable())
+        except Exception:
+            pass
 
     def action_move_up(self) -> None:
         self.state = self.state.move_selection(-1)
@@ -526,13 +546,8 @@ class CockpitApp(App[None]):
             jobs_renderable = self._text([("jobs loaded: 0", "#64748B")])
         jobs_widget.update(jobs_renderable)
 
-        # 破蝦哥 banner + 右側系統監控（每 tick live 刷新）。fail-soft：任何錯誤都不擋刷新。
-        try:
-            banner = self.query_one("#brand-banner", Static)
-            self._set_border(banner, "🦞 破蝦哥 · Cockpit", format_session_summary(self.state))
-            banner.update(self._brand_banner_renderable())
-        except Exception:
-            pass
+        # 破蝦哥 banner + 系統監控：抽成 _refresh_banner，供 widget 全刷與高頻 sysmon tick 共用。
+        self._refresh_banner()
 
     def _state_segment(self) -> list[tuple[str, str]]:
         """DETAIL 底部 ``state:`` 行片段：ok 綠、降級琥珀。"""
