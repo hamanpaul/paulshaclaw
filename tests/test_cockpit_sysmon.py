@@ -82,6 +82,13 @@ class ComputeTests(unittest.TestCase):
             self.assertIsNone(s["net_rx_bps"])
             self.assertIsNotNone(s["mem"])  # 瞬時值
 
+    def test_cpu_total_excludes_guest(self):
+        # guest(idx8) 已含在 user(idx0)；total 不得重複計入，否則 CPU% 失真（Copilot review）。
+        # Δ=[100,0,0,100,0,0,0,0,40,0]：正確 total=sum(前8)=200，busy=100 → 50%（非 240 → 58%）。
+        prev = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+        cur = [100, 0, 0, 100, 0, 0, 0, 0, 40, 0]
+        self.assertAlmostEqual(sysmon._cpu_breakdown(prev, cur)["pct"], 50.0)
+
     def test_counter_reset_none(self):
         prev = {"t": 0.0, "cpu": [9, 9, 9, 9, 9, 9, 9], "io": 500, "net": (999, 999), "mem": {}}
         cur = {"t": 1.0, "cpu": [1, 1, 1, 1, 1, 1, 1], "io": 100, "net": (5, 5), "mem": {}}

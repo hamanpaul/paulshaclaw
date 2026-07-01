@@ -110,7 +110,9 @@ def _cpu_breakdown(prev_cpu, cur_cpu):
     d = [c - p for c, p in zip(cur_cpu, prev_cpu)]
     if any(x < 0 for x in d):  # counter reset
         return None
-    total = sum(d)
+    # total 只加前 8 欄（user..steal）：guest/guest_nice（idx 8/9）已含在 user/nice 內，
+    # 再加總會重複計入 guest 時間、使 CPU% 失真（Copilot review；VM/guest 有值時尤然）。
+    total = sum(d[:8])
     if total <= 0:
         return None
     idle = d[3] + d[4]  # idle + iowait
