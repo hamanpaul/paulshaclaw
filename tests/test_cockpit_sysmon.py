@@ -153,15 +153,48 @@ class FormatTests(unittest.TestCase):
     }
 
     def test_five_lines(self):
-        lines = sysmon.format_stat_lines(self.STATS, bar_width=10, color=False)
+        lines = sysmon.format_stat_lines(self.STATS, bar_width=24, color=False)
         self.assertEqual(len(lines), 5)
         self.assertTrue(lines[0].startswith("CPU") and "45%" in lines[0])
-        self.assertTrue(lines[1].startswith("Mem") and "60%" in lines[1])
-        self.assertTrue(lines[2].startswith("Swp") and "25%" in lines[2])
+        # Mem/Swp 疊實際用量 used/total（htop 風），不再顯示百分比
+        self.assertTrue(lines[1].startswith("Mem"))
+        self.assertIn("4.20M/9.77M", lines[1])
+        self.assertNotIn("60%", lines[1])
+        self.assertTrue(lines[2].startswith("Swp"))
+        self.assertIn("1.46M/7.81M", lines[2])
+        self.assertNotIn("25%", lines[2])
         self.assertTrue(lines[3].startswith("I/O") and "30%" in lines[3])
         self.assertTrue(lines[4].startswith("Net"))
         self.assertIn("↓3.4", lines[4])
         self.assertIn("↑0.8", lines[4])
+
+    def test_human_kb_units_and_precision(self):
+        self.assertEqual(sysmon._human_kb(4300), "4.20M")
+        self.assertEqual(sysmon._human_kb(10000), "9.77M")
+        self.assertEqual(sysmon._human_kb(1500), "1.46M")
+        self.assertEqual(sysmon._human_kb(512), "512K")
+        self.assertEqual(sysmon._human_kb(10_182_000), "9.71G")
+        self.assertEqual(sysmon._human_kb(None), "--")
+
+    def test_meter_bar_overlays_usage_right_aligned(self):
+        bar = sysmon._meter_bar([(0.5, sysmon._GREEN)], 20, "3.6G/9.7G", color=False)
+        self.assertTrue(bar.startswith("[") and bar.endswith("]"))
+        self.assertEqual(len(bar), 22)  # width 20 + 兩個括號
+        self.assertIn("3.6G/9.7G", bar)
+        self.assertTrue(bar.rstrip("]").endswith("3.6G/9.7G"))  # 右對齊在長條末
+
+    def test_meter_bar_narrow_keeps_right_of_overlay(self):
+        # width 過窄 → 右對齊截斷保留尾端（total 那側；Copilot review PR #170）
+        bar = sysmon._meter_bar([], 5, "3.60G/9.71G", color=False)
+        self.assertEqual(bar, "[9.71G]")
+        self.assertNotIn("3.60", bar)
+
+    def test_meter_bar_overlay_colored_by_underlying_segment(self):
+        # 變色邏輯：填色段仍在；overlay 落在空白處以中性色（_TXT）呈現
+        bar = sysmon._meter_bar([(0.5, sysmon._GREEN)], 20, "USED/TOTAL", color=True)
+        self.assertIn(sysmon._GREEN, bar)   # 前半填色段
+        self.assertIn(sysmon._TXT, bar)     # overlay 落空白 → 中性色
+        self.assertIn("USED/TOTAL", bar)    # 全落空白區 → 文字連續
 
     def test_mem_has_htop_segment_colors(self):
         mem_line = sysmon.format_stat_lines(self.STATS, bar_width=40, color=True)[1]
@@ -174,10 +207,13 @@ class FormatTests(unittest.TestCase):
         self.assertIn(sysmon._YELLOW, swp)
 
     def test_bar_width_scales(self):
+        # io=100 → 幾乎填滿（右側 4 格被 '100%' 疊掉）；io=0 → 全空、顯示 '0%'
         full = sysmon.format_stat_lines({**self.STATS, "io": 100.0}, bar_width=20, color=False)[3]
-        self.assertIn("|" * 20, full)
+        self.assertIn("100%", full)
+        self.assertGreaterEqual(full.count("|"), 15)
         empty = sysmon.format_stat_lines({**self.STATS, "io": 0.0}, bar_width=20, color=False)[3]
         self.assertNotIn("|", empty)
+        self.assertIn("0%", empty)
 
     def test_no_color_env(self):
         with patch.dict(os.environ, {"NO_COLOR": "1"}):
