@@ -11,3 +11,7 @@ description = "paulshaclaw agent workflow system"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["paulshaclaw*"]
+
+[tool.setuptools.package-data]
+# cockpit 視覺設計系統樣式表需隨套件出貨（CSS_PATH 於 wheel 安裝時才找得到）
+"paulshaclaw.cockpit" = ["*.tcss"]

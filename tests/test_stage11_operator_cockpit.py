@@ -202,7 +202,7 @@ class Stage11StateTests(unittest.TestCase):
             panes=panes, cockpit_pane_id="%0", cockpit_session_name="main",
             jobs_by_pane={}, actions=LayoutActionService(),
         )
-        widgets = {key: Mock() for key in ("#active-slot", "#work-list", "#pane-detail", "#global-jobs")}
+        widgets = {key: Mock() for key in ("#work-list", "#pane-detail", "#global-jobs")}
 
         with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
             app._refresh_widgets()
