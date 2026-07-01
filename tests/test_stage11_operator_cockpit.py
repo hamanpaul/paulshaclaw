@@ -392,6 +392,20 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(grown.active_pane.pane_id, "%5")
         self.assertIsNone(grown.degraded_reason)
 
+    def test_lone_cockpit_window_reports_no_active_slot_not_lost(self) -> None:
+        # Copilot review PR #173：cockpit 獨佔自身 window（slot 本就 None）是正常「無落點」，
+        # 不該誤標成 active-slot-lost（那是「原本有、後來不見」才對）。
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", width=100, height=40),
+            pane_record("%9", session_name="main", window_index="1", title="elsewhere", width=100, height=40),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+        self.assertEqual(state.degraded_reason, "no-active-slot")
+
+        still_alone = state.refresh(panes)
+        self.assertIsNone(still_alone.active_pane)
+        self.assertEqual(still_alone.degraded_reason, "no-active-slot")
+
     def test_refresh_promotes_cross_window_pane_swapped_into_slot(self) -> None:
         # 跨 window swap 後：被選的 %9 移進 cockpit window 的 slot geom → reconcile 後成為 active。
         panes = (

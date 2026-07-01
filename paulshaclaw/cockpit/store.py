@@ -59,17 +59,20 @@ class CockpitState:
         cockpit_window_index = next(
             (pane.window_index for pane in panes if pane.pane_id == cockpit_pane_id), None
         )
+        slot_anchor = choose_startup_slot(
+            panes,
+            cockpit_pane_id=cockpit_pane_id,
+            cockpit_session_name=cockpit_session_name,
+        )
         return cls(
             cockpit_pane_id=cockpit_pane_id,
             cockpit_session_name=cockpit_session_name,
-            slot_anchor=choose_startup_slot(
-                panes,
-                cockpit_pane_id=cockpit_pane_id,
-                cockpit_session_name=cockpit_session_name,
-            ),
+            slot_anchor=slot_anchor,
             panes=panes,
             selected_index=0,
-            degraded_reason=None,
+            # No slot at all (cockpit alone in its window) is a normal "nowhere to
+            # swap" state, NOT a lost active — don't cry "active-slot-lost".
+            degraded_reason=None if slot_anchor is not None else "no-active-slot",
             cockpit_window_index=cockpit_window_index,
         )
 
@@ -190,13 +193,21 @@ class CockpitState:
                 next_index = min(next_index, candidate_count - 1)
         elif next_index >= candidate_count:
             next_index = candidate_count - 1
-        active_exists = refreshed.active_pane is not None
+        # Distinguish "a slot existed but its pane vanished" (active-slot-lost) from
+        # "there is no slot at all" (no-active-slot, e.g. cockpit alone in its window)
+        # — the latter is normal, not a lost active (Copilot review PR #173).
+        if refreshed.active_pane is not None:
+            degraded_reason = None
+        elif refreshed.slot_anchor is not None:
+            degraded_reason = "active-slot-lost"
+        else:
+            degraded_reason = "no-active-slot"
         return CockpitState(
             cockpit_pane_id=self.cockpit_pane_id,
             cockpit_session_name=self.cockpit_session_name,
             slot_anchor=refreshed.slot_anchor,
             panes=panes,
             selected_index=next_index,
-            degraded_reason=None if active_exists else "active-slot-lost",
+            degraded_reason=degraded_reason,
             cockpit_window_index=cockpit_window,
         )
