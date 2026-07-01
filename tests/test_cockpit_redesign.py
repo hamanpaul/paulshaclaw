@@ -89,6 +89,13 @@ class WorkListRenderingTests(unittest.TestCase):
         self.assertTrue(items[0].startswith("● ACTIVE"))
         self.assertEqual(len(items), 1 + len(app.state.candidate_section))
 
+    def test_set_border_none_subtitle_clears_stale_summary(self) -> None:
+        # Copilot review PR #168：subtitle=None 須清空副標，不得殘留上一選取 pane 的摘要。
+        widget = SimpleNamespace(border_title="old", border_subtitle="stale-iperf")
+        CockpitApp._set_border(widget, "DETAIL", None)
+        self.assertEqual(widget.border_title, "DETAIL")
+        self.assertEqual(widget.border_subtitle, "")
+
     def test_running_pane_row_shows_status_token_in_plain_key(self) -> None:
         app = self._app()
         items = app._work_list_items(app.state.active_pane)

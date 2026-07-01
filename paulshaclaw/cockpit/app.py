@@ -541,10 +541,11 @@ class CockpitApp(App[None]):
 
     @staticmethod
     def _set_border(widget: object, title: str, subtitle: str | None) -> None:
-        """設面板邊框標題／副標；stub 或未掛載時 fail-soft。"""
+        """設面板邊框標題／副標；``subtitle=None``（或空字串）明確清空副標——避免殘留上一狀態
+        的舊摘要（如 DETAIL 由選取態切回無候選態時副標仍顯示前一個 pane；Copilot review PR #168）。
+        stub 或未掛載時 fail-soft。"""
         try:
             widget.border_title = title
-            if subtitle is not None:
-                widget.border_subtitle = subtitle
+            widget.border_subtitle = subtitle or ""
         except Exception:
             pass
