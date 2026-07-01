@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 
-from . import branding
+from . import branding, sysmon
 
 try:
     from textual.app import App, ComposeResult
@@ -95,6 +95,11 @@ class CockpitApp(App[None]):
         self.actions = actions
         self.pane_loader = pane_loader
         self.preview_loader = preview_loader
+        # 系統監控（banner 右側 htop 風）：CPU%/IO%/Net 速率需前後快照差值，故保留上次快照；
+        # _last_stats 存最後有效讀數，None 時沿用以避免快速重刷閃爍。
+        self._mon_prev = None
+        self._last_stats: dict = {}   # 最後有效讀數（bridge 偶發缺樣）
+        self._stale: dict = {}        # 各項連續缺樣次數（超過容忍即降級為 '--'）
         # Last-rendered work-list content, so we skip rebuilding (and flickering)
         # the list on refreshes that didn't change it.
         self._last_work_items: tuple[str, ...] | None = None
@@ -141,10 +146,7 @@ class CockpitApp(App[None]):
             self.title = branding.cockpit_title()
         except Exception:
             pass
-        try:
-            self.query_one("#brand-banner", Static).update(self._brand_banner_renderable())
-        except Exception:
-            pass
+        # brand-banner（+ 系統監控）由 _refresh_widgets 統一填入並每 tick 刷新。
         self._refresh_widgets()
         # Keep the work list live: re-read panes on a fixed interval (bounded
         # work — see REFRESH_INTERVAL_SECONDS). The textual stub has no
@@ -161,15 +163,60 @@ class CockpitApp(App[None]):
             # fallback stubs may not support focus; ignore
             pass
 
+    _MON_COL = 15   # banner 各列補到的固定可見寬
+    _MON_GAP = 2    # banner 與監控列間距
+
     def _brand_banner_renderable(self):
-        """破蝦哥 banner C；有 rich 時用 Text.from_ansi 上色，否則回純字串（NO_COLOR 已去色）。"""
-        art = branding.banner("c")
+        """破蝦哥 banner C + 右側 htop 風系統監控（CPU/Mem/Swp/I/O 橫條 + Net 速率）。
+
+        橫條寬隨終端寬度自適應；監控 fail-soft：讀 /proc 失敗則只顯示 banner。
+        """
+        banner_lines = branding.banner("c").rstrip("\n").split("\n")
+        stat_lines: list[str] = []
+        try:
+            cur = sysmon.read_snapshot()
+            stats = sysmon.compute_stats(self._mon_prev, cur)
+            self._mon_prev = cur
+            # None 短暫沿用上次有效值以 bridge 偶發缺樣；但持久缺樣即降級為 '--'（不顯示假遙測）。
+            stats = sysmon.merge_stale(stats, self._last_stats, self._stale)
+            stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
+        except Exception:
+            stat_lines = []
+        composed = self._compose_banner_stats(banner_lines, stat_lines)
         try:
             from rich.text import Text
 
-            return Text.from_ansi(art)
+            return Text.from_ansi(composed)
         except Exception:
-            return art
+            return composed
+
+    def _monitor_bar_width(self) -> int:
+        """依 banner pane 寬度算橫條可用寬，讓 bar 撐到 pane 右緣（htop 風）。取不到寬度退回 80。"""
+        width = 0
+        try:  # 優先用 brand-banner widget 自身寬度（= pane 內容寬）
+            width = int(self.query_one("#brand-banner").size.width)
+        except Exception:
+            pass
+        if width <= 0:
+            try:
+                width = int(self.size.width)
+            except Exception:
+                width = 0
+        if width <= 0:
+            width = 80
+        # 每監控列固定開銷：label(3)+space+"["+"]"+space+percent(4) = 11；再扣 banner 欄+間距。
+        return max(4, min(200, width - self._MON_COL - self._MON_GAP - 11))
+
+    def _compose_banner_stats(self, banner_lines, stat_lines):
+        """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。"""
+        out = []
+        for i, bline in enumerate(banner_lines):
+            visible = branding.strip_ansi(bline)
+            row = bline + " " * max(0, self._MON_COL - len(visible))
+            if i < len(stat_lines):
+                row += " " * self._MON_GAP + stat_lines[i]
+            out.append(row)
+        return "\n".join(out) + "\n"
 
     def on_list_view_highlighted(self, event: object) -> None:
         try:
@@ -369,3 +416,9 @@ class CockpitApp(App[None]):
         else:
             global_jobs_text = "jobs loaded: 0"
         self.query_one("#global-jobs", Static).update(global_jobs_text)
+
+        # 破蝦哥 banner + 右側系統監控（每 tick live 刷新）。fail-soft：任何錯誤都不擋刷新。
+        try:
+            self.query_one("#brand-banner", Static).update(self._brand_banner_renderable())
+        except Exception:
+            pass
