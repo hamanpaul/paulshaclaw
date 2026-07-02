@@ -1,7 +1,7 @@
 ## 1. rekey 遷移模組
 
-- [ ] 1.1 新增 failing tests `paulshaclaw/memory/tests/test_rekey.py`：dry-run 產 manifest 不動檔；apply 搬檔＋改 frontmatter＋run_moc 重建；conflict fail-safe（source 不 stamp）；他 project 不受影響；不安全 slug raise `RekeyError`；apply 收尾清空的舊 key 目錄與孤兒 moc。
-- [ ] 1.2 實作 `paulshaclaw/memory/rekey.py`：`rekey_project(memory_root, *, old_key, new_slug, now, apply) -> dict`，仿 `retitle.py` 的 manifest／dry-run／apply／run_moc 模式。
+- [x] 1.1 新增 failing tests `paulshaclaw/memory/tests/test_rekey.py`：dry-run 產 manifest 不動檔；apply 搬檔＋改 frontmatter＋run_moc 重建；conflict fail-safe（source 不 stamp）；他 project 不受影響；不安全 slug raise `RekeyError`；apply 收尾清空的舊 key 目錄與孤兒 moc。
+- [x] 1.2 實作 `paulshaclaw/memory/rekey.py`：`rekey_project(memory_root, *, old_key, new_slug, now, apply) -> dict`，仿 `retitle.py` 的 manifest／dry-run／apply／run_moc 模式。
 
 ## 2. rekey CLI 子命令
 

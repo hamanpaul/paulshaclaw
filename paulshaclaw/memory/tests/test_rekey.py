@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from paulshaclaw.memory import rekey
+from paulshaclaw.memory.moc import frontmatter_io as fio
+
+OLD_KEY = "github.com/hamanpaul/testpilot"
+OLD_DIR = "github.com__hamanpaul__testpilot"
+
+
+def _slice(
+    root: Path,
+    dirname: str,
+    project: str,
+    name: str,
+    body: str,
+    *,
+    title: str = "uart-fix",
+) -> Path:
+    path = root / "knowledge" / dirname / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    slice_id = name.split("--")[-1].removesuffix(".md")
+    path.write_text(
+        f"---\nslice_id: {slice_id}\nmemory_layer: knowledge\n"
+        f"project: {project}\nartifact_kind: report\ntitle: {title}\n---\n{body}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+class RekeyProjectTests(unittest.TestCase):
+    def test_dry_run_writes_manifest_and_touches_nothing(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "真實筆記內容一。")
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=False,
+            )
+
+            self.assertTrue(path.exists())
+            fm, _body = fio.read(path.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], OLD_KEY)
+            self.assertEqual(summary["planned"], 1)
+            self.assertEqual(summary["rekeyed"], 0)
+            manifests = list((root / "runtime" / "ledger").glob("rekey-*.jsonl"))
+            self.assertEqual(len(manifests), 1)
+            rows = [json.loads(line) for line in manifests[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(rows[0]["status"], "dry-run")
+            self.assertEqual(rows[0]["from"], OLD_KEY)
+            self.assertEqual(rows[0]["to"], "testpilot")
+
+    def test_apply_moves_file_updates_frontmatter_and_rebuilds_moc(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "真實筆記內容：UART2 pinmux 設錯時靜默失效。"
+            path = _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", body)
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertFalse(path.exists())
+            target = root / "knowledge" / "testpilot" / "uart-fix--sl-a1.md"
+            self.assertTrue(target.exists())
+            fm, new_body = fio.read(target.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], "testpilot")
+            self.assertEqual(fm["slice_id"], "sl-a1")
+            self.assertEqual(new_body.strip(), body)
+            self.assertEqual(summary["rekeyed"], 1)
+            self.assertTrue((root / "knowledge" / "testpilot-moc.md").exists())
+
+    def test_apply_removes_emptied_source_dir_and_orphan_moc(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+            orphan = root / "knowledge" / f"{OLD_DIR}-moc.md"
+            orphan.write_text("---\nmemory_layer: moc\n---\nstale\n", encoding="utf-8")
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertFalse((root / "knowledge" / OLD_DIR).exists())
+            self.assertFalse(orphan.exists())
+            self.assertTrue(summary["removed_source_dir"])
+            self.assertTrue(summary["removed_orphan_moc"])
+
+    def test_conflict_target_is_skipped_and_source_not_stamped(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "舊 key 內容")
+            _slice(root, "testpilot", "testpilot", "uart-fix--sl-a1.md", "同名既有檔")
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertTrue(src.exists())
+            fm, _body = fio.read(src.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], OLD_KEY)
+            self.assertEqual(summary["conflicts"], 1)
+            self.assertEqual(summary["rekeyed"], 0)
+
+    def test_other_projects_untouched(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            other = _slice(
+                root,
+                "airoha",
+                "airoha",
+                "note--sl-b1.md",
+                "airoha 真筆記",
+                title="note",
+            )
+            _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+
+            rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertTrue(other.exists())
+            fm, _body = fio.read(other.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], "airoha")
+
+    def test_unsafe_new_slug_raises(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            with self.assertRaises(rekey.RekeyError):
+                rekey.rekey_project(
+                    root,
+                    old_key=OLD_KEY,
+                    new_slug="a/b",
+                    now="2026-07-02T00:00:00Z",
+                    apply=False,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()
