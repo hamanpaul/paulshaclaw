@@ -405,6 +405,8 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
         try:
             promoted = _promote_fragments(promoter, [fragment for _, fragment in fragments], config)
         except PromoteError as exc:
+            if isinstance(promoter, LLMPromoter):
+                promoter.clear_cache_for_fragments([fragment for _, fragment in fragments])
             warnings.append(f"{session_key}: {exc}; session {session_key} left in split")
             continue
 

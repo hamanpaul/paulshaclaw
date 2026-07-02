@@ -146,6 +146,26 @@ class ExplodingPromoter(Promoter):
         return [slice_frontmatter.build(fragment, config) for fragment in fragments]
 
 
+class ScriptedAgentClient(agent_exec.AgentClient):
+    """Return scripted outputs in order and track the underlying run count."""
+
+    def __init__(self, outputs: list[str]) -> None:
+        self._outputs = list(outputs)
+        self.calls = 0
+
+    def run(self, prompt: str) -> str:
+        del prompt
+        output = self._outputs[min(self.calls, len(self._outputs) - 1)]
+        self.calls += 1
+        return output
+
+
+_VALID_ONE_SLICE = (
+    '[{"title":"alpha","artifact_kind":"report","project":"paulshaclaw","tags":[],'
+    '"body":"body a","source_fragment_indices":[0,1],"relations":[]}]'
+)
+
+
 class PipelineTests(unittest.TestCase):
     _RAW_DOC_FRAGMENT = (
         "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude\n"
@@ -995,6 +1015,101 @@ class ReimportOverwriteTests(unittest.TestCase):
             # and for a brand-new slice_id it falls back to <slice_id>.md
             fresh = pipeline._knowledge_path_for(root, "paulshaclaw", "sl-new")
             self.assertEqual(fresh.name, "sl-new.md")
+
+
+class PromoteFailureCacheRecoveryTests(unittest.TestCase):
+    """#174: failed LLM promotion must not leave a replayable poisoned cache behind."""
+
+    def _cached_llm_promoter(
+        self, root: Path, outputs: list[str]
+    ) -> tuple[ScriptedAgentClient, llm_promoter.LLMPromoter]:
+        inner = ScriptedAgentClient(outputs)
+        cached = agent_exec.CachingAgentClient(
+            inner,
+            root / "runtime" / "cache" / "atomize",
+        )
+        promoter = llm_promoter.LLMPromoter(
+            cached,
+            skill_text="RECOVERY-SKILL",
+            known_projects=["paulshaclaw"],
+            model="fake-llm",
+        )
+        return inner, promoter
+
+    def test_promote_error_clears_poisoned_cache(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(root, ["chatter, not json"])
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertTrue(any("left in split" in warning for warning in result["warnings"]))
+            self.assertEqual(
+                list((root / "runtime" / "cache" / "atomize").glob("*.json")),
+                [],
+            )
+
+    def test_promote_retry_reinvokes_llm_and_recovers(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(
+                root,
+                ["chatter, not json", _VALID_ONE_SLICE],
+            )
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=promoter,
+            )
+
+            result2 = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T04:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 2)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            self.assertEqual(result2["summary"]["slices"], 1)
+
+    def test_non_llm_promoter_failure_does_not_touch_cache_dir(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            sentinel = cache_dir / "keep.json"
+            sentinel.write_text("keep", encoding="utf-8")
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=ExplodingPromoter(fail_session="s1"),
+            )
+
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertTrue(sentinel.exists())
+            self.assertEqual(sorted(path.name for path in cache_dir.iterdir()), ["keep.json"])
 
 
 if __name__ == "__main__":
