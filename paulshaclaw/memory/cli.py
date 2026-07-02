@@ -86,6 +86,11 @@ def _build_parser() -> argparse.ArgumentParser:
     dream_run.add_argument("--max-load", type=float, default=1.0)
     dream_run.add_argument("--promoter", choices=["identity", "llm"], default=None)
     dream_run.add_argument("--agent-command", default=None)
+    dream_run.add_argument(
+        "--instruction-root", action="append", default=None,
+        help="agent-instruction doc root/file; when given, the atomize pass drops "
+             "doc-fragment slices (verbatim instruction-doc sections) at produce "
+             "time. Repeatable; omit to keep doc-fragment detection off.")
     dream_run.set_defaults(func=_dream)
     dream_status = dream_subparsers.add_parser("status")
     dream_status.add_argument("--memory-root", required=True)

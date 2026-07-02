@@ -7,6 +7,7 @@ from pathlib import Path
 from ..atomizer import cli as atomizer_cli
 from ..atomizer import config as atomizer_config
 from ..atomizer import pipeline as atomizer_pipeline
+from ..instruction_corpus import corpus_for_roots
 from ..janitor import config as janitor_config
 from ..janitor import scanner as janitor_scanner
 from ..ledger import dream as dream_ledger
@@ -33,6 +34,7 @@ def _run(args: argparse.Namespace) -> int:
     jan_cfg, jan_hash = janitor_config.load_config()
     promoter = atomizer_cli._build_promoter(args, atom_cfg, memory_root)
     now = args.now
+    doc_corpus = corpus_for_roots(getattr(args, "instruction_root", None))
 
     def atomize_fn() -> dict[str, object]:
         return atomizer_pipeline.run(
@@ -42,6 +44,7 @@ def _run(args: argparse.Namespace) -> int:
             now=now,
             dry_run=args.dry_run,
             promoter=promoter,
+            doc_corpus=doc_corpus,
         )
 
     def janitor_fn() -> dict[str, object]:
