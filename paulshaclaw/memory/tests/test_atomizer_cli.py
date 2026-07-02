@@ -40,8 +40,11 @@ class AtomizeCliTests(unittest.TestCase):
             raw.write_text(_RAW, encoding="utf-8")
             buf = io.StringIO()
             with redirect_stdout(buf):
+                # #175 後預設 promoter=llm 會真跑 agent；本測試標的是 dry-run
+                # 摘要行為，顯式改用 deterministic 的 identity。
                 rc = cli.main(["memory", "atomize", "--memory-root", str(root),
-                               "--now", "2026-05-31T03:00:00Z", "--dry-run"])
+                               "--now", "2026-05-31T03:00:00Z", "--dry-run",
+                               "--promoter", "identity"])
             self.assertEqual(rc, 0)
             payload = json.loads(buf.getvalue())
             self.assertGreaterEqual(payload["summary"]["slices"], 1)

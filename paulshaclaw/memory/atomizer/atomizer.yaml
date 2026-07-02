@@ -27,6 +27,8 @@ agent_exec:
   timeout_seconds: 600
   model: gemma4-26b-a4b-nvfp4
   max_output_tokens: 8192
-promoter: identity
+# #175: 預設 llm 蒸餾。identity 會把 importer 樣板 fragments 1:1 複製成
+# knowledge slices（樣板噪音），僅保留為顯式 --promoter identity（測試/離線）。
+promoter: llm
 skill_path: skills/atomize-knowledge-slice.md
 known_projects_file: ~/.agents/config/projects.yaml
