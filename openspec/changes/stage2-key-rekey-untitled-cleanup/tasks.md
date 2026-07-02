@@ -10,8 +10,8 @@
 
 ## 3. prune-noise 固定清單模式
 
-- [ ] 3.1 擴充 failing tests `paulshaclaw/memory/tests/test_prune_noise.py`（`PruneListedTests`）：listed apply 只刪清單內（未列清單的 noise 保留）；dry-run 不刪；清單含不存在路徑 → rc 2 且整批不刪；清單含 knowledge root 外檔案 → rc 2；`--paths` 與 `--project` 併用 → rc 2。
-- [ ] 3.2 `paulshaclaw/memory/cli.py`：`prune-noise` 加 `--paths` 參數＋ `_prune_listed(root, paths_file, *, now, apply)`（fail-closed 驗證、manifest before unlink、reason=`listed`、apply 後 `build_mocs`）。
+- [x] 3.1 擴充 failing tests `paulshaclaw/memory/tests/test_prune_noise.py`（`PruneListedTests`）：listed apply 只刪清單內（未列清單的 noise 保留）；dry-run 不刪；清單含不存在路徑 → rc 2 且整批不刪；清單含 knowledge root 外檔案 → rc 2；`--paths` 與 `--project` 併用 → rc 2。
+- [x] 3.2 `paulshaclaw/memory/cli.py`：`prune-noise` 加 `--paths` 參數＋ `_prune_listed(root, paths_file, *, now, apply)`（fail-closed 驗證、manifest before unlink、reason=`listed`、apply 後 `build_mocs`）。
 
 ## 4. janitor lint 規則
 

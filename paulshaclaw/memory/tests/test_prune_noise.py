@@ -132,5 +132,156 @@ class PruneNoiseTests(unittest.TestCase):
             self.assertEqual(bad_rows[0]["reason"], "unreadable")
 
 
+class PruneListedTests(unittest.TestCase):
+    def _seed(self, root: Path):
+        listed = _slice(root, "serialwrap", "untitled--sl-u1.md", "## 語言政策\n所有溝通使用 zh-TW。")
+        unlisted_noise = _slice(root, "serialwrap", "cwd--sl-n2.md", "## CWD\n/home/x")
+        good = _slice(root, "serialwrap", "real--sl-g9.md", "真實筆記：devmem 驗證暫存器。")
+        return listed, unlisted_noise, good
+
+    def test_listed_apply_deletes_only_listed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, unlisted_noise, good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"# 固定清單\n{listed}\n", encoding="utf-8")
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "prune-noise",
+                    "--memory-root",
+                    str(root),
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--paths",
+                    str(paths_file),
+                    "--apply",
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            self.assertFalse(listed.exists())
+            self.assertTrue(unlisted_noise.exists())
+            self.assertTrue(good.exists())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl"))
+            self.assertEqual(len(manifests), 1)
+            rows = [json.loads(line) for line in manifests[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["reason"], "listed")
+            self.assertEqual(rows[0]["status"], "deleted")
+
+    def test_listed_dry_run_deletes_nothing(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, _noise, _good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"{listed}\n", encoding="utf-8")
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "prune-noise",
+                    "--memory-root",
+                    str(root),
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--paths",
+                    str(paths_file),
+                    "--dry-run",
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue(listed.exists())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl"))
+            rows = [json.loads(line) for line in manifests[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(rows[0]["status"], "dry-run")
+
+    def test_listed_missing_path_fails_closed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, _noise, _good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(
+                f"{listed}\n{root}/knowledge/serialwrap/ghost--sl-x.md\n",
+                encoding="utf-8",
+            )
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "prune-noise",
+                    "--memory-root",
+                    str(root),
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--paths",
+                    str(paths_file),
+                    "--apply",
+                ]
+            )
+
+            self.assertEqual(rc, 2)
+            self.assertTrue(listed.exists())
+
+    def test_listed_outside_knowledge_root_fails_closed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self._seed(root)
+            outside = root / "outside.md"
+            outside.write_text("---\nmemory_layer: knowledge\n---\nx\n", encoding="utf-8")
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"{outside}\n", encoding="utf-8")
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "prune-noise",
+                    "--memory-root",
+                    str(root),
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--paths",
+                    str(paths_file),
+                    "--apply",
+                ]
+            )
+
+            self.assertEqual(rc, 2)
+            self.assertTrue(outside.exists())
+
+    def test_paths_mutually_exclusive_with_scan_filters(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, _noise, _good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"{listed}\n", encoding="utf-8")
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "prune-noise",
+                    "--memory-root",
+                    str(root),
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--paths",
+                    str(paths_file),
+                    "--project",
+                    "serialwrap",
+                    "--dry-run",
+                ]
+            )
+
+            self.assertEqual(rc, 2)
+            self.assertTrue(listed.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

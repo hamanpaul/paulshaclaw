@@ -150,6 +150,10 @@ def _build_parser() -> argparse.ArgumentParser:
     prune.add_argument(
         "--project", action="append", default=None,
         help="restrict pruning to these project(s). Repeatable; omit to scan all projects.")
+    prune.add_argument(
+        "--paths", default=None,
+        help="固定清單檔：每行一個 knowledge slice 絕對路徑（# 開頭與空行忽略）。"
+             "給定時清單即刪除權威，且與 --instruction-root/--project 互斥。")
     group = prune.add_mutually_exclusive_group()
     group.add_argument("--dry-run", action="store_true")
     group.add_argument("--apply", action="store_true")
@@ -307,6 +311,12 @@ def _prune_noise(args: argparse.Namespace) -> int:
     root = Path(args.memory_root)
     now = (args.now or datetime.now(timezone.utc).isoformat()).replace("+00:00", "Z")
     apply = bool(getattr(args, "apply", False))
+    paths_file = getattr(args, "paths", None)
+    if paths_file:
+        if getattr(args, "instruction_root", None) or getattr(args, "project", None):
+            print("error: --paths 與 --instruction-root/--project 互斥", file=sys.stderr)
+            return 2
+        return _prune_listed(root, Path(paths_file), now=now, apply=apply)
     corpus = corpus_for_roots(getattr(args, "instruction_root", None))
     projects = getattr(args, "project", None)
     knowledge = root / "knowledge"
@@ -366,6 +376,91 @@ def _prune_noise(args: argparse.Namespace) -> int:
     stats = Counter(r["reason"] for r in rows)
     print(json.dumps({"scanned_noise": len(rows), "applied": apply, "by_reason": dict(stats),
                       "manifest": str(manifest)}, ensure_ascii=False))
+    return 0
+
+
+def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int:
+    knowledge = (root / "knowledge").resolve()
+    try:
+        raw_lines = paths_file.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"error: cannot read --paths file: {exc}", file=sys.stderr)
+        return 2
+
+    listed = [line.strip() for line in raw_lines if line.strip() and not line.strip().startswith("#")]
+    if not listed:
+        print("error: --paths file is empty", file=sys.stderr)
+        return 2
+
+    rows: list[dict] = []
+    problems: list[str] = []
+    for entry in listed:
+        try:
+            resolved = Path(entry).resolve(strict=True)
+        except OSError:
+            problems.append(f"missing: {entry}")
+            continue
+        if not resolved.is_file() or resolved.suffix != ".md" or resolved.name.endswith("-moc.md"):
+            problems.append(f"not-a-slice: {entry}")
+            continue
+        if knowledge not in resolved.parents:
+            problems.append(f"outside-knowledge-root: {entry}")
+            continue
+        try:
+            fm, _body = _fio.read(resolved.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError) as exc:
+            problems.append(f"unreadable: {entry}: {exc}")
+            continue
+        if fm.get("memory_layer") != "knowledge":
+            problems.append(f"not-knowledge-layer: {entry}")
+            continue
+        rows.append(
+            {
+                "slice_id": str(fm.get("slice_id", "")),
+                "project": str(fm.get("project", "")),
+                "path": str(resolved),
+                "reason": "listed",
+                "status": "planned" if apply else "dry-run",
+            }
+        )
+
+    if problems:
+        for problem in problems:
+            print(f"error: {problem}", file=sys.stderr)
+        return 2
+
+    ledger_dir = root / "runtime" / "ledger"
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    manifest = ledger_dir / f"prune-{now.replace(':', '')}.jsonl"
+    _write_manifest(manifest, rows)
+
+    if apply:
+        deleted = False
+        for row in rows:
+            try:
+                Path(row["path"]).unlink()
+                row["status"] = "deleted"
+                deleted = True
+            except OSError as exc:
+                row["status"] = "error"
+                row["error"] = str(exc)
+        _write_manifest(manifest, rows)
+        if deleted:
+            _moc_builder.build_mocs(root, now=now)
+
+    stats = Counter(row["reason"] for row in rows)
+    print(
+        json.dumps(
+            {
+                "scanned_noise": len(rows),
+                "applied": apply,
+                "mode": "listed",
+                "by_reason": dict(stats),
+                "manifest": str(manifest),
+            },
+            ensure_ascii=False,
+        )
+    )
     return 0
 
 
