@@ -142,3 +142,24 @@ def test_shortlist_dedup_fail_open_on_corrupt_map(tmp_path, monkeypatch):
     out = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidG", cwd="/x", prompt="SerialWrap 執行")
 
     assert out != ""
+
+
+def test_summary_skips_title_echo_first_line(tmp_path):
+    p = tmp_path / "n.md"
+    p.write_text(
+        "---\ntitle: overview\n---\n# Overview\n\nUART2 pinmux 設錯會靜默失效。\n",
+        encoding="utf-8",
+    )
+    assert SC._summary(str(p), "overview") == "UART2 pinmux 設錯會靜默失效。"
+
+
+def test_summary_all_title_echo_returns_empty(tmp_path):
+    p = tmp_path / "n.md"
+    p.write_text("---\ntitle: review-summary\n---\n# Review Summary\n", encoding="utf-8")
+    assert SC._summary(str(p), "review-summary") == ""
+
+
+def test_summary_first_line_kept_when_not_echo(tmp_path):
+    p = tmp_path / "n.md"
+    p.write_text("---\ntitle: x\n---\n具體結論第一行。\n", encoding="utf-8")
+    assert SC._summary(str(p), "x") == "具體結論第一行。"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,8 +15,12 @@ SHORTLIST_K = 3
 SHORTLIST_FETCH_K = 12
 
 
-def _summary(path: str) -> str:
-    """First meaningful (non-frontmatter, non-empty) body line, for the shortlist."""
+def _norm_title_key(s: str) -> str:
+    return re.sub(r"[\W_]+", "", s).lower()
+
+
+def _summary(path: str, title: str = "") -> str:
+    """First informative body line for the shortlist."""
     try:
         text = Path(path).read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -25,10 +30,17 @@ def _summary(path: str) -> str:
     if lines and lines[0].strip() == "---":
         end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), 0)
         lines = lines[end + 1:]
+    tkey = _norm_title_key(title)
     for ln in lines:
         s = ln.strip()
-        if s:
-            return s.lstrip("# ").strip()
+        if not s:
+            continue
+        s = s.lstrip("# ").strip()
+        if not s:
+            continue
+        if tkey and _norm_title_key(s) == tkey:
+            continue
+        return s
     return ""
 
 
@@ -122,7 +134,7 @@ def build_shortlist_and_record(root: Path, tool: str, session_id: str,
         if not hits:
             return ""
         for h in hits:
-            h["summary"] = _summary(h.get("path", ""))
+            h["summary"] = _summary(h.get("path", ""), str(h.get("title") or ""))
         block = _redact(root, tool, project, session_id, format_shortlist(hits))
         if not block:
             # fail-closed: redaction suppressed the shortlist -> inject nothing and do
