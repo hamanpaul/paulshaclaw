@@ -17,6 +17,7 @@ class SystemdTemplateTests(unittest.TestCase):
         self.assertIn("dream run", service)
         self.assertIn("--require-idle", service)
         self.assertIn("--promoter llm", service)
+        self.assertNotIn("--promoter identity", service)
 
     def test_wrapper_script_exists(self):
         path = BASE / "scripts" / "dream-idle-wrapper.sh"
@@ -26,6 +27,7 @@ class SystemdTemplateTests(unittest.TestCase):
         self.assertIn("PSC_MEMORY_ROOT", text)
         self.assertIn("--require-idle", text)
         self.assertIn("--promoter llm", text)
+        self.assertNotIn("--promoter identity", text)
 
 
 if __name__ == "__main__":
