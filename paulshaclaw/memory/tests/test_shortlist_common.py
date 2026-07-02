@@ -113,9 +113,21 @@ def test_shortlist_dedup_scoped_to_session(tmp_path, monkeypatch):
 
     out1 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidE", cwd="/x", prompt="SerialWrap 執行")
     out2 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidF", cwd="/x", prompt="SerialWrap 執行")
+    note = str(tmp_path / "knowledge" / "proj" / "b.md")
+    expected = [{"sl_id": "sl-bbbbbbbbbbbbbbbb", "path": note}]
 
     assert out1 != ""
     assert out2 != ""
+    events = _offered_events(tmp_path)
+    assert [event["session_id"] for event in events] == ["sidE", "sidF"]
+    assert events[0]["offered"] == expected
+    assert events[1]["offered"] == expected
+
+    sid_e_map = json.loads((tmp_path / "runtime" / "wakeup" / "claude-code__sidE.offered.json").read_text())
+    sid_f_map = json.loads((tmp_path / "runtime" / "wakeup" / "claude-code__sidF.offered.json").read_text())
+    expected_map = {"by_path": {note: "sl-bbbbbbbbbbbbbbbb"}, "by_id": {"sl-bbbbbbbbbbbbbbbb": note}}
+    assert sid_e_map == expected_map
+    assert sid_f_map == expected_map
 
 
 def test_shortlist_dedup_fail_open_on_corrupt_map(tmp_path, monkeypatch):
