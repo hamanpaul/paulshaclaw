@@ -187,5 +187,62 @@ def test_pool_exclude_reason_review_and_canary():
     assert pool_exclude_reason({"artifact_kind": "task", "atom_title": "build P4 split"}) is None
 
 
+def test_is_generic_title_hits_and_misses():
+    from paulshaclaw.memory.noise import is_generic_title
+
+    hits = (
+        "overview",
+        "problem",
+        "untitled",
+        "review-summary",
+        "Review Summary",
+        "report",
+        "task",
+        "todo",
+        "TODO",
+        "report-testpilot",
+        "task-cockpit-swap",
+        "todo_cleanup",
+        "TODO list",
+        "Report Testpilot",
+    )
+    misses = (
+        "",
+        None,
+        "單一-com0-死因未解",
+        "wi-fi-llapi-test-execution-workflow",
+        "overview-of-uart-pinmux",
+        "problem-with-dma-burst",
+        "release-v0-2-0-preparation-execution",
+        "todos",
+        "subtask-routing",
+    )
+
+    for title in hits:
+        assert is_generic_title(title), title
+    for title in misses:
+        assert not is_generic_title(title), title
+
+
+def test_pool_exclude_reason_generic_title():
+    from paulshaclaw.memory.noise import pool_exclude_reason
+
+    assert pool_exclude_reason(
+        {"artifact_kind": "report", "title": "overview"}
+    ) == "generic-title"
+    assert pool_exclude_reason(
+        {"artifact_kind": "report", "atom_title": "Report Testpilot"}
+    ) == "generic-title"
+    assert pool_exclude_reason(
+        {"artifact_kind": "report", "session_title": "TODO"}
+    ) is None
+    assert pool_exclude_reason(
+        {"artifact_kind": "report", "title": "wi-fi-llapi-test-execution-workflow"}
+    ) is None
+    assert pool_exclude_reason(
+        {"artifact_kind": "review", "title": "overview"}
+    ) == "review-record"
+
+
 if __name__ == "__main__":
     unittest.main()

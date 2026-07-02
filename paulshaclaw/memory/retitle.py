@@ -8,6 +8,9 @@ slice body, stamps `title`/`atom_title`/`aliases`, and renames the file to
 slice_id so the rename is safe). doc-fragment candidates are skipped (left for
 `prune-noise`); slices the distiller can't title (LLM offline) are skipped too,
 so the migration never invents a junk title and never fails as a whole.
+Since #178 the scan also covers generic titles (``noise.is_generic_title``:
+report-*/task-*/todo-*/overview/problem/review-summary) so pool-excluded
+generic artifacts can regain a specific title and re-enter the retrieval pool.
 """
 
 from __future__ import annotations
@@ -20,14 +23,14 @@ from typing import Callable
 from .moc import frontmatter_io as _fio
 from .moc import naming as _naming
 from .moc.runner import run_moc
-from .noise import DocCorpus, classify_noise
+from .noise import DocCorpus, classify_noise, is_generic_title
 
 Distiller = Callable[[str], "str | None"]
 
 
 def _is_untitled(frontmatter: dict, path: Path) -> bool:
     title = str(frontmatter.get("title", "")).strip()
-    return title == "untitled" or path.name.startswith("untitled--")
+    return title == "untitled" or path.name.startswith("untitled--") or is_generic_title(title)
 
 
 def _write_manifest(manifest: Path, rows: list[dict]) -> None:

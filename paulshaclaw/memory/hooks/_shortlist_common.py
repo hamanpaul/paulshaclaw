@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,10 +12,15 @@ from paulshaclaw.memory.retrieval import format_shortlist, to_fts_query
 from paulshaclaw.memory.hooks._wakeup_common import log_warn, sanitize_id
 
 SHORTLIST_K = 3
+SHORTLIST_FETCH_K = 12
 
 
-def _summary(path: str) -> str:
-    """First meaningful (non-frontmatter, non-empty) body line, for the shortlist."""
+def _norm_title_key(s: str) -> str:
+    return re.sub(r"[\W_]+", "", s).lower()
+
+
+def _summary(path: str, title: str = "") -> str:
+    """First informative body line for the shortlist."""
     try:
         text = Path(path).read_text(encoding="utf-8", errors="ignore")
     except Exception:
@@ -24,10 +30,17 @@ def _summary(path: str) -> str:
     if lines and lines[0].strip() == "---":
         end = next((i for i in range(1, len(lines)) if lines[i].strip() == "---"), 0)
         lines = lines[end + 1:]
+    tkey = _norm_title_key(title)
     for ln in lines:
         s = ln.strip()
-        if s:
-            return s.lstrip("# ").strip()
+        if not s:
+            continue
+        s = s.lstrip("# ").strip()
+        if not s:
+            continue
+        if tkey and _norm_title_key(s) == tkey:
+            continue
+        return s
     return ""
 
 
@@ -50,6 +63,21 @@ def _redact(root: Path, tool: str, project: str, session_ref: str, text: str) ->
         return ""
 
 
+def _offered_map_path(root: Path, tool: str, session_id: str) -> Path:
+    return root / "runtime" / "wakeup" / f"{tool}__{sanitize_id(session_id)}.offered.json"
+
+
+def _load_offered_ids(root: Path, tool: str, session_id: str) -> set[str]:
+    try:
+        payload = json.loads(_offered_map_path(root, tool, session_id).read_text(encoding="utf-8"))
+        by_id = payload.get("by_id")
+        if not isinstance(by_id, dict):
+            return set()
+        return {str(k) for k in by_id.keys()}
+    except Exception:
+        return set()
+
+
 def _record_offered(root: Path, tool: str, session_id: str, project: str,
                     offered: list[tuple[str, str]]) -> None:
     """Append offered ledger + accumulate per-session sl_id<->path map. Best-effort."""
@@ -64,7 +92,7 @@ def _record_offered(root: Path, tool: str, session_id: str, project: str,
 
         wk_dir = root / "runtime" / "wakeup"
         wk_dir.mkdir(parents=True, exist_ok=True)
-        mpath = wk_dir / f"{tool}__{sanitize_id(session_id)}.offered.json"
+        mpath = _offered_map_path(root, tool, session_id)
         cur = {"by_path": {}, "by_id": {}}
         if mpath.exists():
             try:
@@ -95,13 +123,18 @@ def build_shortlist_and_record(root: Path, tool: str, session_id: str,
             return ""
         try:
             hits = search_mod.search(root, query, project=project,
-                                     limit=SHORTLIST_K, include_decayed=False)
+                                     limit=SHORTLIST_FETCH_K, include_decayed=False)
         except search_mod.SearchIndexError:
             return ""
         if not hits:
             return ""
+        seen = _load_offered_ids(root, tool, session_id)
+        hits = [h for h in hits if h.get("slice_id") and h["slice_id"] not in seen]
+        hits = hits[:SHORTLIST_K]
+        if not hits:
+            return ""
         for h in hits:
-            h["summary"] = _summary(h.get("path", ""))
+            h["summary"] = _summary(h.get("path", ""), str(h.get("title") or ""))
         block = _redact(root, tool, project, session_id, format_shortlist(hits))
         if not block:
             # fail-closed: redaction suppressed the shortlist -> inject nothing and do

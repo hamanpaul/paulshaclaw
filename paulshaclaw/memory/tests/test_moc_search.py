@@ -171,5 +171,24 @@ def test_build_index_excludes_noise_and_pool(tmp_path):
     assert "sl-echo00000000000" not in ids    # classify_noise
 
 
+def test_build_index_excludes_generic_title(tmp_path):
+    from paulshaclaw.memory.moc import search as S
+
+    mr = tmp_path
+    generic_title = "Report Testpilot"
+    generic_sid = "sl-generic0000000"
+    concrete_title = "uart-pinmux-diagnosis"
+    concrete_sid = "sl-concrete000000"
+
+    _slice(mr, generic_sid, "proj", generic_title, "shared retrieval signal")
+    _slice(mr, concrete_sid, "proj", concrete_title, "shared retrieval signal")
+
+    S.build_index(mr, link_weights={})
+
+    hits = S.search(mr, "retrieval", project="proj", limit=10, include_decayed=True)
+    assert [h["slice_id"] for h in hits] == [concrete_sid]
+    assert (mr / "knowledge" / "proj" / f"{generic_title}--{generic_sid}.md").exists()
+
+
 if __name__ == "__main__":
     unittest.main()
