@@ -145,6 +145,7 @@ class RekeyProjectTests(unittest.TestCase):
                 "同名既有檔",
                 title="old-name",
             )
+            original_text = conflict.read_text(encoding="utf-8")
 
             summary = rekey.rekey_project(
                 root,
@@ -159,11 +160,47 @@ class RekeyProjectTests(unittest.TestCase):
             self.assertTrue(summary["indexed"])
             self.assertTrue(conflict.exists())
             self.assertFalse((conflict.parent / "conflict-title--sl-c1.md").exists())
-            fm, _body = fio.read(conflict.read_text(encoding="utf-8"))
+            current_text = conflict.read_text(encoding="utf-8")
+            self.assertEqual(current_text, original_text)
+            fm, _body = fio.read(current_text)
             self.assertEqual(fm["project"], OLD_KEY)
             self.assertFalse(
                 any("UNIQUE constraint failed" in warning for warning in summary["warnings"])
             )
+
+    def test_same_slice_id_under_target_slug_is_treated_as_conflict(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = _slice(
+                root,
+                OLD_DIR,
+                OLD_KEY,
+                "old-name--sl-c1.md",
+                "舊 key 內容",
+                title="old name",
+            )
+            _slice(
+                root,
+                "testpilot",
+                "testpilot",
+                "new-name--sl-c1.md",
+                "同 slice 既有檔",
+                title="new name",
+            )
+            original_text = source.read_text(encoding="utf-8")
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertEqual(summary["conflicts"], 1)
+            self.assertEqual(summary["rekeyed"], 0)
+            self.assertTrue(source.exists())
+            self.assertEqual(source.read_text(encoding="utf-8"), original_text)
 
     def test_other_projects_untouched(self):
         with TemporaryDirectory() as tmp:

@@ -35,6 +35,25 @@ def _write_manifest(manifest: Path, rows: list[dict]) -> None:
     tmp.replace(manifest)
 
 
+def _slice_ids_in_dir(root: Path) -> set[str]:
+    slice_ids: set[str] = set()
+    if not root.exists():
+        return slice_ids
+    for path in sorted(root.rglob("*.md")):
+        if path.name.endswith("-moc.md"):
+            continue
+        try:
+            frontmatter, _body = _fio.read(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError):
+            continue
+        if frontmatter.get("memory_layer") != "knowledge":
+            continue
+        slice_id = str(frontmatter.get("slice_id", ""))
+        if slice_id:
+            slice_ids.add(slice_id)
+    return slice_ids
+
+
 def _reconcile_preserving_paths(memory_root: Path, protected_paths: set[Path]) -> list[str]:
     knowledge = memory_root / "knowledge"
     warnings: list[str] = []
@@ -162,6 +181,7 @@ def rekey_project(
 
     knowledge = memory_root / "knowledge"
     target_dir = knowledge / sanitize_project_component(new_slug)
+    target_slice_ids = _slice_ids_in_dir(target_dir)
     rows: list[dict] = []
     planned: list[tuple[Path, Path, dict]] = []
 
@@ -188,12 +208,15 @@ def rekey_project(
         if not apply:
             rows.append({**base, "status": "dry-run"})
             continue
-        if target != path and target.exists():
+        slice_id = base["slice_id"]
+        if target != path and (target.exists() or slice_id in target_slice_ids):
             rows.append({**base, "status": "conflict"})
             continue
         row = {**base, "status": "planned"}
         rows.append(row)
         planned.append((path, target, row))
+        if slice_id:
+            target_slice_ids.add(slice_id)
 
     manifest = memory_root / "runtime" / "ledger" / f"rekey-{now.replace(':', '')}.jsonl"
     _write_manifest(manifest, rows)
