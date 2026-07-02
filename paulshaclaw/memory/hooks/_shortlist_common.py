@@ -11,6 +11,7 @@ from paulshaclaw.memory.retrieval import format_shortlist, to_fts_query
 from paulshaclaw.memory.hooks._wakeup_common import log_warn, sanitize_id
 
 SHORTLIST_K = 3
+SHORTLIST_FETCH_K = 12
 
 
 def _summary(path: str) -> str:
@@ -50,6 +51,21 @@ def _redact(root: Path, tool: str, project: str, session_ref: str, text: str) ->
         return ""
 
 
+def _offered_map_path(root: Path, tool: str, session_id: str) -> Path:
+    return root / "runtime" / "wakeup" / f"{tool}__{sanitize_id(session_id)}.offered.json"
+
+
+def _load_offered_ids(root: Path, tool: str, session_id: str) -> set[str]:
+    try:
+        payload = json.loads(_offered_map_path(root, tool, session_id).read_text(encoding="utf-8"))
+        by_id = payload.get("by_id")
+        if not isinstance(by_id, dict):
+            return set()
+        return {str(k) for k in by_id.keys()}
+    except Exception:
+        return set()
+
+
 def _record_offered(root: Path, tool: str, session_id: str, project: str,
                     offered: list[tuple[str, str]]) -> None:
     """Append offered ledger + accumulate per-session sl_id<->path map. Best-effort."""
@@ -64,7 +80,7 @@ def _record_offered(root: Path, tool: str, session_id: str, project: str,
 
         wk_dir = root / "runtime" / "wakeup"
         wk_dir.mkdir(parents=True, exist_ok=True)
-        mpath = wk_dir / f"{tool}__{sanitize_id(session_id)}.offered.json"
+        mpath = _offered_map_path(root, tool, session_id)
         cur = {"by_path": {}, "by_id": {}}
         if mpath.exists():
             try:
@@ -95,9 +111,14 @@ def build_shortlist_and_record(root: Path, tool: str, session_id: str,
             return ""
         try:
             hits = search_mod.search(root, query, project=project,
-                                     limit=SHORTLIST_K, include_decayed=False)
+                                     limit=SHORTLIST_FETCH_K, include_decayed=False)
         except search_mod.SearchIndexError:
             return ""
+        if not hits:
+            return ""
+        seen = _load_offered_ids(root, tool, session_id)
+        hits = [h for h in hits if h.get("slice_id") and h["slice_id"] not in seen]
+        hits = hits[:SHORTLIST_K]
         if not hits:
             return ""
         for h in hits:

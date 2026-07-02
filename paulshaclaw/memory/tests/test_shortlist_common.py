@@ -62,3 +62,71 @@ def test_shortlist_fails_closed_when_redaction_raises(tmp_path, monkeypatch):
     assert out == ""  # no shortlist injected
     assert not (tmp_path / "runtime" / "ledger" / "offered.jsonl").exists()
     assert not (tmp_path / "runtime" / "wakeup" / "claude-code__sidX.offered.json").exists()
+
+
+def _seed_two(mr: Path):
+    k = mr / "knowledge" / "proj"
+    k.mkdir(parents=True)
+    (k / "a.md").write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-aaaaaaaaaaaaaaaa\nproject: proj\n"
+        "title: SerialWrap\ncaptured_at: '2026-06-29T00:00:00Z'\n---\n抽象 UART 執行層\n",
+        encoding="utf-8")
+    (k / "b.md").write_text(
+        "---\nmemory_layer: knowledge\nslice_id: sl-bbbbbbbbbbbbbbbb\nproject: proj\n"
+        "title: SerialWrap 進階\ncaptured_at: '2026-06-29T00:01:00Z'\n---\nSerialWrap 執行注意事項\n",
+        encoding="utf-8")
+    S.build_index(mr, link_weights={})
+
+
+def _offered_events(mr: Path):
+    path = mr / "runtime" / "ledger" / "offered.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_shortlist_session_dedup_next_best_then_exhausted(tmp_path, monkeypatch):
+    monkeypatch.setattr(SC, "resolve_project", lambda cwd, memory_root: "proj")
+    monkeypatch.setattr(SC, "SHORTLIST_K", 1)
+    _seed_two(tmp_path)
+
+    out1 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidD", cwd="/x", prompt="SerialWrap 執行")
+    out2 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidD", cwd="/x", prompt="SerialWrap 執行")
+    out3 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidD", cwd="/x", prompt="SerialWrap 執行")
+
+    assert out1 != ""
+    assert out2 != ""
+    assert out3 == ""
+
+    events = _offered_events(tmp_path)
+    assert len(events) == 2
+    ids1 = {item["sl_id"] for item in events[0]["offered"]}
+    ids2 = {item["sl_id"] for item in events[1]["offered"]}
+    assert ids1 != ids2
+    assert ids1 | ids2 == {"sl-aaaaaaaaaaaaaaaa", "sl-bbbbbbbbbbbbbbbb"}
+
+
+def test_shortlist_dedup_scoped_to_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(SC, "resolve_project", lambda cwd, memory_root: "proj")
+    monkeypatch.setattr(SC, "SHORTLIST_K", 1)
+    _seed_two(tmp_path)
+
+    out1 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidE", cwd="/x", prompt="SerialWrap 執行")
+    out2 = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidF", cwd="/x", prompt="SerialWrap 執行")
+
+    assert out1 != ""
+    assert out2 != ""
+
+
+def test_shortlist_dedup_fail_open_on_corrupt_map(tmp_path, monkeypatch):
+    monkeypatch.setattr(SC, "resolve_project", lambda cwd, memory_root: "proj")
+    monkeypatch.setattr(SC, "SHORTLIST_K", 1)
+    _seed_two(tmp_path)
+
+    wakeup = tmp_path / "runtime" / "wakeup"
+    wakeup.mkdir(parents=True)
+    (wakeup / "claude-code__sidG.offered.json").write_text("{broken", encoding="utf-8")
+
+    out = SC.build_shortlist_and_record(tmp_path, "claude-code", "sidG", cwd="/x", prompt="SerialWrap 執行")
+
+    assert out != ""
