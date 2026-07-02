@@ -27,6 +27,25 @@ body
 """
 
 
+_UNTITLED_RECORD = """---
+memory_layer: knowledge
+slice_id: sl-u1
+project: github.com/hamanpaul/testpilot
+title: untitled
+source_agent: claude
+source_session: s2
+source_artifact: b.md
+captured_at: "2026-06-22T00:00:00Z"
+provenance:
+  repo: paulshaclaw
+  commit: c
+  path: docs/x.md
+---
+## 語言政策
+所有溝通使用 zh-TW。
+"""
+
+
 def _setup(tmp: str) -> tuple[Path, Path]:
     root = Path(tmp)
     kroot = root / "knowledge"
@@ -65,6 +84,50 @@ class ScannerTests(unittest.TestCase):
                                       now="2026-05-31T00:00:00Z", dry_run=True, source_path_exists=lambda r: True)
             self.assertEqual(len(result["plan"]), 1)
             self.assertEqual(lifecycle.read_events(root / "runtime" / "ledger" / "lifecycle.jsonl"), [])
+
+
+class ScannerLintTests(unittest.TestCase):
+    def test_lint_counts_and_warnings_surface(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kroot = root / "knowledge"
+            kroot.mkdir(parents=True)
+            slice_path = kroot / "untitled--sl-u1.md"
+            slice_path.write_text(_UNTITLED_RECORD, encoding="utf-8")
+            cfg, cfg_hash = janitor_config.load_config(override_path=None)
+
+            result = scanner.run_scan(
+                root,
+                knowledge_root=kroot,
+                config=cfg,
+                config_hash=cfg_hash,
+                now="2026-07-02T00:00:00Z",
+                dry_run=True,
+                source_path_exists=lambda r: True,
+            )
+
+            self.assertEqual(result["summary"]["lint"], {"untitled": 1, "raw_remote_key": 1})
+            lint_warnings = [warning for warning in result["warnings"] if warning.startswith("lint:")]
+            self.assertEqual(len(lint_warnings), 2)
+            self.assertTrue(slice_path.exists())
+            self.assertEqual(lifecycle.read_events(root / "runtime" / "ledger" / "lifecycle.jsonl"), [])
+
+    def test_clean_tree_has_zero_lint(self):
+        with TemporaryDirectory() as tmp:
+            root, kroot = _setup(tmp)
+            cfg, cfg_hash = janitor_config.load_config(override_path=None)
+
+            result = scanner.run_scan(
+                root,
+                knowledge_root=kroot,
+                config=cfg,
+                config_hash=cfg_hash,
+                now="2026-05-31T00:00:00Z",
+                source_path_exists=lambda r: True,
+            )
+
+            self.assertEqual(result["summary"]["lint"], {"untitled": 0, "raw_remote_key": 0})
+            self.assertFalse([warning for warning in result["warnings"] if warning.startswith("lint:")])
 
 
 if __name__ == "__main__":

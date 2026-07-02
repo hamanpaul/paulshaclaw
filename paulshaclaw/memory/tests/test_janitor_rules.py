@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
+from paulshaclaw.memory.janitor import record_source
 from paulshaclaw.memory.janitor import rules
 from paulshaclaw.memory.janitor.config import JanitorConfig
 from paulshaclaw.memory.janitor.record_source import KnowledgeRecord
@@ -134,6 +136,73 @@ class DeterminismTests(unittest.TestCase):
     def test_malformed_lifecycle_state_does_not_crash(self):
         events = rules.plan_scan([_rec(captured="2026-05-30T00:00:00Z")], {}, {"sl-1": "not-a-dict"}, CFG, NOW, HASH, source_path_exists=_PATH_OK)
         self.assertEqual(events, [])
+
+
+def _lint_rec(rid="sl-1", title="真標題", project="paulshaclaw"):
+    return KnowledgeRecord(
+        record_id=rid,
+        supersedes=(),
+        source_key="claude:s1",
+        captured_at="2026-06-01T00:00:00Z",
+        provenance={"repo": "r", "commit": "c", "path": "docs/x.md"},
+        path=Path("/tmp/x.md"),
+        title=title,
+        project=project,
+    )
+
+
+class LintRuleTests(unittest.TestCase):
+    def test_untitled_title_is_flagged(self):
+        findings = rules.plan_lint([_lint_rec(rid="sl-u1", title="untitled")])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule"], "title-untitled")
+        self.assertEqual(findings[0]["record_id"], "sl-u1")
+
+    def test_raw_remote_project_key_is_flagged(self):
+        findings = rules.plan_lint([_lint_rec(rid="sl-r1", project="github.com/hamanpaul/testpilot")])
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["rule"], "raw-remote-key")
+        self.assertEqual(findings[0]["project"], "github.com/hamanpaul/testpilot")
+
+    def test_clean_record_yields_no_findings(self):
+        self.assertEqual(rules.plan_lint([_lint_rec()]), [])
+
+    def test_both_rules_can_fire_on_one_record(self):
+        findings = rules.plan_lint([_lint_rec(title="untitled", project="a/b")])
+        self.assertEqual({finding["rule"] for finding in findings}, {"title-untitled", "raw-remote-key"})
+
+    def test_findings_are_deterministic_and_sorted(self):
+        first = _lint_rec(rid="sl-2", title="untitled")
+        second = _lint_rec(rid="sl-1", title="untitled")
+        findings_a = rules.plan_lint([first, second])
+        findings_b = rules.plan_lint([second, first])
+        self.assertEqual(findings_a, findings_b)
+        self.assertEqual([finding["record_id"] for finding in findings_a], ["sl-1", "sl-2"])
+
+
+class LintFieldExtractionTests(unittest.TestCase):
+    def test_iter_records_extracts_title_and_project(self):
+        with TemporaryDirectory() as tmp:
+            kroot = Path(tmp) / "knowledge"
+            kroot.mkdir(parents=True)
+            (kroot / "untitled--sl-1.md").write_text(
+                "---\nmemory_layer: knowledge\nslice_id: sl-1\ntitle: untitled\n"
+                "project: github.com/hamanpaul/testpilot\nsource_agent: claude\n"
+                'source_session: s1\ncaptured_at: "2026-06-22T00:00:00Z"\n---\nbody\n',
+                encoding="utf-8",
+            )
+
+            records, warnings = record_source.iter_records(kroot)
+
+            self.assertEqual(warnings, [])
+            self.assertEqual(records[0].title, "untitled")
+            self.assertEqual(records[0].project, "github.com/hamanpaul/testpilot")
+
+    def test_missing_fields_default_to_empty(self):
+        record = _rec()
+        self.assertEqual(record.title, "")
+        self.assertEqual(record.project, "")
+        self.assertEqual(rules.plan_lint([record]), [])
 
 
 if __name__ == "__main__":
