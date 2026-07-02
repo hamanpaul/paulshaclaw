@@ -423,13 +423,15 @@ class PipelineTests(unittest.TestCase):
                 hashlib.sha256(skill_text.encode("utf-8")).hexdigest(),
             )
 
-    def test_llm_empty_output_leaves_session_split_without_archiving_fragments(self):
+    def test_llm_empty_output_reaches_promoted_terminal_state(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _seed_raw(root)
             cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cached_client = agent_exec.CachingAgentClient(FakeAgentClient("[]"), cache_dir)
             promoter = llm_promoter.LLMPromoter(
-                FakeAgentClient("[]"),
+                cached_client,
                 skill_text="EMPTY-SKILL",
                 known_projects=["paulshaclaw"],
                 model="fake-llm",
@@ -439,10 +441,16 @@ class PipelineTests(unittest.TestCase):
                 root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z", promoter=promoter
             )
 
-            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            event = processing.read_events(root)[-1]
+            self.assertEqual(event["state"], "promoted")
+            self.assertEqual(event["slices"], 0)
+            self.assertEqual(result["summary"]["slices"], 0)
             self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
-            self.assertEqual(len(list((root / "inbox" / "_slices").rglob("*.md"))), 2)
-            self.assertTrue(any("left in split" in warning for warning in result["warnings"]))
+            self.assertEqual(list((root / "inbox" / "_slices").rglob("*.md")), [])
+            self.assertEqual(len(list((root / "archive" / "fragments").rglob("*.md"))), 2)
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertFalse(any("left in split" in warning for warning in result["warnings"]))
 
     def test_llm_promotion_archives_unreferenced_fragments(self):
         with TemporaryDirectory() as tmp:
