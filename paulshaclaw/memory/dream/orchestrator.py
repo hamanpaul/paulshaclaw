@@ -14,6 +14,9 @@ from typing import Any, Callable
 
 from paulshaclaw.memory.ledger import dream as dream_ledger
 
+_WARNINGS_RECORDED_MAX = 10
+_WARNING_TEXT_MAX_CHARS = 500
+
 
 def _error_category(exc: Exception) -> str:
     return type(exc).__name__
@@ -42,6 +45,14 @@ def _run_pass(
             summary = value
         else:
             summary = {k: v for k, v in result.items() if k != "warnings"}
+
+    if isinstance(warnings, list) and warnings:
+        summary = dict(summary)
+        summary["warnings"] = [
+            str(warning)[:_WARNING_TEXT_MAX_CHARS]
+            for warning in warnings[:_WARNINGS_RECORDED_MAX]
+        ]
+        summary["warnings_total"] = len(warnings)
 
     passes[name] = summary
 

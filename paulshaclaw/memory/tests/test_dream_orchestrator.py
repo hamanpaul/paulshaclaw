@@ -88,6 +88,93 @@ class TestDreamOrchestrator(unittest.TestCase):
 
             self.assertEqual(dream.last_run(root)["status"], "partial")
 
+    def test_pass_warnings_are_recorded_in_dream_record(self):
+        warning_text = "claude:s1: llm promote failed: x; session claude:s1 left in split"
+
+        def atomize_fn():
+            return {"summary": {"skipped": 1}, "warnings": [warning_text]}
+
+        def janitor_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            orchestrator.run_dream(
+                root,
+                atomize_fn=atomize_fn,
+                janitor_fn=janitor_fn,
+                now="2026-07-02T00:00:00Z",
+                config_hash="cfg",
+            )
+
+            record = dream.last_run(root)
+            self.assertEqual(record["status"], "partial")
+            atomize = record["passes"]["atomize"]
+            self.assertEqual(atomize["warnings"], [warning_text])
+            self.assertEqual(atomize["warnings_total"], 1)
+            self.assertEqual(record["passes"]["janitor"], {"skipped": 0})
+
+    def test_pass_warnings_overflow_truncated_but_counted(self):
+        all_warnings = [f"w{i}" for i in range(45)]
+
+        def atomize_fn():
+            return {"summary": {"skipped": 45}, "warnings": list(all_warnings)}
+
+        def janitor_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        with TemporaryDirectory() as tmpdir:
+            record = orchestrator.run_dream(
+                Path(tmpdir),
+                atomize_fn=atomize_fn,
+                janitor_fn=janitor_fn,
+                now="2026-07-02T00:00:00Z",
+                config_hash="cfg",
+            )
+
+            atomize = record["passes"]["atomize"]
+            self.assertEqual(atomize["warnings"], all_warnings[:10])
+            self.assertEqual(atomize["warnings_total"], 45)
+
+    def test_long_warning_strings_are_truncated(self):
+        def atomize_fn():
+            return {"summary": {"skipped": 1}, "warnings": ["x" * 2000]}
+
+        def janitor_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        with TemporaryDirectory() as tmpdir:
+            record = orchestrator.run_dream(
+                Path(tmpdir),
+                atomize_fn=atomize_fn,
+                janitor_fn=janitor_fn,
+                now="2026-07-02T00:00:00Z",
+                config_hash="cfg",
+            )
+
+            self.assertEqual(record["passes"]["atomize"]["warnings"], ["x" * 500])
+
+    def test_summary_dict_is_not_mutated_by_warning_recording(self):
+        source_summary = {"skipped": 1}
+
+        def atomize_fn():
+            return {"summary": source_summary, "warnings": ["warn"]}
+
+        def janitor_fn():
+            return {"summary": {"skipped": 0}, "warnings": []}
+
+        with TemporaryDirectory() as tmpdir:
+            orchestrator.run_dream(
+                Path(tmpdir),
+                atomize_fn=atomize_fn,
+                janitor_fn=janitor_fn,
+                now="2026-07-02T00:00:00Z",
+                config_hash="cfg",
+            )
+
+            self.assertNotIn("warnings", source_summary)
+            self.assertNotIn("warnings_total", source_summary)
+
     def test_failure_record_redacts_exception_message(self):
         def atomize_fn():
             raise RuntimeError("raw prompt leaked")
