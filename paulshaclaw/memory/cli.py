@@ -394,6 +394,7 @@ def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int
 
     rows: list[dict] = []
     problems: list[str] = []
+    seen_resolved: set[Path] = set()
     for entry in listed:
         raw_path = Path(entry)
         if not raw_path.is_absolute():
@@ -421,6 +422,10 @@ def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int
         if fm.get("memory_layer") != "knowledge":
             problems.append(f"not-knowledge-layer: {entry}")
             continue
+        if resolved in seen_resolved:
+            problems.append(f"duplicate: {entry}")
+            continue
+        seen_resolved.add(resolved)
         rows.append(
             {
                 "slice_id": str(fm.get("slice_id", "")),

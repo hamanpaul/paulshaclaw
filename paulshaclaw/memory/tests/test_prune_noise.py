@@ -5,7 +5,7 @@ import json
 import os
 import pathlib
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -312,6 +312,36 @@ class PruneListedTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertTrue(alias.is_symlink())
             self.assertTrue(listed.exists())
+
+    def test_listed_duplicate_path_fails_closed_before_delete(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, _noise, _good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"{listed}\n{listed}\n", encoding="utf-8")
+            stderr = io.StringIO()
+
+            with redirect_stderr(stderr):
+                rc = main(
+                    [
+                        "memory",
+                        "knowledge",
+                        "prune-noise",
+                        "--memory-root",
+                        str(root),
+                        "--now",
+                        "2026-07-02T00:00:00Z",
+                        "--paths",
+                        str(paths_file),
+                        "--apply",
+                    ]
+                )
+
+            self.assertEqual(rc, 2)
+            self.assertTrue(listed.exists())
+            self.assertIn("duplicate", stderr.getvalue())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl")) if (root / "runtime" / "ledger").exists() else []
+            self.assertEqual(manifests, [])
 
     def test_paths_mutually_exclusive_with_scan_filters(self):
         with TemporaryDirectory() as tmp:

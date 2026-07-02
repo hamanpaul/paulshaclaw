@@ -343,7 +343,7 @@ class RekeyProjectTests(unittest.TestCase):
             self.assertTrue(any("restore blocked" in warning for warning in summary["warnings"]))
             stashes = sorted((root / "runtime").glob("rekey-conflicts-*"))
             self.assertTrue(stashes)
-            self.assertTrue(any(stash.rglob("*.md") for stash in stashes))
+            self.assertTrue(any(any(stash.rglob("*.md")) for stash in stashes))
 
     def test_partial_rekey_keeps_old_project_moc_when_conflicts_remain(self):
         with TemporaryDirectory() as tmp:
@@ -542,6 +542,50 @@ class RekeyCliTests(unittest.TestCase):
 
             self.assertEqual(rc, 1)
             self.assertIn("warning: search index skipped: boom", stderr.getvalue())
+
+    def test_cli_rolls_back_after_frontmatter_update_failure(self):
+        from paulshaclaw.memory.cli import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+
+            with mock.patch(
+                "paulshaclaw.memory.rekey._fio.update",
+                side_effect=OSError("frontmatter blocked"),
+            ):
+                rc = main(
+                    [
+                        "memory",
+                        "knowledge",
+                        "rekey",
+                        "--memory-root",
+                        str(root),
+                        "--from",
+                        OLD_KEY,
+                        "--to",
+                        "testpilot",
+                        "--now",
+                        "2026-07-02T00:00:00Z",
+                        "--apply",
+                    ]
+                )
+
+            self.assertEqual(rc, 1)
+            self.assertTrue(source.exists())
+            self.assertFalse((root / "knowledge" / "testpilot" / "uart-fix--sl-a1.md").exists())
+            fm, _body = fio.read(source.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], OLD_KEY)
+            manifests = list((root / "runtime" / "ledger").glob("rekey-*.jsonl"))
+            rows = [
+                json.loads(line)
+                for line in manifests[0].read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(rows[0]["status"], "error")
+            self.assertIn("rollback_error", rows[0])
+            self.assertIsNone(rows[0]["rollback_error"])
+            self.assertEqual(rows[0]["error"], "frontmatter blocked")
 
 
 if __name__ == "__main__":

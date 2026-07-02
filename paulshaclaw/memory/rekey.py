@@ -171,6 +171,7 @@ def rekey_project(
             if moved and active_path.exists() and not path.exists():
                 try:
                     active_path.rename(path)
+                    row["rollback_error"] = None
                 except OSError as rollback_exc:
                     row["rollback_error"] = str(rollback_exc)
             row["status"] = "error"
