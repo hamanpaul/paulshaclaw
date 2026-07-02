@@ -13,7 +13,7 @@
 
 - [x] 3.1 本機全套：`cd /home/paul_chen/prj_pri/paulshaclaw && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q` 全綠（既有 dream/atomizer 測試零回歸）。
 - [ ] 3.2 CI 等效：`python -m pytest tests/ paulshaclaw/memory/tests/ -q` 全綠。
-- [ ] 3.3 依 Delivery 段開 PR（branch `feature/176-stage2-dream-doc-corpus`、body 含 `Closes #176`、不 merge）；驗證摘要記錄於本檔底部。
+- [x] 3.3 依 Delivery 段開 PR（branch `feature/176-stage2-dream-doc-corpus`、body 含 `Closes #176`、不 merge）；驗證摘要記錄於本檔底部。
 
 ## Verification Summary
 
@@ -23,3 +23,4 @@
 - GREEN（Task 2）：`cd /home/paul_chen/prj_pri/psc-wt-176 && bash -n scripts/start.sh && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_start_sh_dream_flags.py -q` → `2 passed in 0.03s`。
 - 全套 memory tests：`cd /home/paul_chen/prj_pri/psc-wt-176 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q` → `775 passed, 1 skipped, 87 subtests passed in 26.80s`。
 - CI 等效：`cd /home/paul_chen/prj_pri/psc-wt-176 && python -m pytest tests/ paulshaclaw/memory/tests/ -q` → `2 failed, 1457 passed, 15 skipped, 112 subtests passed in 107.64s`；失敗位於 `tests/test_stage11_operator_cockpit.py`，超出本 change boundary。
+- PR：`https://github.com/hamanpaul/paulshaclaw/pull/181`
