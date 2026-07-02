@@ -506,7 +506,13 @@ def _rekey(args: argparse.Namespace) -> int:
     except rekey_mod.RekeyError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+    for warning in summary.get("warnings", []):
+        print(f"warning: {warning}", file=sys.stderr)
     print(json.dumps(summary, ensure_ascii=False))
+    if summary.get("errors", 0):
+        return 1
+    if summary.get("indexed") is False:
+        return 1
     return 0
 
 

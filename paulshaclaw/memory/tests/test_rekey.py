@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import io
 import json
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from paulshaclaw.memory import rekey
 from paulshaclaw.memory.moc import frontmatter_io as fio
@@ -160,6 +163,55 @@ class RekeyProjectTests(unittest.TestCase):
                     apply=False,
                 )
 
+    def test_apply_rename_failure_preserves_source_and_has_manifest_first(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+            ledger = root / "runtime" / "ledger"
+            manifest_present_at_rename: list[bool] = []
+
+            def failing_rename(path_obj: Path, target: Path):
+                manifest_present_at_rename.append(bool(list(ledger.glob("rekey-*.jsonl"))) if ledger.exists() else False)
+                raise OSError("rename blocked")
+
+            with mock.patch.object(Path, "rename", failing_rename):
+                summary = rekey.rekey_project(
+                    root,
+                    old_key=OLD_KEY,
+                    new_slug="testpilot",
+                    now="2026-07-02T00:00:00Z",
+                    apply=True,
+                )
+
+            self.assertTrue(manifest_present_at_rename and manifest_present_at_rename[0])
+            self.assertTrue(source.exists())
+            fm, _body = fio.read(source.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], OLD_KEY)
+            self.assertEqual(summary["errors"], 1)
+            manifests = list(ledger.glob("rekey-*.jsonl"))
+            rows = [json.loads(line) for line in manifests[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(rows[0]["status"], "error")
+
+    def test_apply_surfaces_moc_rebuild_result(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+
+            with mock.patch(
+                "paulshaclaw.memory.rekey.run_moc",
+                return_value={"indexed": False, "warnings": ["search index skipped: boom"]},
+            ):
+                summary = rekey.rekey_project(
+                    root,
+                    old_key=OLD_KEY,
+                    new_slug="testpilot",
+                    now="2026-07-02T00:00:00Z",
+                    apply=True,
+                )
+
+            self.assertFalse(summary["indexed"])
+            self.assertEqual(summary["warnings"], ["search index skipped: boom"])
+
 
 class RekeyCliTests(unittest.TestCase):
     def test_cli_apply_moves_file(self):
@@ -216,6 +268,39 @@ class RekeyCliTests(unittest.TestCase):
             ledger = root / "runtime" / "ledger"
             manifests = list(ledger.glob("rekey-*.jsonl")) if ledger.exists() else []
             self.assertEqual(manifests, [])
+
+    def test_cli_surfaces_moc_rebuild_warnings(self):
+        from paulshaclaw.memory.cli import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+            stderr = io.StringIO()
+
+            with mock.patch(
+                "paulshaclaw.memory.rekey.run_moc",
+                return_value={"indexed": False, "warnings": ["search index skipped: boom"]},
+            ):
+                with redirect_stderr(stderr):
+                    rc = main(
+                        [
+                            "memory",
+                            "knowledge",
+                            "rekey",
+                            "--memory-root",
+                            str(root),
+                            "--from",
+                            OLD_KEY,
+                            "--to",
+                            "testpilot",
+                            "--now",
+                            "2026-07-02T00:00:00Z",
+                            "--apply",
+                        ]
+                    )
+
+            self.assertEqual(rc, 1)
+            self.assertIn("warning: search index skipped: boom", stderr.getvalue())
 
 
 if __name__ == "__main__":

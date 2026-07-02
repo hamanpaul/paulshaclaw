@@ -50,6 +50,7 @@ def rekey_project(
     knowledge = memory_root / "knowledge"
     target_dir = knowledge / sanitize_project_component(new_slug)
     rows: list[dict] = []
+    planned: list[tuple[Path, Path, dict]] = []
 
     for path in sorted(knowledge.rglob("*.md")) if knowledge.exists() else []:
         if path.name.endswith("-moc.md"):
@@ -77,19 +78,41 @@ def rekey_project(
         if target != path and target.exists():
             rows.append({**base, "status": "conflict"})
             continue
-
-        _fio.update(path, {"project": new_slug})
-        target_dir.mkdir(parents=True, exist_ok=True)
-        if target != path:
-            path.rename(target)
-        rows.append({**base, "status": "rekeyed"})
+        row = {**base, "status": "planned"}
+        rows.append(row)
+        planned.append((path, target, row))
 
     manifest = memory_root / "runtime" / "ledger" / f"rekey-{now.replace(':', '')}.jsonl"
     _write_manifest(manifest, rows)
 
+    for path, target, row in planned:
+        moved = False
+        active_path = path
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target != path:
+                path.rename(target)
+                moved = True
+                active_path = target
+            _fio.update(active_path, {"project": new_slug})
+            row["status"] = "rekeyed"
+        except OSError as exc:
+            if moved and active_path.exists() and not path.exists():
+                try:
+                    active_path.rename(path)
+                except OSError as rollback_exc:
+                    row["rollback_error"] = str(rollback_exc)
+            row["status"] = "error"
+            row["error"] = str(exc)
+
+    if apply:
+        _write_manifest(manifest, rows)
+
     counts = Counter(row["status"] for row in rows)
     removed_source_dir = False
     removed_orphan_moc = False
+    indexed = None
+    warnings: list[str] = []
     if apply and counts.get("rekeyed", 0):
         source_dir = knowledge / sanitize_project_component(old_key)
         if source_dir.is_dir() and not any(source_dir.iterdir()):
@@ -99,7 +122,9 @@ def rekey_project(
         if orphan_moc.exists():
             orphan_moc.unlink()
             removed_orphan_moc = True
-        run_moc(memory_root, now)
+        moc_result = run_moc(memory_root, now)
+        indexed = moc_result.get("indexed")
+        warnings = list(moc_result.get("warnings", []))
 
     return {
         "candidates": len(rows),
@@ -107,7 +132,10 @@ def rekey_project(
         "rekeyed": counts.get("rekeyed", 0),
         "planned": counts.get("dry-run", 0),
         "conflicts": counts.get("conflict", 0),
+        "errors": counts.get("error", 0),
         "removed_source_dir": removed_source_dir,
         "removed_orphan_moc": removed_orphan_moc,
+        "indexed": indexed,
+        "warnings": warnings,
         "manifest": str(manifest),
     }
