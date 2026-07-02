@@ -233,7 +233,7 @@ def _parse_proposals(data: Any, known_projects: list[str]) -> list[SliceProposal
     if not isinstance(data, list):
         raise LlmOutputError("agent output must be a JSON array")
     if not data:
-        raise LlmOutputError("agent output must be a non-empty JSON array")
+        return []
 
     allowed_projects = set(known_projects) | {"_unknown"}
     proposals: list[SliceProposal] = []

@@ -146,6 +146,28 @@ class ExplodingPromoter(Promoter):
         return [slice_frontmatter.build(fragment, config) for fragment in fragments]
 
 
+class ScriptedAgentClient(agent_exec.AgentClient):
+    """Return scripted outputs or raise scripted exceptions in order."""
+
+    def __init__(self, outputs: list[str | Exception]) -> None:
+        self._outputs = list(outputs)
+        self.calls = 0
+
+    def run(self, prompt: str) -> str:
+        del prompt
+        output = self._outputs[min(self.calls, len(self._outputs) - 1)]
+        self.calls += 1
+        if isinstance(output, Exception):
+            raise output
+        return output
+
+
+_VALID_ONE_SLICE = (
+    '[{"title":"alpha","artifact_kind":"report","project":"paulshaclaw","tags":[],'
+    '"body":"body a","source_fragment_indices":[0,1],"relations":[]}]'
+)
+
+
 class PipelineTests(unittest.TestCase):
     _RAW_DOC_FRAGMENT = (
         "---\nmemory_layer: inbox\nproject: paulshaclaw\nsource_agent: claude\n"
@@ -403,13 +425,15 @@ class PipelineTests(unittest.TestCase):
                 hashlib.sha256(skill_text.encode("utf-8")).hexdigest(),
             )
 
-    def test_llm_empty_output_leaves_session_split_without_archiving_fragments(self):
+    def test_llm_empty_output_reaches_promoted_terminal_state(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             _seed_raw(root)
             cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cached_client = agent_exec.CachingAgentClient(FakeAgentClient("[]"), cache_dir)
             promoter = llm_promoter.LLMPromoter(
-                FakeAgentClient("[]"),
+                cached_client,
                 skill_text="EMPTY-SKILL",
                 known_projects=["paulshaclaw"],
                 model="fake-llm",
@@ -419,10 +443,16 @@ class PipelineTests(unittest.TestCase):
                 root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z", promoter=promoter
             )
 
-            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            event = processing.read_events(root)[-1]
+            self.assertEqual(event["state"], "promoted")
+            self.assertEqual(event["slices"], 0)
+            self.assertEqual(result["summary"]["slices"], 0)
             self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
-            self.assertEqual(len(list((root / "inbox" / "_slices").rglob("*.md"))), 2)
-            self.assertTrue(any("left in split" in warning for warning in result["warnings"]))
+            self.assertEqual(list((root / "inbox" / "_slices").rglob("*.md")), [])
+            self.assertEqual(len(list((root / "archive" / "fragments").rglob("*.md"))), 2)
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertFalse(any("left in split" in warning for warning in result["warnings"]))
 
     def test_llm_promotion_archives_unreferenced_fragments(self):
         with TemporaryDirectory() as tmp:
@@ -995,6 +1025,304 @@ class ReimportOverwriteTests(unittest.TestCase):
             # and for a brand-new slice_id it falls back to <slice_id>.md
             fresh = pipeline._knowledge_path_for(root, "paulshaclaw", "sl-new")
             self.assertEqual(fresh.name, "sl-new.md")
+
+
+class PromoteFailureCacheRecoveryTests(unittest.TestCase):
+    """#174: failed LLM promotion must not leave a replayable poisoned cache behind."""
+
+    def _cached_llm_promoter(
+        self, root: Path, outputs: list[str | Exception]
+    ) -> tuple[ScriptedAgentClient, llm_promoter.LLMPromoter]:
+        inner = ScriptedAgentClient(outputs)
+        cached = agent_exec.CachingAgentClient(
+            inner,
+            root / "runtime" / "cache" / "atomize",
+        )
+        promoter = llm_promoter.LLMPromoter(
+            cached,
+            skill_text="RECOVERY-SKILL",
+            known_projects=["paulshaclaw"],
+            model="fake-llm",
+        )
+        return inner, promoter
+
+    def _split_and_cache_key(self, root: Path, cfg, h) -> str:
+        split_warnings: list[str] = []
+        pipeline._split_pass(root, cfg, h, "2026-07-02T02:00:00Z", False, split_warnings)
+        fragments = [
+            pipeline._read_fragment(path)
+            for path in sorted((root / "inbox" / "_slices").rglob("*.md"))
+        ]
+        fragments = [fragment for fragment in fragments if fragment is not None]
+        return llm_promoter.LLMPromoter.cache_key_for_fragments(fragments)
+
+    def test_promote_error_clears_poisoned_cache(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(root, ["chatter, not json"])
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertTrue(any("left in split" in warning for warning in result["warnings"]))
+            self.assertEqual(
+                list((root / "runtime" / "cache" / "atomize").glob("*.json")),
+                [],
+            )
+
+    def test_promote_retry_reinvokes_llm_and_recovers(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(
+                root,
+                ["chatter, not json", _VALID_ONE_SLICE],
+            )
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=promoter,
+            )
+
+            result2 = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T04:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 2)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            self.assertEqual(result2["summary"]["slices"], 1)
+
+    def test_non_llm_promoter_failure_does_not_touch_cache_dir(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            sentinel = cache_dir / "keep.json"
+            sentinel.write_text("keep", encoding="utf-8")
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=ExplodingPromoter(fail_session="s1"),
+            )
+
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertTrue(sentinel.exists())
+            self.assertEqual(sorted(path.name for path in cache_dir.iterdir()), ["keep.json"])
+
+    def test_transport_failures_do_not_consume_retry_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(
+                root,
+                [agent_exec.AgentExecError("agent timed out after 600s")] * 6,
+            )
+
+            result = None
+            for hour in range(6):
+                result = pipeline.run(
+                    root,
+                    config=cfg,
+                    config_hash=h,
+                    now=f"2026-07-02T0{hour}:00:00Z",
+                    promoter=promoter,
+                )
+
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            self.assertIsNotNone(result)
+            self.assertEqual(inner.calls, 6)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(list(cache_dir.glob("*.retries")), [])
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertTrue(any("transport failure" in warning for warning in result["warnings"]))
+            self.assertFalse(any("poisoned cache retained" in warning for warning in result["warnings"]))
+
+    def test_transport_recovery_chatter_starts_content_retry_budget_at_one(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(
+                root,
+                [agent_exec.AgentExecError("agent timed out after 600s")] * 6
+                + ["chatter, not json", _VALID_ONE_SLICE],
+            )
+
+            for hour in range(6):
+                pipeline.run(
+                    root,
+                    config=cfg,
+                    config_hash=h,
+                    now=f"2026-07-02T0{hour}:00:00Z",
+                    promoter=promoter,
+                )
+
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T06:00:00Z",
+                promoter=promoter,
+            )
+
+            retries = list(cache_dir.glob("*.retries"))
+            self.assertEqual(inner.calls, 7)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(len(retries), 1)
+            self.assertEqual(retries[0].read_text(encoding="utf-8").strip(), "1")
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertTrue(any("retry 1/5" in warning for warning in result["warnings"]))
+
+            result2 = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T07:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 8)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            self.assertEqual(result2["summary"]["slices"], 1)
+
+    def test_retry_counter_increments_and_cache_cleared_within_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(root, ["chatter, not json"])
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=promoter,
+            )
+
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            retries = list(cache_dir.glob("*.retries"))
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(len(retries), 1)
+            self.assertEqual(retries[0].read_text(encoding="utf-8").strip(), "1")
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+
+    def test_exhausted_budget_retains_poisoned_cache_and_stops_llm_calls(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            cache_key = self._split_and_cache_key(root, cfg, h)
+            (cache_dir / f"{cache_key}.retries").write_text("5", encoding="utf-8")
+            inner, promoter = self._cached_llm_promoter(root, ["chatter, not json"])
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T04:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(
+                (cache_dir / f"{cache_key}.retries").read_text(encoding="utf-8").strip(),
+                "6",
+            )
+            self.assertEqual(len(list(cache_dir.glob("*.json"))), 1)
+            self.assertTrue(any("retry budget exhausted" in warning for warning in result["warnings"]))
+
+            result2 = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T05:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertTrue(any("left in split" in warning for warning in result2["warnings"]))
+
+    def test_successful_promotion_removes_retry_sidecar(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            cache_key = self._split_and_cache_key(root, cfg, h)
+            sidecar = cache_dir / f"{cache_key}.retries"
+            sidecar.write_text("3", encoding="utf-8")
+            inner, promoter = self._cached_llm_promoter(root, [_VALID_ONE_SLICE])
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T04:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            self.assertEqual(result["summary"]["slices"], 1)
+            self.assertFalse(sidecar.exists())
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+
+    def test_dry_run_existing_split_session_leaves_retry_budget_and_cache_untouched(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            cache_key = self._split_and_cache_key(root, cfg, h)
+            cache_path = cache_dir / f"{cache_key}.json"
+            sidecar = cache_dir / f"{cache_key}.retries"
+            cache_path.write_text("chatter, not json", encoding="utf-8")
+            sidecar.write_text("1", encoding="utf-8")
+            inner, promoter = self._cached_llm_promoter(root, [_VALID_ONE_SLICE])
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T05:00:00Z",
+                promoter=promoter,
+                dry_run=True,
+            )
+
+            self.assertEqual(inner.calls, 0)
+            self.assertTrue(cache_path.exists())
+            self.assertEqual(sidecar.read_text(encoding="utf-8").strip(), "1")
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
 
 
 if __name__ == "__main__":

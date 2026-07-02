@@ -26,9 +26,16 @@ class LlmOutputTests(unittest.TestCase):
         )
         self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
 
-    def test_empty_array_raises(self):
-        with self.assertRaisesRegex(llm_output.LlmOutputError, "non-empty JSON array"):
-            llm_output.parse("[]", PROJECTS)
+    def test_empty_array_returns_no_proposals(self):
+        self.assertEqual(llm_output.parse("[]", PROJECTS), [])
+
+    def test_fenced_empty_array_with_reasoning_returns_no_proposals(self):
+        raw = "```json\n[]\n```\n**Reasoning:** The session contains no substantive content."
+        self.assertEqual(llm_output.parse(raw, PROJECTS), [])
+
+    def test_all_invalid_proposals_still_raise_no_salvageable(self):
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "no salvageable proposals"):
+            llm_output.parse('[{"bogus": 1}]', PROJECTS)
 
     def test_parses_bare_array_after_label_on_previous_line(self):
         raw = (

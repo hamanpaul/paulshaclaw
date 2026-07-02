@@ -102,9 +102,8 @@ class LLMPromoterTests(unittest.TestCase):
         with self.assertRaises(llm_promoter.PromoteError):
             _promoter("garbage not json").promote([_frag(0)], CFG)
 
-    def test_empty_output_fails_closed(self):
-        with self.assertRaises(llm_promoter.PromoteError):
-            _promoter("[]").promote([_frag(0)], CFG)
+    def test_empty_output_returns_no_slices(self):
+        self.assertEqual(_promoter("[]").promote([_frag(0)], CFG), [])
 
     def test_bad_artifact_kind_fails_closed(self):
         bad = (
