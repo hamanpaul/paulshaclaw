@@ -17,6 +17,7 @@ from .splitter import Fragment
 
 LOGGER = logging.getLogger(__name__)
 _ATOMIZER_INBOX_FILE_MAX_BYTES = 64 * 1024 * 1024
+_LLM_PROMOTE_MAX_RETRIES = 5
 
 
 def _parse_frontmatter(text: str) -> tuple[Mapping[str, Any] | None, str]:
@@ -93,6 +94,48 @@ def _clear_cache_key(memory_root: Path, cache_key: str | None) -> None:
         candidate.unlink()
     except FileNotFoundError:
         return
+
+
+def _retry_counter_path(memory_root: Path, cache_key: str) -> Path | None:
+    if not LLMPromoter.is_valid_cache_key(cache_key):
+        return None
+    cache_root = (memory_root / "runtime" / "cache" / "atomize").resolve()
+    candidate = (cache_root / f"{cache_key}.retries").resolve()
+    if candidate.parent != cache_root:
+        return None
+    return candidate
+
+
+def _clear_retry_counter(memory_root: Path, cache_key: str | None) -> None:
+    if not cache_key:
+        return
+    counter = _retry_counter_path(memory_root, cache_key)
+    if counter is None:
+        return
+    try:
+        counter.unlink()
+    except FileNotFoundError:
+        return
+
+
+def _record_promote_failure(memory_root: Path, promoter: Promoter, fragments: list[Fragment]) -> str:
+    if not isinstance(promoter, LLMPromoter) or not fragments:
+        return ""
+    cache_key = promoter.cache_key_for_fragments(fragments)
+    counter = _retry_counter_path(memory_root, cache_key)
+    if counter is None:
+        return ""
+    try:
+        attempts = int(counter.read_text(encoding="utf-8").strip() or "0")
+    except (FileNotFoundError, OSError, ValueError):
+        attempts = 0
+    attempts += 1
+    counter.parent.mkdir(parents=True, exist_ok=True)
+    counter.write_text(str(attempts), encoding="utf-8")
+    if attempts <= _LLM_PROMOTE_MAX_RETRIES:
+        promoter.clear_cache_for_fragments(fragments)
+        return f" (cache cleared; retry {attempts}/{_LLM_PROMOTE_MAX_RETRIES})"
+    return f" (retry budget exhausted after {attempts} failures; poisoned cache retained)"
 
 
 def _promoter_metadata(promoter: Promoter) -> dict[str, str]:
@@ -379,6 +422,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
         if state == "promoted":
             cache_key = event.get("cache_key")
             _clear_cache_key(memory_root, cache_key if isinstance(cache_key, str) else None)
+            _clear_retry_counter(memory_root, cache_key if isinstance(cache_key, str) else None)
             if frag_dir_glob:
                 _archive_fragments(memory_root, frag_dir_glob, now)
             continue
@@ -405,9 +449,12 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
         try:
             promoted = _promote_fragments(promoter, [fragment for _, fragment in fragments], config)
         except PromoteError as exc:
-            if isinstance(promoter, LLMPromoter):
-                promoter.clear_cache_for_fragments([fragment for _, fragment in fragments])
-            warnings.append(f"{session_key}: {exc}; session {session_key} left in split")
+            note = _record_promote_failure(
+                memory_root,
+                promoter,
+                [fragment for _, fragment in fragments],
+            )
+            warnings.append(f"{session_key}: {exc}; session {session_key} left in split{note}")
             continue
 
         # Phase 2: Validate all slices before any writes
@@ -498,6 +545,7 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
         )
         _archive_fragments(memory_root, [frag_path for frag_path, _ in fragments], now)
         _clear_cache_key(memory_root, cache_key)
+        _clear_retry_counter(memory_root, cache_key)
     return slices_written, noise_dropped
 
 

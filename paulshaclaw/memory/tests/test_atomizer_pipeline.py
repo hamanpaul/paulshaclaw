@@ -1044,6 +1044,16 @@ class PromoteFailureCacheRecoveryTests(unittest.TestCase):
         )
         return inner, promoter
 
+    def _split_and_cache_key(self, root: Path, cfg, h) -> str:
+        split_warnings: list[str] = []
+        pipeline._split_pass(root, cfg, h, "2026-07-02T02:00:00Z", False, split_warnings)
+        fragments = [
+            pipeline._read_fragment(path)
+            for path in sorted((root / "inbox" / "_slices").rglob("*.md"))
+        ]
+        fragments = [fragment for fragment in fragments if fragment is not None]
+        return llm_promoter.LLMPromoter.cache_key_for_fragments(fragments)
+
     def test_promote_error_clears_poisoned_cache(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1118,6 +1128,93 @@ class PromoteFailureCacheRecoveryTests(unittest.TestCase):
             self.assertEqual(processing.state_of(root, "claude:s1"), "split")
             self.assertTrue(sentinel.exists())
             self.assertEqual(sorted(path.name for path in cache_dir.iterdir()), ["keep.json"])
+
+    def test_retry_counter_increments_and_cache_cleared_within_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(root, ["chatter, not json"])
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T03:00:00Z",
+                promoter=promoter,
+            )
+
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            retries = list(cache_dir.glob("*.retries"))
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(len(retries), 1)
+            self.assertEqual(retries[0].read_text(encoding="utf-8").strip(), "1")
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+
+    def test_exhausted_budget_retains_poisoned_cache_and_stops_llm_calls(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            cache_key = self._split_and_cache_key(root, cfg, h)
+            (cache_dir / f"{cache_key}.retries").write_text("5", encoding="utf-8")
+            inner, promoter = self._cached_llm_promoter(root, ["chatter, not json"])
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T04:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(
+                (cache_dir / f"{cache_key}.retries").read_text(encoding="utf-8").strip(),
+                "6",
+            )
+            self.assertEqual(len(list(cache_dir.glob("*.json"))), 1)
+            self.assertTrue(any("retry budget exhausted" in warning for warning in result["warnings"]))
+
+            result2 = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T05:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertTrue(any("left in split" in warning for warning in result2["warnings"]))
+
+    def test_successful_promotion_removes_retry_sidecar(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            cache_key = self._split_and_cache_key(root, cfg, h)
+            sidecar = cache_dir / f"{cache_key}.retries"
+            sidecar.write_text("3", encoding="utf-8")
+            inner, promoter = self._cached_llm_promoter(root, [_VALID_ONE_SLICE])
+
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T04:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 1)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            self.assertEqual(result["summary"]["slices"], 1)
+            self.assertFalse(sidecar.exists())
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
 
 
 if __name__ == "__main__":
