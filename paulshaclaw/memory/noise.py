@@ -217,7 +217,7 @@ def pool_exclude_reason(frontmatter: Mapping[str, object]) -> str | None:
         return "generic-title"
     return None
 
-
+# --- generic-title pool exclusion: normalized exact/prefix match only (#178) ---
 _GENERIC_EXACT_TITLES = frozenset(
     {"overview", "problem", "untitled", "review-summary", "report", "task", "todo"}
 )
@@ -225,6 +225,13 @@ _GENERIC_TITLE_PREFIX = re.compile(r"^(?:report|task|todo)-")
 
 
 def is_generic_title(title: object) -> bool:
+    """True when title normalizes to an exact generic label or allowed prefix.
+
+    Normalization lower-cases, trims, and collapses whitespace/underscores to ``-``.
+    Match rules are limited to exact titles in ``_GENERIC_EXACT_TITLES`` or the
+    ``report-`` / ``task-`` / ``todo-`` prefix regex. Contains-style matches do
+    not count, and falsy/empty inputs return ``False``.
+    """
     if not title:
         return False
     normalized = re.sub(r"[\s_]+", "-", str(title).strip().lower())
