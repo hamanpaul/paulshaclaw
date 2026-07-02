@@ -147,9 +147,9 @@ class ExplodingPromoter(Promoter):
 
 
 class ScriptedAgentClient(agent_exec.AgentClient):
-    """Return scripted outputs in order and track the underlying run count."""
+    """Return scripted outputs or raise scripted exceptions in order."""
 
-    def __init__(self, outputs: list[str]) -> None:
+    def __init__(self, outputs: list[str | Exception]) -> None:
         self._outputs = list(outputs)
         self.calls = 0
 
@@ -157,6 +157,8 @@ class ScriptedAgentClient(agent_exec.AgentClient):
         del prompt
         output = self._outputs[min(self.calls, len(self._outputs) - 1)]
         self.calls += 1
+        if isinstance(output, Exception):
+            raise output
         return output
 
 
@@ -1029,7 +1031,7 @@ class PromoteFailureCacheRecoveryTests(unittest.TestCase):
     """#174: failed LLM promotion must not leave a replayable poisoned cache behind."""
 
     def _cached_llm_promoter(
-        self, root: Path, outputs: list[str]
+        self, root: Path, outputs: list[str | Exception]
     ) -> tuple[ScriptedAgentClient, llm_promoter.LLMPromoter]:
         inner = ScriptedAgentClient(outputs)
         cached = agent_exec.CachingAgentClient(
@@ -1129,6 +1131,84 @@ class PromoteFailureCacheRecoveryTests(unittest.TestCase):
             self.assertTrue(sentinel.exists())
             self.assertEqual(sorted(path.name for path in cache_dir.iterdir()), ["keep.json"])
 
+    def test_transport_failures_do_not_consume_retry_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(
+                root,
+                [agent_exec.AgentExecError("agent timed out after 600s")] * 6,
+            )
+
+            result = None
+            for hour in range(6):
+                result = pipeline.run(
+                    root,
+                    config=cfg,
+                    config_hash=h,
+                    now=f"2026-07-02T0{hour}:00:00Z",
+                    promoter=promoter,
+                )
+
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            self.assertIsNotNone(result)
+            self.assertEqual(inner.calls, 6)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(list(cache_dir.glob("*.retries")), [])
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertTrue(any("transport failure" in warning for warning in result["warnings"]))
+            self.assertFalse(any("poisoned cache retained" in warning for warning in result["warnings"]))
+
+    def test_transport_recovery_chatter_starts_content_retry_budget_at_one(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            inner, promoter = self._cached_llm_promoter(
+                root,
+                [agent_exec.AgentExecError("agent timed out after 600s")] * 6
+                + ["chatter, not json", _VALID_ONE_SLICE],
+            )
+
+            for hour in range(6):
+                pipeline.run(
+                    root,
+                    config=cfg,
+                    config_hash=h,
+                    now=f"2026-07-02T0{hour}:00:00Z",
+                    promoter=promoter,
+                )
+
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            result = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T06:00:00Z",
+                promoter=promoter,
+            )
+
+            retries = list(cache_dir.glob("*.retries"))
+            self.assertEqual(inner.calls, 7)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
+            self.assertEqual(len(retries), 1)
+            self.assertEqual(retries[0].read_text(encoding="utf-8").strip(), "1")
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertTrue(any("retry 1/5" in warning for warning in result["warnings"]))
+
+            result2 = pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T07:00:00Z",
+                promoter=promoter,
+            )
+
+            self.assertEqual(inner.calls, 8)
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            self.assertEqual(result2["summary"]["slices"], 1)
+
     def test_retry_counter_increments_and_cache_cleared_within_budget(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -1215,6 +1295,34 @@ class PromoteFailureCacheRecoveryTests(unittest.TestCase):
             self.assertEqual(result["summary"]["slices"], 1)
             self.assertFalse(sidecar.exists())
             self.assertEqual(list(cache_dir.glob("*.json")), [])
+
+    def test_dry_run_existing_split_session_leaves_retry_budget_and_cache_untouched(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cache_dir.mkdir(parents=True)
+            cache_key = self._split_and_cache_key(root, cfg, h)
+            cache_path = cache_dir / f"{cache_key}.json"
+            sidecar = cache_dir / f"{cache_key}.retries"
+            cache_path.write_text("chatter, not json", encoding="utf-8")
+            sidecar.write_text("1", encoding="utf-8")
+            inner, promoter = self._cached_llm_promoter(root, [_VALID_ONE_SLICE])
+
+            pipeline.run(
+                root,
+                config=cfg,
+                config_hash=h,
+                now="2026-07-02T05:00:00Z",
+                promoter=promoter,
+                dry_run=True,
+            )
+
+            self.assertEqual(inner.calls, 0)
+            self.assertTrue(cache_path.exists())
+            self.assertEqual(sidecar.read_text(encoding="utf-8").strip(), "1")
+            self.assertEqual(processing.state_of(root, "claude:s1"), "split")
 
 
 if __name__ == "__main__":

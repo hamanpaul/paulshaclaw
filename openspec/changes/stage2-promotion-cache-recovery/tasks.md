@@ -26,11 +26,19 @@
 - [x] 5.2 CI-equivalent check: `python -m pytest tests/ paulshaclaw/memory/tests/ -q`. Known pre-existing local noise (unrelated, do NOT touch): 2 failures in `tests/test_stage11_operator_cockpit.py` from local textual version drift; `paulshaclaw/memory/tests/` must be fully green and CI is authoritative.
 - [x] 5.3 Record verification summary below; deliver per plan Delivery section (branch `feature/174-stage2-promotion-cache-recovery`, PR body `Closes #174`, no merge).
 
+## 6. PR #179 review-fix follow-up
+
+- [x] 6.1 Add failing tests in `paulshaclaw/memory/tests/test_atomizer_pipeline.py` proving transport failures do not consume `.retries`, the first post-outage content failure starts at retry `1`, and `dry_run=True` never mutates an existing split backlog.
+- [x] 6.2 Implement in `pipeline.py`: only count cached content failures toward `.retries`, emit truthful transport/no-cache warning text, and keep dry-run out of the live split-backlog loop.
+- [x] 6.3 Update OpenSpec spec/design/tasks (plus plan addendum) so retry budget semantics explicitly cover content attempts vs transport failures and dry-run remains mutation-free even when `dry_run_fragments` is empty.
+
 ## Verification Summary
 
 - `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_atomizer_pipeline.py -q -k "PromoteFailureCacheRecovery"` → RED：`2 failed, 1 passed`；GREEN（在 `pipeline.py` 清 cache 後）改跑全檔 `.../test_atomizer_pipeline.py -q` → `36 passed`。
 - `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_llm_output.py paulshaclaw/memory/tests/test_llm_promoter.py -q ; PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_atomizer_pipeline.py -q -k "empty_output_reaches_promoted"` → RED：前段 `3 failed, 44 passed, 18 subtests passed`、後段 `1 failed`；GREEN：`.../test_llm_output.py .../test_llm_promoter.py .../test_atomizer_pipeline.py -q` → `83 passed, 18 subtests passed`。
 - `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_dream_orchestrator.py -q` → RED：`3 failed, 7 passed`；GREEN：`.../test_dream_orchestrator.py .../test_dream_cli.py .../test_dream_cli_moc_warnings.py .../test_dream_e2e.py -q` → `16 passed`。
 - `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_atomizer_pipeline.py -q -k "PromoteFailureCacheRecovery"` → RED：`3 failed, 3 passed, 33 deselected`；GREEN（加入 `.retries` sidecar/預算 5 後）`.../test_atomizer_pipeline.py -q` → `39 passed`。
+- `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/test_atomizer_pipeline.py -q -k "transport_failures_do_not_consume_retry_budget or transport_recovery_chatter_starts_content_retry_budget_at_one or dry_run_existing_split_session_leaves_retry_budget_and_cache_untouched or retry_counter_increments_and_cache_cleared_within_budget or exhausted_budget_retains_poisoned_cache_and_stops_llm_calls or successful_promotion_removes_retry_sidecar"` → RED：`3 failed, 3 passed, 36 deselected`；GREEN：`6 passed, 36 deselected`。
 - `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q` → `781 passed, 1 skipped, 87 subtests passed in 26.70s`。
 - `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. python -m pytest tests/ paulshaclaw/memory/tests/ -q` → `1463 passed, 15 skipped, 112 subtests passed`，另有 plan 已知本機雜訊 `tests/test_stage11_operator_cockpit.py::{test_on_mount_schedules_pane_and_sysmon_ticks,test_refresh_skips_work_list_rebuild_when_content_unchanged}` 2 失敗；`paulshaclaw/memory/tests/` 全綠，未超出既有噪音範圍。
+- `cd /home/paul_chen/prj_pri/psc-wt-174 && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q`（PR #179 review-fix 後重跑）→ `784 passed, 1 skipped, 87 subtests passed in 31.58s`。

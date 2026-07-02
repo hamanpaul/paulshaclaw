@@ -81,14 +81,21 @@ def _archive_fragments(memory_root: Path, fragment_paths: list[Path], now: str) 
         _move(frag_path, dst)
 
 
-def _clear_cache_key(memory_root: Path, cache_key: str | None) -> None:
-    if not cache_key:
-        return
+def _cache_path(memory_root: Path, cache_key: str) -> Path | None:
     if not LLMPromoter.is_valid_cache_key(cache_key):
-        return
+        return None
     cache_root = (memory_root / "runtime" / "cache" / "atomize").resolve()
     candidate = (cache_root / f"{cache_key}.json").resolve()
     if candidate.parent != cache_root:
+        return None
+    return candidate
+
+
+def _clear_cache_key(memory_root: Path, cache_key: str | None) -> None:
+    if not cache_key:
+        return
+    candidate = _cache_path(memory_root, cache_key)
+    if candidate is None:
         return
     try:
         candidate.unlink()
@@ -122,6 +129,11 @@ def _record_promote_failure(memory_root: Path, promoter: Promoter, fragments: li
     if not isinstance(promoter, LLMPromoter) or not fragments:
         return ""
     cache_key = promoter.cache_key_for_fragments(fragments)
+    cache_path = _cache_path(memory_root, cache_key)
+    if cache_path is None:
+        return ""
+    if not cache_path.exists():
+        return " (transport failure; no cache written; retry budget unchanged)"
     counter = _retry_counter_path(memory_root, cache_key)
     if counter is None:
         return ""
@@ -383,8 +395,9 @@ def _promote_pass(memory_root: Path, config: AtomizerConfig, config_hash: str, n
     slices_written = 0
     noise_dropped = 0
 
-    # In dry_run mode, process the fragments from split pass
-    if dry_run and dry_run_fragments:
+    # In dry_run mode, only preview freshly split raw sessions. Existing split backlog
+    # must stay mutation-free: no LLM call, no cache changes, no retry-sidecar writes.
+    if dry_run:
         for session_key, fragments in dry_run_fragments.items():
             try:
                 promoted = _promote_fragments(promoter, fragments, config)

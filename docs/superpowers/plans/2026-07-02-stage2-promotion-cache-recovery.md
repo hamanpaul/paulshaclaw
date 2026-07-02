@@ -10,6 +10,11 @@
 
 **Spec:** OpenSpec change `openspec/changes/stage2-promotion-cache-recovery/`（proposal / design / specs/stage2-memory-governance / tasks）｜issue #174
 
+## PR #179 review-fix addendum
+
+- `.retries` 僅計 **content attempts**：只有失敗時快取 `.json` 已存在（代表 LLM 實際輸出已落盤）才累加；`AgentExecError` 類 transport 失敗不計數，warning 需明講 `transport failure / no cache written / retry budget unchanged`。
+- `dry_run=True` 時 `_promote_pass` 直接停在 preview 路徑，不得 fall-through 進 live split backlog 迴圈；既有 split session 的快取、`.retries` 與底層 agent 呼叫數都必須維持不變。
+
 ---
 
 ## Boundary（可改檔案白名單）

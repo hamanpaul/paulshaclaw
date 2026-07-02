@@ -11,7 +11,7 @@ All findings below follow the audit's **VERIFY corrections** where they overrode
 - A promotion failure must not permanently freeze a session: the poisoned cache is cleared so the next run re-invokes the LLM.
 - gemma4's legitimate `[]` answer becomes a terminal state: `state=promoted`, `slices=0`, fragments archived, cache cleared.
 - Promotion failures become observable: warning text reaches the dream ledger record.
-- LLM re-invocation per stuck session is bounded (no unbounded hourly LLM spend on chatter-prone sessions).
+- LLM re-invocation after a cached bad output is bounded (no unbounded hourly LLM spend on chatter-prone sessions that already produced replayable output).
 
 **Non-Goals:**
 
@@ -25,7 +25,7 @@ All findings below follow the audit's **VERIFY corrections** where they overrode
 
 ### Clear the poisoned cache in the pipeline's PromoteError path (LLM promoter only)
 
-`pipeline.py` already owns success-path cache clearing (`:381`, `:498`), so failure-path clearing lives there too, symmetric and testable: in the `except PromoteError` handler of `_promote_pass` (non-dry-run branch), when `isinstance(promoter, LLMPromoter)`, call `promoter.clear_cache_for_fragments([...])` — that method already guards non-`CachingAgentClient` agents and empty fragment lists (`llm_promoter.py:66-69`, currently zero callers). Identity promoter failures are untouched. The dry-run branch stays mutation-free by design.
+`pipeline.py` already owns success-path cache clearing (`:381`, `:498`), so failure-path clearing lives there too, symmetric and testable — but only for failures that actually materialized cached raw output. In the `except PromoteError` handler of `_promote_pass` (non-dry-run branch), compute the session cache key and inspect the corresponding `.json`: if it exists, this was a content attempt and the cached bad output should be cleared/re-budgeted; if it does not exist, the failure came from the transport path (`AgentExecError`) and both cache / retry state stay untouched. Identity promoter failures are untouched. The dry-run branch now returns before the live event loop, so both newly split previews and existing split backlog stay mutation-free by design.
 
 ### Empty proposal array is a valid terminal result — early `return []` in `_parse_proposals`
 
@@ -39,13 +39,14 @@ Known behavior change accepted: raw output containing BOTH an empty array and a 
 
 ### Bounded retry via a `.retries` sidecar counter; exhausted budget parks on the poisoned cache
 
-State must survive across dream runs; the smallest persistent store aligned with the failure unit is a sidecar file `runtime/cache/atomize/<cache_key>.retries` holding an integer. On `PromoteError` (LLM promoter, non-dry-run): increment the counter, then clear the cache only while `attempts <= 5` (`_LLM_PROMOTE_MAX_RETRIES = 5`, module constant — config plumbing rejected to keep the boundary small). Once `attempts > 5`, the poisoned cache is deliberately retained: subsequent runs replay it and fail at parse time without any LLM call — the cache becomes a cheap parking state, still warned about every run (and now visible in the dream record). Counter paths are validated with the same `is_valid_cache_key` + parent-directory containment used by `_clear_cache_key` (hostile ledger/key hardening precedent). On success, `_clear_cache_key` also removes the sidecar so a later identical session starts with a fresh budget. Total LLM calls per stuck session: at most 6 (initial + 5 retries).
+State must survive across dream runs; the smallest persistent store aligned with the failure unit is a sidecar file `runtime/cache/atomize/<cache_key>.retries` holding an integer. On `PromoteError` (LLM promoter, non-dry-run), first resolve the cache path. If the `.json` exists, the failure counts as a content attempt: increment the counter, then clear the cache only while `attempts <= 5` (`_LLM_PROMOTE_MAX_RETRIES = 5`, module constant — config plumbing rejected to keep the boundary small). Once `attempts > 5`, the poisoned cache is deliberately retained: subsequent runs replay it and fail at parse time without any LLM call — the cache becomes a cheap parking state, still warned about every run (and now visible in the dream record). If the `.json` does not exist, the failure came from the transport path; the warning stays truthful (`transport failure; no cache written; retry budget unchanged`) and the sidecar is left untouched. Counter paths are validated with the same `is_valid_cache_key` + parent-directory containment used by `_clear_cache_key` (hostile ledger/key hardening precedent). On success, `_clear_cache_key` also removes the sidecar so a later identical session starts with a fresh budget. Total LLM calls per content-stuck session: at most 6 (initial + 5 retries after the first cached bad output); pure transport outages keep the pre-PR natural retry behavior because there is no cheap parking state without cached output.
 
 Sequencing note: a poisoned cache left by the pre-fix code counts its first post-deploy replay as attempt 1 and is then cleared — the backlog therefore self-heals without ops action; the ops deletion in the plan merely skips that one replay cycle.
 
 ## Risks / Trade-offs
 
 - **Chatter sessions may burn their whole retry budget** (LLM never produces valid JSON). Accepted: bounded at 6 calls, then cheap parking; prompt hardening is a follow-up. Manual reset = delete the `.json` + `.retries` pair.
+- **Transport outages are still retried every dream run.** Accepted: without cached output there is nothing to park on, so we preserve the pre-PR natural retry semantics instead of fabricating budget usage.
 - **`warnings` enlarge dream.jsonl records.** Bounded: ≤10 entries × ≤500 chars per pass.
 - **Retained poisoned cache after budget exhaustion looks like the old bug.** Distinguished by the `.retries` sidecar and by the warning text in the dream record; documented in the plan.
 - **Pipeline-level Phase-2 validation failures (`pipeline.py:412-419`) do not clear the cache.** For `LLMPromoter` these are practically unreachable (promote() already validates every slice and raises `PromoteError`, which is covered); left out to keep the diff minimal.
