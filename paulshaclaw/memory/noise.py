@@ -213,4 +213,21 @@ def pool_exclude_reason(frontmatter: Mapping[str, object]) -> str | None:
                     ("atom_title", "title", "session_title")).lower()
     if kind == "task" and ("canary" in blob or "smoke" in blob):
         return "canary-fixture"
+    if any(is_generic_title(frontmatter.get(k)) for k in ("atom_title", "title")):
+        return "generic-title"
     return None
+
+
+_GENERIC_EXACT_TITLES = frozenset(
+    {"overview", "problem", "untitled", "review-summary", "report", "task", "todo"}
+)
+_GENERIC_TITLE_PREFIX = re.compile(r"^(?:report|task|todo)-")
+
+
+def is_generic_title(title: object) -> bool:
+    if not title:
+        return False
+    normalized = re.sub(r"[\s_]+", "-", str(title).strip().lower())
+    if not normalized:
+        return False
+    return normalized in _GENERIC_EXACT_TITLES or _GENERIC_TITLE_PREFIX.match(normalized) is not None
