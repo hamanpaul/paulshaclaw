@@ -202,6 +202,68 @@ class RekeyProjectTests(unittest.TestCase):
             self.assertTrue(source.exists())
             self.assertEqual(source.read_text(encoding="utf-8"), original_text)
 
+    def test_same_target_path_planned_twice_marks_later_row_conflict(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            first = root / "knowledge" / OLD_DIR / "foo.md"
+            first.parent.mkdir(parents=True, exist_ok=True)
+            first.write_text(
+                "---\nslice_id: sl-a1\nmemory_layer: knowledge\n"
+                f"project: {OLD_KEY}\nartifact_kind: report\ntitle: foo\n---\n第一筆\n",
+                encoding="utf-8",
+            )
+            second = root / "knowledge" / OLD_DIR / "sub" / "foo.md"
+            second.parent.mkdir(parents=True, exist_ok=True)
+            second.write_text(
+                "---\nslice_id: sl-b1\nmemory_layer: knowledge\n"
+                f"project: {OLD_KEY}\nartifact_kind: report\ntitle: foo\n---\n第二筆\n",
+                encoding="utf-8",
+            )
+            original_second = second.read_text(encoding="utf-8")
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertEqual(summary["rekeyed"], 1)
+            self.assertEqual(summary["conflicts"], 1)
+            self.assertFalse(first.exists())
+            self.assertTrue((root / "knowledge" / "testpilot" / "foo--sl-a1.md").exists())
+            self.assertTrue(second.exists())
+            self.assertEqual(second.read_text(encoding="utf-8"), original_second)
+
+    def test_apply_cleanup_failure_is_reported_in_summary(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+            source_dir = root / "knowledge" / OLD_DIR
+            real_rmdir = Path.rmdir
+
+            def failing_rmdir(self_path: Path):
+                if self_path == source_dir:
+                    raise OSError("directory busy")
+                return real_rmdir(self_path)
+
+            with mock.patch.object(Path, "rmdir", failing_rmdir):
+                summary = rekey.rekey_project(
+                    root,
+                    old_key=OLD_KEY,
+                    new_slug="testpilot",
+                    now="2026-07-02T00:00:00Z",
+                    apply=True,
+                )
+
+            self.assertEqual(summary["rekeyed"], 1)
+            self.assertEqual(summary["errors"], 1)
+            self.assertTrue(
+                any("directory busy" in warning for warning in summary["warnings"])
+            )
+            self.assertTrue((root / "knowledge" / "testpilot" / "uart-fix--sl-a1.md").exists())
+
     def test_other_projects_untouched(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

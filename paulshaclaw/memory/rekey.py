@@ -18,8 +18,6 @@ from tempfile import TemporaryDirectory
 
 from .atomizer.config import is_safe_path_component, sanitize_project_component
 from .moc import frontmatter_io as _fio
-from .moc import naming as _moc_naming
-from .moc import runner as _moc_runner
 from .moc.runner import run_moc
 
 
@@ -54,98 +52,10 @@ def _slice_ids_in_dir(root: Path) -> set[str]:
     return slice_ids
 
 
-def _reconcile_preserving_paths(memory_root: Path, protected_paths: set[Path]) -> list[str]:
-    knowledge = memory_root / "knowledge"
-    warnings: list[str] = []
-    if not knowledge.exists():
-        return warnings
-
-    protected_existing = tuple(path for path in protected_paths if path.exists())
-    protected_resolved = {path.resolve() for path in protected_existing}
-    protected_slice_ids: set[str] = set()
-    for path in protected_existing:
-        frontmatter, _body = _fio.read(path.read_text(encoding="utf-8"))
-        if frontmatter.get("memory_layer") != "knowledge":
-            continue
-        slice_id = str(frontmatter.get("slice_id", ""))
-        if slice_id:
-            protected_slice_ids.add(slice_id)
-
-    seen: dict[str, Path] = {}
-    for path in sorted(knowledge.rglob("*.md")):
-        frontmatter, body = _fio.read(path.read_text(encoding="utf-8"))
-        if frontmatter.get("memory_layer") != "knowledge":
-            continue
-        slice_id = frontmatter.get("slice_id")
-        if not slice_id:
-            warnings.append(f"{path}: missing slice_id; skipped")
-            continue
-        if path.resolve() in protected_resolved:
-            seen.setdefault(str(slice_id), path)
-            continue
-        target = path.with_name(_moc_naming.target_name(frontmatter, body))
-        if path != target:
-            if target.exists():
-                if target.resolve() in protected_resolved:
-                    seen.setdefault(str(slice_id), path)
-                    continue
-                if path.stat().st_mtime <= target.stat().st_mtime:
-                    path.unlink()
-                    continue
-                target.unlink()
-            path.rename(target)
-            path = target
-        slice_id_str = str(slice_id)
-        if slice_id_str in protected_slice_ids:
-            seen.setdefault(slice_id_str, path)
-            continue
-        if slice_id_str in seen:
-            other = seen[slice_id_str]
-            if path.resolve() != other.resolve():
-                older = other if other.stat().st_mtime <= path.stat().st_mtime else path
-                newer = path if older is other else other
-                older.unlink()
-                seen[slice_id_str] = newer
-                warnings.append(f"duplicate slice_id {slice_id}; kept {newer.name}")
-        else:
-            seen[slice_id_str] = path
-    return warnings
-
-
 def _run_moc_preserving_conflicts(memory_root: Path, now: str, protected_paths: set[Path]) -> dict:
-    if not protected_paths:
-        return run_moc(memory_root, now)
-    original_reconcile = _moc_runner.naming.reconcile
-    original_build_index = _moc_runner.search.build_index
-    _moc_runner.naming.reconcile = lambda root: _reconcile_preserving_paths(root, protected_paths)
-    _moc_runner.search.build_index = (
-        lambda root, link_weights, *, doc_corpus=None: _build_index_excluding_paths(
-            root,
-            link_weights,
-            doc_corpus=doc_corpus,
-            protected_paths=protected_paths,
-            build_index=original_build_index,
-        )
-    )
-    try:
-        return run_moc(memory_root, now)
-    finally:
-        _moc_runner.naming.reconcile = original_reconcile
-        _moc_runner.search.build_index = original_build_index
-
-
-def _build_index_excluding_paths(
-    memory_root: Path,
-    link_weights: dict[str, int],
-    *,
-    doc_corpus: object | None,
-    protected_paths: set[Path],
-    build_index,
-) -> None:
     existing = tuple(path for path in sorted(protected_paths) if path.exists())
     if not existing:
-        build_index(memory_root, link_weights, doc_corpus=doc_corpus)
-        return
+        return run_moc(memory_root, now)
     runtime = memory_root / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(dir=runtime, prefix="rekey-conflicts-") as tmpdir:
@@ -156,7 +66,7 @@ def _build_index_excluding_paths(
             path.rename(parked)
             moved.append((path, parked))
         try:
-            build_index(memory_root, link_weights, doc_corpus=doc_corpus)
+            return run_moc(memory_root, now)
         finally:
             for original, parked in reversed(moved):
                 if parked.exists():
@@ -184,6 +94,7 @@ def rekey_project(
     target_slice_ids = _slice_ids_in_dir(target_dir)
     rows: list[dict] = []
     planned: list[tuple[Path, Path, dict]] = []
+    planned_targets: set[Path] = set()
 
     for path in sorted(knowledge.rglob("*.md")) if knowledge.exists() else []:
         if path.name.endswith("-moc.md"):
@@ -209,12 +120,13 @@ def rekey_project(
             rows.append({**base, "status": "dry-run"})
             continue
         slice_id = base["slice_id"]
-        if target != path and (target.exists() or slice_id in target_slice_ids):
+        if target != path and (target.exists() or target in planned_targets or slice_id in target_slice_ids):
             rows.append({**base, "status": "conflict"})
             continue
         row = {**base, "status": "planned"}
         rows.append(row)
         planned.append((path, target, row))
+        planned_targets.add(target)
         if slice_id:
             target_slice_ids.add(slice_id)
 
@@ -249,19 +161,25 @@ def rekey_project(
     removed_orphan_moc = False
     indexed = None
     warnings: list[str] = []
+    post_apply_errors = 0
     if apply and counts.get("rekeyed", 0):
-        source_dir = knowledge / sanitize_project_component(old_key)
-        if source_dir.is_dir() and not any(source_dir.iterdir()):
-            source_dir.rmdir()
-            removed_source_dir = True
-        orphan_moc = knowledge / f"{sanitize_project_component(old_key)}-moc.md"
-        if orphan_moc.exists():
-            orphan_moc.unlink()
-            removed_orphan_moc = True
-        conflict_paths = {Path(row["path"]) for row in rows if row["status"] == "conflict"}
-        moc_result = _run_moc_preserving_conflicts(memory_root, now, conflict_paths)
-        indexed = moc_result.get("indexed")
-        warnings = list(moc_result.get("warnings", []))
+        try:
+            source_dir = knowledge / sanitize_project_component(old_key)
+            if source_dir.is_dir() and not any(source_dir.iterdir()):
+                source_dir.rmdir()
+                removed_source_dir = True
+            orphan_moc = knowledge / f"{sanitize_project_component(old_key)}-moc.md"
+            if orphan_moc.exists():
+                orphan_moc.unlink()
+                removed_orphan_moc = True
+            conflict_paths = {Path(row["path"]) for row in rows if row["status"] == "conflict"}
+            moc_result = _run_moc_preserving_conflicts(memory_root, now, conflict_paths)
+            indexed = moc_result.get("indexed")
+            warnings = list(moc_result.get("warnings", []))
+        except (OSError, UnicodeDecodeError) as exc:
+            indexed = False
+            post_apply_errors = 1
+            warnings.append(f"post-apply cleanup failed: {exc}")
 
     return {
         "candidates": len(rows),
@@ -269,7 +187,7 @@ def rekey_project(
         "rekeyed": counts.get("rekeyed", 0),
         "planned": counts.get("dry-run", 0),
         "conflicts": counts.get("conflict", 0),
-        "errors": counts.get("error", 0),
+        "errors": counts.get("error", 0) + post_apply_errors,
         "removed_source_dir": removed_source_dir,
         "removed_orphan_moc": removed_orphan_moc,
         "indexed": indexed,
