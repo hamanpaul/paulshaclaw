@@ -192,8 +192,19 @@ start_dream_loop() {
       # load average is still near zero, so the idle gate would always pass and
       # stack a full dream pass on top of the startup burst.
       sleep "$interval"
+      # #176: doc-fragment 產生端過濾。roots = instruction_corpus.default_roots()，
+      # 與 moc/runner 的 index 端 broad corpus 同源——index 排除什麼、產生端就擋什麼。
       PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
         --memory-root "$dream_root" --require-idle --promoter llm \
+        --instruction-root "$HOME/.claude/CLAUDE.md" \
+        --instruction-root "$HOME/CLAUDE.md" \
+        --instruction-root "$HOME/AGENTS.md" \
+        --instruction-root "$HOME/GEMINI.md" \
+        --instruction-root "$HOME/.codex" \
+        --instruction-root "$HOME/.agents" \
+        --instruction-root "$HOME/.gemini" \
+        --instruction-root "$HOME/prj_pri" \
+        --instruction-root "$HOME/prj_arc" \
         >>"$dream_log" 2>&1 || true
     done
   ) 200>&- &
