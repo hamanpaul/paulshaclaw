@@ -20,8 +20,8 @@
 
 ## 5. janitor scanner 接線
 
-- [ ] 5.1 擴充 failing tests `paulshaclaw/memory/tests/test_janitor_scanner.py`（`ScannerLintTests`）：`summary["lint"]` counts、`lint:` warnings、乾淨樹零 counts、lint 不動檔案不寫 lifecycle。
-- [ ] 5.2 `janitor/scanner.py`：`run_scan` 呼叫 `rules.plan_lint`，counts 進 `summary["lint"]`、findings 逐筆 append warnings。
+- [x] 5.1 擴充 failing tests `paulshaclaw/memory/tests/test_janitor_scanner.py`（`ScannerLintTests`）：`summary["lint"]` counts、`lint:` warnings、乾淨樹零 counts、lint 不動檔案不寫 lifecycle。
+- [x] 5.2 `janitor/scanner.py`：`run_scan` 呼叫 `rules.plan_lint`，counts 進 `summary["lint"]`、findings 逐筆 append warnings。
 
 ## 6. 回歸驗證與收尾
 

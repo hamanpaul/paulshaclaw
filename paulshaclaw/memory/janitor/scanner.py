@@ -170,6 +170,9 @@ def run_scan(
         events = rules.plan_scan(records, import_index, lc_state, config, now, config_hash)
     else:
         events = rules.plan_scan(records, import_index, lc_state, config, now, config_hash, source_path_exists)
+    lint_findings = rules.plan_lint(records)
+    for finding in lint_findings:
+        warnings.append(f"lint:{finding['rule']}: {finding['path']} (project={finding['project']})")
     
     # Count event types
     decayed_count = sum(1 for e in events if e["event_type"] == "decayed")
@@ -185,6 +188,10 @@ def run_scan(
         "skipped": record_skipped,
         "config_hash": config_hash,
         "dry_run": dry_run,
+        "lint": {
+            "untitled": sum(1 for finding in lint_findings if finding["rule"] == rules.LINT_TITLE_UNTITLED),
+            "raw_remote_key": sum(1 for finding in lint_findings if finding["rule"] == rules.LINT_RAW_REMOTE_KEY),
+        },
     }
     
     result: dict[str, Any] = {
