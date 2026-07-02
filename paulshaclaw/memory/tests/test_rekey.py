@@ -161,5 +161,62 @@ class RekeyProjectTests(unittest.TestCase):
                 )
 
 
+class RekeyCliTests(unittest.TestCase):
+    def test_cli_apply_moves_file(self):
+        from paulshaclaw.memory.cli import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "rekey",
+                    "--memory-root",
+                    str(root),
+                    "--from",
+                    OLD_KEY,
+                    "--to",
+                    "testpilot",
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--apply",
+                ]
+            )
+
+            self.assertEqual(rc, 0)
+            self.assertTrue((root / "knowledge" / "testpilot" / "uart-fix--sl-a1.md").exists())
+
+    def test_cli_rejects_slash_in_to(self):
+        from paulshaclaw.memory.cli import main
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "rekey",
+                    "--memory-root",
+                    str(root),
+                    "--from",
+                    OLD_KEY,
+                    "--to",
+                    "a/b",
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--dry-run",
+                ]
+            )
+
+            self.assertEqual(rc, 2)
+            ledger = root / "runtime" / "ledger"
+            manifests = list(ledger.glob("rekey-*.jsonl")) if ledger.exists() else []
+            self.assertEqual(manifests, [])
+
+
 if __name__ == "__main__":
     unittest.main()

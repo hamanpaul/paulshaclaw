@@ -172,6 +172,18 @@ def _build_parser() -> argparse.ArgumentParser:
     rgroup.add_argument("--apply", action="store_true")
     retitle.set_defaults(func=_retitle_untitled)
 
+    rekey_p = knowledge_subparsers.add_parser("rekey")
+    rekey_p.add_argument("--memory-root", required=True)
+    rekey_p.add_argument("--from", dest="from_key", required=True,
+                         help="舊 project key（可含 '/'，嚴格相等比對）。")
+    rekey_p.add_argument("--to", dest="to_slug", required=True,
+                         help="新短 slug（path-safe，不得含 '/'）。")
+    rekey_p.add_argument("--now", default=None)
+    kgroup = rekey_p.add_mutually_exclusive_group()
+    kgroup.add_argument("--dry-run", action="store_true")
+    kgroup.add_argument("--apply", action="store_true")
+    rekey_p.set_defaults(func=_rekey)
+
     usage_p = memory_subparsers.add_parser("usage")
     usage_p.add_argument("--memory-root", required=True)
     usage_p.add_argument("--since", default=None)
@@ -378,6 +390,27 @@ def _retitle_untitled(args: argparse.Namespace) -> int:
     summary = retitle_mod.retitle_untitled(
         root, now=now, apply=apply, distill=distill, doc_corpus=corpus,
         projects=getattr(args, "project", None))
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
+def _rekey(args: argparse.Namespace) -> int:
+    from . import rekey as rekey_mod
+
+    root = Path(args.memory_root)
+    now = (args.now or datetime.now(timezone.utc).isoformat()).replace("+00:00", "Z")
+    apply = bool(getattr(args, "apply", False))
+    try:
+        summary = rekey_mod.rekey_project(
+            root,
+            old_key=args.from_key,
+            new_slug=args.to_slug,
+            now=now,
+            apply=apply,
+        )
+    except rekey_mod.RekeyError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     print(json.dumps(summary, ensure_ascii=False))
     return 0
 

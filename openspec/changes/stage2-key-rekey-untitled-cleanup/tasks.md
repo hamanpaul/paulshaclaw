@@ -5,8 +5,8 @@
 
 ## 2. rekey CLI 子命令
 
-- [ ] 2.1 新增 failing CLI tests（`test_rekey.py` 內 `RekeyCliTests`）：`memory knowledge rekey --from <old> --to <slug> --apply` 走通；`--to` 含 `/` → exit code 2。
-- [ ] 2.2 `paulshaclaw/memory/cli.py`：`knowledge` subparser 下加 `rekey`（`--from` dest=`from_key`、`--to` dest=`to_slug`、`--now`、互斥 `--dry-run`/`--apply`）＋ `_rekey` handler（捕 `RekeyError` → stderr ＋ return 2）。
+- [x] 2.1 新增 failing CLI tests（`test_rekey.py` 內 `RekeyCliTests`）：`memory knowledge rekey --from <old> --to <slug> --apply` 走通；`--to` 含 `/` → exit code 2。
+- [x] 2.2 `paulshaclaw/memory/cli.py`：`knowledge` subparser 下加 `rekey`（`--from` dest=`from_key`、`--to` dest=`to_slug`、`--now`、互斥 `--dry-run`/`--apply`）＋ `_rekey` handler（捕 `RekeyError` → stderr ＋ return 2）。
 
 ## 3. prune-noise 固定清單模式
 
