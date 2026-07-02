@@ -399,6 +399,9 @@ def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int
         if not raw_path.is_absolute():
             problems.append(f"not-absolute: {entry}")
             continue
+        if raw_path.is_symlink():
+            problems.append(f"symlink-not-allowed: {entry}")
+            continue
         try:
             resolved = raw_path.resolve(strict=True)
         except OSError:

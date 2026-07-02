@@ -315,6 +315,57 @@ class RekeyProjectTests(unittest.TestCase):
             self.assertTrue(first.exists())
             self.assertTrue(second.exists())
 
+    def test_conflict_restore_failure_leaves_recovery_stash(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "ok-file--sl-a1.md", "可遷移內容", title="ok-file")
+            _slice(root, OLD_DIR, OLD_KEY, "first-conflict--sl-c1.md", "第一個 conflict", title="first conflict")
+            _slice(root, OLD_DIR, OLD_KEY, "second-conflict--sl-c2.md", "第二個 conflict", title="second conflict")
+            _slice(root, "testpilot", "testpilot", "first-conflict--sl-c1.md", "既有檔一", title="first-conflict")
+            _slice(root, "testpilot", "testpilot", "second-conflict--sl-c2.md", "既有檔二", title="second-conflict")
+            original_rename = Path.rename
+
+            def flaky_rename(self_path: Path, target: Path):
+                if "rekey-conflicts-" in str(self_path.parent):
+                    raise OSError("restore blocked")
+                return original_rename(self_path, target)
+
+            with mock.patch.object(Path, "rename", flaky_rename):
+                summary = rekey.rekey_project(
+                    root,
+                    old_key=OLD_KEY,
+                    new_slug="testpilot",
+                    now="2026-07-02T00:00:00Z",
+                    apply=True,
+                )
+
+            self.assertEqual(summary["errors"], 1)
+            self.assertTrue(any("restore blocked" in warning for warning in summary["warnings"]))
+            stashes = sorted((root / "runtime").glob("rekey-conflicts-*"))
+            self.assertTrue(stashes)
+            self.assertTrue(any(stash.rglob("*.md") for stash in stashes))
+
+    def test_partial_rekey_keeps_old_project_moc_when_conflicts_remain(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "ok-file--sl-a1.md", "可遷移內容", title="ok-file")
+            _slice(root, OLD_DIR, OLD_KEY, "old-name--sl-c1.md", "衝突來源內容", title="conflict title")
+            _slice(root, "testpilot", "testpilot", "old-name--sl-c1.md", "同名既有檔", title="old-name")
+            old_moc = root / "knowledge" / f"{OLD_DIR}-moc.md"
+            old_moc.write_text("---\nmemory_layer: moc\n---\nstale\n", encoding="utf-8")
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertEqual(summary["conflicts"], 1)
+            self.assertFalse(summary["removed_orphan_moc"])
+            self.assertTrue(old_moc.exists())
+
     def test_other_projects_untouched(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 
 from .atomizer.config import is_safe_path_component, sanitize_project_component
 from .moc import frontmatter_io as _fio
@@ -58,27 +58,43 @@ def _run_moc_preserving_conflicts(memory_root: Path, now: str, protected_paths: 
         return run_moc(memory_root, now)
     runtime = memory_root / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(dir=runtime, prefix="rekey-conflicts-") as tmpdir:
-        stash_root = Path(tmpdir)
-        moved: list[tuple[Path, Path]] = []
+    stash_root = Path(mkdtemp(dir=runtime, prefix="rekey-conflicts-"))
+    moved: list[tuple[Path, Path]] = []
+    result: dict | None = None
+    pending_error: Exception | None = None
+    try:
         for index, path in enumerate(existing):
+            parked = stash_root / f"{index}-{path.name}"
+            path.rename(parked)
+            moved.append((path, parked))
+        result = run_moc(memory_root, now)
+    except Exception as exc:
+        pending_error = exc
+    finally:
+        restore_errors: list[str] = []
+        for original, parked in reversed(moved):
+            if not parked.exists():
+                continue
             try:
-                parked = stash_root / f"{index}-{path.name}"
-                path.rename(parked)
-                moved.append((path, parked))
-            except Exception:
-                for original, parked in reversed(moved):
-                    if parked.exists():
-                        original.parent.mkdir(parents=True, exist_ok=True)
-                        parked.rename(original)
-                raise
-        try:
-            return run_moc(memory_root, now)
-        finally:
-            for original, parked in reversed(moved):
-                if parked.exists():
-                    original.parent.mkdir(parents=True, exist_ok=True)
-                    parked.rename(original)
+                original.parent.mkdir(parents=True, exist_ok=True)
+                parked.rename(original)
+            except OSError as exc:
+                restore_errors.append(f"{original}: {exc}")
+        if not restore_errors:
+            try:
+                stash_root.rmdir()
+            except OSError:
+                pass
+        if restore_errors:
+            pending_error = OSError(
+                "restore blocked; parked conflicts preserved at "
+                f"{stash_root}: {'; '.join(restore_errors)}"
+            )
+    if pending_error is not None:
+        raise pending_error
+    if result is None:
+        raise OSError(f"rekey rebuild did not complete; parked conflicts preserved at {stash_root}")
+    return result
 
 
 def rekey_project(
@@ -179,7 +195,7 @@ def rekey_project(
                 post_apply_errors += 1
                 warnings.append(f"post-apply cleanup failed: {exc}")
         orphan_moc = knowledge / f"{sanitize_project_component(old_key)}-moc.md"
-        if orphan_moc.exists():
+        if removed_source_dir and orphan_moc.exists():
             try:
                 orphan_moc.unlink()
                 removed_orphan_moc = True
