@@ -25,9 +25,13 @@
 
 ## 6. 回歸驗證與收尾
 
-- [ ] 6.1 全套測試綠：`cd /home/paul_chen/prj_pri/paulshaclaw && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q`（CI 等效 `python -m pytest tests/ paulshaclaw/memory/tests/ -q`）。
-- [ ] 6.2 勾選本檔全部 checkbox 並在下方補 Verification Summary（測試輸出摘要）。
+- [x] 6.1 全套測試綠：`cd /home/paul_chen/prj_pri/paulshaclaw && PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q`（CI 等效 `python -m pytest tests/ paulshaclaw/memory/tests/ -q`）。
+- [x] 6.2 勾選本檔全部 checkbox 並在下方補 Verification Summary（測試輸出摘要）。
 
 ## Verification Summary
 
-（實作完成後填：focused pytest 輸出、全套結果、rekey/prune dry-run 示範輸出。）
+- Focused pytest（`test_rekey.py test_prune_noise.py test_janitor_rules.py test_janitor_scanner.py -q`）：`62 passed in 1.07s`
+- 全套 memory 測試（`PYTHONPATH=. ~/.local/bin/pytest paulshaclaw/memory/tests/ -q`）：`804 passed, 1 skipped, 87 subtests passed in 31.16s`
+- CI 等效（`PYTHONPATH=. python -m pytest tests/ paulshaclaw/memory/tests/ -q`）：`2 failed, 1486 passed, 15 skipped, 112 subtests passed in 114.52s`（失敗皆在 `tests/test_stage11_operator_cockpit.py`，超出本 change boundary）
+- `memory knowledge rekey --dry-run` 示範：`{"candidates": 1, "applied": false, "rekeyed": 0, "planned": 1, "conflicts": 0, "errors": 0, "removed_source_dir": false, "removed_orphan_moc": false, "indexed": null, "warnings": [], "manifest": "/tmp/.../runtime/ledger/rekey-2026-07-02T000000Z.jsonl"}`
+- `memory knowledge prune-noise --paths ... --dry-run` 示範：`{"scanned_noise": 1, "applied": false, "mode": "listed", "by_reason": {"listed": 1}, "deleted": 0, "errors": 0, "manifest": "/tmp/.../runtime/ledger/prune-2026-07-02T000000Z.jsonl"}`
