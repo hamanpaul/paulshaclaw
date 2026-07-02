@@ -395,8 +395,12 @@ def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int
     rows: list[dict] = []
     problems: list[str] = []
     for entry in listed:
+        raw_path = Path(entry)
+        if not raw_path.is_absolute():
+            problems.append(f"not-absolute: {entry}")
+            continue
         try:
-            resolved = Path(entry).resolve(strict=True)
+            resolved = raw_path.resolve(strict=True)
         except OSError:
             problems.append(f"missing: {entry}")
             continue
@@ -449,6 +453,7 @@ def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int
             _moc_builder.build_mocs(root, now=now)
 
     stats = Counter(row["reason"] for row in rows)
+    status_counts = Counter(row["status"] for row in rows)
     print(
         json.dumps(
             {
@@ -456,11 +461,15 @@ def _prune_listed(root: Path, paths_file: Path, *, now: str, apply: bool) -> int
                 "applied": apply,
                 "mode": "listed",
                 "by_reason": dict(stats),
+                "deleted": status_counts.get("deleted", 0),
+                "errors": status_counts.get("error", 0),
                 "manifest": str(manifest),
             },
             ensure_ascii=False,
         )
     )
+    if apply and status_counts.get("error", 0):
+        return 1
     return 0
 
 

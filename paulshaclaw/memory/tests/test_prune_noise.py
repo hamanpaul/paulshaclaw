@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
+import os
 import pathlib
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -255,6 +258,33 @@ class PruneListedTests(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertTrue(outside.exists())
 
+    def test_listed_relative_path_fails_closed(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, _noise, _good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"{os.path.relpath(listed, Path.cwd())}\n", encoding="utf-8")
+
+            rc = main(
+                [
+                    "memory",
+                    "knowledge",
+                    "prune-noise",
+                    "--memory-root",
+                    str(root),
+                    "--now",
+                    "2026-07-02T00:00:00Z",
+                    "--paths",
+                    str(paths_file),
+                    "--apply",
+                ]
+            )
+
+            self.assertEqual(rc, 2)
+            self.assertTrue(listed.exists())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl")) if (root / "runtime" / "ledger").exists() else []
+            self.assertEqual(manifests, [])
+
     def test_paths_mutually_exclusive_with_scan_filters(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -281,6 +311,46 @@ class PruneListedTests(unittest.TestCase):
 
             self.assertEqual(rc, 2)
             self.assertTrue(listed.exists())
+
+    def test_listed_apply_unlink_error_returns_nonzero_and_reports_counts(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            listed, _noise, _good = self._seed(root)
+            paths_file = root / "cleanup.txt"
+            paths_file.write_text(f"{listed}\n", encoding="utf-8")
+            stdout = io.StringIO()
+            real_unlink = pathlib.Path.unlink
+
+            def failing_unlink(self_path, *args, **kwargs):
+                if self_path == listed:
+                    raise OSError("disk busy")
+                return real_unlink(self_path, *args, **kwargs)
+
+            with mock.patch.object(pathlib.Path, "unlink", failing_unlink):
+                with redirect_stdout(stdout):
+                    rc = main(
+                        [
+                            "memory",
+                            "knowledge",
+                            "prune-noise",
+                            "--memory-root",
+                            str(root),
+                            "--now",
+                            "2026-07-02T00:00:00Z",
+                            "--paths",
+                            str(paths_file),
+                            "--apply",
+                        ]
+                    )
+
+            self.assertEqual(rc, 1)
+            self.assertTrue(listed.exists())
+            manifests = list((root / "runtime" / "ledger").glob("prune-*.jsonl"))
+            rows = [json.loads(line) for line in manifests[0].read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(rows[0]["status"], "error")
+            summary = json.loads(stdout.getvalue())
+            self.assertEqual(summary["deleted"], 0)
+            self.assertEqual(summary["errors"], 1)
 
 
 if __name__ == "__main__":

@@ -125,6 +125,42 @@ class RekeyProjectTests(unittest.TestCase):
             self.assertEqual(summary["conflicts"], 1)
             self.assertEqual(summary["rekeyed"], 0)
 
+    def test_conflict_source_stays_untouched_when_other_rows_rekey(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "ok-file--sl-a1.md", "可遷移內容", title="ok-file")
+            conflict = _slice(
+                root,
+                OLD_DIR,
+                OLD_KEY,
+                "old-name--sl-c1.md",
+                "衝突來源內容",
+                title="conflict title",
+            )
+            _slice(
+                root,
+                "testpilot",
+                "testpilot",
+                "old-name--sl-c1.md",
+                "同名既有檔",
+                title="old-name",
+            )
+
+            summary = rekey.rekey_project(
+                root,
+                old_key=OLD_KEY,
+                new_slug="testpilot",
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+            )
+
+            self.assertEqual(summary["rekeyed"], 1)
+            self.assertEqual(summary["conflicts"], 1)
+            self.assertTrue(conflict.exists())
+            self.assertFalse((conflict.parent / "conflict-title--sl-c1.md").exists())
+            fm, _body = fio.read(conflict.read_text(encoding="utf-8"))
+            self.assertEqual(fm["project"], OLD_KEY)
+
     def test_other_projects_untouched(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)

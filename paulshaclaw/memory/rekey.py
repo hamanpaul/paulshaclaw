@@ -2,8 +2,8 @@
 key to a registered short slug (#177).
 
 Recall filters by strict project equality, and some call sites also derive the
-knowledge directory from a sanitized project slug. A safe migration therefore
-must rewrite frontmatter ``project`` AND move the file into ``knowledge/<slug>``;
+per-project directory from a sanitized project slug. A safe migration therefore
+must rewrite frontmatter ``project`` AND move the file into the sanitized slug directory;
 doing only one would leave recall in a torn state. The migration writes an
 audit manifest, supports dry-run/apply, rebuilds MOCs and the retrieval index
 through ``run_moc``, and never touches ``retrieval.db`` directly.
@@ -17,6 +17,8 @@ from pathlib import Path
 
 from .atomizer.config import is_safe_path_component, sanitize_project_component
 from .moc import frontmatter_io as _fio
+from .moc import naming as _moc_naming
+from .moc import runner as _moc_runner
 from .moc.runner import run_moc
 
 
@@ -30,6 +32,75 @@ def _write_manifest(manifest: Path, rows: list[dict]) -> None:
     tmp = manifest.with_name(f".{manifest.name}.tmp")
     tmp.write_text(payload, encoding="utf-8")
     tmp.replace(manifest)
+
+
+def _reconcile_preserving_paths(memory_root: Path, protected_paths: set[Path]) -> list[str]:
+    knowledge = memory_root / "knowledge"
+    warnings: list[str] = []
+    if not knowledge.exists():
+        return warnings
+
+    protected_existing = tuple(path for path in protected_paths if path.exists())
+    protected_resolved = {path.resolve() for path in protected_existing}
+    protected_slice_ids: set[str] = set()
+    for path in protected_existing:
+        frontmatter, _body = _fio.read(path.read_text(encoding="utf-8"))
+        if frontmatter.get("memory_layer") != "knowledge":
+            continue
+        slice_id = str(frontmatter.get("slice_id", ""))
+        if slice_id:
+            protected_slice_ids.add(slice_id)
+
+    seen: dict[str, Path] = {}
+    for path in sorted(knowledge.rglob("*.md")):
+        frontmatter, body = _fio.read(path.read_text(encoding="utf-8"))
+        if frontmatter.get("memory_layer") != "knowledge":
+            continue
+        slice_id = frontmatter.get("slice_id")
+        if not slice_id:
+            warnings.append(f"{path}: missing slice_id; skipped")
+            continue
+        if path.resolve() in protected_resolved:
+            seen.setdefault(str(slice_id), path)
+            continue
+        target = path.with_name(_moc_naming.target_name(frontmatter, body))
+        if path != target:
+            if target.exists():
+                if target.resolve() in protected_resolved:
+                    seen.setdefault(str(slice_id), path)
+                    continue
+                if path.stat().st_mtime <= target.stat().st_mtime:
+                    path.unlink()
+                    continue
+                target.unlink()
+            path.rename(target)
+            path = target
+        slice_id_str = str(slice_id)
+        if slice_id_str in protected_slice_ids:
+            seen.setdefault(slice_id_str, path)
+            continue
+        if slice_id_str in seen:
+            other = seen[slice_id_str]
+            if path.resolve() != other.resolve():
+                older = other if other.stat().st_mtime <= path.stat().st_mtime else path
+                newer = path if older is other else other
+                older.unlink()
+                seen[slice_id_str] = newer
+                warnings.append(f"duplicate slice_id {slice_id}; kept {newer.name}")
+        else:
+            seen[slice_id_str] = path
+    return warnings
+
+
+def _run_moc_preserving_conflicts(memory_root: Path, now: str, protected_paths: set[Path]) -> dict:
+    if not protected_paths:
+        return run_moc(memory_root, now)
+    original_reconcile = _moc_runner.naming.reconcile
+    _moc_runner.naming.reconcile = lambda root: _reconcile_preserving_paths(root, protected_paths)
+    try:
+        return run_moc(memory_root, now)
+    finally:
+        _moc_runner.naming.reconcile = original_reconcile
 
 
 def rekey_project(
@@ -122,7 +193,8 @@ def rekey_project(
         if orphan_moc.exists():
             orphan_moc.unlink()
             removed_orphan_moc = True
-        moc_result = run_moc(memory_root, now)
+        conflict_paths = {Path(row["path"]) for row in rows if row["status"] == "conflict"}
+        moc_result = _run_moc_preserving_conflicts(memory_root, now, conflict_paths)
         indexed = moc_result.get("indexed")
         warnings = list(moc_result.get("warnings", []))
 
