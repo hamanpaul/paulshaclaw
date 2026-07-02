@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from .atomizer.config import is_safe_path_component, sanitize_project_component
 from .moc import frontmatter_io as _fio
@@ -96,11 +97,52 @@ def _run_moc_preserving_conflicts(memory_root: Path, now: str, protected_paths: 
     if not protected_paths:
         return run_moc(memory_root, now)
     original_reconcile = _moc_runner.naming.reconcile
+    original_build_index = _moc_runner.search.build_index
     _moc_runner.naming.reconcile = lambda root: _reconcile_preserving_paths(root, protected_paths)
+    _moc_runner.search.build_index = (
+        lambda root, link_weights, *, doc_corpus=None: _build_index_excluding_paths(
+            root,
+            link_weights,
+            doc_corpus=doc_corpus,
+            protected_paths=protected_paths,
+            build_index=original_build_index,
+        )
+    )
     try:
         return run_moc(memory_root, now)
     finally:
         _moc_runner.naming.reconcile = original_reconcile
+        _moc_runner.search.build_index = original_build_index
+
+
+def _build_index_excluding_paths(
+    memory_root: Path,
+    link_weights: dict[str, int],
+    *,
+    doc_corpus: object | None,
+    protected_paths: set[Path],
+    build_index,
+) -> None:
+    existing = tuple(path for path in sorted(protected_paths) if path.exists())
+    if not existing:
+        build_index(memory_root, link_weights, doc_corpus=doc_corpus)
+        return
+    runtime = memory_root / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=runtime, prefix="rekey-conflicts-") as tmpdir:
+        stash_root = Path(tmpdir)
+        moved: list[tuple[Path, Path]] = []
+        for index, path in enumerate(existing):
+            parked = stash_root / f"{index}-{path.name}"
+            path.rename(parked)
+            moved.append((path, parked))
+        try:
+            build_index(memory_root, link_weights, doc_corpus=doc_corpus)
+        finally:
+            for original, parked in reversed(moved):
+                if parked.exists():
+                    original.parent.mkdir(parents=True, exist_ok=True)
+                    parked.rename(original)
 
 
 def rekey_project(

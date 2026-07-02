@@ -156,10 +156,14 @@ class RekeyProjectTests(unittest.TestCase):
 
             self.assertEqual(summary["rekeyed"], 1)
             self.assertEqual(summary["conflicts"], 1)
+            self.assertTrue(summary["indexed"])
             self.assertTrue(conflict.exists())
             self.assertFalse((conflict.parent / "conflict-title--sl-c1.md").exists())
             fm, _body = fio.read(conflict.read_text(encoding="utf-8"))
             self.assertEqual(fm["project"], OLD_KEY)
+            self.assertFalse(
+                any("UNIQUE constraint failed" in warning for warning in summary["warnings"])
+            )
 
     def test_other_projects_untouched(self):
         with TemporaryDirectory() as tmp:
