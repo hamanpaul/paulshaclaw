@@ -248,7 +248,10 @@ class RekeyProjectTests(unittest.TestCase):
                     raise OSError("directory busy")
                 return real_rmdir(self_path)
 
-            with mock.patch.object(Path, "rmdir", failing_rmdir):
+            with mock.patch.object(Path, "rmdir", failing_rmdir), mock.patch(
+                "paulshaclaw.memory.rekey.run_moc",
+                return_value={"indexed": True, "warnings": ["index rebuilt"]},
+            ) as run_moc_mock:
                 summary = rekey.rekey_project(
                     root,
                     old_key=OLD_KEY,
@@ -259,10 +262,58 @@ class RekeyProjectTests(unittest.TestCase):
 
             self.assertEqual(summary["rekeyed"], 1)
             self.assertEqual(summary["errors"], 1)
+            self.assertTrue(summary["indexed"])
             self.assertTrue(
                 any("directory busy" in warning for warning in summary["warnings"])
             )
+            self.assertIn("index rebuilt", summary["warnings"])
+            run_moc_mock.assert_called_once()
             self.assertTrue((root / "knowledge" / "testpilot" / "uart-fix--sl-a1.md").exists())
+
+    def test_conflict_stash_failure_restores_already_parked_files(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _slice(root, OLD_DIR, OLD_KEY, "ok-file--sl-a1.md", "可遷移內容", title="ok-file")
+            first = _slice(
+                root,
+                OLD_DIR,
+                OLD_KEY,
+                "first-conflict--sl-c1.md",
+                "第一個 conflict",
+                title="first conflict",
+            )
+            second = _slice(
+                root,
+                OLD_DIR,
+                OLD_KEY,
+                "second-conflict--sl-c2.md",
+                "第二個 conflict",
+                title="second conflict",
+            )
+            _slice(root, "testpilot", "testpilot", "first-conflict--sl-c1.md", "既有檔一", title="first-conflict")
+            _slice(root, "testpilot", "testpilot", "second-conflict--sl-c2.md", "既有檔二", title="second-conflict")
+            original_rename = Path.rename
+            stash_moves: list[Path] = []
+
+            def flaky_rename(self_path: Path, target: Path):
+                if "rekey-conflicts-" in str(target.parent):
+                    stash_moves.append(self_path)
+                    if len(stash_moves) == 2:
+                        raise OSError("stash blocked")
+                return original_rename(self_path, target)
+
+            with mock.patch.object(Path, "rename", flaky_rename):
+                summary = rekey.rekey_project(
+                    root,
+                    old_key=OLD_KEY,
+                    new_slug="testpilot",
+                    now="2026-07-02T00:00:00Z",
+                    apply=True,
+                )
+
+            self.assertEqual(summary["errors"], 1)
+            self.assertTrue(first.exists())
+            self.assertTrue(second.exists())
 
     def test_other_projects_untouched(self):
         with TemporaryDirectory() as tmp:

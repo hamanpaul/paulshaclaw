@@ -62,9 +62,16 @@ def _run_moc_preserving_conflicts(memory_root: Path, now: str, protected_paths: 
         stash_root = Path(tmpdir)
         moved: list[tuple[Path, Path]] = []
         for index, path in enumerate(existing):
-            parked = stash_root / f"{index}-{path.name}"
-            path.rename(parked)
-            moved.append((path, parked))
+            try:
+                parked = stash_root / f"{index}-{path.name}"
+                path.rename(parked)
+                moved.append((path, parked))
+            except Exception:
+                for original, parked in reversed(moved):
+                    if parked.exists():
+                        original.parent.mkdir(parents=True, exist_ok=True)
+                        parked.rename(original)
+                raise
         try:
             return run_moc(memory_root, now)
         finally:
@@ -163,23 +170,31 @@ def rekey_project(
     warnings: list[str] = []
     post_apply_errors = 0
     if apply and counts.get("rekeyed", 0):
-        try:
-            source_dir = knowledge / sanitize_project_component(old_key)
-            if source_dir.is_dir() and not any(source_dir.iterdir()):
+        source_dir = knowledge / sanitize_project_component(old_key)
+        if source_dir.is_dir() and not any(source_dir.iterdir()):
+            try:
                 source_dir.rmdir()
                 removed_source_dir = True
-            orphan_moc = knowledge / f"{sanitize_project_component(old_key)}-moc.md"
-            if orphan_moc.exists():
+            except OSError as exc:
+                post_apply_errors += 1
+                warnings.append(f"post-apply cleanup failed: {exc}")
+        orphan_moc = knowledge / f"{sanitize_project_component(old_key)}-moc.md"
+        if orphan_moc.exists():
+            try:
                 orphan_moc.unlink()
                 removed_orphan_moc = True
+            except OSError as exc:
+                post_apply_errors += 1
+                warnings.append(f"post-apply cleanup failed: {exc}")
+        try:
             conflict_paths = {Path(row["path"]) for row in rows if row["status"] == "conflict"}
             moc_result = _run_moc_preserving_conflicts(memory_root, now, conflict_paths)
             indexed = moc_result.get("indexed")
-            warnings = list(moc_result.get("warnings", []))
+            warnings.extend(list(moc_result.get("warnings", [])))
         except (OSError, UnicodeDecodeError) as exc:
             indexed = False
-            post_apply_errors = 1
-            warnings.append(f"post-apply cleanup failed: {exc}")
+            post_apply_errors += 1
+            warnings.append(f"post-apply rebuild failed: {exc}")
 
     return {
         "candidates": len(rows),
