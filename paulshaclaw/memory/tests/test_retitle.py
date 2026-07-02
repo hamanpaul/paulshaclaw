@@ -109,5 +109,42 @@ class RetitleUntitledTests(unittest.TestCase):
             self.assertEqual(summary["planned"], 0)
 
 
+class RetitleGenericTitleTests(unittest.TestCase):
+    def test_generic_title_slice_is_retitled(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            body = "COM0 斷線根因是 udev 權限規則沒套用，重插後 ttyUSB 編號漂移。"
+            p = _slice(root, "testpilot", "report-testpilot--sl-r1.md", body, title="report-testpilot")
+            summary = retitle.retitle_untitled(
+                root,
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+                distill=lambda b: "COM0 斷線根因",
+            )
+            self.assertFalse(p.exists())
+            target = root / "knowledge" / "testpilot" / "com0-斷線根因--sl-r1.md"
+            self.assertTrue(target.exists(), list((root / "knowledge" / "testpilot").iterdir()))
+            self.assertEqual(summary["retitled"], 1)
+
+    def test_specific_title_slice_not_scanned(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            p = _slice(
+                root,
+                "testpilot",
+                "uart2-tips--sl-s1.md",
+                "UART2 在 pinmux 設錯時靜默失效。",
+                title="UART2 除錯重點",
+            )
+            summary = retitle.retitle_untitled(
+                root,
+                now="2026-07-02T00:00:00Z",
+                apply=True,
+                distill=lambda b: "不該被呼叫",
+            )
+            self.assertTrue(p.exists())
+            self.assertEqual(summary["candidates"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
