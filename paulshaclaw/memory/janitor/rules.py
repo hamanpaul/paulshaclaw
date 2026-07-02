@@ -11,6 +11,8 @@ from paulshaclaw.memory.janitor.config import JanitorConfig
 from paulshaclaw.memory.janitor.record_source import KnowledgeRecord
 
 SCHEMA_VERSION = "1"
+LINT_TITLE_UNTITLED = "title-untitled"
+LINT_RAW_REMOTE_KEY = "raw-remote-key"
 
 SourcePathCheck = Callable[[KnowledgeRecord], bool | None]
 
@@ -262,3 +264,28 @@ def plan_scan(
                 events.append(_reactivation_event(record, decision, now, config_hash))
     
     return events
+
+
+def plan_lint(records: list[KnowledgeRecord]) -> list[dict[str, Any]]:
+    """Return advisory lint findings for hygiene issues in knowledge records."""
+    findings: list[dict[str, Any]] = []
+    for record in sorted(records, key=lambda item: item.record_id):
+        if record.title == "untitled":
+            findings.append(
+                {
+                    "rule": LINT_TITLE_UNTITLED,
+                    "record_id": record.record_id,
+                    "path": str(record.path),
+                    "project": record.project,
+                }
+            )
+        if "/" in record.project:
+            findings.append(
+                {
+                    "rule": LINT_RAW_REMOTE_KEY,
+                    "record_id": record.record_id,
+                    "path": str(record.path),
+                    "project": record.project,
+                }
+            )
+    return findings

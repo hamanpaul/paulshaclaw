@@ -28,6 +28,8 @@ class KnowledgeRecord:
     captured_at: str
     provenance: Mapping[str, str]
     path: Path
+    title: str = ""
+    project: str = ""
 
 
 def _parse_frontmatter(text: str) -> Mapping[str, Any] | None:
@@ -109,6 +111,10 @@ def _build_record(path: Path, data: Mapping[str, Any]) -> tuple[KnowledgeRecord 
     
     # Extract captured_at
     captured_at = _clean_string(data.get("captured_at")) or ""
+
+    # Advisory fields for hygiene lint.
+    title = _clean_string(data.get("title")) or ""
+    project = _clean_string(data.get("project")) or ""
     
     # Extract provenance
     prov_raw = data.get("provenance", {})
@@ -129,6 +135,8 @@ def _build_record(path: Path, data: Mapping[str, Any]) -> tuple[KnowledgeRecord 
         captured_at=captured_at,
         provenance=provenance,
         path=path,
+        title=title,
+        project=project,
     )
     return record, None
 

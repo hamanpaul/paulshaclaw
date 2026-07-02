@@ -15,8 +15,8 @@
 
 ## 4. janitor lint 規則
 
-- [ ] 4.1 擴充 failing tests `paulshaclaw/memory/tests/test_janitor_rules.py`（`LintRuleTests` ＋ `LintFieldExtractionTests`）：untitled 命中、raw-remote key 命中、乾淨 record 零 findings、單筆雙中、deterministic 排序；`iter_records` 抽取 `title`/`project`。
-- [ ] 4.2 `janitor/record_source.py`：`KnowledgeRecord` 尾端加 `title: str = ""`、`project: str = ""`，`_build_record` 抽取；`janitor/rules.py`：新增純函式 `plan_lint(records) -> list[dict]` 與 rule 常數。
+- [x] 4.1 擴充 failing tests `paulshaclaw/memory/tests/test_janitor_rules.py`（`LintRuleTests` ＋ `LintFieldExtractionTests`）：untitled 命中、raw-remote key 命中、乾淨 record 零 findings、單筆雙中、deterministic 排序；`iter_records` 抽取 `title`/`project`。
+- [x] 4.2 `janitor/record_source.py`：`KnowledgeRecord` 尾端加 `title: str = ""`、`project: str = ""`，`_build_record` 抽取；`janitor/rules.py`：新增純函式 `plan_lint(records) -> list[dict]` 與 rule 常數。
 
 ## 5. janitor scanner 接線
 
