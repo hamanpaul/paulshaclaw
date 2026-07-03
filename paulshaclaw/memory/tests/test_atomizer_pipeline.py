@@ -454,6 +454,39 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(list(cache_dir.glob("*.json")), [])
             self.assertFalse(any("left in split" in warning for warning in result["warnings"]))
 
+    def test_llm_wrapped_empty_output_reaches_promoted_terminal_state_without_retry_budget(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _seed_raw(root)
+            cfg, h = atomizer_config.load_config(override_path=None)
+            cache_dir = root / "runtime" / "cache" / "atomize"
+            cached_client = agent_exec.CachingAgentClient(
+                FakeAgentClient('{"findings": []}'),
+                cache_dir,
+            )
+            promoter = llm_promoter.LLMPromoter(
+                cached_client,
+                skill_text="EMPTY-SKILL",
+                known_projects=["paulshaclaw"],
+                model="fake-llm",
+            )
+
+            result = pipeline.run(
+                root, config=cfg, config_hash=h, now="2026-05-31T03:00:00Z", promoter=promoter
+            )
+
+            self.assertEqual(processing.state_of(root, "claude:s1"), "promoted")
+            event = processing.read_events(root)[-1]
+            self.assertEqual(event["state"], "promoted")
+            self.assertEqual(event["slices"], 0)
+            self.assertEqual(result["summary"]["slices"], 0)
+            self.assertEqual(list((root / "knowledge").rglob("*.md")), [])
+            self.assertEqual(list((root / "inbox" / "_slices").rglob("*.md")), [])
+            self.assertEqual(len(list((root / "archive" / "fragments").rglob("*.md"))), 2)
+            self.assertEqual(list(cache_dir.glob("*.retries")), [])
+            self.assertEqual(list(cache_dir.glob("*.json")), [])
+            self.assertFalse(any("left in split" in warning for warning in result["warnings"]))
+
     def test_llm_promotion_archives_unreferenced_fragments(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
