@@ -6,6 +6,7 @@ import unittest
 from paulshaclaw.memory.atomizer import llm_output
 
 PROJECTS = ["paulshaclaw", "prplos-core"]
+WRAPPER_KEYS = ("findings", "slices", "proposals", "atoms")
 GOOD = (
     'prose before\n```json\n'
     '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":["t"],'
@@ -46,12 +47,16 @@ class LlmOutputTests(unittest.TestCase):
         self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
 
     def test_parses_object_wrapped_whitelisted_array(self):
-        raw = json.dumps({"findings": [_proposal_payload("a"), _proposal_payload("b", fragment_index=1)]})
-        proposals = llm_output.parse(raw, PROJECTS)
-        self.assertEqual([proposal.title for proposal in proposals], ["a", "b"])
+        for key in WRAPPER_KEYS:
+            with self.subTest(key=key):
+                raw = json.dumps({key: [_proposal_payload("a"), _proposal_payload("b", fragment_index=1)]})
+                proposals = llm_output.parse(raw, PROJECTS)
+                self.assertEqual([proposal.title for proposal in proposals], ["a", "b"])
 
     def test_object_wrapped_empty_array_returns_no_proposals(self):
-        self.assertEqual(llm_output.parse('{"findings":[]}', PROJECTS), [])
+        for key in WRAPPER_KEYS:
+            with self.subTest(key=key):
+                self.assertEqual(llm_output.parse(json.dumps({key: []}), PROJECTS), [])
 
     def test_empty_array_returns_no_proposals(self):
         self.assertEqual(llm_output.parse("[]", PROJECTS), [])
