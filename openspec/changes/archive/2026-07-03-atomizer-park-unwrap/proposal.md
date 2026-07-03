@@ -4,7 +4,7 @@ The #174 poisoned-cache fix (PR #179) drained the dream promotion backlog from 6
 
 Two failure modes (instances in `runtime/cache/atomize/`):
 
-1. **Object-wrapped array (parser-recoverable, exact wrapper only)** — `claude-code:ee5fb45b…` (fragments=9) → gemma4 returns `{"findings": []}`. `llm_output.py::_iter_json_arrays` (`:47/:54`) only recognizes a **top-level bare array** (`isinstance(candidate, list)` `:62`); `_parse_proposals` (`:233-234`) requires `isinstance(data, list)`, so an object-wrapped payload falls to `parse` (`:278`) "no JSON array found" → `PromoteError` → retry → park. Even a wrapped **empty** result `{"findings":[]}` — which should reach #179's empty-array → `slices=0` terminal state — parks because the outer layer is an object. However, a metadata-bearing wrong-task object like `{"findings":[],"note":"created file ..."}` must still be rejected; only an exact single-key wrapper is safe to unwrap.
+1. **Object-wrapped array (parser-recoverable, exact wrapper only)** — `claude-code:ee5fb45b…` (fragments=9) → gemma4 returns `{"findings": []}`. Before this change, `llm_output.py` only recognized a **top-level bare array**, while `_parse_proposals` requires `data` to already be a list, so an object-wrapped payload fell through to `parse` as "no JSON array found" → `PromoteError` → retry → park. Even a wrapped **empty** result `{"findings":[]}` — which should reach #179's empty-array → `slices=0` terminal state — parked because the outer layer was an object. However, a metadata-bearing wrong-task object like `{"findings":[],"note":"created file ..."}` must still be rejected; only an exact single-key wrapper is safe to unwrap.
 2. **Wrong-task prose (needs prompt hardening, not parser)** — `claude-code:1abd65d0…` (fragments=7) / `claude-code:335dd389…` (fragments=28) → "Done. Here's the summary of what I did: 1. Created new memory file…". The model thinks it must **execute** the extraction (create/write files) rather than **return** inline JSON → no JSON at all → parser cannot help → park.
 
 ## What Changes
@@ -25,7 +25,7 @@ None. This change extends the existing `stage2-memory-governance` capability.
 
 ## Impact
 
-- **Affected code**: `paulshaclaw/memory/atomizer/llm_output.py` (`_iter_json_arrays` / `_iter_json_array_candidates` unwrap), `paulshaclaw/memory/atomizer/skills/atomize-knowledge-slice.md` (prompt).
-- **Affected tests**: `paulshaclaw/memory/tests/test_llm_output.py` — object-wrapped non-empty → N slices; object-wrapped empty → `slices=0` terminal; bare array + multiple-arrays unchanged.
+- **Affected code**: `paulshaclaw/memory/atomizer/llm_output.py` (exact-wrapper unwrap), `paulshaclaw/memory/atomizer/skills/atomize-knowledge-slice.md` (skill contract), `paulshaclaw/memory/atomizer/prompt.py` (runtime prompt footer).
+- **Affected tests**: `paulshaclaw/memory/tests/test_llm_output.py` (exact-wrapper / reject metadata-bearing wrappers), `paulshaclaw/memory/tests/test_atomizer_prompt.py` (rendered prompt contract), `paulshaclaw/memory/tests/test_atomizer_pipeline.py` (wrapped empty → `slices=0` promoted terminal path).
 - **Non-goal**: does NOT change #179's retry-budget parking (bounded, no loop, correct). This reduces the fraction that falls into park (parser-recoverable ones), not the parking mechanism.
 - **Relates**: #174 (fixed), #179 (PR merged), audit (wf memory 五項根因).
