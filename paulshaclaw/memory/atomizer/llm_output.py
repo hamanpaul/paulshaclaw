@@ -16,6 +16,7 @@ _JSON_DECODER = json.JSONDecoder()
 _EMBEDDED_JSON_PREFIXES = frozenset({":", ",", "[", "{", '"'})
 _EMBEDDED_JSON_SUFFIXES = frozenset({":", ",", "]", "}"})
 _OUTPUT_ARRAY_LABEL_RE = re.compile(r"output:", re.IGNORECASE)
+_PROPOSAL_ARRAY_WRAPPER_KEYS = frozenset({"findings", "slices", "proposals", "atoms"})
 _PROPOSAL_KEYS = frozenset(
     {
         "title",
@@ -47,8 +48,10 @@ class SliceProposal:
 def _iter_json_arrays(raw: str):
     for fenced in _FENCED_BLOCK_RE.finditer(raw):
         yield from _iter_json_array_candidates(fenced.group(1), offset=fenced.start(1))
+        yield from _iter_wrapped_json_array_candidates(fenced.group(1), offset=fenced.start(1))
 
     yield from _iter_json_array_candidates(raw, offset=0)
+    yield from _iter_wrapped_json_array_candidates(raw, offset=0)
 
 
 def _iter_json_array_candidates(raw: str, offset: int):
@@ -61,6 +64,30 @@ def _iter_json_array_candidates(raw: str, offset: int):
             continue
         if isinstance(candidate, list) and _is_standalone_json_value(raw, start, end):
             yield candidate, offset + start, offset + end
+
+
+def _iter_wrapped_json_array_candidates(raw: str, offset: int):
+    for start, character in enumerate(raw):
+        if character != "{":
+            continue
+        try:
+            candidate, end = _JSON_DECODER.raw_decode(raw, start)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(candidate, dict) or not _is_standalone_json_value(raw, start, end):
+            continue
+        if (unwrapped := _unwrap_wrapped_json_array_candidate(candidate)) is not None:
+            yield unwrapped, offset + start, offset + end
+
+
+def _unwrap_wrapped_json_array_candidate(candidate: dict[str, Any]) -> list[Any] | None:
+    array_keys = [key for key, value in candidate.items() if isinstance(value, list)]
+    if len(array_keys) != 1:
+        return None
+    key = array_keys[0]
+    if key not in _PROPOSAL_ARRAY_WRAPPER_KEYS:
+        return None
+    return candidate[key]
 
 
 def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:
