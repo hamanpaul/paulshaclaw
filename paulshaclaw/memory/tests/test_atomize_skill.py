@@ -91,7 +91,7 @@ class SkillDocTests(unittest.TestCase):
 
         self.assertIn("## Output contract", body)
         _, output_contract = body.split("## Output contract", maxsplit=1)
-        self.assertIn("Return ONLY the JSON array.", output_contract)
+        self.assertIn("Return ONLY an inline JSON array.", output_contract)
         for field in (
             "title",
             "artifact_kind",
@@ -125,6 +125,16 @@ class SkillDocTests(unittest.TestCase):
                 '- `{ "type": "mentions", "entity": "<stable entity name>" }`',
             ],
         )
+
+    def test_skill_output_contract_forbids_file_writes_and_prose(self):
+        _, body = self._read_skill()
+
+        _, output_contract = body.split("## Output contract", maxsplit=1)
+        self.assertIn("Return ONLY an inline JSON array.", output_contract)
+        self.assertIn("The first character of your response must be `[` and the last character must be `]`.", output_contract)
+        self.assertIn("Do NOT create files, write files, save files, or claim that you updated any file or index.", output_contract)
+        self.assertIn("Do NOT return prose, narration, summaries, markdown fences, or any text before or after the JSON array.", output_contract)
+        self.assertNotIn("```", output_contract)
 
 
 if __name__ == "__main__":

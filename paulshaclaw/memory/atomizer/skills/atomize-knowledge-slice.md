@@ -82,7 +82,10 @@ triggers:
 - 檢查所有 `title` 在同一批輸出內唯一且可互相引用。
 
 ## Output contract
-Return ONLY the JSON array.
+Return ONLY an inline JSON array.
+The first character of your response must be `[` and the last character must be `]`.
+Do NOT create files, write files, save files, or claim that you updated any file or index.
+Do NOT return prose, narration, summaries, markdown fences, or any text before or after the JSON array.
 
 Each item in the array must be an object with these fields:
 
@@ -96,19 +99,5 @@ Each item in the array must be an object with these fields:
   - `{ "type": "relates_to", "target_title": "<another slice title>" }`
   - `{ "type": "mentions", "entity": "<stable entity name>" }`
 
-```json
-[
-  {
-    "title": "example overview",
-    "artifact_kind": "report",
-    "project": "paulshaclaw",
-    "tags": ["atomizer", "overview"],
-    "body": "Distilled markdown content.",
-    "source_fragment_indices": [0, 1],
-    "relations": [
-      {"type": "relates_to", "target_title": "example detail"},
-      {"type": "mentions", "entity": "BRCM"}
-    ]
-  }
-]
-```
+Inline example shape (for reference only; your actual response must still be only the array):
+`[{"title":"example overview","artifact_kind":"report","project":"paulshaclaw","tags":["atomizer","overview"],"body":"Distilled markdown content.","source_fragment_indices":[0,1],"relations":[{"type":"relates_to","target_title":"example detail"},{"type":"mentions","entity":"BRCM"}]}]`
