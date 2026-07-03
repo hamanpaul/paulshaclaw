@@ -19,6 +19,16 @@ def _frag(index, body):
     )
 
 
+def _expected_output_footer() -> list[str]:
+    return [
+        "## Output",
+        "Return ONLY an inline JSON array.",
+        "The first character of your response must be `[` and the last character must be `]`.",
+        "Do NOT create files, write files, save files, or claim that you updated any file or index.",
+        "Do NOT return prose, narration, summaries, markdown fences, or any text before or after the JSON array.",
+    ]
+
+
 class PromptSessionHintTests(unittest.TestCase):
     def test_includes_session_project_hint_when_known(self):
         frag = Fragment(
@@ -67,8 +77,7 @@ class PromptTests(unittest.TestCase):
                     "[fragment 1]",
                     "beta",
                     "",
-                    "## Output",
-                    "Return ONLY the JSON array specified by the skill's output contract.",
+                    *_expected_output_footer(),
                 ]
             ),
         )
@@ -96,11 +105,15 @@ class PromptTests(unittest.TestCase):
                     "[fragment 0]",
                     "alpha",
                     "",
-                    "## Output",
-                    "Return ONLY the JSON array specified by the skill's output contract.",
+                    *_expected_output_footer(),
                 ]
             ),
         )
+
+    def test_runtime_footer_repeats_hardened_output_contract(self):
+        text = prompt_mod.build_prompt("SKILLDOC", [_frag(0, "alpha")], ["paulshaclaw"])
+        footer = "\n".join(_expected_output_footer())
+        self.assertIn(footer, text)
 
     def test_deterministic(self):
         frags = [_frag(0, "alpha")]
