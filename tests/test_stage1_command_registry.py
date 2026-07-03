@@ -13,7 +13,7 @@ class CommandRegistryTests(unittest.TestCase):
         registry = load_default_command_registry()
         self.assertEqual(
             [command.name for command in registry.commands],
-            ["/help", "/status", "/dispatch", "/tmate", "/agent"],
+            ["/help", "/status", "/dispatch", "/tmate", "/manager", "/agent"],
         )
         self.assertEqual(
             registry.telegram_commands(),
@@ -22,11 +22,14 @@ class CommandRegistryTests(unittest.TestCase):
                 {"command": "status", "description": "顯示 runtime 狀態"},
                 {"command": "dispatch", "description": "派工或送訊息到 pane"},
                 {"command": "tmate", "description": "管理 tmate remote access"},
+                {"command": "manager", "description": "查看或觸發 manager"},
                 {"command": "agent", "description": "管理 claude-gemma4 agent"},
             ],
         )
         self.assertTrue(all(command.telegram_menu.enabled for command in registry.commands))
         self.assertEqual(registry.get("/tmate").func_call.timeout_seconds, 3600)
+        self.assertEqual(registry.get("/manager").func_call.type, "python")
+        self.assertEqual(registry.get("/manager").func_call.target, "manager")
         self.assertEqual(registry.get("/agent").func_call.type, "python")
         self.assertEqual(registry.get("/agent").func_call.target, "agent")
 
@@ -98,6 +101,7 @@ class CommandRegistryTests(unittest.TestCase):
         registry = load_default_command_registry()
         help_text = registry.render_help()
         self.assertIn("/help [command] - 列出可用命令，或顯示單一命令用法", help_text)
+        self.assertIn("/manager [status|tick] - 查看或觸發 persona manager", help_text)
         self.assertIn("/agent [start %pane|startf %pane|stop|status] - 管理 claude-gemma4 agent session", help_text)
         self.assertIn("/tmate [status|start|stop]", registry.render_help("/tmate"))
         self.assertEqual(registry.render_help("tmate"), registry.render_help("/tmate"))

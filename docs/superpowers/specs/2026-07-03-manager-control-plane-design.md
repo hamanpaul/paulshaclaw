@@ -69,7 +69,7 @@ flowchart LR
   "schema_version": 1,
   "req_id": "20260703T101500Z-<uuid4>",
   "type": "tick",                         // tick | fanout
-  "args": { "executor": "copilot", "allow_unsafe": false, "specs_dir": null },
+  "args": { "executor": null, "allow_unsafe": false, "specs_dir": null },
   "requested_by": "cockpit",              // cockpit | telegram
   "created_at": "2026-07-03T10:15:00Z"
 }
@@ -103,7 +103,7 @@ flowchart LR
 - 前端**只讀這一個檔**，不掃內部 `runtime/handoff` / `state/coordinator/jobs`；內部改版不影響前端。
 
 ### 4.4 並發與健壯性
-- 單例 daemon lock（`control/lock` 或沿用 coordinator `lock/`）。
+- 單例 daemon lock（`control/manager.lock`）；lock payload 先完整寫入 temp 檔，再以原子方式發佈；live owner 需同時滿足「PID 存活」與「真實 `python -m paulshaclaw.coordinator.manager_daemon` argv 形狀」。
 - request 處理採「讀 → 處理 → 寫 done → 刪/移 request」；重覆 req_id 以既存 done 為準（冪等）。
 - 所有寫入 atomic（temp+rename）。`schema_version` 供 #125 契約演進。
 
@@ -119,10 +119,10 @@ flowchart LR
 3. **寫 `status.json`** rollup（ready/in_flight/recent_done/daemon）。
 4. `sleep poll_interval`（預設 3–5s，對 request 反應快；tick 仍以 300s 節流）。
 
-**runtime 掛載**：`scripts/start.sh` 新增 `start_manager_loop()`，**仿 `start_dream_loop()`**——背景 subshell `while true`、toggle `PSC_MANAGER_DAEMON_DISABLED`、log `~/.agents/log/manager.log`、綁 start.sh `cleanup`。**取代** `start_manager_service()` 的 timer 掛載（timer 停用或保留為 #126 的 systemd 選項）。
+**runtime 掛載**：`scripts/start.sh` 新增 `start_manager_loop()`，沿用 dream-loop 的 lifecycle 慣例——背景啟動、toggle `PSC_MANAGER_DAEMON_DISABLED`、log `~/.agents/log/manager.log`、綁 start.sh `cleanup`；daemon 本身擁有常駐 loop，因此不再外包一層 shell `while true`。若 `start.sh` 因硬中止殘留既有 live manager，下一次啟動會辨識並 adopt 該 PID。resident path 必須承接既有 manager runtime 設定（至少 `PSC_MANAGER_EXECUTOR`、`PSC_MANAGER_INTERVAL_SECONDS`）與 orphan broker reaper。**取代** `start_manager_service()` 的 timer 掛載（timer 啟動前即 retire，保留 systemd 化給 #126）。
 
 **安全**（沿用 coordinator 既有守門）：
-- headless 觸發需 `executor`（預設 `copilot`；Haiku model alias = `claude-haiku-4.5`）。
+- headless 觸發需 `executor`；若 request 未明填，daemon 取用 runtime 預設（`PSC_MANAGER_EXECUTOR`，預設 `copilot`；Haiku model alias = `claude-haiku-4.5`）。
 - `allow_unsafe` 預設 `false`；為 true 時沿用 `_refuse_unsafe_fanout` 的 **fail-closed ≤1 就緒 slice**。
 - worktree 從 `main` 切 `feature/<slice_id>`。
 
@@ -138,7 +138,7 @@ flowchart LR
 
 ### 6.1 cockpit（`app.py`）
 - `Binding("m", "manager_panel", "m manager 狀態")` → `action_manager_panel` push 一個 `ManagerModal`（仿既有 `HelpModal`）顯示 `read_status()`。
-- `Binding("t", "manager_tick", "t 踢 manager tick")` → `action_manager_tick` 呼 `submit_request("tick")`（**非阻塞**，不卡 Textual event loop）→ 之後刷新面板顯示 `done` 結果。
+- `Binding("t", "manager_tick", "t 踢 manager tick")` → `action_manager_tick` 呼 `submit_request("tick")`（**非阻塞**，不卡 Textual event loop）→ 之後刷新 `status.json` rollup（含 `recent_done` / `last_tick_at`）。`ManagerModal` 開啟時會阻擋背景 pane bindings，避免 modal 開著還誤觸 swap / quit / focus。
 - 兩 Binding 自動出現在 `?` help modal（既有機制吃 `BINDINGS`）。
 
 ### 6.2 paulshiabro（`commands.json` + `daemon.py`）
@@ -154,13 +154,13 @@ flowchart LR
      → 原子寫 ~/.agents/control/requests/<id>.json
 daemon 下一輪 drain → manager.run_tick(...)（launch headless + poll 一趟）
      → 寫 done/<id>.json + 更新 status.json
-cockpit 面板刷新讀 status.json / poll_done(<id>) → 顯示 dispatched/completed
+cockpit 面板刷新讀 status.json（`recent_done` / `last_tick_at`）→ 顯示 dispatched/completed
 ```
 非同步：前端送出即返回，不等 tick 完成；狀態之後從檔案浮現。
 
 ## 8. 錯誤處理
 
-- daemon 單輪/單 request 失敗 → log + continue，不倒 loop；request 失敗寫 `done status=error, error=<reason>`。
+- daemon 單輪/單 request 失敗 → log + continue，不倒 loop；request 失敗寫 `done status=error, error=<reason>`。`status.json`/`done` 寫檔與 request 檔競態（例如檔案在 glob/stat/load 間消失）亦不應 topple daemon。
 - request schema 非法 → daemon 拒收並寫 error done。
 - `status.json` 讀不到/過期 → 前端顯示 degraded（`--`），不沿用舊值。
 - 前端 `submit_request` 失敗（control dir 不存在等）→ 明確錯誤訊息，不靜默。

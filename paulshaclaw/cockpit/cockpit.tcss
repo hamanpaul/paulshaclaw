@@ -91,10 +91,12 @@ Footer > .footer--description {
 }
 
 /* ? 說明 modal：置中、品牌橘框卡片 */
-HelpModal {
+HelpModal,
+ManagerModal {
     align: center middle;
 }
-#help-modal {
+#help-modal,
+#manager-modal {
     width: 66;
     height: auto;
     padding: 1 2;

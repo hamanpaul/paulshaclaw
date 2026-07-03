@@ -126,15 +126,16 @@ pytest tests/ paulshaclaw/memory/tests/
 | [`bot`](./paulshaclaw/bot/) | Telegram 主介面 | ~0.8k LOC | 在跑 | ✅ |
 | [`monitor`](./paulshaclaw/monitor/) | 跨專案狀態同步 | ~1.4k LOC | 在跑 | ✅ |
 | [`cockpit`](./paulshaclaw/cockpit/) | 實際的 TUI（多 session pane） | ~0.9k LOC | MVP 在跑 | ✅ |
+| [`control`](./paulshaclaw/control/) | manager control-plane 契約 / client | ~0.2k LOC | runtime 契約在跑 | 🟢 |
 | [`lifecycle`](./paulshaclaw/lifecycle/) | artifact / phase gate | ~0.4k LOC | library | 🟢 |
 | [`observability`](./paulshaclaw/observability/) | health / recovery | ~0.2k LOC | library | 🟢 |
 | [`security`](./paulshaclaw/security/) | redaction / approval / audit | ~0.3k LOC | library | 🟢 |
 | [`deploy`](./paulshaclaw/deploy/) | install / upgrade / uninstall | ~0.3k LOC | library | 🟢 |
 | [`persona`](./paulshaclaw/persona/) | scope / autonomy / config-loader 治理骨架 | ~0.76k LOC | **未接進 runtime** | 🧪 shadow |
-| [`coordinator`](./paulshaclaw/coordinator/) | multi-agent dispatch / registry / seams | ~0.64k LOC | **未接進 runtime** | 🧪 shadow |
+| [`coordinator`](./paulshaclaw/coordinator/) | multi-agent dispatch / registry / manager daemon / seams | ~0.9k LOC | manager daemon / control plane 在跑 | ✅ |
 | [`tui`](./paulshaclaw/tui/) | 早期 TUI 嘗試 | **僅 ~19 LOC** | 基本沒做 | 🚧（真 TUI 見 `cockpit`） |
 
-> ⚠️ **特別聲明（persona / coordinator）**：這兩塊有測試、有份量、踩 agent 治理熱題，**但目前尚未 wired 進任何運行路徑**（`core` / `bot` / `cockpit` 皆未 import）。本 repo 將其作為「**設計 + CLI 展示**」公開，標 **experimental / shadow**，**不宣稱「在跑」**。
+> ⚠️ **特別聲明（persona / coordinator）**：`persona` 仍是治理骨架，**尚未 wired 進 runtime**；但 `coordinator` 已透過 `start.sh` 的 resident **manager daemon** + `control` 檔案契約實際接進運行路徑。前端（`core` / `bot` / `cockpit`）依然只碰 `control` client，**不直接 import coordinator**。
 
 ---
 

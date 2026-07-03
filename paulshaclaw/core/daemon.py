@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from paulshaclaw.control import client as control_client
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_dispatcher import CommandDispatcher
 from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry
@@ -29,6 +30,17 @@ class CoordinatorClient(Protocol):
         """Create a minimal coordinator job."""
 
 
+class ManagerClient(Protocol):
+    def read_status(self) -> dict[str, object]:
+        """Read the current manager status snapshot."""
+
+    def submit_request(self, req_type: str, args: dict[str, object], requested_by: str) -> str:
+        """Submit a manager request and return its request id."""
+
+    def poll_done(self, req_id: str, timeout: float, poll_interval: float = 0.5) -> dict[str, object] | None:
+        """Wait briefly for a done record and return it when present."""
+
+
 @dataclass
 class LocalCoordinator:
     counter: int = 0
@@ -44,18 +56,23 @@ class LocalCoordinator:
 
 
 class PaulShiaBroDaemon:
+    MANAGER_TICK_TIMEOUT_SECONDS = 15.0
+    MANAGER_TICK_POLL_INTERVAL_SECONDS = 0.5
+
     def __init__(
         self,
         config: AppConfig,
         coordinator: CoordinatorClient | None = None,
         command_registry: CommandRegistry | None = None,
         tmate_manager: TmateManager | None = None,
+        manager_client: ManagerClient | None = None,
     ) -> None:
         self.config = config
         self.coordinator = coordinator or LocalCoordinator()
         self.command_registry = command_registry or load_default_command_registry()
         tmate_timeout = self.command_registry.get("/tmate").func_call.timeout_seconds or 3600
         self.tmate_manager = tmate_manager or TmateManager(timeout_seconds=tmate_timeout)
+        self.manager_client = manager_client or control_client
         self._cockpit_pane_id = next((pane.pane_id for pane in self.config.pane_assignments if pane.title == "cockpit"), None)
         self._agent_pane_id: str | None = None
         self.command_dispatcher = CommandDispatcher(
@@ -65,6 +82,7 @@ class PaulShiaBroDaemon:
                 "status": self._handle_status_command,
                 "dispatch": self._handle_dispatch_command,
                 "tmate": self._handle_tmate_command,
+                "manager": self._handle_manager_command,
                 "agent": self._handle_agent_command,
             },
         )
@@ -332,6 +350,34 @@ class PaulShiaBroDaemon:
             return self.tmate_manager.stop()
         raise ValueError("/tmate 只接受 status/start/stop")
 
+    def _handle_manager_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
+        if len(args) > 1:
+            raise ValueError("/manager 只接受 status/tick")
+
+        action = args[0] if args else "status"
+        if action == "status":
+            return {
+                "ok": True,
+                "kind": "manager",
+                "action": "status",
+                "text": self._format_manager_status(self.manager_client.read_status()),
+            }
+        if action == "tick":
+            req_id = self.manager_client.submit_request("tick", {}, "telegram")
+            done = self.manager_client.poll_done(
+                req_id,
+                timeout=self.MANAGER_TICK_TIMEOUT_SECONDS,
+                poll_interval=self.MANAGER_TICK_POLL_INTERVAL_SECONDS,
+            )
+            return {
+                "ok": True,
+                "kind": "manager",
+                "action": "tick",
+                "req_id": req_id,
+                "text": self._format_manager_tick_result(req_id, done),
+            }
+        raise ValueError("/manager 只接受 status/tick")
+
     def _handle_agent_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
         action = args[0] if args else "status"
         extra = args[1:]
@@ -404,6 +450,53 @@ class PaulShiaBroDaemon:
             return self._agent_status_payload(pane_id=rechecked_pane_id, pid=rechecked_pid)
 
         raise ValueError("/agent 只接受 start/startf/stop/status")
+
+    def _format_manager_status(self, status: dict[str, object]) -> str:
+        daemon = status.get("daemon")
+        daemon = daemon if isinstance(daemon, dict) else {}
+        ready = list(status.get("ready", []))
+        in_flight = list(status.get("in_flight", []))
+        recent_done = list(status.get("recent_done", []))
+        lines = [
+            "manager status",
+            f"updated_at: {status.get('updated_at') or '--'}",
+            f"daemon: pid={daemon.get('pid', '--')} idle={daemon.get('idle', '--')} last_tick_at={daemon.get('last_tick_at', '--')}",
+            f"ready({len(ready)}): {', '.join(str(item) for item in ready) if ready else '--'}",
+            f"in_flight({len(in_flight)}): {self._format_manager_items(in_flight, state_key='state')}",
+            f"recent_done({len(recent_done)}): {self._format_manager_items(recent_done, state_key='gate_status')}",
+        ]
+        if status.get("degraded"):
+            lines.insert(1, f"degraded: {status.get('degraded_reason') or '--'}")
+        return "\n".join(lines)
+
+    def _format_manager_items(self, items: list[object], *, state_key: str) -> str:
+        rendered: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            rendered.append(f"{item.get('slice_id', '--')}({item.get(state_key, '--')})")
+        return ", ".join(rendered) if rendered else "--"
+
+    def _format_manager_tick_result(self, req_id: str, done: dict[str, object] | None) -> str:
+        if done is None:
+            return "queued, check /manager status"
+        status = str(done.get("status", "unknown"))
+        if status == "error":
+            return f"manager tick: error\nreq_id: {req_id}\nerror: {done.get('error') or '--'}"
+
+        result = done.get("result")
+        parts: list[str] = []
+        if isinstance(result, dict):
+            for key in ("dispatch_skipped", "dispatched", "completed", "errors", "reaped"):
+                value = result.get(key)
+                if value in (None, [], {}):
+                    continue
+                if isinstance(value, list):
+                    parts.append(f"{key}={len(value)}")
+                else:
+                    parts.append(f"{key}={value}")
+        detail = ", ".join(parts) if parts else "done"
+        return f"manager tick: {status}\nreq_id: {req_id}\n{detail}"
 
     def handle_command(self, command: str) -> dict[str, object]:
         return self.command_dispatcher.execute(command)

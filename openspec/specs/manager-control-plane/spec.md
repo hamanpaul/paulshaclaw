@@ -1,4 +1,9 @@
-## ADDED Requirements
+# manager-control-plane Specification
+
+## Purpose
+Expose a file-contract control plane plus a resident manager daemon so cockpit and PaulShiaBro can observe and trigger persona-manager work without importing coordinator internals.
+
+## Requirements
 
 ### Requirement: Control-plane file contract root and layout
 
@@ -100,9 +105,9 @@ A failure processing one request SHALL be isolated: the daemon MUST write `done/
 
 The daemon's dispatch path SHALL preserve the existing manager safety gates unchanged: a headless `executor` (default `copilot`), `allow_unsafe` defaulting to false with the fail-closed guard that refuses fanout when at most one slice is ready, and worktrees cut from `main`.
 
-#### Scenario: Unsafe fanout is refused when too few slices are ready
+#### Scenario: Unsafe fanout is refused when too many slices are ready
 
-- **WHEN** a fanout is requested with `allow_unsafe` false and at most one slice ready
+- **WHEN** a fanout is requested with `allow_unsafe` true and more than one slice is ready
 - **THEN** the daemon refuses the fanout (fail-closed) and records the refusal
 
 ### Requirement: Frontend controller client never imports coordinator
