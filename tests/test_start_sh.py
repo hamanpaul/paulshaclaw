@@ -206,6 +206,13 @@ class StartScriptLifecycleTests(unittest.TestCase):
             f"start.sh `-m paulshaclaw.*` launches missing PYTHONPATH=$REPO: {missing}",
         )
 
+    def test_cleanup_bounds_owned_manager_wait_with_sigkill_fallback(self) -> None:
+        # #187 review fix #3: the owned-manager shutdown path must be bounded
+        # with a SIGKILL fallback so a wedged manager cannot hang cleanup on a
+        # bare unbounded `wait "$MANAGER_PID"`.
+        text = START_SH.read_text(encoding="utf-8")
+        self.assertIn("kill -KILL", text)
+
     def test_monitor_and_cockpit_start_without_telegram_inputs(self) -> None:
         self._run_lifecycle_test(cockpit_mode="exit", telegram_enabled=False, capture_output=True)
 

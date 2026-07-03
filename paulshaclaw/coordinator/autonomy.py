@@ -254,6 +254,7 @@ def dispatch_ready(
     errors: list[tuple[str, Exception]] = []
     for m in ready:
         slice_id = m["slice_id"]
+        job: dict | None = None
         try:
             prompt = build_dispatch_prompt(persona, task=slice_id, plan_path=m["plan"])
             worktree = _launcher_worktree(dispatcher, slice_id)
@@ -263,22 +264,26 @@ def dispatch_ready(
             except Exception:
                 dispatch_head = None
             log_dir = str(Path("runtime/dispatch") / slice_id)
+            # 在 launch 前先落地 registry row：Popen 之後、記錄完成之前若 daemon
+            # 崩潰，仍有可回收的 job 列（否則 agent 在跑卻無 job / in_flight / 輪詢）。
+            job = _record_launching_job(
+                dispatcher=dispatcher,
+                slice_id=slice_id,
+                persona=persona,
+                worktree=worktree,
+                dispatch_head=dispatch_head,
+            )
             handle = launcher.launch(
                 slice_id=slice_id,
                 prompt=prompt,
                 worktree=worktree,
                 log_dir=log_dir,
             )
-            job = _record_launcher_job(
-                dispatcher=dispatcher,
-                slice_id=slice_id,
-                persona=persona,
-                worktree=worktree,
-                handle=handle,
-                dispatch_head=dispatch_head,
-            )
+            job = _attach_launch_handle(dispatcher=dispatcher, job=job, handle=handle)
             jobs.append(job)
         except Exception as exc:
+            if job is not None:
+                _fail_launching_job(dispatcher, job)
             errors.append((slice_id, exc))
     if errors:
         raise DispatchReadyError(errors, jobs)
@@ -296,15 +301,15 @@ def _launcher_worktree(dispatcher, slice_id: str) -> str:
     return worktree_creator.create(_branch_for_slice(slice_id))
 
 
-def _record_launcher_job(
+def _record_launching_job(
     *,
     dispatcher,
     slice_id: str,
     persona: str,
     worktree: str,
-    handle: LaunchHandle,
     dispatch_head: str | None = None,
 ) -> dict:
+    """Persist the job row *before* launch (handle fields filled in later)."""
     registry = getattr(dispatcher, "_registry", None)
     if registry is None:
         return {
@@ -313,10 +318,10 @@ def _record_launcher_job(
             "worktree": worktree,
             "status": "dispatched",
             "dispatch_head": dispatch_head,
-            "executor": handle.executor,
-            "session_name": handle.session_name,
-            "pid": handle.pid,
-            "log_path": handle.log_path,
+            "executor": None,
+            "session_name": None,
+            "pid": None,
+            "log_path": None,
         }
     return registry.create_job(
         task=slice_id,
@@ -325,8 +330,39 @@ def _record_launcher_job(
         pane="",
         worktree=worktree,
         dispatch_head=dispatch_head,
+        executor=None,
+        session_name=None,
+        pid=None,
+        log_path=None,
+    )
+
+
+def _attach_launch_handle(*, dispatcher, job: dict, handle: LaunchHandle) -> dict:
+    """Fill in the launch handle on the pre-launch job row."""
+    registry = getattr(dispatcher, "_registry", None)
+    if registry is None or "job_id" not in job:
+        return {
+            **job,
+            "executor": handle.executor,
+            "session_name": handle.session_name,
+            "pid": handle.pid,
+            "log_path": handle.log_path,
+        }
+    return registry.attach_launch_handle(
+        job["job_id"],
         executor=handle.executor,
         session_name=handle.session_name,
         pid=handle.pid,
         log_path=handle.log_path,
     )
+
+
+def _fail_launching_job(dispatcher, job: dict) -> None:
+    """Reconcile a pre-launch row whose launch raised (mark failed)."""
+    registry = getattr(dispatcher, "_registry", None)
+    if registry is None or "job_id" not in job:
+        return
+    try:
+        registry.update_status(job["job_id"], "failed")
+    except Exception:
+        pass

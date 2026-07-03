@@ -175,3 +175,56 @@ def test_client_module_imports_without_coordinator(monkeypatch):
     importlib.import_module("paulshaclaw.control.client")
 
     assert attempted == []
+
+
+# ---- #184/#187 review fix: liveness-aware read_status ----
+
+def _write_status_file(tmp_path, *, pid, age_seconds):
+    from pathlib import Path
+    updated_at = (datetime.now(timezone.utc) - timedelta(seconds=age_seconds)).isoformat()
+    payload = {
+        "schema_version": constants.SCHEMA_VERSION,
+        "updated_at": updated_at,
+        "daemon": {"pid": pid, "last_tick_at": None, "idle": False},
+        "ready": [],
+        "in_flight": [],
+        "recent_done": [],
+    }
+    contract.atomic_write_json(constants.status_path(), payload)
+
+
+def test_read_status_live_busy_daemon_not_degraded(monkeypatch, tmp_path):
+    """A live-but-busy daemon (status older than the 15s window) is NOT degraded."""
+    import os
+    from paulshaclaw.control import client
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    _write_status_file(tmp_path, pid=os.getpid(), age_seconds=60)  # live pid, stale age
+    status = client.read_status()
+    assert status["degraded"] is False
+    assert status["degraded_reason"] is None
+
+
+def test_read_status_dead_pid_and_stale_is_degraded(monkeypatch, tmp_path):
+    from paulshaclaw.control import client
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+
+    def _dead(pid, sig):
+        raise ProcessLookupError()
+
+    monkeypatch.setattr(client.os, "kill", _dead)
+    _write_status_file(tmp_path, pid=424242, age_seconds=60)
+    status = client.read_status()
+    assert status["degraded"] is True
+    assert status["degraded_reason"] == "stale"
+
+
+def test_read_status_live_but_stalled_is_degraded(monkeypatch, tmp_path):
+    import os
+    from paulshaclaw.control import client
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    _write_status_file(
+        tmp_path, pid=os.getpid(), age_seconds=constants.STATUS_STALLED_AFTER_SECONDS + 30
+    )
+    status = client.read_status()
+    assert status["degraded"] is True
+    assert status["degraded_reason"] == "stalled"

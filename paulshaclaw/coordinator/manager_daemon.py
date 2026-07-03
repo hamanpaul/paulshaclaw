@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import fcntl
 import os
 import signal
 import sys
@@ -31,8 +32,19 @@ USE_DEFAULT_REAPER = object()
 @dataclass
 class HeldLock:
     path: Path
+    fd: int = -1
 
     def release(self) -> None:
+        if self.fd >= 0:
+            try:
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = -1
         self.path.unlink(missing_ok=True)
 
 
@@ -43,41 +55,47 @@ def acquire_lock(
     pid_alive: Callable[[int], bool] | None = None,
     now_fn: Callable[[], str] = contract.utcnow,
 ) -> HeldLock | None:
+    """Acquire the single-instance lock via ``flock``.
+
+    ``flock`` is held for the daemon's lifetime and released by the kernel on
+    process death, so a stale lock file left by a crashed daemon is reclaimable
+    with no manual liveness check or unlink — eliminating the check-then-unlink
+    race a second contender could otherwise use to steal a live lock. ``pid``
+    identifies the owner recorded in the file (for start.sh adoption); the
+    ``pid_alive`` parameter is retained for API compatibility and is unused.
+    """
     lock_path = path or constants.lock_path()
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     owner_pid = os.getpid() if pid is None else pid
-    alive = pid_alive or _pid_alive
     payload = {
         "schema_version": constants.SCHEMA_VERSION,
         "pid": owner_pid,
         "acquired_at": now_fn(),
     }
 
-    for _ in range(2):
-        fd, temp_name = tempfile.mkstemp(
-            dir=lock_path.parent,
-            prefix=f".{lock_path.name}.",
-            suffix=".tmp",
-            text=True,
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        # Another live daemon holds the exclusive lock.
+        os.close(fd)
+        return None
+    try:
+        os.ftruncate(fd, 0)
+        os.lseek(fd, 0, os.SEEK_SET)
+        os.write(
+            fd,
+            (json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"),
         )
-        temp_path = Path(temp_name)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, ensure_ascii=False, sort_keys=True)
-            handle.write("\n")
+        os.fsync(fd)
+    except OSError:
         try:
-            os.link(temp_path, lock_path)
-        except FileExistsError:
-            temp_path.unlink(missing_ok=True)
-            if _lock_is_live(lock_path, alive):
-                return None
-            lock_path.unlink(missing_ok=True)
-            continue
-        except Exception:
-            temp_path.unlink(missing_ok=True)
-            raise
-        temp_path.unlink(missing_ok=True)
-        return HeldLock(lock_path)
-    return None
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        os.close(fd)
+        raise
+    return HeldLock(lock_path, fd)
 
 
 def default_specs_dir() -> str:

@@ -132,6 +132,31 @@ class JobRegistry:
                 return dict(job)
         raise KeyError(f"job 不存在: {job_id}")
 
+    def attach_launch_handle(
+        self,
+        job_id: str,
+        *,
+        executor: str | None = None,
+        session_name: str | None = None,
+        pid: int | None = None,
+        log_path: str | None = None,
+    ) -> dict[str, object]:
+        """Fill in launch-handle fields on a row created before launch.
+
+        Used so the registry row can be persisted *before* the agent process is
+        started (crash-recovery), then updated with the handle once launch
+        returns.
+        """
+        for job in self._jobs:
+            if job["job_id"] == job_id:
+                job["executor"] = executor
+                job["session_name"] = session_name
+                job["pid"] = pid
+                job["log_path"] = log_path
+                self._persist()
+                return dict(job)
+        raise KeyError(f"job 不存在: {job_id}")
+
     def update_headless_result(
         self,
         job_id: str,

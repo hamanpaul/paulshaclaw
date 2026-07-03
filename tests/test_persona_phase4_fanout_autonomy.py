@@ -499,8 +499,58 @@ class FanoutTests(unittest.TestCase):
 
             self.assertEqual(launcher.calls, ["slice-a", "slice-b"])
             self.assertEqual([job["task"] for job in ctx.exception.jobs], ["slice-b"])
-            self.assertEqual([job["task"] for job in reg.list_jobs()], ["slice-b"])
+            # slice-a's row is persisted before launch (crash-recovery) and
+            # reconciled to "failed" when launch raises; slice-b dispatches fine.
+            jobs_by_task = {job["task"]: job for job in reg.list_jobs()}
+            self.assertEqual(sorted(jobs_by_task), ["slice-a", "slice-b"])
+            self.assertEqual(jobs_by_task["slice-a"]["status"], "failed")
+            self.assertIsNone(jobs_by_task["slice-a"]["pid"])
+            self.assertEqual(jobs_by_task["slice-b"]["pid"], 123)
             self.assertIn("slice-a", str(ctx.exception))
+
+    def test_dispatch_ready_persists_job_before_launch(self) -> None:
+        # #187 review fix #2: the registry row must be persisted BEFORE launch
+        # so a crash between Popen and the post-launch record leaves a
+        # recoverable job (not an orphaned agent with no job row).
+        from paulshaclaw.coordinator.autonomy import dispatch_ready
+        from paulshaclaw.coordinator.dispatcher import Dispatcher
+        from paulshaclaw.coordinator.launcher import LaunchHandle
+        from paulshaclaw.coordinator.registry import JobRegistry
+
+        class _FakeSender:
+            def send(self, pane_id, text):
+                raise AssertionError("launcher path must not send to pane")
+
+        class _FakeWt:
+            def create(self, branch):
+                return f"/fake/wt/{branch.replace('/', '-')}"
+
+        class _OrderLauncher:
+            def __init__(self, reg):
+                self.reg = reg
+                self.rows_at_launch = None
+
+            def launch(self, *, slice_id, prompt, worktree, log_dir):
+                self.rows_at_launch = [j["task"] for j in self.reg.list_jobs()]
+                return LaunchHandle(
+                    executor="copilot", session_name=slice_id, pid=123, log_path=f"{log_dir}/x"
+                )
+
+        with tempfile.TemporaryDirectory() as d:
+            reg = JobRegistry(state_path=Path(d) / "jobs.json")
+            launcher = _OrderLauncher(reg)
+            disp = Dispatcher(reg, _FakeSender(), _FakeWt())
+            jobs = dispatch_ready(
+                [_meta("slice-a", plan="docs/a.md")],
+                is_satisfied=lambda _id: True,
+                dispatcher=disp,
+                persona="builder",
+                launcher=launcher,
+            )
+            # row existed when launch ran; handle (pid) attached afterwards.
+            self.assertEqual(launcher.rows_at_launch, ["slice-a"])
+            self.assertEqual(jobs[0]["pid"], 123)
+            self.assertEqual(reg.get_job(jobs[0]["job_id"])["pid"], 123)
 
     def test_dispatch_ready_no_slice_id_not_dispatched(self) -> None:
         from paulshaclaw.coordinator.autonomy import dispatch_ready

@@ -745,10 +745,15 @@ def test_pid_alive_requires_manager_cmdline(tmp_path) -> None:
             proc.wait(timeout=10)
 
 
-def test_acquire_lock_publishes_payload_without_exposing_empty_lock_file() -> None:
+def test_acquire_lock_uses_flock_for_single_instance() -> None:
     source = inspect.getsource(manager_daemon.acquire_lock)
 
-    assert "os.link(" in source
+    # Single-instance is enforced by an exclusive flock (kernel-released on
+    # process death), so a stale lock is reclaimable with no check-then-unlink
+    # race that a second contender could use to steal a live lock.
+    assert "fcntl.flock" in source
+    assert "LOCK_EX" in source
+    assert "LOCK_NB" in source
     assert "os.O_EXCL" not in source
 
 
@@ -896,3 +901,26 @@ def test_main_returns_one_when_lock_refuses_second_instance(monkeypatch):
     exit_code = manager_daemon.main(["--tick-interval", "12", "--poll-interval", "1.5"])
 
     assert exit_code == 1
+
+
+# ---- #187 review fix #4: flock lock has no stale-lock steal race ----
+
+def test_acquire_lock_reclaims_stale_lock_file(tmp_path):
+    """A stale lock file (content present, no live flock holder) is reclaimable."""
+    lock_path = tmp_path / "manager.lock"
+    lock_path.write_text('{"schema_version":1,"pid":999999,"acquired_at":"x"}\n', encoding="utf-8")
+    held = manager_daemon.acquire_lock(path=lock_path, pid=222)
+    assert held is not None
+    held.release()
+
+
+def test_acquire_lock_reacquire_after_release(tmp_path):
+    lock_path = tmp_path / "manager.lock"
+    first = manager_daemon.acquire_lock(path=lock_path, pid=111)
+    assert first is not None
+    # a second contender is refused while the flock is held (no unlink race)
+    assert manager_daemon.acquire_lock(path=lock_path, pid=222) is None
+    first.release()
+    second = manager_daemon.acquire_lock(path=lock_path, pid=333)
+    assert second is not None
+    second.release()

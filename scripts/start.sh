@@ -65,6 +65,16 @@ cleanup() {
   done
   if [[ -n "${MANAGER_PID:-}" ]]; then
     if [[ "${MANAGER_PID_OWNED:-1}" == "1" ]]; then
+      # bounded graceful wait (100 x 0.05s = 5s), then SIGKILL fallback so a
+      # wedged manager cannot hang shutdown indefinitely.
+      local shutdown_checks=100
+      while (( shutdown_checks > 0 )) && kill -0 "$MANAGER_PID" 2>/dev/null; do
+        sleep 0.05
+        shutdown_checks=$((shutdown_checks - 1))
+      done
+      if kill -0 "$MANAGER_PID" 2>/dev/null; then
+        kill -KILL "$MANAGER_PID" 2>/dev/null || true
+      fi
       wait "$MANAGER_PID" 2>/dev/null || true
     else
       wait_for_manager_shutdown "$MANAGER_PID"
