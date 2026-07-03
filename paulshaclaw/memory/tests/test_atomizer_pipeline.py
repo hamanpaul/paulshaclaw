@@ -485,7 +485,12 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(len(list((root / "archive" / "fragments").rglob("*.md"))), 2)
             self.assertEqual(list(cache_dir.glob("*.retries")), [])
             self.assertEqual(list(cache_dir.glob("*.json")), [])
-            self.assertFalse(any("left in split" in warning for warning in result["warnings"]))
+            split_or_retry_warnings = [
+                warning
+                for warning in result["warnings"]
+                if "left in split" in warning or "retry " in warning
+            ]
+            self.assertEqual(split_or_retry_warnings, [])
 
     def test_llm_promotion_archives_unreferenced_fragments(self):
         with TemporaryDirectory() as tmp:
