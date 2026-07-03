@@ -202,8 +202,8 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
     - created/imported/updated/restored => active
     - accessed => preserves current state, updates last_access_ts
     - superseded => superseded, sets superseded_by from metadata.detail['superseded_by']
-      unless the event is a MOC reconcile file-dedup trace, which keeps the
-      logical record active while still leaving an audit trail
+    - MOC reconcile dedup traces (source="moc-reconcile") are audit-only and are
+      skipped here: they never create or change effective state (see #184)
     - archived => archived, sets archive_reason from reason
     - deleted => deleted, sets deleted flag
     - decayed => decayed
@@ -228,8 +228,14 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
         record_id = event["record_id"]
         event_type = event["event_type"]
         ts = event["ts"]
-        is_moc_reconcile_dedup = _is_moc_reconcile_dedup_event(event)
-        
+        # MOC reconcile dedup deletions are an audit-only trace: they live in
+        # the raw ledger (read_events) for provenance but MUST NOT establish or
+        # change effective lifecycle state. A slice whose only event is this
+        # trace stays "unknown"; a slice with a prior state keeps it.
+        # (#184 adversarial-review finding: it previously set None -> "active".)
+        if _is_moc_reconcile_dedup_event(event):
+            continue
+
         if record_id not in result:
             result[record_id] = {
                 "last_state": None,
@@ -239,10 +245,9 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
                 "superseded_by": None,
                 "deleted": None,
             }
-        
+
         rec = result[record_id]
-        if not is_moc_reconcile_dedup:
-            rec["last_event_ts"] = ts
+        rec["last_event_ts"] = ts
         
         if event_type in {"created", "imported", "updated", "restored", "reactivation"}:
             rec["last_state"] = "active"
@@ -251,19 +256,9 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
             rec["last_access_ts"] = ts
         elif event_type == "superseded":
             metadata = event.get("metadata") or {}
-            if is_moc_reconcile_dedup:
-                # MOC reconcile dedups duplicate physical files for the same
-                # logical slice_id. The deletion needs an audit event, but the
-                # surviving slice should only stay active when it was already
-                # active (or had no prior lifecycle state).
-                if rec["last_state"] in (None, "active"):
-                    rec["last_state"] = "active"
-                    rec["deleted"] = None
-                    rec["superseded_by"] = None
-            else:
-                rec["last_state"] = "superseded"
-                detail = metadata.get("detail") or {}
-                rec["superseded_by"] = detail.get("superseded_by")
+            rec["last_state"] = "superseded"
+            detail = metadata.get("detail") or {}
+            rec["superseded_by"] = detail.get("superseded_by")
         elif event_type == "archived":
             rec["last_state"] = "archived"
             rec["archive_reason"] = event.get("reason")

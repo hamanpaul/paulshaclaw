@@ -95,8 +95,28 @@ class NamingTests(unittest.TestCase):
                     "schema_version": "1",
                 },
             )
+            # sl-3 has no *state* event (the dedup trace is audit-only and is
+            # skipped by the fold), so it stays default-active for retrieval...
             self.assertEqual(retrieval_set.active_records(root, ["sl-3"]), ["sl-3"])
-            self.assertEqual(retrieval_set.record_state(root, "sl-3"), "active")
+            # ...but the audit-only trace MUST NOT establish lifecycle state, so
+            # a slice with no prior lifecycle reports "unknown" (#184 review).
+            self.assertEqual(retrieval_set.record_state(root, "sl-3"), "unknown")
+
+    def test_dedup_lifecycle_event_uses_injected_now(self):
+        # #184 review: the moc pass injects a logical `now`; the dedup ledger
+        # trace must stamp it (no wall-clock) so the ledger stays deterministic.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "knowledge" / "paulshaclaw").mkdir(parents=True)
+            _write(root, "first--sl-7.md", "sl-7", "OLD\n", title="first")
+            time.sleep(0.01)
+            _write(root, "second--sl-7.md", "sl-7", "NEW\n", title="second")
+            fixed_now = "2000-01-01T00:00:00Z"
+            naming.reconcile(root, fixed_now)
+            events = read_events(root)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["ts"], fixed_now)
+            self.assertTrue(events[0]["event_id"].startswith(fixed_now))
 
     def test_skips_moc_files(self):
         with TemporaryDirectory() as tmp:

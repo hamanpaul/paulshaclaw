@@ -49,11 +49,13 @@ def _append_superseded_event(
     slice_id: str,
     deleted_path: Path,
     kept_path: Path,
+    ts: str | None = None,
 ) -> None:
     """Best-effort lifecycle trace for reconcile deletions.
 
     ``kept_path`` is the file that survives the current unlink decision before
-    any follow-up rename happens.
+    any follow-up rename happens. ``ts`` carries the moc pass's injected ``now``
+    so the ledger event stays deterministic (no wall-clock in the moc pass).
     """
     try:
         lifecycle.append_event(
@@ -64,6 +66,7 @@ def _append_superseded_event(
             reason="moc dedup",
             actor="moc-reconcile",
             run_id=None,
+            ts=ts,
             metadata={
                 "deleted_path": str(deleted_path),
                 "kept_path": str(kept_path),
@@ -74,8 +77,12 @@ def _append_superseded_event(
         pass
 
 
-def reconcile(memory_root: Path) -> list[str]:
-    """Rename slices to <title>--<slice_id>.md and dedup by slice_id. Returns warnings."""
+def reconcile(memory_root: Path, now: str | None = None) -> list[str]:
+    """Rename slices to <title>--<slice_id>.md and dedup by slice_id. Returns warnings.
+
+    ``now`` is the moc pass's injected logical timestamp; it is stamped on the
+    dedup lifecycle traces so they stay deterministic (no wall-clock).
+    """
     knowledge = memory_root / "knowledge"
     warnings: list[str] = []
     if not knowledge.exists():
@@ -94,10 +101,10 @@ def reconcile(memory_root: Path) -> list[str]:
             if target.exists():
                 # Only overwrite if current file is newer
                 if path.stat().st_mtime <= target.stat().st_mtime:
-                    _append_superseded_event(memory_root, slice_id, path, target)
+                    _append_superseded_event(memory_root, slice_id, path, target, ts=now)
                     path.unlink()
                     continue
-                _append_superseded_event(memory_root, slice_id, target, path)
+                _append_superseded_event(memory_root, slice_id, target, path, ts=now)
                 target.unlink()
             path.rename(target)
             path = target
@@ -106,7 +113,7 @@ def reconcile(memory_root: Path) -> list[str]:
             if path.resolve() != other.resolve():
                 older = other if other.stat().st_mtime <= path.stat().st_mtime else path
                 newer = path if older is other else other
-                _append_superseded_event(memory_root, slice_id, older, newer)
+                _append_superseded_event(memory_root, slice_id, older, newer, ts=now)
                 older.unlink()
                 seen[slice_id] = newer
                 warnings.append(f"duplicate slice_id {slice_id}; kept {newer.name}")

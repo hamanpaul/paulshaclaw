@@ -204,6 +204,27 @@ class LifecycleLedgerTest(unittest.TestCase):
         self.assertEqual(result["rec-001"]["last_state"], "superseded")
         self.assertEqual(result["rec-001"]["superseded_by"], "rec-002")
 
+    def test_fold_lifecycle_moc_reconcile_only_does_not_establish_state(self):
+        # #184 review finding: an audit-only moc-reconcile dedup trace for a
+        # slice with no prior lifecycle MUST NOT create effective state (it
+        # previously folded to "active"). The record stays absent from the fold
+        # so record_state() reports "unknown".
+        events = [
+            {
+                "ts": "2024-01-02T00:00:00",
+                "record_id": "sl-audit-only",
+                "event_type": "superseded",
+                "source": "moc-reconcile",
+                "metadata": {
+                    "deleted_path": "/tmp/older.md",
+                    "kept_path": "/tmp/newer.md",
+                    "schema_version": "1",
+                },
+            },
+        ]
+        result = fold_lifecycle(events)
+        self.assertNotIn("sl-audit-only", result)
+
     def test_fold_lifecycle_moc_reconcile_superseded_preserves_active_state(self):
         events = [
             {"ts": "2024-01-01T00:00:00", "record_id": "rec-001", "event_type": "created"},
