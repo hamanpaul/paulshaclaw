@@ -81,13 +81,12 @@ def _iter_wrapped_json_array_candidates(raw: str, offset: int):
 
 
 def _unwrap_wrapped_json_array_candidate(candidate: dict[str, Any]) -> list[Any] | None:
-    array_keys = [key for key, value in candidate.items() if isinstance(value, list)]
-    if len(array_keys) != 1:
+    if len(candidate) != 1:
         return None
-    key = array_keys[0]
-    if key not in _PROPOSAL_ARRAY_WRAPPER_KEYS:
+    key, value = next(iter(candidate.items()))
+    if key not in _PROPOSAL_ARRAY_WRAPPER_KEYS or not isinstance(value, list):
         return None
-    return candidate[key]
+    return value
 
 
 def _is_standalone_json_value(raw: str, start: int, end: int) -> bool:

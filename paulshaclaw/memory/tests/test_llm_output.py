@@ -345,6 +345,11 @@ class LlmOutputTests(unittest.TestCase):
         with self.assertRaisesRegex(llm_output.LlmOutputError, "no JSON array found"):
             llm_output.parse(raw, PROJECTS)
 
+    def test_does_not_unwrap_wrapper_with_extra_top_level_metadata(self):
+        raw = json.dumps({"findings": [], "note": "created file knowledge/foo.md"})
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "no JSON array found"):
+            llm_output.parse(raw, PROJECTS)
+
 
 class LlmOutputLenientTests(unittest.TestCase):
     """Lenient repair: drop bad relations / coerce unknown project / skip hard-error
