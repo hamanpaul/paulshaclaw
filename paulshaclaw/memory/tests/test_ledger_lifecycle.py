@@ -204,6 +204,82 @@ class LifecycleLedgerTest(unittest.TestCase):
         self.assertEqual(result["rec-001"]["last_state"], "superseded")
         self.assertEqual(result["rec-001"]["superseded_by"], "rec-002")
 
+    def test_fold_lifecycle_moc_reconcile_superseded_preserves_active_state(self):
+        events = [
+            {"ts": "2024-01-01T00:00:00", "record_id": "rec-001", "event_type": "created"},
+            {
+                "ts": "2024-01-02T00:00:00",
+                "record_id": "rec-001",
+                "event_type": "superseded",
+                "source": "moc-reconcile",
+                "metadata": {
+                    "deleted_path": "/tmp/older.md",
+                    "kept_path": "/tmp/newer.md",
+                    "schema_version": "1",
+                },
+            },
+        ]
+
+        result = fold_lifecycle(events)
+        self.assertEqual(result["rec-001"]["last_state"], "active")
+        self.assertIsNone(result["rec-001"]["deleted"])
+        self.assertEqual(result["rec-001"]["last_event_ts"], "2024-01-01T00:00:00")
+
+    def test_fold_lifecycle_moc_reconcile_superseded_preserves_prior_inactive_state(self):
+        cases = [
+            (
+                {"ts": "2024-01-02T00:00:00", "record_id": "rec-arch", "event_type": "archived", "reason": "cleanup"},
+                "archived",
+                None,
+            ),
+            (
+                {"ts": "2024-01-02T00:00:00", "record_id": "rec-decay", "event_type": "decayed", "reason": "ttl_expired"},
+                "decayed",
+                None,
+            ),
+            (
+                {"ts": "2024-01-02T00:00:00", "record_id": "rec-deleted", "event_type": "deleted"},
+                "deleted",
+                True,
+            ),
+            (
+                {
+                    "ts": "2024-01-02T00:00:00",
+                    "record_id": "rec-superseded",
+                    "event_type": "superseded",
+                    "metadata": {"detail": {"superseded_by": "rec-new"}},
+                },
+                "superseded",
+                None,
+            ),
+        ]
+
+        for previous_event, expected_state, expected_deleted in cases:
+            with self.subTest(record_id=previous_event["record_id"], expected_state=expected_state):
+                events = [
+                    {"ts": "2024-01-01T00:00:00", "record_id": previous_event["record_id"], "event_type": "created"},
+                    previous_event,
+                    {
+                        "ts": "2024-01-03T00:00:00",
+                        "record_id": previous_event["record_id"],
+                        "event_type": "superseded",
+                        "source": "moc-reconcile",
+                        "metadata": {
+                            "deleted_path": "/tmp/older.md",
+                            "kept_path": "/tmp/newer.md",
+                            "schema_version": "1",
+                        },
+                    },
+                ]
+
+                result = fold_lifecycle(events)
+                self.assertEqual(result[previous_event["record_id"]]["last_state"], expected_state)
+                self.assertEqual(result[previous_event["record_id"]]["deleted"], expected_deleted)
+                self.assertEqual(
+                    result[previous_event["record_id"]]["last_event_ts"],
+                    previous_event["ts"],
+                )
+
     def test_fold_lifecycle_archived(self):
         events = [
             {"ts": "2024-01-01T00:00:00", "record_id": "rec-001", "event_type": "created"},

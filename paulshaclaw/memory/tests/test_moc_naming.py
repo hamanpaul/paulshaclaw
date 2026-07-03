@@ -2,17 +2,31 @@ from __future__ import annotations
 
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from paulshaclaw.memory.ledger.lifecycle import read_events
+from paulshaclaw.memory.ledger import retrieval_set
 from paulshaclaw.memory.moc import naming
 
 
-def _write(root: Path, name: str, fm_extra: str, body: str = "body\n") -> Path:
+def _write(
+    root: Path,
+    name: str,
+    slice_id: str,
+    body: str = "body\n",
+    *,
+    title: str | None = None,
+) -> Path:
     path = root / "knowledge" / "paulshaclaw" / name
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\nslice_id: {fm_extra}\nmemory_layer: knowledge\nproject: paulshaclaw\n"
-                    f"artifact_kind: research\n---\n{body}", encoding="utf-8")
+    title_line = f"title: {title}\n" if title else ""
+    path.write_text(
+        f"---\nslice_id: {slice_id}\nmemory_layer: knowledge\nproject: paulshaclaw\n"
+        f"artifact_kind: research\n{title_line}---\n{body}",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -53,16 +67,36 @@ class NamingTests(unittest.TestCase):
             naming.reconcile(root)
             self.assertTrue((root / "knowledge" / "paulshaclaw" / "research-paulshaclaw--sl-2.md").exists())
 
-    def test_dedup_keeps_one_per_slice_id(self):
+    def test_dedup_keeps_one_per_slice_id_and_records_lifecycle_event(self):
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             kdir = root / "knowledge" / "paulshaclaw"
             kdir.mkdir(parents=True)
-            (kdir / "sl-3.md").write_text("---\nslice_id: sl-3\nmemory_layer: knowledge\nproject: paulshaclaw\nartifact_kind: research\n---\nNEW\n", encoding="utf-8")
-            (kdir / "old--sl-3.md").write_text("---\nslice_id: sl-3\nmemory_layer: knowledge\nproject: paulshaclaw\nartifact_kind: research\n---\nOLD\n", encoding="utf-8")
-            naming.reconcile(root)
+            older = _write(root, "first--sl-3.md", "sl-3", "OLD\n", title="first")
+            time.sleep(0.01)
+            newer = _write(root, "second--sl-3.md", "sl-3", "NEW\n", title="second")
+            warnings = naming.reconcile(root)
             remaining = sorted(p.name for p in kdir.glob("*sl-3*.md"))
-            self.assertEqual(len(remaining), 1)
+            self.assertEqual(remaining, ["second--sl-3.md"])
+            self.assertEqual(warnings, ["duplicate slice_id sl-3; kept second--sl-3.md"])
+            events = read_events(root)
+            self.assertEqual(len(events), 1)
+            event = events[0]
+            self.assertEqual(event["record_id"], "sl-3")
+            self.assertEqual(event["event_type"], "superseded")
+            self.assertEqual(event["source"], "moc-reconcile")
+            self.assertEqual(event["actor"], "moc-reconcile")
+            self.assertEqual(event["reason"], "moc dedup")
+            self.assertEqual(
+                event["metadata"],
+                {
+                    "deleted_path": str(older),
+                    "kept_path": str(newer),
+                    "schema_version": "1",
+                },
+            )
+            self.assertEqual(retrieval_set.active_records(root, ["sl-3"]), ["sl-3"])
+            self.assertEqual(retrieval_set.record_state(root, "sl-3"), "active")
 
     def test_skips_moc_files(self):
         with TemporaryDirectory() as tmp:
@@ -92,6 +126,73 @@ class NamingTests(unittest.TestCase):
             content = target.read_text(encoding="utf-8")
             self.assertIn("NEW", content, "Should keep newer file's content")
             self.assertNotIn("OLD", content)
+            events = read_events(root)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event_type"], "superseded")
+            self.assertEqual(
+                events[0]["metadata"],
+                {
+                    "deleted_path": str(older),
+                    "kept_path": str(target),
+                    "schema_version": "1",
+                },
+            )
+
+    def test_rename_collision_replaces_older_target_and_records_lifecycle_event(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kdir = root / "knowledge" / "paulshaclaw"
+            kdir.mkdir(parents=True)
+            target = kdir / "target--sl-10.md"
+            target.write_text(
+                "---\nslice_id: sl-10\nmemory_layer: knowledge\nproject: paulshaclaw\nartifact_kind: research\ntitle: target\n---\nOLD\n",
+                encoding="utf-8",
+            )
+            time.sleep(0.01)
+            source = kdir / "old-name--sl-10.md"
+            source.write_text(
+                "---\nslice_id: sl-10\nmemory_layer: knowledge\nproject: paulshaclaw\nartifact_kind: research\ntitle: target\n---\nNEW\n",
+                encoding="utf-8",
+            )
+
+            naming.reconcile(root)
+
+            self.assertTrue(target.exists())
+            self.assertFalse(source.exists())
+            self.assertEqual(
+                target.read_text(encoding="utf-8").splitlines()[-1],
+                "NEW",
+            )
+            events = read_events(root)
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["record_id"], "sl-10")
+            self.assertEqual(
+                events[0]["metadata"],
+                {
+                    "deleted_path": str(target),
+                    "kept_path": str(source),
+                    "schema_version": "1",
+                },
+            )
+
+    def test_lifecycle_append_failure_does_not_abort_reconcile(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            kdir = root / "knowledge" / "paulshaclaw"
+            kdir.mkdir(parents=True)
+            _write(root, "first--sl-11.md", "sl-11", "OLD\n", title="first")
+            time.sleep(0.01)
+            newer = _write(root, "second--sl-11.md", "sl-11", "NEW\n", title="second")
+
+            with mock.patch(
+                "paulshaclaw.memory.ledger.lifecycle.append_event",
+                side_effect=OSError("ledger down"),
+            ):
+                warnings = naming.reconcile(root)
+
+            self.assertEqual(warnings, ["duplicate slice_id sl-11; kept second--sl-11.md"])
+            self.assertTrue(newer.exists())
+            self.assertEqual(read_events(root), [])
 
 
 if __name__ == "__main__":

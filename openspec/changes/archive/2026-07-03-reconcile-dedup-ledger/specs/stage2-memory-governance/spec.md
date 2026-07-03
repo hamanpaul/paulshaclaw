@@ -4,7 +4,7 @@
 
 When the MOC naming reconcile pass deletes a file to resolve a duplicate `slice_id` (or removes an older file it overwrites during rename), it SHALL append a lifecycle event to `runtime/ledger/lifecycle.jsonl` via the lifecycle ledger API, recording the deletion with `event_type` `superseded`, the `slice_id` as `record_id`, a `reason` identifying the moc dedup, and metadata identifying the deleted and kept paths. No reconcile deletion may be unrecorded.
 
-The reconcile pass's choice of **which** file survives MUST remain identical to the pre-change behavior — only the ledger trace is added. A lifecycle-ledger write failure MUST NOT abort the pass; it degrades to the existing warning and the pass continues.
+The reconcile pass's choice of **which** file survives MUST remain identical to the pre-change behavior — only the ledger trace is added. These audit-only lifecycle events MUST NOT change the slice's effective lifecycle state or lifecycle-based recency semantics. A lifecycle-ledger write failure MUST NOT abort the pass; it degrades to the existing warning and the pass continues.
 
 #### Scenario: Duplicate slice_id dedup emits a lifecycle event
 
