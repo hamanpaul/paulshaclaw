@@ -67,6 +67,17 @@ policy_version: 1.0.12
 - **R-20（workflow policy_version 同步，FAIL gate，無豁免 label）**：workflow 內宣告的 `policy_version` / `POLICY_VERSION` semver 字面值必須與 `.paul-project.yml` 一致。
 - **Exemption 白名單新增**：`policy-exempt:ci-tests`（R-19）。
 
+## v1.0.12 新增規則（隨 paulsha-conventions 1.0.3→1.0.12 升級，2026-07-04）
+引擎 pin 已升到 v1.0.12（見 policy-check workflow 與上游 RELEASES 及 CHANGELOG）。1.0.3~1.0.12 新增的規則對本 repo 多為 opt-in：未在專案設定檔（paul-project）宣告對應欄位即不啟用（NA）。摘要如下，日後啟用再遵循：
+
+- R-14（1.0.6 起，無豁免）：四份 agent 慣例檔（CLAUDE／AGENTS／GEMINI／copilot-instructions）在 copy 模式下須完全一致，含版本欄與首行 managed-by 版本註記——改任一份或 bump 版本都要同步四份；symlink 模式則後三者須為指向 CLAUDE 的 symlink。
+- R-09（1.0.9 起）：改為 per-PR changelog 碎片模型；本 repo 目前直寫 changelog、未採碎片，故不強制。
+- R-21 機密掃描（opt-in tier）：宣告 tier 為 shareable 才啟用，掃雇主標記、個人絕對路徑與憑證。本 repo 不宣告 tier——切勿設 shareable（含大量個人絕對路徑與廠商名）。
+- R-22 doc-reference 懸空引用（diff-aware）：本次 PR 新造成的懸空為 FAIL、陳年為 advisory WARN；豁免 label 為 doc-reference。本 repo 現有約 163 筆陳年 advisory（多為 README roadmap 前向引用），不擋 merge。
+- R-23 引擎 pin 版本 attestation（需宣告 conventions engine 才啟用）；R-24 moc-alignment（opt-in moc）；R-25 doc-coverage（opt-in）；R-26 generated-fact marker（opt-in）——本 repo 皆未宣告，NA。
+- 升版流程：改 pin 或版本前，先在本機以目標引擎版本實跑並確認零 fail 再推送（本地舊版引擎測不到新規則）；功能分支 slug 不得含小數點。
+
+
 ## 架構與專案慣例（吸收自 copilot-instructions）
 
 ### 分階段生命週期（staged lifecycle）
