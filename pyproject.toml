@@ -15,3 +15,6 @@ include = ["paulshaclaw*"]
 [tool.setuptools.package-data]
 # cockpit 視覺設計系統樣式表需隨套件出貨（CSS_PATH 於 wheel 安裝時才找得到）
 "paulshaclaw.cockpit" = ["*.tcss"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

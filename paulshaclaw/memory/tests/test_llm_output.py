@@ -1,15 +1,35 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from paulshaclaw.memory.atomizer import llm_output
 
 PROJECTS = ["paulshaclaw", "prplos-core"]
+WRAPPER_KEYS = ("findings", "slices", "proposals", "atoms")
 GOOD = (
     'prose before\n```json\n'
     '[{"title":"a","artifact_kind":"report","project":"paulshaclaw","tags":["t"],'
     '"body":"b","source_fragment_indices":[0],"relations":[]}]\n```\nprose after'
 )
+
+
+def _proposal_payload(
+    title: str,
+    *,
+    artifact_kind: str = "report",
+    project: str = "paulshaclaw",
+    fragment_index: int = 0,
+) -> dict[str, object]:
+    return {
+        "title": title,
+        "artifact_kind": artifact_kind,
+        "project": project,
+        "tags": ["t"],
+        "body": f"body-{title}",
+        "source_fragment_indices": [fragment_index],
+        "relations": [],
+    }
 
 
 class LlmOutputTests(unittest.TestCase):
@@ -25,6 +45,18 @@ class LlmOutputTests(unittest.TestCase):
             '"source_fragment_indices":[0],"relations":[]}]'
         )
         self.assertEqual(len(llm_output.parse(raw, PROJECTS)), 1)
+
+    def test_parses_object_wrapped_whitelisted_array(self):
+        for key in WRAPPER_KEYS:
+            with self.subTest(key=key):
+                raw = json.dumps({key: [_proposal_payload("a"), _proposal_payload("b", fragment_index=1)]})
+                proposals = llm_output.parse(raw, PROJECTS)
+                self.assertEqual([proposal.title for proposal in proposals], ["a", "b"])
+
+    def test_object_wrapped_empty_array_returns_no_proposals(self):
+        for key in WRAPPER_KEYS:
+            with self.subTest(key=key):
+                self.assertEqual(llm_output.parse(json.dumps({key: []}), PROJECTS), [])
 
     def test_empty_array_returns_no_proposals(self):
         self.assertEqual(llm_output.parse("[]", PROJECTS), [])
@@ -292,6 +324,30 @@ class LlmOutputTests(unittest.TestCase):
             '"source_fragment_indices":[1],"relations":[]}]'
         )
         with self.assertRaisesRegex(llm_output.LlmOutputError, "multiple valid JSON arrays found"):
+            llm_output.parse(raw, PROJECTS)
+
+    def test_wrapped_array_and_bare_array_still_raise_multiple_valid_arrays(self):
+        raw = (
+            json.dumps({"findings": [_proposal_payload("a")]})
+            + "\n"
+            + json.dumps([_proposal_payload("b", artifact_kind="plan", project="prplos-core", fragment_index=1)])
+        )
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "multiple valid JSON arrays found"):
+            llm_output.parse(raw, PROJECTS)
+
+    def test_does_not_unwrap_non_whitelisted_array_key(self):
+        raw = json.dumps({"results": [_proposal_payload("a")]})
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "no JSON array found"):
+            llm_output.parse(raw, PROJECTS)
+
+    def test_does_not_unwrap_object_with_multiple_array_keys(self):
+        raw = json.dumps({"findings": [_proposal_payload("a")], "atoms": []})
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "no JSON array found"):
+            llm_output.parse(raw, PROJECTS)
+
+    def test_does_not_unwrap_wrapper_with_extra_top_level_metadata(self):
+        raw = json.dumps({"findings": [], "note": "created file knowledge/foo.md"})
+        with self.assertRaisesRegex(llm_output.LlmOutputError, "no JSON array found"):
             llm_output.parse(raw, PROJECTS)
 
 

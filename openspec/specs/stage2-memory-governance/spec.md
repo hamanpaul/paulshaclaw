@@ -380,6 +380,15 @@ Stage 2 SHALL ship a seed atomization skill document at `paulshaclaw/memory/atom
 - **WHEN** a reviewer reads the seed skill document
 - **THEN** it MUST describe the required JSON output schema the agent must emit, including `artifact_kind`, `project`, `tags`, `body`, `source_fragment_indices`, and `relations`
 
+### Requirement: Atomizer prompt forbids execution and prose
+
+Stage 2 SHALL require the atomize-knowledge-slice prompt, including the final rendered runtime prompt, to instruct the model to return only an inline JSON array, and to NOT perform file create/write actions and NOT return prose, narration, summaries, markdown fences, or any text before/after the JSON array.
+
+#### Scenario: Prompt states the inline-array-only contract
+
+- **WHEN** the atomizer prompt is rendered for a promotion attempt
+- **THEN** it MUST explicitly require an inline JSON array response and forbid file-creating/writing actions and prose narration
+
 ### Requirement: Knowledge slice frontmatter union contract
 
 Stage 2 SHALL produce knowledge slices whose frontmatter is the union of the Topic 4 janitor read contract and the Stage 3 frontmatter schema, plus a Stage-2-owned `tags` field. Each slice frontmatter MUST pass `paulshaclaw.lifecycle.schema.validate_frontmatter` and MUST also expose the Topic 4 fields (`memory_layer=knowledge`, `source_agent`, `captured_at`, `provenance`, `supersedes`). The atomizer MUST assign `slice_id`, `artifact_kind`, `checksum`, and `supersedes` deterministically and MUST NOT extend or redefine the Stage 3 required frontmatter schema. `checksum` MUST equal `sha256(slice body)`.
@@ -404,6 +413,30 @@ Stage 2 SHALL require the LLM promoter to return a JSON array of slice proposals
 - **WHEN** the agent returns malformed JSON, an out-of-range `artifact_kind`, an unknown `project`, or an empty `body`
 - **THEN** no knowledge slice MAY be written for that session
 - **THEN** the session MUST remain in `state=split` with a warning, for retry on the next run
+
+### Requirement: Object-wrapped JSON array unwrap in promotion parsing
+
+The atomizer JSON extraction SHALL unwrap a top-level JSON object only when it contains exactly one top-level key, that key is drawn from the whitelist {`findings`, `slices`, `proposals`, `atoms`}, and its value is a list, treating that list as the proposals payload. Extraction of a bare top-level array and of multiple valid arrays MUST continue to behave exactly as before this change.
+
+#### Scenario: Object-wrapped non-empty array extracts to slices
+
+- **WHEN** the model returns `{"findings": [ {…}, {…} ]}`
+- **THEN** the parser unwraps the `findings` array and extracts the two slice proposals
+
+#### Scenario: Object-wrapped empty array reaches the slices=0 terminal state
+
+- **WHEN** the model returns `{"findings": []}`
+- **THEN** the parser yields an empty array and the session reaches the `slices=0` terminal state (promoted, fragments archived, cache cleared) rather than being parked
+
+#### Scenario: Bare array and multiple arrays are unchanged
+
+- **WHEN** the output is a bare top-level JSON array, or contains multiple valid top-level arrays
+- **THEN** extraction behaves identically to the pre-change parser
+
+#### Scenario: Object with multiple, non-whitelisted, or extra top-level fields is not unwrapped
+
+- **WHEN** the top-level object has more than one top-level key, has more than one array-valued key, or its lone array key is not in the whitelist
+- **THEN** the parser does NOT unwrap it (no false-positive extraction)
 
 ### Requirement: Flow-through with archive retention
 
@@ -467,6 +500,16 @@ Stage 2 atomizer execution MUST be deterministic given `(records, ledgers, confi
 - **WHEN** a single raw session document has unparseable frontmatter
 - **THEN** that session MUST be skipped with a warning
 - **THEN** other sessions MUST still be processed
+
+### Requirement: Recovery note for parser-recoverable parked sessions
+
+The documented recovery for parser-recoverable parked sessions SHALL clear only the affected session+fragment cache key and its `.retries` sidecar, then rerun dream and expect the session to reach `promoted` (including the `slices=0` case).
+
+#### Scenario: Recovery note scopes the cleanup and expected outcome
+
+- **WHEN** a reviewer reads the recovery note for object-wrapped parked sessions
+- **THEN** it MUST limit cleanup to the affected session+fragment cache key and matching `.retries` sidecar
+- **THEN** it MUST state that rerun is expected to end in `promoted`, including the `slices=0` terminal case
 
 ### Requirement: Redaction trust boundary for distilled output
 
