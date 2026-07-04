@@ -784,3 +784,240 @@ The validation gate SHALL score each rollout output with a hybrid of a determini
 - **WHEN** the loop scores a candidate on the validation set
 - **THEN** the score MUST combine structural and judge components into a single 0–1 value
 - **THEN** the judge MUST NOT be prompted to assign or correct the project
+
+### Requirement: Promotion failure clears the poisoned LLM cache
+
+When session promotion fails with a `PromoteError` under an LLM promoter backed by a caching agent client, the atomizer pipeline SHALL clear the cached raw output for that session's fragments (cache key `<agent>:<session>__<sha256(fragments)>`) before leaving the session in `split` state **only when that failed attempt actually produced cached raw output**. Failures that occur before any cache write (for example an underlying `AgentExecError` transport failure) MUST leave the retry counter unchanged, MUST NOT claim poisoned-cache retention, and MUST keep the session eligible for a real LLM call on the next atomize run. Cache clearing MUST NOT occur for non-LLM promoters, MUST NOT occur in dry-run mode, and MUST only unlink files inside `runtime/cache/atomize/` after validating the cache key.
+
+#### Scenario: Poisoned cache is cleared on promote failure
+
+- **WHEN** an LLM promoter with a caching agent client produces unparseable output for a split session (a `PromoteError`)
+- **THEN** the session MUST remain in `split` state with a `left in split` warning
+- **THEN** the cache file for that session's fragments MUST no longer exist under `runtime/cache/atomize/`
+
+#### Scenario: Next run re-invokes the LLM and recovers
+
+- **WHEN** the first atomize run fails promotion with bad LLM output and a second run's LLM output is valid
+- **THEN** the second run MUST invoke the underlying agent again (no cache replay of the bad output)
+- **THEN** the session MUST reach `promoted` state on the second run
+
+#### Scenario: Transport failure leaves no cache and no retry-budget mutation
+
+- **WHEN** the underlying agent command fails before any raw output is cached for a split session
+- **THEN** no `.json` cache file may be created and no `.retries` sidecar may be created or incremented for that failed attempt
+- **THEN** the warning text MUST describe a transport / no-cache retry state and MUST NOT claim poisoned-cache retention
+- **THEN** a later run MUST still invoke the underlying agent again
+
+#### Scenario: Identity promoter failures do not touch the cache
+
+- **WHEN** a non-LLM promoter raises during promotion for a session
+- **THEN** no file under `runtime/cache/atomize/` may be created or deleted by the failure handling
+
+#### Scenario: Dry-run backlog preview does not mutate cache or retry budget
+
+- **WHEN** `dry_run=True`, the raw inbox document for a session has already been archived, and that session remains in `split` with an existing cache file and `.retries` sidecar
+- **THEN** the cache file MUST remain present and the `.retries` sidecar MUST remain unchanged after the dry-run
+- **THEN** the underlying agent MUST NOT be invoked
+
+### Requirement: Empty proposal output is a terminal promoted state
+
+The LLM output parser SHALL treat an empty JSON array (including one wrapped in a fenced code block and surrounded by prose) as a valid result meaning "no extractable knowledge", returning zero proposals instead of raising. The atomizer pipeline SHALL bring such a session to `state=promoted` with `slices=0`, archive its fragments, clear its cache, and emit no `left in split` warning. A non-empty JSON array whose every proposal is schema-invalid MUST still raise (`no salvageable proposals`).
+
+#### Scenario: Bare empty array parses to zero proposals
+
+- **WHEN** the raw agent output is `[]`
+- **THEN** parsing MUST return an empty proposal list without raising
+
+#### Scenario: Fenced empty array with reasoning prose parses to zero proposals
+
+- **WHEN** the raw agent output is a fenced ```json``` block containing `[]` followed by reasoning prose
+- **THEN** parsing MUST return an empty proposal list without raising
+
+#### Scenario: Session with empty LLM output reaches promoted with zero slices
+
+- **WHEN** an LLM promoter returns zero slices for a split session
+- **THEN** the processing ledger MUST record `state=promoted` with `slices: 0` for that session
+- **THEN** the session's fragments MUST be archived out of `inbox/_slices/` and its cache cleared
+- **THEN** no `left in split` warning may be emitted for that session
+
+#### Scenario: All-invalid proposals still fail closed
+
+- **WHEN** the raw agent output is a non-empty JSON array in which every proposal violates the schema
+- **THEN** parsing MUST raise an error mentioning `no salvageable proposals`
+
+### Requirement: Bounded LLM retry budget per stuck session
+
+The atomizer pipeline SHALL bound LLM re-invocations for a repeatedly **content-failing** session using a persistent retry counter stored as `runtime/cache/atomize/<cache_key>.retries`. On each `PromoteError` under an LLM promoter (non-dry-run), the counter MUST be incremented only when the cached raw-output file exists for that failed attempt; transport failures that leave no cached raw output MUST leave the counter unchanged. The poisoned cache MUST be cleared only while the incremented count is at or below the budget (5). Once the count exceeds the budget, the poisoned cache MUST be retained so later runs fail at parse time without invoking the LLM, while still emitting a warning that identifies the exhausted budget. Successful promotion MUST remove the retry counter together with the cache file. Retry-counter file paths MUST pass the same cache-key validation and directory-containment checks as cache files.
+
+#### Scenario: Failure within budget increments the counter and clears the cache
+
+- **WHEN** a split session fails promotion for the first time under an LLM promoter
+- **THEN** `runtime/cache/atomize/<cache_key>.retries` MUST contain `1`
+- **THEN** the cache file MUST be cleared so the next run re-invokes the LLM
+
+#### Scenario: First post-outage content failure starts at retry 1
+
+- **WHEN** one or more transport failures happened without writing cached raw output and a later LLM response fails after being cached
+- **THEN** `runtime/cache/atomize/<cache_key>.retries` MUST contain `1`
+- **THEN** the cache file MUST be cleared so the session still retains the remaining content retry budget
+
+#### Scenario: Exhausted budget parks on the poisoned cache
+
+- **WHEN** a session's retry counter already equals the budget and promotion fails again
+- **THEN** the counter MUST be incremented past the budget and the cache file MUST be retained
+- **THEN** a subsequent run MUST NOT invoke the underlying agent for that session (cache replay only) and MUST still record a warning
+
+#### Scenario: Success clears the retry counter
+
+- **WHEN** a session with an existing retry counter is successfully promoted
+- **THEN** both the cache file and the `.retries` sidecar for its cache key MUST be removed
+
+### Requirement: Dream record surfaces pass warnings
+
+The dream orchestrator SHALL include warning text in the per-pass summary written to the dream ledger: when a pass returns a non-empty warnings list, the pass summary MUST contain `warnings` (the first 10 warning strings, each truncated to at most 500 characters) and `warnings_total` (the full count). When the warnings list is empty or absent, the pass summary MUST NOT contain these keys. Recorded warning text MUST NOT include raw prompts or raw LLM output bodies.
+
+#### Scenario: Warning text reaches the dream ledger
+
+- **WHEN** the atomize pass returns warnings `["claude:s1: llm promote failed: ...; session claude:s1 left in split"]`
+- **THEN** the persisted dream record MUST contain that warning string in `passes.atomize.warnings`
+- **THEN** `passes.atomize.warnings_total` MUST equal `1` and the run status MUST be `partial`
+
+#### Scenario: Warning overflow is truncated but counted
+
+- **WHEN** a pass returns 45 warnings
+- **THEN** `passes.<pass>.warnings` MUST contain exactly 10 entries and `warnings_total` MUST equal `45`
+
+#### Scenario: Clean pass summary is unchanged
+
+- **WHEN** a pass returns an empty warnings list
+- **THEN** its pass summary MUST NOT contain `warnings` or `warnings_total` keys
+
+### Requirement: Atomizer default promoter is LLM distillation
+
+Stage 2 SHALL ship the atomizer with `promoter: llm` as the packaged default (`paulshaclaw/memory/atomizer/atomizer.yaml`). Any CLI path invoked without an explicit `--promoter` flag (`memory atomize`, `memory dream run`) MUST resolve to the LLM promoter and MUST NOT construct an `IdentityPromoter`. The identity promoter MUST remain available as an explicit `--promoter identity` option for tests and offline deterministic runs. The code-level fallback for configs that omit the `promoter` key entirely MUST remain `identity` (fail-safe: a stripped-down config never silently upgrades into spawning an external LLM call).
+
+#### Scenario: Packaged config default resolves to llm
+
+- **WHEN** `atomizer.config.load_config(override_path=None)` loads the packaged `atomizer.yaml`
+- **THEN** the resulting `AtomizerConfig.default_promoter` MUST equal `"llm"`
+
+#### Scenario: CLI without --promoter builds the LLM promoter
+
+- **WHEN** `atomizer.cli._build_promoter` is called with `args.promoter = None` against the packaged config
+- **THEN** the returned promoter MUST be an `LLMPromoter` instance
+- **THEN** it MUST NOT be an `IdentityPromoter` instance
+
+#### Scenario: Explicit identity flag is still honored
+
+- **WHEN** `atomizer.cli._build_promoter` is called with `args.promoter = "identity"`
+- **THEN** the returned promoter MUST be an `IdentityPromoter` instance
+
+#### Scenario: Config omitting the promoter key fails safe to identity
+
+- **WHEN** `load_config` reads a config file that contains no `promoter` key
+- **THEN** `default_promoter` MUST resolve to `"identity"`
+- **THEN** no LLM agent process MAY be spawned as a side effect of loading configuration
+
+### Requirement: Scheduled dream templates pin the LLM promoter
+
+The repo-shipped schedule templates (`paulshaclaw/memory/dream/scripts/dream-idle-wrapper.sh` and `paulshaclaw/memory/dream/systemd/paulsha-memory-dream.service`) SHALL pin `--promoter llm` explicitly, matching the production dream loop (`scripts/start.sh`). Each template MUST carry a comment documenting the identity promoter's boilerplate-output risk: identity copies importer template fragments 1:1 into knowledge slices and the noise gate only drops part of that boilerplate.
+
+#### Scenario: Wrapper pins llm
+
+- **WHEN** an operator inspects `dream-idle-wrapper.sh`
+- **THEN** its `memory dream run` invocation MUST contain `--promoter llm`
+- **THEN** it MUST NOT contain `--promoter identity`
+- **THEN** a comment MUST explain the identity boilerplate risk
+
+#### Scenario: Systemd service pins llm
+
+- **WHEN** an operator inspects `paulsha-memory-dream.service`
+- **THEN** its `ExecStart` MUST contain `--promoter llm`
+- **THEN** it MUST NOT contain `--promoter identity`
+
+#### Scenario: Enabling the systemd timer does not reintroduce identity promotion
+
+- **WHEN** the (currently uninstalled) systemd timer/service pair is enabled without modification
+- **THEN** every scheduled dream run MUST use the LLM promoter
+
+### Requirement: Project key rekey migration
+
+Stage 2 SHALL 提供一次性 rekey 遷移工具：模組 `paulshaclaw.memory.rekey` 與 CLI `memory knowledge rekey --memory-root <root> --from <old-key> --to <slug>`。工具 MUST 僅選取 frontmatter `memory_layer: knowledge` 且 `project` 與 `<old-key>` 嚴格相等的 slice（略過 `-moc.md`）。`--to` MUST 為 path-safe slug（依 `atomizer/config.py::is_safe_path_component`，不得含 `/`），違反時 CLI MUST 以 exit code 2 拒絕且不產生任何副作用。預設（未帶 `--apply`）為 dry-run：MUST 產出審計 manifest `runtime/ledger/rekey-<now>.jsonl`（原子寫入）且 MUST NOT 改動任何 knowledge 檔案。`--apply` 時每筆候選 MUST 改寫 frontmatter `project` 為新 slug、將檔案搬移至 `knowledge/<sanitized-slug>/`（`sanitize_project_component`），並保留 `slice_id` 與 body；有任何成功筆數時 MUST 觸發 `moc/runner.py::run_moc` 重建 MOC 與 retrieval index。工具 MUST NOT 直接讀寫 `runtime/indexes/retrieval.db`。
+
+#### Scenario: dry-run 產 manifest 不動檔案
+
+- **WHEN** 對含 1 筆 `project: github.com/hamanpaul/testpilot` slice 的 memory root 執行 rekey（`--to testpilot`，未帶 `--apply`）
+- **THEN** `runtime/ledger/rekey-<now>.jsonl` MUST 存在且該筆 status 為 `dry-run`、含 `from`/`to`/`path`/`target` 欄位
+- **THEN** 原檔案 MUST 原地保留且 frontmatter `project` 不變
+
+#### Scenario: apply 搬檔、改 frontmatter、重建 MOC
+
+- **WHEN** 對同一 memory root 執行 rekey `--apply`
+- **THEN** 檔案 MUST 出現在 `knowledge/testpilot/` 下且原路徑消失
+- **THEN** frontmatter `project` MUST 等於 `testpilot`，`slice_id` 與 body MUST 逐字不變
+- **THEN** manifest 該筆 status MUST 為 `rekeyed`，且 `knowledge/testpilot-moc.md` MUST 存在（run_moc 已觸發）
+
+#### Scenario: 目標檔已存在時 conflict fail-safe
+
+- **WHEN** 目的地 `knowledge/<slug>/` 已存在同名檔案
+- **THEN** 該筆 MUST 記為 `conflict`，source 檔案（含 frontmatter）MUST 完全不動
+
+#### Scenario: 不安全 slug 被拒絕
+
+- **WHEN** `--to` 含 `/`（如 `a/b`）
+- **THEN** CLI MUST 回傳 exit code 2 且 MUST NOT 產生 manifest 或改動任何檔案
+
+#### Scenario: apply 收尾清空的舊 key 目錄與孤兒 moc
+
+- **WHEN** apply 成功搬走舊 key 目錄下全部檔案，且 `knowledge/<sanitized-old-key>-moc.md` 存在
+- **THEN** 清空的 `knowledge/<sanitized-old-key>/` 目錄 MUST 被移除
+- **THEN** 孤兒 `<sanitized-old-key>-moc.md` MUST 被移除
+
+### Requirement: Fixed-list prune mode
+
+`memory knowledge prune-noise` SHALL 支援 `--paths <file>` 固定清單模式：清單檔每行一個絕對路徑，`#` 開頭與空白行忽略。此模式 MUST 與 `--instruction-root`、`--project` 互斥（同時給定 → exit code 2、零副作用）。刪除範圍 MUST 恰為清單內檔案——清單即權威，不需 `classify_noise` 同意，manifest reason MUST 為 `listed`。驗證 MUST fail-closed：任一清單路徑不存在、resolve 後不在 `<memory-root>/knowledge/` 之下、為 `-moc.md`、或 frontmatter 非 `memory_layer: knowledge` 時，MUST 以 exit code 2 中止且 MUST NOT 刪除任何檔案。清單全部有效時 MUST 在任何 unlink 之前先寫 manifest，apply 後更新各筆狀態並重建 MOC（`build_mocs`）。
+
+#### Scenario: 只刪清單內檔案
+
+- **WHEN** 清單僅含 1 筆 untitled slice 路徑，而同專案另有 1 筆可判 noise 但未列清單的 slice，執行 `--paths <file> --apply`
+- **THEN** 清單內檔案 MUST 被刪除（即使 `classify_noise` 不會判它為 noise）
+- **THEN** 未列清單的 noise 檔與其他真筆記 MUST 全部保留
+- **THEN** manifest MUST 恰含清單筆數列、reason 全為 `listed`
+
+#### Scenario: 清單超出範圍即整批中止
+
+- **WHEN** 清單含一個不存在的路徑或一個位於 `knowledge/` 之外的檔案
+- **THEN** 命令 MUST 回傳 exit code 2
+- **THEN** 清單內其餘（本身有效的）檔案 MUST NOT 被刪除
+
+#### Scenario: dry-run 不刪
+
+- **WHEN** 以 `--paths <file> --dry-run` 執行
+- **THEN** manifest MUST 產出且各筆 status 為 `dry-run`，所有檔案 MUST 保留
+
+#### Scenario: 與掃描模式互斥
+
+- **WHEN** 同時給定 `--paths` 與 `--project`（或 `--instruction-root`）
+- **THEN** 命令 MUST 回傳 exit code 2 且 MUST NOT 產生 manifest
+
+### Requirement: Janitor hygiene lint for untitled and raw-remote keys
+
+janitor scan SHALL 對 knowledge records 執行 read-only lint：frontmatter `title` 等於 `untitled` → rule `title-untitled`；frontmatter `project` 含 `/`（raw-remote key）→ rule `raw-remote-key`。lint MUST NOT 修改任何檔案、MUST NOT 寫入 lifecycle 事件（告警不自動改）。`run_scan` 回傳的 summary MUST 含 `lint` 欄位 `{"untitled": <N>, "raw_remote_key": <M>}`（經 dream orchestrator 的 summary passthrough 落入 dream ledger `passes.janitor`），且每筆 finding MUST 以 `lint:<rule>: <path> (project=<key>)` 形式 append 至 warnings。lint 結果 MUST deterministic（按 record_id 排序）。乾淨樹 MUST 回傳零 counts 且無 `lint:` 開頭的 warnings。
+
+#### Scenario: untitled 與 raw-remote key 同時告警
+
+- **WHEN** knowledge 樹含 1 筆 `title: untitled` 且 `project: github.com/hamanpaul/testpilot` 的 slice，執行 janitor scan
+- **THEN** `summary["lint"]` MUST 等於 `{"untitled": 1, "raw_remote_key": 1}`
+- **THEN** warnings MUST 含 2 筆 `lint:` 開頭的訊息
+- **THEN** 該 slice 檔案 MUST 原封不動、lifecycle ledger MUST 無 lint 相關事件
+
+#### Scenario: 乾淨樹零告警
+
+- **WHEN** knowledge 樹所有 slice 都有真標題且 project 為短 slug
+- **THEN** `summary["lint"]` MUST 等於 `{"untitled": 0, "raw_remote_key": 0}` 且無 `lint:` warnings
+
+#### Scenario: 告警進 dream ledger
+
+- **WHEN** dream run 的 janitor pass 掃到 lint findings
+- **THEN** dream ledger 該輪記錄的 `passes.janitor.lint` MUST 帶有非零 counts（經既有 summary passthrough，無需 orchestrator 改動）
+
