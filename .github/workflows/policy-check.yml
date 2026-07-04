@@ -5,10 +5,10 @@ jobs:
   policy:
     # Pin both the reusable workflow and the policy engine to the SAME full 40-char commit SHA.
     # Do NOT use a tag or branch ref — full SHA is required by the policy engine validation step.
-    uses: hamanpaul/paulsha-conventions/.github/workflows/reusable-policy-check.yml@98487868a098e22647074c677a58633ce4fa19be
+    uses: hamanpaul/paulsha-conventions/.github/workflows/reusable-policy-check.yml@58290153a400926851afa0f1794236e7669847c6  # v1.0.12
     with:
       policy_profile: stage-driven
-      policy_version: 1.0.2
+      policy_version: 1.0.12
       # 必須傳入完整 40 字元 hex commit SHA，指向 hamanpaul/paulsha-conventions。
-      # uses: 與 policy_engine_ref 兩者必須鎖定到同一個 SHA。
-      policy_engine_ref: 98487868a098e22647074c677a58633ce4fa19be
+      # uses: 與 policy_engine_ref 兩者必須鎖定到同一個 SHA（v1.0.12，見 RELEASES.md）。
+      policy_engine_ref: 58290153a400926851afa0f1794236e7669847c6
