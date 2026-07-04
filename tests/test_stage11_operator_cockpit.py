@@ -1,11 +1,15 @@
+import ast
+import inspect
+import os
 import subprocess
 import shutil
 import sys
+import tempfile
 import unittest
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 # textual is an optional dev/test dependency. Guard imports so the repository's
 # baseline tests (python -m unittest discover) can run under system Python
@@ -29,9 +33,12 @@ from paulshaclaw.cockpit.app import (
     pane_display_label,
 )
 from paulshaclaw.cockpit.help import HelpModal
+from paulshaclaw.cockpit.manager_panel import ManagerModal
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import TmuxClient, derive_summary, parse_list_panes
+from paulshaclaw.control import constants, contract
+from paulshaclaw.coordinator import manager_daemon
 
 
 def pane_record(
@@ -264,6 +271,22 @@ class Stage11StateTests(unittest.TestCase):
             actions=LayoutActionService(),
             pane_loader=pane_loader,
         )
+
+    def _install_mutable_screen(self, app, initial=None) -> dict:
+        """Give ``app`` a controllable ``screen`` for screen-aware actions.
+
+        textual's ``App.screen`` is a read-only property, so tests cannot assign
+        it directly; patch it with a holder-backed PropertyMock and return the
+        holder so tests can seed/read the "current screen" and have a mocked
+        ``push_screen`` update it.
+        """
+        holder = {"screen": initial}
+        patcher = patch.object(
+            type(app), "screen", new_callable=PropertyMock, side_effect=lambda: holder["screen"]
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return holder
 
     def test_list_panes_uses_dash_a_flag(self) -> None:
         client = TmuxClient()
@@ -518,10 +541,171 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("down: ↑/↓ 選擇", help_text)
         self.assertIn("enter: Enter 把選中的 pane 換到我面前", help_text)
         self.assertIn("c: c 回 cockpit", help_text)
+        self.assertIn("m: m 顯示 manager 面板", help_text)
         self.assertIn("q: q 離開 cockpit", help_text)
+        self.assertIn("t: t 送出 manager tick", help_text)
         self.assertIn("ctrl+q: Ctrl+Q 離開 cockpit", help_text)
         self.assertIn("question_mark: ? 顯示說明", help_text)
         self.assertIn("all local tmux sessions", help_text)
+
+    def test_cockpit_app_imports_manager_client_without_coordinator_dependency(self) -> None:
+        tree = ast.parse(inspect.getsource(sys.modules["paulshaclaw.cockpit.app"]))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(alias.name for alias in node.names)
+            if isinstance(node, ast.ImportFrom):
+                imported.add(node.module or "")
+
+        self.assertFalse(any(name.startswith("paulshaclaw.coordinator") for name in imported))
+
+    def test_action_manager_panel_pushes_manager_modal_from_status(self) -> None:
+        app = self._minimal_app()
+        self._install_mutable_screen(app, None)
+        pushed: list[object] = []
+        app.push_screen = pushed.append
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "updated_at": "2026-07-03T12:00:00+00:00",
+                "daemon": {"pid": 1234, "last_tick_at": "2026-07-03T11:59:00+00:00", "idle": False},
+                "ready": ["slice-a"],
+                "in_flight": [{"slice_id": "slice-b", "state": "running"}],
+                "recent_done": [{"slice_id": "slice-c", "gate_status": "passed"}],
+                "degraded": False,
+                "degraded_reason": None,
+            }
+        )
+
+        app.action_manager_panel()
+
+        self.assertEqual(len(pushed), 1)
+        self.assertIsInstance(pushed[0], ManagerModal)
+        self.assertIn("slice-a", pushed[0].status_text)
+
+    def test_action_manager_tick_starts_background_submit_before_refresh(self) -> None:
+        app = self._minimal_app()
+        self._install_mutable_screen(app, None)
+        fake_client = SimpleNamespace(
+            submit_calls=[],
+            submit_request=lambda req_type, args, requested_by: fake_client.submit_calls.append((req_type, args, requested_by)) or "req-1",
+        )
+        started: list[dict[str, object]] = []
+
+        class FakeThread:
+            def __init__(self, *, target, daemon):
+                started.append({"target": target, "daemon": daemon, "started": False})
+
+            def start(self):
+                started[-1]["started"] = True
+
+        app.manager_client = fake_client
+        app.thread_factory = FakeThread
+        app.call_from_thread = lambda callback: callback()
+        app._after_manager_tick = Mock()
+
+        app.action_manager_tick()
+
+        self.assertEqual(fake_client.submit_calls, [])
+        self.assertEqual(len(started), 1)
+        self.assertTrue(started[0]["daemon"])
+        self.assertTrue(started[0]["started"])
+
+        started[0]["target"]()
+
+        self.assertEqual(fake_client.submit_calls, [("tick", {}, "cockpit")])
+        app._after_manager_tick.assert_called_once_with(None)
+
+    def test_action_manager_tick_surfaces_submit_error_and_refreshes(self) -> None:
+        app = self._minimal_app()
+        self._install_mutable_screen(app, None)
+        started: list[dict[str, object]] = []
+
+        class FakeThread:
+            def __init__(self, *, target, daemon):
+                started.append({"target": target, "daemon": daemon, "started": False})
+
+            def start(self):
+                started[-1]["started"] = True
+
+        def fail_submit(req_type, args, requested_by):
+            raise PermissionError("control root denied")
+
+        app.manager_client = SimpleNamespace(submit_request=fail_submit)
+        app.thread_factory = FakeThread
+        app.call_from_thread = lambda callback: callback()
+        app.notify = Mock()
+        with patch.object(app, "_refresh_manager_panel") as refresh, patch.object(app, "_reconcile_state") as reconcile:
+            app.action_manager_tick()
+            started[0]["target"]()
+
+        app.notify.assert_called_once()
+        self.assertIn("PermissionError: control root denied", app.notify.call_args.args[0])
+        refresh.assert_called_once_with()
+        reconcile.assert_called_once_with(light=True)
+
+    def test_refresh_tick_updates_manager_panel_when_open(self) -> None:
+        app = self._minimal_app()
+        with patch.object(app, "_reconcile_state") as reconcile, patch.object(app, "_refresh_manager_panel") as refresh:
+            app._on_refresh_tick()
+
+        reconcile.assert_called_once_with(light=True)
+        refresh.assert_called_once_with()
+
+    def test_manager_tick_round_trip_refreshes_open_modal_from_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"PSC_CONTROL_ROOT": tmpdir}):
+            refreshed_at = contract.utcnow()
+            app = self._minimal_app()
+            holder = self._install_mutable_screen(app, None)
+            app.push_screen = lambda screen: holder.__setitem__("screen", screen)
+            started: list[dict[str, object]] = []
+
+            class FakeThread:
+                def __init__(self, *, target, daemon):
+                    started.append({"target": target, "daemon": daemon, "started": False})
+
+                def start(self):
+                    started[-1]["started"] = True
+
+            app.thread_factory = FakeThread
+            app.call_from_thread = lambda callback: callback()
+
+            app.action_manager_tick()
+
+            self.assertEqual(len(started), 1)
+            started[0]["target"]()
+
+            request_path = next(constants.requests_dir().glob("*.json"))
+            req_id = request_path.stem
+
+            manager_daemon.run_loop(
+                request_executor=lambda req: {"dispatched": ["slice-a"], "completed": [], "errors": []},
+                status_provider=lambda: {
+                    "ready": [],
+                    "in_flight": [],
+                    "recent_done": [
+                        {"slice_id": "slice-a", "gate_status": "passed", "at": refreshed_at}
+                    ],
+                },
+                periodic_tick_runner=lambda: {"dispatch_skipped": False},
+                poll_interval=0.0,
+                tick_interval=300.0,
+                now_fn=lambda: refreshed_at,
+                monotonic_fn=lambda: 0.0,
+                sleep_fn=lambda _: None,
+                pid=4321,
+                max_rounds=1,
+            )
+
+            app.action_manager_panel()
+
+            done = contract.read_json(constants.done_dir() / f"{req_id}.json")
+            status = contract.read_json(constants.status_path())
+
+            self.assertEqual(done["status"], "ok")
+            self.assertEqual(status["recent_done"][0]["slice_id"], "slice-a")
+            self.assertIsInstance(app.screen, ManagerModal)
+            self.assertIn("slice-a (passed)", app.screen.status_text)
+            self.assertIn(f"last_tick_at={refreshed_at}", app.screen.status_text)
 
 
 class Stage11ArtifactTests(unittest.TestCase):
@@ -750,6 +934,48 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("ctrl+q")
                 self.assertIsInstance(app.screen, HelpModal)
 
+        exit_mock.assert_not_called()
+
+    async def test_manager_modal_blocks_background_bindings(self) -> None:
+        actions = FakeLayoutActionService()
+        submit_calls: list[tuple[str, dict[str, object], str]] = []
+        app = CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", title="cockpit", command="python", width=120, height=40),
+                pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+        )
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "updated_at": "2026-07-03T12:00:00+00:00",
+                "daemon": {"pid": 1234, "last_tick_at": "2026-07-03T11:59:00+00:00", "idle": False},
+                "ready": ["slice-a"],
+                "in_flight": [],
+                "recent_done": [],
+                "degraded": False,
+                "degraded_reason": None,
+            },
+            submit_request=lambda req_type, args, requested_by: submit_calls.append((req_type, args, requested_by)) or "req-1",
+        )
+
+        with patch.object(app, "exit") as exit_mock:
+            async with app.run_test() as pilot:
+                await pilot.press("m")
+                self.assertIsInstance(app.screen, ManagerModal)
+                await pilot.press("c")
+                await pilot.press("enter")
+                await pilot.press("t")
+                await pilot.press("q")
+                await pilot.press("ctrl+q")
+                self.assertIsInstance(app.screen, ManagerModal)
+
+        self.assertEqual(actions.focused, [])
+        self.assertEqual(actions.swaps, [])
+        self.assertEqual(submit_calls, [])
         exit_mock.assert_not_called()
 
     async def test_help_modal_dismiss_triggers_light_refresh(self) -> None:

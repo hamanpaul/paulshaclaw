@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
+import threading
 from collections.abc import Callable
 
+from ..control import client as control_client
 from . import branding, sysmon
 
 try:
@@ -17,7 +19,20 @@ except Exception:  # pragma: no cover - fallback when textual not installed
     T = TypeVar("T")
 
     class App(Generic[T]):
-        pass
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.screen = None
+
+        def set_interval(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover - noop
+            return None
+
+        def query_one(self, *args: Any, **kwargs: Any) -> Any:  # pragma: no cover - noop
+            raise LookupError("query_one unavailable in textual fallback")
+
+        def push_screen(self, screen: Any) -> None:  # pragma: no cover - noop
+            self.screen = screen
+
+        def exit(self) -> None:  # pragma: no cover - noop
+            return None
 
     ComposeResult = Iterable[Any]
 
@@ -52,6 +67,7 @@ except Exception:  # pragma: no cover - fallback when textual not installed
 
 from .actions import LayoutActionService
 from .help import HelpModal
+from .manager_panel import ManagerModal
 from .models import JobSummary, PaneRecord
 from .store import CockpitState
 
@@ -116,7 +132,9 @@ class CockpitApp(App[None]):
         Binding("down", "move_down", "↑/↓ 選擇"),
         Binding("enter", "swap_selected", "Enter 把選中的 pane 換到我面前"),
         Binding("c", "focus_cockpit", "c 回 cockpit"),
+        Binding("m", "manager_panel", "m 顯示 manager 面板"),
         Binding("q", "quit_app", "q 離開 cockpit"),
+        Binding("t", "manager_tick", "t 送出 manager tick"),
         Binding("ctrl+q", "quit_app", "Ctrl+Q 離開 cockpit"),
         Binding("question_mark", "show_help", "? 顯示說明"),
     ]
@@ -144,6 +162,8 @@ class CockpitApp(App[None]):
         # Last-rendered work-list content, so we skip rebuilding (and flickering)
         # the list on refreshes that didn't change it.
         self._last_work_items: tuple[str, ...] | None = None
+        self.manager_client = control_client
+        self.thread_factory = threading.Thread
 
     @classmethod
     def from_snapshot(
@@ -282,6 +302,7 @@ class CockpitApp(App[None]):
 
     def _on_refresh_tick(self) -> None:
         self._reconcile_state(light=True)
+        self._refresh_manager_panel()
 
     def _on_sysmon_tick(self) -> None:
         """高頻（htop 步調）系統監控刷新：只讀 /proc 就地更新 banner，不碰 tmux、不重建清單，
@@ -299,10 +320,14 @@ class CockpitApp(App[None]):
             pass
 
     def action_move_up(self) -> None:
+        if self._background_actions_blocked():
+            return
         self.state = self.state.move_selection(-1)
         self._refresh_widgets()
 
     def action_move_down(self) -> None:
+        if self._background_actions_blocked():
+            return
         self.state = self.state.move_selection(1)
         self._refresh_widgets()
 
@@ -311,6 +336,15 @@ class CockpitApp(App[None]):
             return isinstance(self.screen, HelpModal)
         except Exception:
             return False
+
+    def _manager_modal_open(self) -> bool:
+        try:
+            return isinstance(self.screen, ManagerModal)
+        except Exception:
+            return False
+
+    def _background_actions_blocked(self) -> bool:
+        return self._help_modal_open() or self._manager_modal_open()
 
     def _selected_list_index(self) -> int:
         selected_offset = 1 if self.state.active_pane is not None else 0
@@ -322,7 +356,7 @@ class CockpitApp(App[None]):
         return selected_offset
 
     def action_swap_selected(self) -> None:
-        if self._help_modal_open():
+        if self._background_actions_blocked():
             return
         active_pane = self.state.active_pane
         selected_pane = self.state.selected_pane
@@ -336,7 +370,7 @@ class CockpitApp(App[None]):
         self._reconcile_state()
 
     def action_focus_cockpit(self) -> None:
-        if self._help_modal_open():
+        if self._background_actions_blocked():
             return
         self.actions.return_to_cockpit(self.state.cockpit_pane_id)
 
@@ -344,12 +378,62 @@ class CockpitApp(App[None]):
         self._reconcile_state(light=True)
 
     def action_show_help(self) -> None:
-        if self._help_modal_open():
+        if self._background_actions_blocked():
             return
         self.push_screen(HelpModal(self.BINDINGS))
 
-    def action_quit_app(self) -> None:
+    def action_manager_panel(self) -> None:
         if self._help_modal_open():
+            return
+        status = self.manager_client.read_status()
+        if self._manager_modal_open():
+            try:
+                self.screen.update_status(status)
+            except Exception:
+                pass
+            return
+        self.push_screen(ManagerModal(status))
+
+    def action_manager_tick(self) -> None:
+        if self._background_actions_blocked():
+            return
+        worker = self.thread_factory(target=self._run_manager_tick, daemon=True)
+        worker.start()
+
+    def _run_manager_tick(self) -> None:
+        error_message: str | None = None
+        try:
+            self.manager_client.submit_request("tick", {}, "cockpit")
+        except Exception as exc:  # noqa: BLE001
+            error_message = f"manager tick submit failed: {type(exc).__name__}: {exc}"
+        finally:
+            callback = getattr(self, "call_from_thread", None)
+            if callable(callback):
+                callback(lambda: self._after_manager_tick(error_message))
+            else:
+                self._after_manager_tick(error_message)
+
+    def _after_manager_tick(self, error_message: str | None = None) -> None:
+        if error_message:
+            notifier = getattr(self, "notify", None)
+            if callable(notifier):
+                try:
+                    notifier(error_message, severity="error")
+                except TypeError:
+                    notifier(error_message)
+        self._refresh_manager_panel()
+        self._reconcile_state(light=True)
+
+    def _refresh_manager_panel(self) -> None:
+        if not self._manager_modal_open():
+            return
+        try:
+            self.screen.update_status(self.manager_client.read_status())
+        except Exception:
+            pass
+
+    def action_quit_app(self) -> None:
+        if self._background_actions_blocked():
             return
         try:
             self.exit()
@@ -357,7 +441,7 @@ class CockpitApp(App[None]):
             pass
 
     def on_key(self, event: object) -> None:
-        if self._help_modal_open():
+        if self._background_actions_blocked():
             return
         try:
             if hasattr(event, "key"):

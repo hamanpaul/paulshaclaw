@@ -62,6 +62,20 @@
       }
     },
     {
+      "name": "/manager",
+      "usage": "/manager [status|tick]",
+      "summary": "查看或觸發 persona manager",
+      "telegram_menu": {
+        "command": "manager",
+        "description": "查看或觸發 manager",
+        "enabled": true
+      },
+      "func_call": {
+        "type": "python",
+        "target": "manager"
+      }
+    },
+    {
       "name": "/agent",
       "usage": "/agent [start %pane|startf %pane|stop|status]",
       "summary": "管理 claude-gemma4 agent session",

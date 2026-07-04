@@ -56,6 +56,38 @@ class FakeTmateManager:
         return {"ok": True, "kind": "tmate", "state": "stopped", "running": False}
 
 
+class FakeManagerClient:
+    def __init__(
+        self,
+        *,
+        status_payload: dict[str, object] | None = None,
+        done_payload: dict[str, object] | None = None,
+    ) -> None:
+        self.status_payload = status_payload or {
+            "updated_at": "2026-07-03T12:00:00+00:00",
+            "daemon": {"pid": 1234, "last_tick_at": "2026-07-03T11:59:00+00:00", "idle": False},
+            "ready": ["slice-a"],
+            "in_flight": [{"slice_id": "slice-b", "state": "running"}],
+            "recent_done": [{"slice_id": "slice-c", "gate_status": "passed"}],
+            "degraded": False,
+            "degraded_reason": None,
+        }
+        self.done_payload = done_payload
+        self.calls: list[tuple[str, object]] = []
+
+    def read_status(self) -> dict[str, object]:
+        self.calls.append(("read_status", None))
+        return self.status_payload
+
+    def submit_request(self, req_type: str, args: dict[str, object], requested_by: str) -> str:
+        self.calls.append(("submit_request", (req_type, args, requested_by)))
+        return "req-1"
+
+    def poll_done(self, req_id: str, timeout: float, poll_interval: float = 0.5) -> dict[str, object] | None:
+        self.calls.append(("poll_done", (req_id, timeout, poll_interval)))
+        return self.done_payload
+
+
 def write_config_file() -> Path:
     config = {
         "daemon_name": "PaulShiaBro",
@@ -313,8 +345,96 @@ class Stage1SmokeTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertIn("/agent [start %pane|startf %pane|stop|status]", result["message"])
+        self.assertIn("/manager [status|tick]", result["message"])
         self.assertIn("/tmate [status|start|stop]", result["message"])
         self.assertIn("/dispatch <task_id>|<pane_id> <message>", result["message"])
+
+    def test_manager_status_command_renders_status_summary(self) -> None:
+        config_path = self.make_config_path()
+        manager_client = FakeManagerClient()
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            manager_client=manager_client,
+        )
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/manager status")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("manager status", result["message"])
+        self.assertIn("slice-a", result["message"])
+        self.assertEqual(manager_client.calls, [("read_status", None)])
+
+    def test_manager_bare_command_defaults_to_status(self) -> None:
+        config_path = self.make_config_path()
+        manager_client = FakeManagerClient()
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            manager_client=manager_client,
+        )
+
+        result = daemon.handle_command("/manager")
+
+        self.assertEqual(result["kind"], "manager")
+        self.assertEqual(result["action"], "status")
+        self.assertEqual(manager_client.calls, [("read_status", None)])
+
+    def test_manager_tick_short_polls_done_record(self) -> None:
+        config_path = self.make_config_path()
+        manager_client = FakeManagerClient(
+            done_payload={
+                "req_id": "req-1",
+                "status": "ok",
+                "result": {"dispatched": ["slice-a"], "completed": [], "errors": []},
+            }
+        )
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            manager_client=manager_client,
+        )
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/manager tick")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("manager tick: ok", result["message"])
+        self.assertIn("dispatched=1", result["message"])
+        self.assertEqual(
+            manager_client.calls,
+            [
+                ("submit_request", ("tick", {}, "telegram")),
+                ("poll_done", ("req-1", 15.0, 0.5)),
+            ],
+        )
+
+    def test_manager_tick_falls_back_to_queued_on_timeout(self) -> None:
+        config_path = self.make_config_path()
+        manager_client = FakeManagerClient(done_payload=None)
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            manager_client=manager_client,
+        )
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/manager tick")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["message"], "queued, check /manager status")
+
+    def test_manager_command_rejects_unknown_action(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            manager_client=FakeManagerClient(),
+        )
+
+        with self.assertRaisesRegex(ValueError, "/manager 只接受 status/tick"):
+            daemon.handle_command("/manager nope")
 
     def test_tmate_bare_command_returns_status(self) -> None:
         config_path = self.make_config_path()
