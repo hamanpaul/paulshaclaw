@@ -9,7 +9,7 @@ import unittest
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 # textual is an optional dev/test dependency. Guard imports so the repository's
 # baseline tests (python -m unittest discover) can run under system Python
@@ -271,6 +271,22 @@ class Stage11StateTests(unittest.TestCase):
             actions=LayoutActionService(),
             pane_loader=pane_loader,
         )
+
+    def _install_mutable_screen(self, app, initial=None) -> dict:
+        """Give ``app`` a controllable ``screen`` for screen-aware actions.
+
+        textual's ``App.screen`` is a read-only property, so tests cannot assign
+        it directly; patch it with a holder-backed PropertyMock and return the
+        holder so tests can seed/read the "current screen" and have a mocked
+        ``push_screen`` update it.
+        """
+        holder = {"screen": initial}
+        patcher = patch.object(
+            type(app), "screen", new_callable=PropertyMock, side_effect=lambda: holder["screen"]
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return holder
 
     def test_list_panes_uses_dash_a_flag(self) -> None:
         client = TmuxClient()
@@ -545,7 +561,7 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_action_manager_panel_pushes_manager_modal_from_status(self) -> None:
         app = self._minimal_app()
-        app.screen = None
+        self._install_mutable_screen(app, None)
         pushed: list[object] = []
         app.push_screen = pushed.append
         app.manager_client = SimpleNamespace(
@@ -568,7 +584,7 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_action_manager_tick_starts_background_submit_before_refresh(self) -> None:
         app = self._minimal_app()
-        app.screen = None
+        self._install_mutable_screen(app, None)
         fake_client = SimpleNamespace(
             submit_calls=[],
             submit_request=lambda req_type, args, requested_by: fake_client.submit_calls.append((req_type, args, requested_by)) or "req-1",
@@ -584,6 +600,7 @@ class Stage11StateTests(unittest.TestCase):
 
         app.manager_client = fake_client
         app.thread_factory = FakeThread
+        app.call_from_thread = lambda callback: callback()
         app._after_manager_tick = Mock()
 
         app.action_manager_tick()
@@ -600,7 +617,7 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_action_manager_tick_surfaces_submit_error_and_refreshes(self) -> None:
         app = self._minimal_app()
-        app.screen = None
+        self._install_mutable_screen(app, None)
         started: list[dict[str, object]] = []
 
         class FakeThread:
@@ -615,6 +632,7 @@ class Stage11StateTests(unittest.TestCase):
 
         app.manager_client = SimpleNamespace(submit_request=fail_submit)
         app.thread_factory = FakeThread
+        app.call_from_thread = lambda callback: callback()
         app.notify = Mock()
         with patch.object(app, "_refresh_manager_panel") as refresh, patch.object(app, "_reconcile_state") as reconcile:
             app.action_manager_tick()
@@ -637,8 +655,8 @@ class Stage11StateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"PSC_CONTROL_ROOT": tmpdir}):
             refreshed_at = contract.utcnow()
             app = self._minimal_app()
-            app.screen = None
-            app.push_screen = lambda screen: setattr(app, "screen", screen)
+            holder = self._install_mutable_screen(app, None)
+            app.push_screen = lambda screen: holder.__setitem__("screen", screen)
             started: list[dict[str, object]] = []
 
             class FakeThread:
@@ -649,6 +667,7 @@ class Stage11StateTests(unittest.TestCase):
                     started[-1]["started"] = True
 
             app.thread_factory = FakeThread
+            app.call_from_thread = lambda callback: callback()
 
             app.action_manager_tick()
 
