@@ -57,6 +57,17 @@ def _compute_event_hash(event: Dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
+def _is_moc_reconcile_dedup_event(event: LifecycleEvent) -> bool:
+    """Return True for audit-only MOC reconcile dedup traces."""
+    metadata = event.get("metadata")
+    return (
+        event.get("source") == "moc-reconcile"
+        and isinstance(metadata, dict)
+        and "deleted_path" in metadata
+        and "kept_path" in metadata
+    )
+
+
 def _parse_events(lines: Iterable[str]) -> List[LifecycleEvent]:
     events = []
     for line_number, line in enumerate(lines, start=1):
@@ -191,6 +202,8 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
     - created/imported/updated/restored => active
     - accessed => preserves current state, updates last_access_ts
     - superseded => superseded, sets superseded_by from metadata.detail['superseded_by']
+    - MOC reconcile dedup traces (source="moc-reconcile") are audit-only and are
+      skipped here: they never create or change effective state (see #184)
     - archived => archived, sets archive_reason from reason
     - deleted => deleted, sets deleted flag
     - decayed => decayed
@@ -202,7 +215,8 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict keyed by record_id with fields:
             - last_state: current lifecycle state
-            - last_event_ts: timestamp of most recent event
+            - last_event_ts: timestamp of most recent state-affecting event
+              (audit-only MOC dedup traces do not advance it)
             - last_access_ts: timestamp of most recent access (if any)
             - archive_reason: reason for archival (if archived)
             - superseded_by: record_id that supersedes this one (if superseded)
@@ -214,7 +228,14 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
         record_id = event["record_id"]
         event_type = event["event_type"]
         ts = event["ts"]
-        
+        # MOC reconcile dedup deletions are an audit-only trace: they live in
+        # the raw ledger (read_events) for provenance but MUST NOT establish or
+        # change effective lifecycle state. A slice whose only event is this
+        # trace stays "unknown"; a slice with a prior state keeps it.
+        # (#184 adversarial-review finding: it previously set None -> "active".)
+        if _is_moc_reconcile_dedup_event(event):
+            continue
+
         if record_id not in result:
             result[record_id] = {
                 "last_state": None,
@@ -224,7 +245,7 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
                 "superseded_by": None,
                 "deleted": None,
             }
-        
+
         rec = result[record_id]
         rec["last_event_ts"] = ts
         
@@ -234,8 +255,8 @@ def fold_lifecycle(events: List[LifecycleEvent]) -> Dict[str, Dict[str, Any]]:
         elif event_type == "accessed":
             rec["last_access_ts"] = ts
         elif event_type == "superseded":
-            rec["last_state"] = "superseded"
             metadata = event.get("metadata") or {}
+            rec["last_state"] = "superseded"
             detail = metadata.get("detail") or {}
             rec["superseded_by"] = detail.get("superseded_by")
         elif event_type == "archived":
