@@ -38,3 +38,6 @@ tmp/
 ref/
 .worktrees/
 .test-work/
+
+# Generated artifacts (brag / demo videos, hyperframes composition output)
+brag-output/

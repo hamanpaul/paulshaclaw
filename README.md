@@ -1,82 +1,179 @@
 # paulshaclaw
 
-> **一句話定位**：一套「個人 agent 作業系統（agent-OS）」的**架構參考 / 作品集 showcase** —— 不是可以 `pip install` 裝來就跑的產品，而是把「24×7 個人 AI agent 工作流」想清楚、並把其中最成熟的核心（**靠地端 LLM 蒸餾的記憶 pipeline**）開源展示的設計＋實作集。（對外品牌曾用 PaulShiaBro。）
+> **一句話**：一套個人「agent 作業系統」——把 **記憶**、**manager**、**persona** 三件事組成一層底座，圍繞著你日常在用的 AI coding agent（Claude Code / Codex / Copilot），讓它們**跨 session、跨 vendor 記得住、也管得住**。（對外品牌 PaulShiaBro，吉祥物破蝦哥 🦞。）
+
+這份 README 講的是**架構與設計**：系統由哪些部分組成、彼此怎麼搭、資料與控制怎麼流動。實作與規格細節見各模組原始碼與 [`docs/`](./docs/)、[`openspec/`](./openspec/)。
 
 ---
 
-## What it is / What it isn't
+## 心智模型：三大支柱環繞 agent
 
-> 這段是全篇最重要的「期待值校準」。先說明**不要**期待什麼，能省下你的時間。
+單一個 AI coding agent 有兩個先天缺口：**關掉就失憶**（每個 session 從零開始）、**放它自己跑很危險**（沒有邊界與排程）。paulshaclaw 用三根支柱把這兩個缺口補起來，全部圍繞著 agent：
 
-**這是什麼**
+- **記憶（memory）** — 把 agent 的對話 transcript 用**地端 LLM** 蒸餾成可複用的**經驗筆記**（教訓 / 偏好 / 踩過的坑），隔天以 *wake-up brief* 餵回下一個 agent。跨 vendor 通用。
+- **manager（coordinator + control）** — 一個常駐 daemon，把「相依已就緒」的任務切片自動派給 agent（tmux pane + 獨立 git worktree），並用檔案契約控制面對外暴露。
+- **persona** — 每個 agent 角色的**契約護欄**：能在哪個生命週期階段動、能寫哪些路徑、能用哪些工具。
 
-- 一個個人 agent 工作流的**設計 + 實作展示**：可讀程式碼、可讀設計文件（`openspec/` 與 `docs/`）、可跑測試（約 1198 passed）。
-- 重點展示 **`transcript → 原子化 → Zettelkasten → MOC → wake-up brief`** 這條靠**地端 LLM** 蒸餾的記憶 pipeline（見下方「亮點」）。
-- 一份關於「如何替個人 multi-agent 環境做治理（scope / autonomy / dispatch）」的**思路與骨架**（標 experimental / shadow，見下方「誠實狀態表」）。
+```mermaid
+flowchart TB
+    subgraph vendors[AI coding agents（跨 vendor）]
+        CC[Claude Code]
+        CX[Codex]
+        CP[Copilot]
+    end
 
-**這不是什麼**
+    MGR["manager<br/>常駐 daemon · 派工"] -->|dispatch| vendors
+    PERSONA["persona<br/>scope 契約護欄"] -. 界定能動什麼 .-> vendors
+    vendors -->|對話 transcript| MEM["記憶<br/>經驗筆記 pipeline"]
+    MEM -->|wake-up brief| vendors
 
-- ❌ **不是**裝起來就能用的成品 / SaaS / 套件。它**重度假設一套特定的個人環境**（見下方「Getting started / 環境前提」）。
-- ❌ **不是**一鍵方案——外部依賴（地端 LLM、transcript 來源、tmux / WSL）需自備或自行替換。
-- ❌ **不保證**跨環境可移植；它是為作者自己的工作流長出來的，公開是為了**參考價值**而非通用性。
+    UI["介面層<br/>core · bot · cockpit"] -->|檔案請求| CTRL["control plane<br/>~/.agents/control"]
+    CTRL --> MGR
+```
 
-> 本 repo 是作者個人系統的**完整快照**——含天天在跑的核心、library 級被動模組、以及尚未接進 runtime 的 experimental 治理骨架。各模組的真實狀態一律見下方「誠實狀態表」，不灌水。
+一句話關係：**manager 決定「誰、何時、跑什麼」；persona 決定「這個誰、被允許動什麼」；記憶餵給它「昨天學到什麼」。**
 
 ---
 
-## 亮點：記憶 pipeline（皇冠寶石）
+## 架構原則
 
-> 整個專案最成熟、最值得讀的部分。
+- **hub-and-spoke**：單一 manager / orchestrator 持有任務權威；worker（agent）做有界執行並回傳 artifact。除非文件明示，避免 worker↔worker mesh。
+- **artifact-first / event-first**：prompt 文字**不是**真相源；canonical state 落在 artifacts 與 event log，gate 決策依檔案 / schema / 事件記錄。
+- **fail-close**：信任邊界（handoff 讀取、scope 檢查、記憶 ingestion）出錯時一律關閉、不放行。
+- **stage 獨立性 / 三軸分層 / always-on 失敗域分離**：模組沿分階段生命週期演進（見下方「命名與路徑」），各 stage 可獨立驗證；always-on 服務與一次性任務的失敗域分開。
 
-把多家 agent（Claude Code / Codex / Copilot 等）的對話 transcript，透過**地端 LLM** 蒸餾，逐步轉成可被下一輪 agent 喚起的長期記憶：
+---
 
-```
-transcript → 原子化(atomize) → Zettelkasten 原子筆記 → MOC(Map of Content) → wake-up brief
-                                  └── 由地端 LLM 蒸餾標題 / 摘要 ──┘
-```
+## 支柱一：記憶（經驗筆記 pipeline）
+
+整個系統最成熟、天天在作者機器上跑的部分。它**不是**專案待辦或狀態記憶，而是把多家 agent 的對話蒸餾成**可複用的經驗筆記**（Zettelkasten 原子筆記），跨專案、跨 vendor 沿用。
 
 ```mermaid
 flowchart LR
-    subgraph Sources[Agent transcripts]
+    subgraph src[Agent transcripts]
         A[Claude Code]
         B[Codex]
         C[Copilot]
     end
-    Sources --> IMP[importer]
-    IMP --> ATOM[atomizer<br/>地端 LLM 蒸餾]
-    ATOM --> ZK[(Zettelkasten<br/>原子筆記 + ledger)]
-    ZK --> MOC[moc<br/>Map of Content]
-    MOC --> WAKE[wakeup<br/>wake-up brief]
-    WAKE -.下一輪 agent 喚起.-> Sources
-    DREAM[dream loop<br/>背景週期蒸餾] -.驅動.-> ATOM
-    SYNC[syncback / replay] -.回填.-> ZK
+    src -->|hooks| Q["runtime/queue"]
+    Q --> IMP["importer<br/>正規化 · 分類 · ledger"]
+    IMP --> INBOX[("inbox/<br/>sessions·plans·research·reports")]
+    INBOX --> ATOM["atomizer<br/>地端 LLM 蒸餾"]
+    ATOM --> ZK[("Zettelkasten<br/>原子經驗筆記")]
+    ZK --> MOC["moc<br/>Map of Content"]
+    MOC --> WAKE["wakeup<br/>wake-up brief"]
+    WAKE -.餵給下一輪 agent.-> src
+    DREAM["dream loop<br/>背景週期蒸餾"] -.驅動.-> ATOM
+    SYNC["syncback / replay"] -.回填 / 復盤.-> ZK
 ```
 
-實作位於 [`paulshaclaw/memory/`](./paulshaclaw/memory/)（`importer / atomizer / moc / wakeup / dream / ledger / syncback / policy / routing` 等子模組）。
+**資料流（deterministic pipeline，見 [`memory/routing.md`](./paulshaclaw/memory/routing.md)）**
 
-**為什麼值得看**：踩在「agent memory」這個熱題上，是端到端、有大量測試、天天在作者機器上跑的真實實作（非 demo）。實證：記憶層約 11k LOC、對應測試大量，knowledge 已累積數百則 slice。
+| 階段 | 子模組 | 做什麼 |
+|---|---|---|
+| 收件 | `hooks` + `importer` | hook 把各家 session payload 寫進 `runtime/queue`；importer 做 adapter 正規化、frontmatter/render、project resolver、classifier、idempotent ledger，路由到 `inbox/` |
+| 蒸餾 | `atomizer` | 用地端 LLM 把 artifact 拆解、連結成原子筆記（deterministic splitting + linking） |
+| 組織 | `moc` | 把原子筆記織成 Map of Content（知識地圖） |
+| 喚起 | `wakeup` | 產出 *wake-up brief*，讓下一個 agent 一開機就載入昨日經驗 |
+| 背景 | `dream` | 常駐的週期蒸餾迴圈，持續把新 transcript 煉成筆記 |
+| 治理 | `policy` · `ledger` · `syncback` · `replay` | 記憶安全政策（redaction / classification / audit）、事件 ledger 與完整性、回填與復盤 |
+
+輔以 `retrieval`（取用）、`retitle` / `rekey`（重寫標題 / 主鍵）、`noise`（去噪）、`usage`（用量）、`skillopt`、`lint` 等。實作見 [`paulshaclaw/memory/`](./paulshaclaw/memory/)。
+
+**設計重點**：地端 LLM 蒸餾（隱私留在本機）、跨 vendor 統一格式（adapter 正規化）、idempotent ledger（可重跑不重複）、fail-close 的 ingestion 安全契約。
 
 ---
 
-## Getting started / 環境前提
+## 支柱二：manager（編排執行面）
 
-> ⚠️ **先讀這段再 clone。** 本專案**死綁一套特定個人環境**；缺了下列前提，多數功能跑不起來。設計上已盡量把對個人 infra 的依賴抽成 **config / 可關閉開關**，但「自備或替換外部依賴」是使用前提。
+把「多個 agent 一起工作」變成可控的常駐服務。分兩塊：
 
-**假設的環境**
+**[`coordinator/`](./paulshaclaw/coordinator/) — 引擎**
+- `manager_daemon`：常駐 daemon + **tick 迴圈**（預設 300s tick / 3s poll），每 tick 派發就緒工作並回收孤兒 broker。
+- `autonomy`（`dispatch_ready`）：**相依滿足才放行下游**——只派發依賴已 merged / handoff gate 過關的 slice。
+- `dispatcher` + `seams`：透過 seam（`PaneSender` / `WorktreeCreator`）把命令送進 **tmux pane**、在**獨立 git worktree** 執行。
+- `manager`：任務狀態機（`dispatched` / `running` → `done` / `failed`）。
 
-| 前提 | 說明 | 缺了會怎樣 / 如何替換 |
+**[`control/`](./paulshaclaw/control/) — 檔案契約控制面**
+- 介面層（core / bot / cockpit）**不直接 import coordinator**，改在 `~/.agents/control/` 用檔案溝通：`requests/`（type：`tick` / `fanout`）、`done/`、`status.json`、`manager.lock`。
+- `atomic_write_json`（temp + `rename`）＝ crash-safe 原子寫；`status.json` 帶健康語意（無 live pid → stale、卡死 → degraded，live-but-busy 不算 degraded）。
+
+現況：manager daemon 與 control plane 已接進運行路徑（[`scripts/start.sh`](./scripts/start.sh) 拉起的 resident daemon）。
+
+---
+
+## 支柱三：persona（治理契約面）
+
+回答「這個 agent 角色，**被允許**動什麼」。核心是：**persona = 契約**，agent instance 才是 runtime 執行，skill 是可復用能力。實作見 [`paulshaclaw/persona/`](./paulshaclaw/persona/)。
+
+- `contract`（[`personas.yaml`](./paulshaclaw/persona/personas.yaml)）：每個角色宣告 `allowed_phases`（能在哪些生命週期階段）、`write_paths`（能寫哪些路徑）、`allowed_tools`（工具白名單）。內建三角色：
+  - **manager**：orchestrate / dispatch / policy / commit / push / PR / merge
+  - **builder**：只在 `build` 階段、只寫 `paulshaclaw/**`、`tests/**`
+  - **reviewer**：只在 `review`、只寫 `reports/review/**`、**不改 code**
+- `guardrail`：對每個動作回 `GuardrailDecision(allowed, rule_id, reason)`——越界寫入就擋。
+- `scope_ci` / `gate`：CI 側把 PR 的 `git diff` 變動路徑比對契約，**fail-close**。
+- `handoff`：角色間交棒用 JSON manifest，寫端不驗、**讀端是 fail-close 信任邊界**。
+
+現況：enforcement 目前為 `shadow`（觀察模式，算出違規但不擋），設計上可切換為 enforcing 並接進 dispatch 路徑。
+
+---
+
+## 介面層與橫切能力
+
+**介面層（都只碰 `control` client，不直接 import coordinator）**
+
+| 模組 | 角色 |
+|---|---|
+| [`core`](./paulshaclaw/core/) | 核心 daemon + 路由 |
+| [`bot`](./paulshaclaw/bot/) | Telegram 主介面 |
+| [`cockpit`](./paulshaclaw/cockpit/) | TUI（多 session pane），破蝦哥座艙 |
+
+**橫切能力（cross-cutting）**
+
+| 模組 | 角色 |
+|---|---|
+| [`cost`](./paulshaclaw/cost/) | 多家 provider 用量 / 成本 footer |
+| [`monitor`](./paulshaclaw/monitor/) | 跨專案狀態同步 |
+| [`lifecycle`](./paulshaclaw/lifecycle/) | artifact / phase gate |
+| [`observability`](./paulshaclaw/observability/) | health / recovery |
+| [`security`](./paulshaclaw/security/) | redaction / approval / audit |
+| [`deploy`](./paulshaclaw/deploy/) | install / upgrade / uninstall |
+
+> 各模組成熟度不一：記憶 pipeline 端到端在跑、manager 控制面在跑；`persona` 護欄目前為 shadow 觀察模式；早期的 [`tui`](./paulshaclaw/tui/) 已由 `cockpit` 取代。細節見各模組原始碼。
+
+---
+
+## 命名與路徑
+
+**命名系統（勿改）**
+
+- `paulshaclaw`：repo｜`PaulShiaBro`：daemon / bot｜`psc`：CLI / env 短名｜`PoHsiaBro`：字型 / glyph 家族｜破蝦哥：吉祥物
+
+**path split（三軸分層）**
+
+- `paulshaclaw/`：repo code 與範本
+- `~/.agents/`：私有 runtime 狀態與記憶（含 `control/`）
+- `~/.config/paulshaclaw/`：secret 與機器本地 config
+
+**分階段生命週期**：模組名常帶 stage 標記（如 `core` 為 Stage 1、`memory` 為 Stage 2、`persona`/`coordinator` 為 Stage 4）——這是歷史演進脈絡，非完成度評分。
+
+---
+
+## 環境前提
+
+> ⚠️ 本專案**重度假設一套特定個人環境**，設計上已盡量把對個人 infra 的依賴抽成 config / 可關閉開關，但「自備或替換外部依賴」是使用前提。
+
+| 前提 | 說明 | 缺了會怎樣 |
 |---|---|---|
 | **WSL / Linux** | 開發與運行平台 | 其他平台未測試 |
-| **tmux** | 多 pane / 多 agent 協作載體 | 無 tmux 則跨 pane 協作（cockpit）不可用 |
-| **地端 LLM endpoint** | 記憶蒸餾後端（OpenAI / Anthropic 相容介面） | **必備**；無則 atomize / wake-up 不運作。endpoint 走 config，範例佔位 `http://127.0.0.1:8000`（請改成你自己的位址） |
+| **tmux** | 多 pane / 多 agent 協作載體 | 無 tmux 則跨 pane 協作（cockpit / dispatch）不可用 |
+| **地端 LLM endpoint** | 記憶蒸餾後端（OpenAI / Anthropic 相容介面） | **必備**；無則 atomize / wake-up 不運作。走 config，範例佔位 `http://127.0.0.1:8000`（請改成你自己的位址） |
 | **transcript 來源格式** | 假設特定 agent CLI 的 transcript 落地格式 / 路徑 | 格式不符需自寫 adapter；路徑走 config |
-| **狀態 / secret 路徑** | runtime 狀態與密鑰**放在 repo 外**（例：`~/.agents/`、`~/.config/paulshaclaw/`） | 路徑走 config；secret 不入庫（見下方「安全」） |
+| **狀態 / secret 路徑** | runtime 狀態與密鑰放在 repo 外（`~/.agents/`、`~/.config/paulshaclaw/`） | 路徑走 config；secret 不入庫 |
 
 ---
 
 ## Install
-
-> 先確認上方「環境前提」；缺了地端 LLM endpoint 等前提，多數功能跑不起來。
 
 ```bash
 # 1. 取得程式碼
@@ -85,7 +182,6 @@ cd paulshaclaw
 
 # 2. 安裝相依（Python >= 3.10）
 pip install -e .
-#   個別 stage 另有 requirements-stage9.txt / requirements-stage11.txt
 
 # 3. 設定環境前提（複製範例 config 後填入你自己的 endpoint / 路徑）
 cp config/paulshaclaw-stage1.sample.json config/paulshaclaw-stage1.json
@@ -93,70 +189,32 @@ cp config/paulshaclaw-stage1.sample.json config/paulshaclaw-stage1.json
 #   - transcript 來源路徑
 #   - 狀態 / secret 目錄（repo 外）
 
-# 4. （建議）先只跑測試，確認核心是真的（見下方「測試 / 驗證」）
+# 4. 跑測試確認核心
 pytest tests/ paulshaclaw/memory/tests/
 ```
 
-**安全 / 不入庫的東西**：密鑰、token、個人狀態一律放 repo 外（透過 config 指向 `~/.config/...`、`~/.agents/...`）。請勿把任何真實密鑰、內網主機名、客戶 / 專案代號寫進 repo。
+**安全 / 不入庫**：密鑰、token、個人狀態一律放 repo 外（透過 config 指向 `~/.config/...`、`~/.agents/...`）。請勿把任何真實密鑰、內網主機名、客戶 / 專案代號寫進 repo。CI（[`.github/workflows/tests.yml`](./.github/workflows/tests.yml)）會在 push / PR 跑測試。
 
 ---
 
 ## Usage
 
-> 本專案重度綁環境（見「環境前提」）；公開重點是**讀**核心程式碼 / 設計 ＋ **跑測試**驗證核心為真，而非一鍵運行。
+本專案重度綁一套特定個人環境（見「環境前提」）；公開的價值在於**讀架構 / 設計**與**跑測試**，而非一鍵運行。
 
-- 先跑測試確認核心為真（見下方「測試 / 驗證」）。
-- 核心記憶 pipeline 的子模組與用法見 [`paulshaclaw/memory/`](./paulshaclaw/memory/)。
-- 各模組「是否真的在 runtime 跑」一律見下方「誠實狀態表」。
+- 從上方「心智模型」與三大支柱讀起，對照各模組原始碼。
+- 記憶 pipeline 的子模組與資料流見 [`paulshaclaw/memory/`](./paulshaclaw/memory/) 與 [`paulshaclaw/memory/routing.md`](./paulshaclaw/memory/routing.md)。
+- manager 由 [`scripts/start.sh`](./scripts/start.sh) 拉起；介面層（core / bot / cockpit）透過 `~/.agents/control/` 檔案契約驅動它。
 - 設計與規格入口見 [`docs/`](./docs/)、[`openspec/`](./openspec/)。
-
----
-
-## 誠實狀態表
-
-> **戒灌水。** 下表據實標各模組完成度與**是否真的接進 runtime**。
->
-> 圖例：✅ 在跑（wired + 天天運行）｜🟢 真實 library（有測試、被動呼叫）｜🧪 experimental / shadow（有測試、有份量，**但未接進 runtime**）｜🚧 未實作 / 空殼。
-
-| 模組 | 角色 | 量（實證） | runtime 狀態 | 標記 |
-|---|---|---|---|---|
-| [`memory`](./paulshaclaw/memory/) | 記憶 pipeline + dream（皇冠寶石） | ~11k LOC | 端到端在跑 | ✅ |
-| [`cost`](./paulshaclaw/cost/) | 多家 provider 用量 footer | ~1.8k LOC | 在跑 | ✅ |
-| [`core`](./paulshaclaw/core/) | daemon + 路由核心 | ~1.1k LOC | 在跑 | ✅ |
-| [`bot`](./paulshaclaw/bot/) | Telegram 主介面 | ~0.8k LOC | 在跑 | ✅ |
-| [`monitor`](./paulshaclaw/monitor/) | 跨專案狀態同步 | ~1.4k LOC | 在跑 | ✅ |
-| [`cockpit`](./paulshaclaw/cockpit/) | 實際的 TUI（多 session pane） | ~0.9k LOC | MVP 在跑 | ✅ |
-| [`control`](./paulshaclaw/control/) | manager control-plane 契約 / client | ~0.2k LOC | runtime 契約在跑 | 🟢 |
-| [`lifecycle`](./paulshaclaw/lifecycle/) | artifact / phase gate | ~0.4k LOC | library | 🟢 |
-| [`observability`](./paulshaclaw/observability/) | health / recovery | ~0.2k LOC | library | 🟢 |
-| [`security`](./paulshaclaw/security/) | redaction / approval / audit | ~0.3k LOC | library | 🟢 |
-| [`deploy`](./paulshaclaw/deploy/) | install / upgrade / uninstall | ~0.3k LOC | library | 🟢 |
-| [`persona`](./paulshaclaw/persona/) | scope / autonomy / config-loader 治理骨架 | ~0.76k LOC | **未接進 runtime** | 🧪 shadow |
-| [`coordinator`](./paulshaclaw/coordinator/) | multi-agent dispatch / registry / manager daemon / seams | ~0.9k LOC | manager daemon / control plane 在跑 | ✅ |
-| [`tui`](./paulshaclaw/tui/) | 早期 TUI 嘗試 | **僅 ~19 LOC** | 基本沒做 | 🚧（真 TUI 見 `cockpit`） |
-
-> ⚠️ **特別聲明（persona / coordinator）**：`persona` 仍是治理骨架，**尚未 wired 進 runtime**；但 `coordinator` 已透過 `start.sh` 的 resident **manager daemon** + `control` 檔案契約實際接進運行路徑。前端（`core` / `bot` / `cockpit`）依然只碰 `control` client，**不直接 import coordinator**。
-
----
-
-## 測試 / 驗證
-
-> 不必相信 README 自評——**自己跑測試**看核心是不是真的。
-
-```bash
-pytest tests/ paulshaclaw/memory/tests/
-```
-
-- 覆蓋現況（實證，2026-06-19）：**1198 passed / 1 skipped**（skipped 為需真實地端 LLM 的 opt-in live 測試）。
-- CI：[`.github/workflows/tests.yml`](./.github/workflows/tests.yml) 會在 push / PR 跑 `pytest`。
 
 ---
 
 ## 設計文件
 
-- 架構總覽：[`docs/research/`](./docs/research/)
-- OpenSpec 規格與變更：[`openspec/`](./openspec/)
-- 七大設計原則：Hub-and-spoke · Artifact-first · Proposal-first · Fail-close · Stage 獨立性 · 三軸分層 · always-on 失敗域分離
+- 架構總覽：[`docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md`](./docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md)
+- Stage 3 生命週期 / slash-command / gate：[`docs/research/03...`](./docs/research/03.stage3-lifecycle-slash-commands-artifacts-phase-gating-research.md)
+- Stage 4 persona 契約 / handoff / 護欄：[`docs/research/04...`](./docs/research/04.stage4-persona-role-catalog-handoff-guardrails-research.md)
+- 記憶路由：[`paulshaclaw/memory/routing.md`](./paulshaclaw/memory/routing.md)
+- 規格與變更：[`openspec/`](./openspec/)
 
 ---
 
@@ -168,10 +226,16 @@ pytest tests/ paulshaclaw/memory/tests/
 
 ## License
 
-本專案採 **MIT License**（最簡、最寬鬆，適合 showcase）。完整條款見 [`LICENSE`](./LICENSE)；著作權人 `Copyright (c) 2026 Paul Chen (hamanpaul)`。
+MIT License，著作權人 `Copyright (c) 2026 Paul Chen (hamanpaul)`。完整條款見 [`LICENSE`](./LICENSE)。
 
 ---
 
 ## English summary
 
-**paulshaclaw** is a **reference / portfolio showcase** of a personal "agent operating system" — **not** a `pip install`-and-run product. It heavily assumes one specific personal environment (WSL, tmux, a local LLM endpoint, specific agent-CLI transcript formats). The crown jewel is a **memory pipeline** that distills multi-agent chat transcripts into long-term memory via a **local LLM** (`transcript → atomize → Zettelkasten → MOC → wake-up brief`). Other modules range from daily-driver runtime to passive libraries to **experimental, not-yet-wired** governance scaffolding (`persona` / `coordinator`) — each labeled honestly in the status table above. Run `pytest tests/ paulshaclaw/memory/tests/` to see the core is real (~1198 passing). MIT licensed.
+**paulshaclaw** is a personal "agent OS" — a substrate of **three pillars around your everyday AI coding agents** (Claude Code / Codex / Copilot):
+
+- **memory** — distills agent transcripts into reusable **experience notes** via a **local LLM** (`transcript → atomize → Zettelkasten → MOC → wake-up brief`), fed back to the next agent; cross-vendor.
+- **manager** (`coordinator` + `control`) — a resident daemon that dispatches dependency-ready task slices to agents in tmux panes + isolated git worktrees, exposed via a crash-safe file-contract control plane under `~/.agents/control`.
+- **persona** — per-role contracts (allowed phases / write-paths / tools) enforced by a guardrail, CI scope-checked against the diff (currently in shadow mode).
+
+Design is **hub-and-spoke** and **artifact / event-first**: canonical state lives in artifacts and event logs, not prompt text. The project heavily assumes one specific personal environment (WSL, tmux, a local LLM endpoint, specific agent-CLI transcript formats). MIT licensed.
