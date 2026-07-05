@@ -2,9 +2,9 @@
 
 > **一句話**：一套個人「agent 作業系統」——把 **記憶**、**manager**、**persona** 三件事組成一層底座，圍繞著你日常在用的 AI coding agent（Claude Code / Codex / Copilot），讓它們**跨 session、跨 vendor 記得住、也管得住**。（對外品牌 PaulShiaBro，吉祥物破蝦哥 🦞。）
 
-[![paulshaclaw：三件事，一起接住你的 agent — brag 影片](./docs/media/brag-poster.png)](./docs/media/brag.mp4)
+![paulshaclaw brag demo：三件事，一起接住你的 agent（記憶 · manager · persona）](./docs/media/brag.gif)
 
-*▶️ 點縮圖播放 24 秒 demo（記憶 · manager · persona 三大支柱）；GitHub 會開啟內建 mp4 播放器。*
+*24 秒 demo（三大支柱）。有聲高畫質版：[▶️ brag.mp4](./docs/media/brag.mp4)。*
 
 這份 README 講的是**架構與設計**：系統由哪些部分組成、彼此怎麼搭、資料與控制怎麼流動。實作與規格細節見各模組原始碼與 [`docs/`](./docs/)、[`openspec/`](./openspec/)。
 
