@@ -8,6 +8,7 @@ and this project adheres to Semantic Versioning.
 ## [Unreleased]
 
 ### Changed
+- **README 從「專案評估」改寫為「架構與說明」文件**：移除「誠實狀態表」（完成度評分 + LOC）、「What it is / isn't」期待值校準、以及戒灌水 / 測試數強調；改以「三大支柱環繞 agent」為心智模型重構——記憶明確定位為跨 vendor 蒸餾的**經驗筆記**（非專案狀態）並附系統總覽與記憶 pipeline 兩張 mermaid；`manager`（coordinator daemon + `control` 檔案契約控制面）與 `persona`（契約 + guardrail + CI scope 檢查，enforcement 現為 shadow）各自成節；介面層（core/bot/cockpit）與橫切能力（cost/monitor/lifecycle/observability/security/deploy）改以架構角色列表呈現，不再列完成度評分。保留環境前提 / Install / 設計文件連結；所有內部引用路徑經驗證存在（符合 R-22 doc-reference gate）。
 - **`/agent start` 改吃 pane id 參數**：`/agent start %pane` / `/agent startf %pane` 在呼叫端指定的既有 pane 啟動 claude-gemma4 agent（取代原本 `split-window` 切新 pane）。啟動前驗證該 pane 為 idle shell——非 shell 或被 claude/minicom 等佔用、pane id 未以 `%` 開頭、帶多個 pane id 皆拒絕並回報原因。修正先前切新 pane「不 work」、agent 未穩定常駐導致 Telegram 回覆斷線的問題。
 - **同步 policy 1.0.2**：`policy_version` 1.0.1 → 1.0.2（`.paul-project.yml` + 四份 agent 檔 + `managed-by@v1.0.2`），caller `policy-check` workflow 的 `uses:` 與 `policy_engine_ref` 重新雙重釘選至 `hamanpaul/paulsha-conventions@98487868a098e22647074c677a58633ce4fa19be`，並在 agent 檔追加 R-19 / R-20（CI 測試要求與 workflow `policy_version` 同步規則）。
 - **同步 policy 1.0.1**：`policy_version` 1.0.0 → 1.0.1（`.paul-project.yml` + 四份 agent 檔 + `managed-by@v1.0.1`），caller `policy-check` workflow 的 `uses:` 與 `policy_engine_ref` 重新雙重釘選至 `hamanpaul/paulsha-conventions@4ff59b6c35a46a87af3c3e641975743ee8fa0858`（含 R-17 / R-18）；agent 檔追加 R-17 / R-18 與語言規範說明
