@@ -1,7 +1,7 @@
 ## 1. 先行（不搬 code，不必等閘）
 
 - [ ] 1.1 依 new-project-template 建立 `hamanpaul/paulsha-hippo` repo（無歷史、conventions 1.0.12、R-20 版本同步、protected tags）
-- [ ] 1.2 hippo CI 四道骨架：tests（R-19）、policy-check、`paulsha_hippo.lib` import-lint（禁內部依賴）、deident gate（#201）
+- [ ] 1.2 hippo CI 四道保證骨架：tests（R-19）、policy-check、`paulsha_hippo.lib` import-lint（pytest 併入 tests）、deident（R-21 `tier: shareable` 併入 policy-check，#201/#211）
 - [ ] 1.3 hippo README 草稿（zh-tw：定位→quickstart→安裝→設定→日常使用→架構→家族關係）
 - [ ] 1.4 #125 issue comment 註記工作名更名 `paulsha-memory` → `paulsha-hippo` 與本 change 連結
 
