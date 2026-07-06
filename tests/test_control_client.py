@@ -139,6 +139,99 @@ def test_read_status_uses_runtime_stale_threshold(monkeypatch, tmp_path):
     importlib.reload(client)
 
 
+def test_read_status_preserves_held_items(monkeypatch, tmp_path):
+    import os
+
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    updated_at = datetime.now(timezone.utc).isoformat()
+    payload = contract.build_status(
+        ready=["slice-a"],
+        in_flight=[],
+        recent_done=[],
+        daemon={"pid": os.getpid(), "last_tick_at": updated_at, "idle": False},
+        updated_at=updated_at,
+    )
+    payload["held"] = [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+    contract.atomic_write_json(constants.status_path(), payload)
+
+    status = client.read_status()
+
+    assert status["held"] == [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+
+
+def test_read_status_normalizes_missing_held_to_empty_list(monkeypatch, tmp_path):
+    import os
+
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    updated_at = datetime.now(timezone.utc).isoformat()
+    contract.atomic_write_json(
+        constants.status_path(),
+        contract.build_status(
+            ready=["slice-a"],
+            in_flight=[],
+            recent_done=[],
+            daemon={"pid": os.getpid(), "last_tick_at": updated_at, "idle": False},
+            updated_at=updated_at,
+        ),
+    )
+
+    status = client.read_status()
+
+    assert status["held"] == []
+
+
+def test_read_status_preserves_held_on_degraded_snapshots(monkeypatch, tmp_path):
+    import os
+
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    held = [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+
+    stale_updated_at = "2000-01-01T00:00:00+00:00"
+    contract.atomic_write_json(
+        constants.status_path(),
+        {
+            "schema_version": constants.SCHEMA_VERSION,
+            "updated_at": stale_updated_at,
+            "daemon": {"pid": 424242, "last_tick_at": stale_updated_at, "idle": False},
+            "ready": ["slice-a"],
+            "held": held,
+            "in_flight": [],
+            "recent_done": [],
+        },
+    )
+
+    monkeypatch.setattr(client.os, "kill", lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()))
+    stale = client.read_status()
+    assert stale["degraded"] is True
+    assert stale["held"] == held
+
+    live_updated_at = (
+        datetime.now(timezone.utc) - timedelta(seconds=constants.STATUS_STALLED_AFTER_SECONDS + 30)
+    ).isoformat()
+    contract.atomic_write_json(
+        constants.status_path(),
+        {
+            "schema_version": constants.SCHEMA_VERSION,
+            "updated_at": live_updated_at,
+            "daemon": {"pid": os.getpid(), "last_tick_at": live_updated_at, "idle": False},
+            "ready": ["slice-a"],
+            "held": held,
+            "in_flight": [],
+            "recent_done": [],
+        },
+    )
+
+    stalled = client.read_status()
+    assert stalled["degraded"] is True
+    assert stalled["held"] == held
+
+
 def test_poll_done_returns_record_or_none(monkeypatch, tmp_path):
     from paulshaclaw.control import client
 
@@ -158,6 +251,51 @@ def test_poll_done_returns_record_or_none(monkeypatch, tmp_path):
 
     assert found == done_payload
     assert client.poll_done("missing", timeout=0.0, poll_interval=0.0) is None
+
+
+def test_control_plane_coordinator_submits_dispatch_request(monkeypatch, tmp_path):
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+
+    coordinator = client.ControlPlaneCoordinator()
+
+    job = coordinator.create_job(
+        phase="stage1",
+        scope="slice-a",
+        payload={"specs_dir": "/repo/specs", "force_hold": True, "ignored": "value"},
+    )
+
+    request_path = constants.requests_dir() / f"{job['job_id']}.json"
+    request = contract.read_json(request_path)
+
+    assert job == {"job_id": job["job_id"], "phase": "stage1", "scope": "slice-a"}
+    assert request is not None
+    assert request["type"] == "dispatch"
+    assert request["requested_by"] == "telegram"
+    assert request["args"] == {
+        "slice_id": "slice-a",
+        "specs_dir": "/repo/specs",
+        "force_hold": True,
+    }
+
+
+def test_control_plane_coordinator_wait_done_reads_done(monkeypatch, tmp_path):
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+
+    coordinator = client.ControlPlaneCoordinator()
+    done_payload = contract.build_done(
+        req_id="req-123",
+        status="ok",
+        result={"job_id": "job-1", "slice_id": "slice-a"},
+    )
+    contract.atomic_write_json(constants.done_dir() / "req-123.json", done_payload)
+
+    found = coordinator.wait_done("req-123", timeout=0.0, poll_interval=0.0)
+
+    assert found == done_payload
 
 
 def test_client_module_imports_without_coordinator(monkeypatch):

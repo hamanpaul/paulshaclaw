@@ -126,6 +126,34 @@ def default_reaper() -> Callable[[], dict[str, Any]]:
     return lambda: broker_reaper.reap_orphan_brokers(apply=True)
 
 
+def _in_flight_status(registry) -> list[dict[str, Any]]:
+    in_flight = []
+    for job in registry.list_jobs():
+        status = job.get("status")
+        if status not in manager.IN_FLIGHT_STATUSES:
+            continue
+        in_flight.append(
+            {
+                "job_id": job.get("job_id"),
+                "slice_id": job.get("task"),
+                "state": status,
+            }
+        )
+    return in_flight
+
+
+def _held_reasons(meta: dict[str, Any], is_satisfied: Callable[[str], bool]) -> list[str]:
+    reasons: list[str] = []
+    if not (isinstance(meta.get("plan"), str) and meta["plan"]):
+        reasons.append("no-plan")
+    if meta.get("dispatch") != "auto":
+        reasons.append("dispatch-hold")
+    for dep in meta.get("depends_on", []):
+        if not is_satisfied(dep):
+            reasons.append(f"deps-unsatisfied:{dep}")
+    return reasons
+
+
 def build_status_provider(
     *,
     registry,
@@ -133,21 +161,9 @@ def build_status_provider(
     recent_done_provider: Callable[[], list[dict[str, Any]]],
 ) -> Callable[[], dict[str, Any]]:
     def provider() -> dict[str, Any]:
-        in_flight = []
-        for job in registry.list_jobs():
-            status = job.get("status")
-            if status not in manager.IN_FLIGHT_STATUSES:
-                continue
-            in_flight.append(
-                {
-                    "job_id": job.get("job_id"),
-                    "slice_id": job.get("task"),
-                    "state": status,
-                }
-            )
         return {
             "ready": list(ready_provider()),
-            "in_flight": in_flight,
+            "in_flight": _in_flight_status(registry),
             "recent_done": list(recent_done_provider()),
         }
 
@@ -163,11 +179,6 @@ def build_runtime_status_provider(
     ready_units_fn: Callable[[list[dict[str, Any]], Callable[[str], bool]], list[dict[str, Any]]] = autonomy.ready_units,
     recent_done_limit: int = RECENT_DONE_LIMIT,
 ) -> Callable[[], dict[str, Any]]:
-    def ready_provider() -> list[str]:
-        metas = scan_specs_fn(specs_dir)
-        predicate = lambda slice_id: autonomy.default_is_satisfied(slice_id, handoff_dir=handoff_dir)
-        return [meta["slice_id"] for meta in ready_units_fn(metas, predicate)]
-
     def recent_done_provider() -> list[dict[str, Any]]:
         manifests: list[tuple[str, dict[str, Any]]] = []
         handoff_path = Path(handoff_dir)
@@ -190,11 +201,30 @@ def build_runtime_status_provider(
         manifests.sort(key=lambda item: item[0], reverse=True)
         return [item[1] for item in manifests[:recent_done_limit]]
 
-    return build_status_provider(
-        registry=registry,
-        ready_provider=ready_provider,
-        recent_done_provider=recent_done_provider,
-    )
+    def provider() -> dict[str, Any]:
+        metas = scan_specs_fn(specs_dir)
+        predicate = lambda slice_id: autonomy.default_is_satisfied(slice_id, handoff_dir=handoff_dir)
+        ready_units = ready_units_fn(metas, predicate)
+        ready = [meta["slice_id"] for meta in ready_units]
+        ready_ids = set(ready)
+        held = []
+        for meta in metas:
+            slice_id = meta.get("slice_id")
+            if not (isinstance(slice_id, str) and slice_id):
+                continue
+            if slice_id in ready_ids:
+                continue
+            reasons = _held_reasons(meta, predicate)
+            if reasons:
+                held.append({"slice_id": slice_id, "reasons": reasons})
+        return {
+            "ready": ready,
+            "held": held,
+            "in_flight": _in_flight_status(registry),
+            "recent_done": recent_done_provider(),
+        }
+
+    return provider
 
 
 def build_request_executor(
@@ -218,6 +248,52 @@ def build_request_executor(
         request_specs_dir = args.get("specs_dir") or specs_dir
         metas = scan_specs_fn(request_specs_dir)
         allow_unsafe = bool(args.get("allow_unsafe", False))
+        persona = args.get("persona", default_persona)
+        if request["type"] == "dispatch":
+            slice_id = args.get("slice_id")
+            target = next((meta for meta in metas if meta.get("slice_id") == slice_id), None)
+            if target is None:
+                raise ValueError("unknown-slice")
+            if not (isinstance(target.get("plan"), str) and target["plan"]):
+                raise ValueError("no-plan")
+            missing_deps = [dep for dep in target.get("depends_on", []) if not predicate(dep)]
+            if missing_deps:
+                raise ValueError(f"deps-unsatisfied: {', '.join(missing_deps)}")
+            force_hold = bool(args.get("force_hold", False))
+            if target.get("dispatch") != "auto" and not force_hold:
+                raise ValueError("dispatch-hold")
+            registry = getattr(dispatcher, "_registry", None)
+            if registry is None:
+                raise RuntimeError("dispatch requires registry for already-active guard")
+            if any(
+                job.get("task") == slice_id and job.get("status") in manager.IN_FLIGHT_STATUSES
+                for job in registry.list_jobs()
+            ):
+                raise ValueError("already-active")
+            active_launcher = _resolve_launcher(
+                args.get("executor", default_executor),
+                launcher,
+                allow_unsafe=allow_unsafe,
+                model=args.get("model"),
+            )
+            dispatched = dispatch_ready_fn(
+                [{**target, "dispatch": "auto"}],
+                lambda _slice_id: True,
+                dispatcher,
+                persona=persona,
+                launcher=active_launcher,
+            )
+            job = dispatched[0]
+            result = {
+                "job_id": job.get("job_id"),
+                "worktree": job.get("worktree"),
+                "branch": job.get("branch"),
+                "slice_id": slice_id,
+            }
+            if force_hold and target.get("dispatch") != "auto":
+                result["override"] = "hold"
+                result["requested_by"] = request["requested_by"]
+            return result
         _refuse_unsafe_fanout(metas, predicate, allow_unsafe=allow_unsafe)
         active_launcher = _resolve_launcher(
             args.get("executor", default_executor),
@@ -225,7 +301,6 @@ def build_request_executor(
             allow_unsafe=allow_unsafe,
             model=args.get("model"),
         )
-        persona = args.get("persona", default_persona)
         if request["type"] == "fanout":
             jobs = dispatch_ready_fn(
                 metas,
@@ -445,6 +520,7 @@ def run_loop(
                     },
                     updated_at=now_fn(),
                 )
+                status_payload["held"] = list(snapshot.get("held", []))
                 contract.atomic_write_json(constants.status_path(), status_payload)
             except Exception as exc:  # noqa: BLE001
                 _log_error(exc)

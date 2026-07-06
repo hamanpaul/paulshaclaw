@@ -654,6 +654,84 @@ class ListenerBuildTests(unittest.TestCase):
             self.assertFalse(response["ok"])
             self.assertIn("coordinator backend 未設定", response["message"])
 
+    def test_build_listener_uses_control_plane_coordinator_when_backend_control(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "backend": "control", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            listener = build_listener(
+                config_path=str(config_path),
+                settings=BotSettings(token="fake-token"),
+                client=RecordingClient([]),
+            )
+
+            self.assertIsInstance(listener.router.daemon.coordinator, listener_module.ControlPlaneCoordinator)
+
+    def test_build_listener_env_override_selects_control_plane_coordinator(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.dict(os.environ, {"PSC_COORDINATOR_BACKEND": "control"}, clear=False):
+                listener = build_listener(
+                    config_path=str(config_path),
+                    settings=BotSettings(token="fake-token"),
+                    client=RecordingClient([]),
+                )
+
+            self.assertIsInstance(listener.router.daemon.coordinator, listener_module.ControlPlaneCoordinator)
+
+    def test_build_listener_rejects_test_only_local_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "backend": "local", "default_payload": {}},
+                        "pane_assignments": [
+                            {"pane_id": "%0", "title": "cockpit", "task_id": "task-1", "status": "ready"}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "test-only"):
+                build_listener(
+                    config_path=str(config_path),
+                    settings=BotSettings(token="fake-token"),
+                    client=RecordingClient([]),
+                )
+
     def test_build_listener_routes_agent_messages_without_chat_backend_and_keeps_dispatch_guard(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"

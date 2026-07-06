@@ -8,6 +8,25 @@ from typing import Any
 from . import constants, contract
 
 
+class ControlPlaneCoordinator:
+    def __init__(self, *, requested_by: str = "telegram") -> None:
+        self.requested_by = requested_by
+
+    def create_job(self, *, phase: str, scope: str, payload: dict[str, object]) -> dict[str, object]:
+        args: dict[str, Any] = {"slice_id": scope}
+        specs_dir = payload.get("specs_dir")
+        if isinstance(specs_dir, str) and specs_dir.strip():
+            args["specs_dir"] = specs_dir
+        force_hold = payload.get("force_hold")
+        if isinstance(force_hold, bool):
+            args["force_hold"] = force_hold
+        req_id = submit_request("dispatch", args, self.requested_by)
+        return {"job_id": req_id, "phase": phase, "scope": scope}
+
+    def wait_done(self, req_id: str, timeout: float, poll_interval: float = 0.5) -> dict[str, Any] | None:
+        return poll_done(req_id, timeout=timeout, poll_interval=poll_interval)
+
+
 def submit_request(req_type: str, args: dict[str, Any], requested_by: str) -> str:
     request = contract.build_request(req_type=req_type, args=args, requested_by=requested_by)
     contract.atomic_write_json(constants.requests_dir() / f"{request['req_id']}.json", request)
@@ -26,10 +45,10 @@ def read_status() -> dict[str, Any]:
         # window; only flag it once it has stalled far beyond any real request.
         if age is not None and age <= constants.STATUS_STALLED_AFTER_SECONDS:
             return _ok_status(payload, updated_at)
-        return _degraded_status("stalled")
+        return _degraded_status("stalled", payload)
     # No live daemon pid to confirm — fall back to age-based staleness.
     if age is None or age > constants.STATUS_STALE_AFTER_SECONDS:
-        return _degraded_status("stale")
+        return _degraded_status("stale", payload)
     return _ok_status(payload, updated_at)
 
 
@@ -39,6 +58,7 @@ def _ok_status(payload: dict[str, Any], updated_at: object) -> dict[str, Any]:
         "updated_at": updated_at,
         "daemon": payload.get("daemon"),
         "ready": list(payload.get("ready", [])),
+        "held": list(payload.get("held", [])),
         "in_flight": list(payload.get("in_flight", [])),
         "recent_done": list(payload.get("recent_done", [])),
         "degraded": False,
@@ -73,12 +93,13 @@ def poll_done(req_id: str, timeout: float, poll_interval: float = 0.5) -> dict[s
             time.sleep(poll_interval)
 
 
-def _degraded_status(reason: str) -> dict[str, Any]:
+def _degraded_status(reason: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "schema_version": constants.SCHEMA_VERSION,
         "updated_at": None,
         "daemon": None,
         "ready": [],
+        "held": list(payload.get("held", [])) if isinstance(payload, dict) else [],
         "in_flight": [],
         "recent_done": [],
         "degraded": True,

@@ -309,7 +309,8 @@ start_manager_loop() {
   fi
   local manager_log="$HOME/.agents/log/manager.log"
   (
-    PYTHONPATH="$REPO" "$PY" -m paulshaclaw.coordinator.manager_daemon
+    PYTHONPATH="$REPO" "$PY" -m paulshaclaw.coordinator.manager_daemon \
+      --specs-dir "$REPO/docs/superpowers/specs"
   ) 200>&- >>"$manager_log" 2>&1 &
   MANAGER_PID=$!
   MANAGER_PID_OWNED=1
