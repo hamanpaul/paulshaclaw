@@ -52,14 +52,22 @@ def _default_gate_runner(job: dict) -> dict | None:
 def _satisfied_pred(handoff_dir: str):
     def _pred(slice_id: str) -> bool:
         try:
-            return autonomy.default_is_satisfied(slice_id, handoff_dir=handoff_dir)
+            return _manifest_is_satisfied(slice_id, Path(handoff_dir))
         except (OSError, ValueError):
             return False
 
     return _pred
 
 
-def _existing_manifest_job_id(path: Path) -> str | None:
+def _lexical_absolute(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path)))
+
+
+def _is_safe_handoff_root(path: Path) -> bool:
+    return _lexical_absolute(path) == path.resolve(strict=False)
+
+
+def _read_manifest_payload(path: Path) -> dict | None:
     if not path.is_file():
         return None
     try:
@@ -68,8 +76,32 @@ def _existing_manifest_job_id(path: Path) -> str | None:
         return None
     if not isinstance(payload, dict):
         return None
-    job_id = payload.get("job_id")
-    return job_id if isinstance(job_id, str) and job_id else None
+    return payload
+
+
+def _manifest_is_current_for_job(path: Path, *, job_id: str, slice_id: str, status: str) -> bool:
+    payload = _read_manifest_payload(path)
+    if payload is None:
+        return False
+    gate_status = "passed" if status == "done" else "failed"
+    return (
+        payload.get("job_id") == job_id
+        and payload.get("slice_id") == slice_id
+        and payload.get("gate_status") == gate_status
+        and payload.get("completion") == status
+    )
+
+
+def _manifest_is_satisfied(slice_id: str, handoff_dir: Path) -> bool:
+    if not _is_safe_slice_id(slice_id):
+        return False
+    if not _is_safe_handoff_root(handoff_dir):
+        return False
+    manifest_path = handoff_dir / f"{slice_id}.json"
+    if manifest_path.is_symlink():
+        return False
+    payload = _read_manifest_payload(manifest_path)
+    return isinstance(payload, dict) and payload.get("gate_status") == "passed"
 
 
 def complete_tick(
@@ -85,6 +117,7 @@ def complete_tick(
         raise RuntimeError("complete_tick 需 dispatcher._registry（fail-closed）")
     runner = gate_runner if gate_runner is not None else _default_gate_runner
     hdir = Path(handoff_dir)
+    handoff_root_safe = _is_safe_handoff_root(hdir)
 
     polled: list[str] = []
     completed: list[dict] = []
@@ -119,12 +152,19 @@ def complete_tick(
                 errors.append({"job_id": job_id, "error": f"job 缺合法/安全 task/slice_id: {slice_id!r}"})
                 continue
             manifest_path = hdir / f"{slice_id}.json"
+            if not handoff_root_safe:
+                errors.append(
+                    {"job_id": job_id, "error": f"handoff dir 拒絕 symlink/root escape: {hdir}"}
+                )
+                continue
             if manifest_path.is_symlink():
                 errors.append(
                     {"job_id": job_id, "error": f"handoff manifest path 拒絕 symlink: {manifest_path}"}
                 )
                 continue
-            if _existing_manifest_job_id(manifest_path) == job_id:
+            if _manifest_is_current_for_job(
+                manifest_path, job_id=job_id, slice_id=slice_id, status=status
+            ):
                 continue  # 真冪等：同一個 terminal job 已落盤
 
             gate_status = "passed" if status == "done" else "failed"

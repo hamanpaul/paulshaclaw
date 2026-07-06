@@ -122,6 +122,42 @@ class CompleteTickReconcileTests(unittest.TestCase):
             self.assertEqual(second["completed"], [])
             self.assertEqual(second["polled"], [])
 
+    def test_same_job_stale_manifest_is_repaired(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-stale")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "slice-stale.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "slice_id": "slice-stale",
+                        "job_id": job["job_id"],
+                        "gate_status": "failed",
+                        "completion": "failed",
+                        "exit_code": 1,
+                        "branch": job["branch"],
+                        "gate_verdict": None,
+                        "completed_at": "OLD",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T1")
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["job_id"], job["job_id"])
+            self.assertEqual(manifest["gate_status"], "passed")
+            self.assertEqual(manifest["completion"], "done")
+            self.assertEqual(manifest["completed_at"], "T1")
+            self.assertEqual(summary["completed"], [{"slice_id": "slice-stale", "gate_status": "passed"}])
+
     def test_requeue_overwrites_manifest_for_new_job_id(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
@@ -232,6 +268,22 @@ class CompleteTickReconcileTests(unittest.TestCase):
             summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
 
             self.assertEqual(target_path.read_text(encoding="utf-8"), '{"outside": true}\n')
+            self.assertEqual(summary["completed"], [])
+            self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
+
+    def test_symlink_handoff_dir_is_rejected_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-hdir-link")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            target_dir = Path(d) / "outside"
+            target_dir.mkdir()
+            hdir = Path(d) / "handoff"
+            hdir.symlink_to(target_dir, target_is_directory=True)
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+
+            self.assertFalse((target_dir / "slice-hdir-link.json").exists())
             self.assertEqual(summary["completed"], [])
             self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
 
@@ -412,6 +464,30 @@ class RunTickTests(unittest.TestCase):
             manifest_path = hdir / "up.json"
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_bytes(b"\x80not-utf8")
+            metas = [
+                {"slice_id": "down", "dispatch": "auto", "plan": "p-down.md", "depends_on": ["up"]},
+            ]
+
+            summary = manager.run_tick(
+                disp, metas=metas, launcher=None, handoff_dir=str(hdir), clock=lambda: "T0",
+            )
+
+            self.assertEqual(summary["dispatched"], [])
+            self.assertFalse(any(e.get("stage") == "fanout" for e in summary["errors"]))
+
+    def test_symlink_dependency_manifest_does_not_create_fanout_error(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            disp = FakeDispatcher(reg, poll_map={})
+            hdir = Path(d) / "handoff"
+            target_path = Path(d) / "outside-up.json"
+            target_path.write_text(
+                json.dumps({"slice_id": "up", "gate_status": "passed"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            manifest_path = hdir / "up.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.symlink_to(target_path)
             metas = [
                 {"slice_id": "down", "dispatch": "auto", "plan": "p-down.md", "depends_on": ["up"]},
             ]
