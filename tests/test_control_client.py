@@ -139,6 +139,51 @@ def test_read_status_uses_runtime_stale_threshold(monkeypatch, tmp_path):
     importlib.reload(client)
 
 
+def test_read_status_preserves_held_items(monkeypatch, tmp_path):
+    import os
+
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    updated_at = datetime.now(timezone.utc).isoformat()
+    payload = contract.build_status(
+        ready=["slice-a"],
+        in_flight=[],
+        recent_done=[],
+        daemon={"pid": os.getpid(), "last_tick_at": updated_at, "idle": False},
+        updated_at=updated_at,
+    )
+    payload["held"] = [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+    contract.atomic_write_json(constants.status_path(), payload)
+
+    status = client.read_status()
+
+    assert status["held"] == [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+
+
+def test_read_status_normalizes_missing_held_to_empty_list(monkeypatch, tmp_path):
+    import os
+
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    updated_at = datetime.now(timezone.utc).isoformat()
+    contract.atomic_write_json(
+        constants.status_path(),
+        contract.build_status(
+            ready=["slice-a"],
+            in_flight=[],
+            recent_done=[],
+            daemon={"pid": os.getpid(), "last_tick_at": updated_at, "idle": False},
+            updated_at=updated_at,
+        ),
+    )
+
+    status = client.read_status()
+
+    assert status["held"] == []
+
+
 def test_poll_done_returns_record_or_none(monkeypatch, tmp_path):
     from paulshaclaw.control import client
 

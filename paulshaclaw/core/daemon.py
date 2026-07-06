@@ -455,6 +455,7 @@ class PaulShiaBroDaemon:
         daemon = status.get("daemon")
         daemon = daemon if isinstance(daemon, dict) else {}
         ready = list(status.get("ready", []))
+        held = list(status.get("held", []))
         in_flight = list(status.get("in_flight", []))
         recent_done = list(status.get("recent_done", []))
         lines = [
@@ -462,6 +463,7 @@ class PaulShiaBroDaemon:
             f"updated_at: {status.get('updated_at') or '--'}",
             f"daemon: pid={daemon.get('pid', '--')} idle={daemon.get('idle', '--')} last_tick_at={daemon.get('last_tick_at', '--')}",
             f"ready({len(ready)}): {', '.join(str(item) for item in ready) if ready else '--'}",
+            f"held({len(held)}): {self._format_manager_held_items(held)}",
             f"in_flight({len(in_flight)}): {self._format_manager_items(in_flight, state_key='state')}",
             f"recent_done({len(recent_done)}): {self._format_manager_items(recent_done, state_key='gate_status')}",
         ]
@@ -475,6 +477,16 @@ class PaulShiaBroDaemon:
             if not isinstance(item, dict):
                 continue
             rendered.append(f"{item.get('slice_id', '--')}({item.get(state_key, '--')})")
+        return ", ".join(rendered) if rendered else "--"
+
+    def _format_manager_held_items(self, items: list[object]) -> str:
+        rendered: list[str] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            reasons = item.get("reasons", [])
+            first_reason = reasons[0] if isinstance(reasons, list) and reasons else "--"
+            rendered.append(f"{item.get('slice_id', '--')}({first_reason})")
         return ", ".join(rendered) if rendered else "--"
 
     def _format_manager_tick_result(self, req_id: str, done: dict[str, object] | None) -> str:

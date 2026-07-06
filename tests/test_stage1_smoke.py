@@ -366,6 +366,33 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertIn("slice-a", result["message"])
         self.assertEqual(manager_client.calls, [("read_status", None)])
 
+    def test_manager_status_command_renders_held_summary(self) -> None:
+        config_path = self.make_config_path()
+        manager_client = FakeManagerClient(
+            status_payload={
+                "updated_at": "2026-07-03T12:00:00+00:00",
+                "daemon": {"pid": 1234, "last_tick_at": "2026-07-03T11:59:00+00:00", "idle": False},
+                "ready": ["slice-a"],
+                "held": [{"slice_id": "slice-held", "reasons": ["dispatch-hold", "deps-unsatisfied:slice-dep"]}],
+                "in_flight": [{"slice_id": "slice-b", "state": "running"}],
+                "recent_done": [{"slice_id": "slice-c", "gate_status": "passed"}],
+                "degraded": False,
+                "degraded_reason": None,
+            }
+        )
+        daemon = PaulShiaBroDaemon(
+            config=load_config(config_path=config_path),
+            coordinator=FakeCoordinator(),
+            manager_client=manager_client,
+        )
+        router = TelegramCommandRouter(daemon=daemon)
+
+        result = router.handle_message(user_id=1001, text="/manager status")
+
+        self.assertTrue(result["ok"])
+        self.assertIn("held(1): slice-held(dispatch-hold)", result["message"])
+        self.assertEqual(manager_client.calls, [("read_status", None)])
+
     def test_manager_bare_command_defaults_to_status(self) -> None:
         config_path = self.make_config_path()
         manager_client = FakeManagerClient()

@@ -783,6 +783,60 @@ def test_runtime_status_provider_lists_recent_done_by_completion_time(monkeypatc
     assert [entry["slice_id"] for entry in status["recent_done"]] == ["slice-b", "slice-a"]
 
 
+def test_runtime_status_provider_classifies_held_units(monkeypatch, tmp_path):
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    handoff_dir = tmp_path / "handoff"
+    handoff_dir.mkdir()
+    provider = manager_daemon.build_runtime_status_provider(
+        registry=FakeRegistry(),
+        specs_dir=str(tmp_path / "specs"),
+        handoff_dir=str(handoff_dir),
+        scan_specs_fn=lambda specs_dir: [
+            {"slice_id": "slice-ready", "dispatch": "auto", "plan": "ready.md", "depends_on": []},
+            {"slice_id": "slice-no-plan", "dispatch": "auto", "plan": None, "depends_on": []},
+            {"slice_id": "slice-held", "dispatch": "hold", "plan": "held.md", "depends_on": []},
+            {"slice_id": "slice-blocked", "dispatch": "auto", "plan": "blocked.md", "depends_on": ["slice-dep"]},
+        ],
+    )
+
+    status = provider()
+
+    assert status["ready"] == ["slice-ready"]
+    assert status["held"] == [
+        {"slice_id": "slice-no-plan", "reasons": ["no-plan"]},
+        {"slice_id": "slice-held", "reasons": ["dispatch-hold"]},
+        {"slice_id": "slice-blocked", "reasons": ["deps-unsatisfied:slice-dep"]},
+    ]
+    assert {item["slice_id"] for item in status["held"]} == {"slice-no-plan", "slice-held", "slice-blocked"}
+
+
+def test_run_loop_persists_held_status_from_provider(monkeypatch, tmp_path):
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+
+    started = manager_daemon.run_loop(
+        request_executor=lambda req: {"dispatched": []},
+        status_provider=lambda: {
+            "ready": [],
+            "held": [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}],
+            "in_flight": [],
+            "recent_done": [],
+        },
+        periodic_tick_runner=lambda: {"dispatch_skipped": False},
+        poll_interval=0.0,
+        tick_interval=300.0,
+        now_fn=lambda: "2026-07-03T09:05:00+00:00",
+        monotonic_fn=lambda: 0.0,
+        sleep_fn=lambda _: None,
+        pid=1,
+        max_rounds=1,
+    )
+
+    status = contract.read_json(constants.status_path())
+
+    assert started is True
+    assert status["held"] == [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+
+
 def test_allow_unsafe_fanout_over_one_ready_slice_writes_error_done(monkeypatch, tmp_path):
     monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
     req_id = "20260703T090006Z-22222222222222222222222222222222"
