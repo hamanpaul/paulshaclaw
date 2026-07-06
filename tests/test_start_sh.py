@@ -15,6 +15,12 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 START_SH = PROJECT_ROOT / "scripts" / "start.sh"
+SERVICE_SCRIPT_NAMES = (
+    "service-cost.sh",
+    "service-dream.sh",
+    "service-manager.sh",
+    "service-bot.sh",
+)
 
 
 FAKE_PYTHON = textwrap.dedent(
@@ -181,6 +187,20 @@ FAKE_SYSTEMCTL = textwrap.dedent(
         raise SystemExit(main())
     """
 )
+
+
+def _install_start_scripts(target_dir: Path, *, repo_root: Path | None = None) -> None:
+    for name in ("start.sh", *SERVICE_SCRIPT_NAMES):
+        source = PROJECT_ROOT / "scripts" / name
+        text = source.read_text(encoding="utf-8")
+        if repo_root is not None:
+            text = text.replace(
+                "REPO=/home/paul_chen/prj_pri/paulshaclaw",
+                f"REPO={repo_root}",
+            )
+        target = target_dir / name
+        target.write_text(text, encoding="utf-8")
+        target.chmod(0o755)
 
 
 class StartScriptLifecycleTests(unittest.TestCase):
@@ -458,8 +478,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             self.assertIn('BASH_SOURCE[0]', start_sh_text)
             self.assertNotIn("set -m", start_sh_text)
             self.assertNotIn("while kill -0", start_sh_text)
-            start_sh.write_text(start_sh_text, encoding="utf-8")
-            start_sh.chmod(0o755)
+            _install_start_scripts(fake_scripts)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -716,8 +735,7 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
             fake_tmux.chmod(0o755)
 
             start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
-            start_sh.chmod(0o755)
+            _install_start_scripts(fake_scripts)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -804,8 +822,7 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
             fake_tmux.chmod(0o755)
 
             start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
-            start_sh.chmod(0o755)
+            _install_start_scripts(fake_scripts)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -912,14 +929,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             fake_tmux.chmod(0o755)
 
             start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(
-                START_SH.read_text(encoding="utf-8").replace(
-                    "REPO=/home/paul_chen/prj_pri/paulshaclaw",
-                    f"REPO={repo_root}",
-                ),
-                encoding="utf-8",
-            )
-            start_sh.chmod(0o755)
+            _install_start_scripts(fake_scripts, repo_root=repo_root)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -991,14 +1001,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             fake_tmux.chmod(0o755)
 
             start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(
-                START_SH.read_text(encoding="utf-8").replace(
-                    "REPO=/home/paul_chen/prj_pri/paulshaclaw",
-                    f"REPO={repo_root}",
-                ),
-                encoding="utf-8",
-            )
-            start_sh.chmod(0o755)
+            _install_start_scripts(fake_scripts, repo_root=repo_root)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1058,14 +1061,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             fake_tmux.chmod(0o755)
 
             start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(
-                START_SH.read_text(encoding="utf-8").replace(
-                    "REPO=/home/paul_chen/prj_pri/paulshaclaw",
-                    f"REPO={repo_root}",
-                ),
-                encoding="utf-8",
-            )
-            start_sh.chmod(0o755)
+            _install_start_scripts(fake_scripts, repo_root=repo_root)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1126,10 +1122,7 @@ class StartScriptDreamLoopTests(unittest.TestCase):
         self.assertIn("wait_for_manager_shutdown", cleanup_block)
 
     def test_dream_loop_sleeps_before_first_run(self) -> None:
-        text = START_SH.read_text(encoding="utf-8")
-        start = text.index("start_dream_loop() {")
-        end = text.index("# Telegram listener", start)
-        dream_block = text[start:end]
+        dream_block = (PROJECT_ROOT / "scripts" / "service-dream.sh").read_text(encoding="utf-8")
 
         sleep_index = dream_block.index('sleep "$interval"')
         run_index = dream_block.index('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run')
@@ -1138,7 +1131,7 @@ class StartScriptDreamLoopTests(unittest.TestCase):
     def test_heavy_services_are_staggered_by_two_seconds(self) -> None:
         text = START_SH.read_text(encoding="utf-8")
         monitor_index = text.index('echo "monitor pid=$MONITOR_PID"')
-        telegram_index = text.index('"$PY" -m paulshaclaw.bot.listener')
+        telegram_index = text.index('"$script_dir/service-bot.sh"')
         cockpit_index = text.index('"$PY" -m paulshaclaw.cockpit')
 
         first_sleep = text.index("sleep 2", monitor_index)

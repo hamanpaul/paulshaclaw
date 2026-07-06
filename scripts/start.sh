@@ -169,14 +169,8 @@ start_cost_refresh_loop() {
     interval=30
   fi
   local cost_log="$HOME/.agents/log/cost.log"
-  # Redirect the whole subshell (including sleep) to the log so no child keeps
-  # the parent's stdout pipe open after start.sh exits.
-  (
-    while true; do
-      PYTHONPATH="$REPO" "$PY" -m paulshaclaw.cost --once || true
-      sleep "$interval"
-    done
-  ) 200>&- >>"$cost_log" 2>&1 &
+  PSC_COST_REQUIRE_TMUX=1 PSC_COST_REFRESH_INTERVAL_OVERRIDE="$interval" \
+    "$script_dir/service-cost.sh" 200>&- >>"$cost_log" 2>&1 &
   COST_REFRESH_PID=$!
   echo "cost refresh pid=$COST_REFRESH_PID (interval=${interval}s)"
 }
@@ -203,28 +197,8 @@ start_dream_loop() {
     interval=3600
   fi
   local dream_log="$HOME/.agents/log/dream.log"
-  (
-    while true; do
-      # Defer the first run by one full interval: right after boot the 1-minute
-      # load average is still near zero, so the idle gate would always pass and
-      # stack a full dream pass on top of the startup burst.
-      sleep "$interval"
-      # #176: doc-fragment 產生端過濾。roots = instruction_corpus.default_roots()，
-      # 與 moc/runner 的 index 端 broad corpus 同源——index 排除什麼、產生端就擋什麼。
-      PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
-        --memory-root "$dream_root" --require-idle --promoter llm \
-        --instruction-root "$HOME/.claude/CLAUDE.md" \
-        --instruction-root "$HOME/CLAUDE.md" \
-        --instruction-root "$HOME/AGENTS.md" \
-        --instruction-root "$HOME/GEMINI.md" \
-        --instruction-root "$HOME/.codex" \
-        --instruction-root "$HOME/.agents" \
-        --instruction-root "$HOME/.gemini" \
-        --instruction-root "$HOME/prj_pri" \
-        --instruction-root "$HOME/prj_arc" \
-        >>"$dream_log" 2>&1 || true
-    done
-  ) 200>&- &
+  PSC_DREAM_INTERVAL_OVERRIDE="$interval" PSC_DREAM_ROOT_OVERRIDE="$dream_root" \
+    "$script_dir/service-dream.sh" 200>&- >>"$dream_log" 2>&1 &
   DREAM_PID=$!
   echo "dream pid=$DREAM_PID (interval=${interval}s, root=$dream_root)"
 }
@@ -309,7 +283,7 @@ start_manager_loop() {
   fi
   local manager_log="$HOME/.agents/log/manager.log"
   (
-    PYTHONPATH="$REPO" "$PY" -m paulshaclaw.coordinator.manager_daemon
+    "$script_dir/service-manager.sh"
   ) 200>&- >>"$manager_log" 2>&1 &
   MANAGER_PID=$!
   MANAGER_PID_OWNED=1
@@ -417,7 +391,7 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
-  PYTHONPATH="$REPO" "$PY" -m paulshaclaw.bot.listener 200>&- >> "$TELEGRAM_LOG" 2>&1 &
+  PSC_BOT_ALLOW_SKIP=1 "$script_dir/service-bot.sh" 200>&- >> "$TELEGRAM_LOG" 2>&1 &
   TELEGRAM_PID=$!
   telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
   while true; do
