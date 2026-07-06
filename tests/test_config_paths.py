@@ -103,9 +103,9 @@ def test_memory_root_independent_of_agents_root(monkeypatch, tmp_path):
 
 def test_repo_root_default_is_two_levels_above_paths_py(monkeypatch):
     monkeypatch.delenv("PSC_REPO_ROOT", raising=False)
-    expected = Path(__file__).resolve().parents[1] / "paulshaclaw" / "config" / "paths.py"
-    # repo_root 應為 paulshaclaw/ 的上層（即 repo 根）
-    assert (paths.repo_root() / "paulshaclaw" / "config" / "paths.py").exists()
+    expected = Path(__file__).resolve().parents[1]
+    # repo_root 應為 repo 根（paulshaclaw/config/paths.py 的上上層）
+    assert paths.repo_root() == expected
 
 
 # ---------------------------------------------------------------------------

@@ -13,12 +13,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..control import constants, contract
-from paulshaclaw.config import paths
 from . import autonomy, broker_reaper, manager
 from .cli import _refuse_unsafe_fanout, _resolve_launcher
 from .dispatcher import Dispatcher
 from .registry import JobRegistry
 from .seams import ScriptWorktreeCreator, TmuxPaneSender
+from paulshaclaw.config import paths
 
 DEFAULT_TICK_INTERVAL = 300.0
 DEFAULT_POLL_INTERVAL = 3.0
