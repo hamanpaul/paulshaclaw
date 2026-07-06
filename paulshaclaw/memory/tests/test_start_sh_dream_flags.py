@@ -9,14 +9,15 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-_START_SH = Path(__file__).resolve().parents[3] / "scripts" / "start.sh"
+# G3：dream loop 已從 start.sh 抽到 service-dream.sh（systemd 化）。
+_DREAM_SH = Path(__file__).resolve().parents[3] / "scripts" / "service-dream.sh"
 
 
 class StartShDreamFlagsTests(unittest.TestCase):
     def _dream_cmd(self) -> str:
-        text = _START_SH.read_text(encoding="utf-8")
+        text = _DREAM_SH.read_text(encoding="utf-8")
         start = text.index("memory dream run")
-        end = text.index('>>"$dream_log"', start)
+        end = text.index("child_pid=$!", start)
         return text[start:end]
 
     def test_dream_run_keeps_existing_flags(self):
