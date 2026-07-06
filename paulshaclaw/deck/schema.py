@@ -8,6 +8,8 @@ from typing import Mapping
 import yaml
 
 SCHEMA_VERSION = 0
+# runtime 契約真相源：coordinator/autonomy.py::parse_spec_frontmatter（勿發明多餘欄位）
+EMITTED_FRONTMATTER_FIELDS = ("dispatch", "slice_id", "plan", "depends_on")
 CARD_KINDS = ("skill",)
 CARD_TYPES = ("interactive", "headless")
 CARD_CLASSES = ("core", "niche", "emergency")
