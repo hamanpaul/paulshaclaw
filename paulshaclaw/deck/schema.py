@@ -14,7 +14,26 @@ CARD_KINDS = ("skill",)
 CARD_TYPES = ("interactive", "headless")
 CARD_CLASSES = ("core", "niche", "emergency")
 ALLOWED_PLACEHOLDERS = frozenset({"task-slug", "change"})
-_PLACEHOLDER_RE = re.compile(r"<([a-z0-9-]+)>")
+_CARDS_FILE_KEYS = frozenset({"version", "cards"})
+_CARD_KEYS = frozenset(
+    {
+        "id",
+        "kind",
+        "type",
+        "class",
+        "skill_ref",
+        "requires",
+        "produces",
+        "persona_binding",
+        "provider_binding",
+        "slice_group",
+    }
+)
+_COMBO_FILE_KEYS = frozenset({"combo"})
+_COMBO_KEYS = frozenset({"id", "task_type", "cards", "gate_spine"})
+_COMBO_ENTRY_KEYS = frozenset({"ref", "depends_on"})
+_GATE_CHECK_KEYS = frozenset({"after", "exists"})
+_PLACEHOLDER_RE = re.compile(r"<([^<>]+)>")
 
 DEFAULT_CARDS_PATH = Path(__file__).with_name("data") / "cards.yaml"
 DEFAULT_COMBOS_DIR = Path(__file__).with_name("data") / "combos"
@@ -74,6 +93,21 @@ def _str_tuple(value, card_id: str, field_name: str, errors: list[str]) -> tuple
     return tuple(value)
 
 
+def _check_unknown_keys(label: str, record: Mapping, allowed: frozenset[str], errors: list[str]) -> None:
+    unknown = sorted(key for key in record if key not in allowed)
+    if unknown:
+        errors.append(f"{label}: 未知欄位 {unknown}")
+
+
+def _optional_str(value, card_id: str, field_name: str, errors: list[str]) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        errors.append(f"{card_id}: {field_name} 必須為非空字串")
+        return None
+    return value
+
+
 def load_cards(path: str | Path) -> dict[str, Card]:
     source = Path(path)
     try:
@@ -84,12 +118,16 @@ def load_cards(path: str | Path) -> dict[str, Card]:
         raise DeckSchemaError(f"cards 格式錯誤（缺 cards 清單）: {source}")
 
     errors: list[str] = []
+    _check_unknown_keys("cards", raw, _CARDS_FILE_KEYS, errors)
+    if raw.get("version") != SCHEMA_VERSION:
+        errors.append(f"cards: version 不符，預期 {SCHEMA_VERSION}，實際 {raw.get('version')!r}")
     cards: dict[str, Card] = {}
     for rec in raw["cards"]:
         if not isinstance(rec, Mapping) or not isinstance(rec.get("id"), str) or not rec["id"]:
             errors.append("卡片缺 id 或格式錯誤")
             continue
         cid = rec["id"]
+        _check_unknown_keys(cid, rec, _CARD_KEYS, errors)
         if cid in cards:
             errors.append(f"{cid}: 重複的 card id")
             continue
@@ -108,6 +146,8 @@ def load_cards(path: str | Path) -> dict[str, Card]:
         requires = _str_tuple(rec.get("requires"), cid, "requires", errors)
         produces = _str_tuple(rec.get("produces"), cid, "produces", errors)
         _check_placeholders(cid, requires + produces, errors)
+        persona_binding = _optional_str(rec.get("persona_binding"), cid, "persona_binding", errors)
+        provider_binding = _optional_str(rec.get("provider_binding"), cid, "provider_binding", errors)
         slice_group = rec.get("slice_group")
         if slice_group is not None and (not isinstance(slice_group, str) or not slice_group):
             errors.append(f"{cid}: slice_group 必須為非空字串")
@@ -121,8 +161,8 @@ def load_cards(path: str | Path) -> dict[str, Card]:
             skill_ref=skill_ref,
             requires=requires,
             produces=produces,
-            persona_binding=rec.get("persona_binding"),
-            provider_binding=rec.get("provider_binding"),
+            persona_binding=persona_binding,
+            provider_binding=provider_binding,
             slice_group=slice_group,
         )
     if errors:
@@ -163,9 +203,11 @@ def load_combo(path: str | Path, cards: Mapping[str, Card]) -> Combo:
         raise DeckSchemaError(f"combo 載入失敗: {source}: {exc}") from exc
     if not isinstance(raw, Mapping) or not isinstance(raw.get("combo"), Mapping):
         raise DeckSchemaError(f"combo 格式錯誤（缺 combo 區塊）: {source}")
-    rec = raw["combo"]
-
     errors: list[str] = []
+    _check_unknown_keys("combo", raw, _COMBO_FILE_KEYS, errors)
+    rec = raw["combo"]
+    _check_unknown_keys("combo", rec, _COMBO_KEYS, errors)
+
     combo_id = rec.get("id")
     task_type = rec.get("task_type")
     if not isinstance(combo_id, str) or not combo_id:
@@ -184,6 +226,7 @@ def load_combo(path: str | Path, cards: Mapping[str, Card]) -> Combo:
             errors.append("combo.cards 項目缺 ref")
             continue
         ref = item["ref"]
+        _check_unknown_keys(ref, item, _COMBO_ENTRY_KEYS, errors)
         if ref not in cards:
             errors.append(f"未知卡片引用: {ref}")
         if ref in seen:
@@ -200,10 +243,13 @@ def load_combo(path: str | Path, cards: Mapping[str, Card]) -> Combo:
         if not isinstance(g, Mapping) or not isinstance(g.get("after"), str):
             errors.append("gate_spine 項目缺 after")
             continue
+        _check_unknown_keys(g["after"], g, _GATE_CHECK_KEYS, errors)
         if g["after"] not in seen:
             errors.append(f"gate_spine.after 指向不存在卡片: {g['after']}")
         exists = _str_tuple(g.get("exists"), g["after"], "gate_spine.exists", errors)
         _check_placeholders(g["after"], exists, errors)
+        if not exists:
+            errors.append(f"{g['after']}: gate_spine.exists 不得為空")
         spine.append(GateCheck(after=g["after"], exists=exists))
 
     if errors:

@@ -64,9 +64,39 @@ def test_load_cards_bad_enum_rejects_whole_file(tmp_path):
         load_cards(_write(tmp_path, "cards.yaml", bad))
 
 
+def test_load_cards_wrong_version_rejected(tmp_path):
+    bad = VALID_CARDS.replace("version: 0", "version: 99")
+    with pytest.raises(DeckSchemaError, match="version"):
+        load_cards(_write(tmp_path, "cards.yaml", bad))
+
+
 def test_load_cards_unknown_placeholder_rejected(tmp_path):
     bad = VALID_CARDS.replace("<task-slug>", "<feature-name>")
     with pytest.raises(DeckSchemaError, match="feature-name"):
+        load_cards(_write(tmp_path, "cards.yaml", bad))
+
+
+def test_load_cards_malformed_placeholder_rejected(tmp_path):
+    bad = VALID_CARDS.replace("<task-slug>", "<task_slug>")
+    with pytest.raises(DeckSchemaError, match="task_slug"):
+        load_cards(_write(tmp_path, "cards.yaml", bad))
+
+
+def test_load_cards_unknown_field_rejected(tmp_path):
+    bad = VALID_CARDS.replace("slice_group: build", "slcie_group: build")
+    with pytest.raises(DeckSchemaError, match="slcie_group"):
+        load_cards(_write(tmp_path, "cards.yaml", bad))
+
+
+def test_load_cards_non_string_persona_binding_rejected(tmp_path):
+    bad = VALID_CARDS.replace("persona_binding: planner", "persona_binding: 123")
+    with pytest.raises(DeckSchemaError, match="persona_binding"):
+        load_cards(_write(tmp_path, "cards.yaml", bad))
+
+
+def test_load_cards_non_string_provider_binding_rejected(tmp_path):
+    bad = VALID_CARDS.replace("produces: []", "produces: []\n    provider_binding: 123")
+    with pytest.raises(DeckSchemaError, match="provider_binding"):
         load_cards(_write(tmp_path, "cards.yaml", bad))
 
 
@@ -90,6 +120,20 @@ def test_load_combo_unknown_ref_rejected(tmp_path):
         load_combo(_write(tmp_path, "demo.yaml", bad), cards)
 
 
+def test_load_combo_unknown_field_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace("gate_spine:", "gate_spien:")
+    with pytest.raises(DeckSchemaError, match="gate_spien"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_load_combo_unknown_card_entry_field_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace("depends_on: [writing-plans]", "depends_om: [writing-plans]")
+    with pytest.raises(DeckSchemaError, match="depends_om"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
 def test_load_combo_cycle_rejected(tmp_path):
     cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
     bad = VALID_COMBO.replace(
@@ -104,4 +148,28 @@ def test_load_combo_unknown_placeholder_rejected(tmp_path):
     cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
     bad = VALID_COMBO.replace("<task-slug>", "<feature-name>")
     with pytest.raises(DeckSchemaError, match="feature-name"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_load_combo_malformed_placeholder_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace("<task-slug>", "<Task-Slug>")
+    with pytest.raises(DeckSchemaError, match="Task-Slug"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_load_combo_unknown_gate_field_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace("exists:", "exsts:")
+    with pytest.raises(DeckSchemaError, match="exsts"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_load_combo_empty_gate_exists_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace(
+        'exists: ["docs/superpowers/plans/*<task-slug>*.md"]',
+        "exists: []",
+    )
+    with pytest.raises(DeckSchemaError, match="exists"):
         load_combo(_write(tmp_path, "demo.yaml", bad), cards)
