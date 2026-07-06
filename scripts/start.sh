@@ -1,6 +1,50 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+start_bot_supervised() {
+  local delay="${PSC_BOT_BACKOFF_BASE:-5}"
+  if [[ ! "$delay" =~ ^[0-9]+$ ]]; then
+    delay=5
+  fi
+  if (( delay > 120 )); then delay=120; fi  # 初值也套 120s 上限（誤設 PSC_BOT_BACKOFF_BASE 防護，review nitpick）
+  local -a cmd=("$@")
+  if [[ "${#cmd[@]}" -eq 0 ]]; then
+    echo "start_bot_supervised requires a command" >&2
+    return 1
+  fi
+  (
+    if [[ -n "${PSC_BOT_SUPERVISOR_LOG:-}" ]]; then
+      exec >>"$PSC_BOT_SUPERVISOR_LOG" 2>&1
+    fi
+    local child_pid="" respawn_count=0 status=0
+    trap 'if [[ -n "${child_pid:-}" ]]; then kill -TERM "$child_pid" 2>/dev/null || true; wait "$child_pid" 2>/dev/null || true; fi; exit 0' INT TERM
+    while true; do
+      "${cmd[@]}" &
+      child_pid=$!
+      if wait "$child_pid"; then
+        child_pid=""
+        break
+      fi
+      status=$?
+      child_pid=""
+      respawn_count=$((respawn_count + 1))
+      echo "bot exited unexpectedly (status=$status); respawn #$respawn_count in ${delay}s" >&2
+      sleep "$delay"
+      if (( delay > 0 )); then
+        delay=$((delay * 6))
+        if (( delay > 120 )); then
+          delay=120
+        fi
+      fi
+    done
+  ) &
+  TELEGRAM_PID=$!
+}
+
+if [[ "${1:-}" == "--source-only" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 start_lock="${XDG_RUNTIME_DIR:-/tmp}/paulshaclaw-start.lock"
 exec 200>"$start_lock"
 flock -n 200 || { echo 已有實例在跑; exit 1; }
@@ -414,12 +458,71 @@ sleep 2
 start_dream_loop
 start_manager_loop
 
-if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
+run_telegram_listener_once() {
+  local telegram_listener_pid=""
+  trap 'if [[ -n "${telegram_listener_pid:-}" ]]; then kill -TERM "$telegram_listener_pid" 2>/dev/null || true; wait "$telegram_listener_pid" 2>/dev/null || true; fi; exit 143' INT TERM
+
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
   PYTHONPATH="$REPO" "$PY" -m paulshaclaw.bot.listener 200>&- >> "$TELEGRAM_LOG" 2>&1 &
-  TELEGRAM_PID=$!
+  telegram_listener_pid=$!
+
+  local telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
+  while true; do
+    if [[ -s "$TELEGRAM_READY_FILE" ]]; then
+      break
+    fi
+    if ! kill -0 "$telegram_listener_pid" 2>/dev/null; then
+      wait "$telegram_listener_pid" 2>/dev/null || true
+      echo "telegram listener exited before ready" >&2
+      return 1
+    fi
+    if (( SECONDS >= telegram_ready_deadline )); then
+      kill -TERM "$telegram_listener_pid" 2>/dev/null || true
+      wait "$telegram_listener_pid" 2>/dev/null || true
+      echo "telegram listener readiness timeout" >&2
+      return 1
+    fi
+    sleep 0.05
+  done
+
+  if ! kill -0 "$telegram_listener_pid" 2>/dev/null; then
+    wait "$telegram_listener_pid" 2>/dev/null || true
+    echo "telegram listener exited after ready" >&2
+    return 1
+  fi
+
+  local telegram_ready_stabilize_deadline=$((SECONDS + 1))
+  local telegram_state
+  while true; do
+    telegram_state=$(ps -o stat= -p "$telegram_listener_pid" 2>/dev/null | tr -d '[:space:]')
+    if [[ -z "$telegram_state" || "$telegram_state" == *Z* ]]; then
+      wait "$telegram_listener_pid" 2>/dev/null || true
+      echo "telegram listener not healthy after ready" >&2
+      return 1
+    fi
+    if (( SECONDS >= telegram_ready_stabilize_deadline )); then
+      break
+    fi
+    sleep 0.05
+  done
+
+  echo "telegram pid=$telegram_listener_pid"
+  if wait "$telegram_listener_pid"; then
+    return 0
+  fi
+  local status=$?
+  echo "telegram listener exited unexpectedly (status=$status)" >&2
+  return "$status"
+}
+
+if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
+  mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
+  : > "$TELEGRAM_READY_FILE"
+  export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
+  export PSC_BOT_SUPERVISOR_LOG="$TELEGRAM_LOG"
+  start_bot_supervised run_telegram_listener_once
   telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
   while true; do
     if [[ -s "$TELEGRAM_READY_FILE" ]]; then

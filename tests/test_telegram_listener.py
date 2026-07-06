@@ -265,6 +265,80 @@ class BotSettingsTests(unittest.TestCase):
 
 
 class TelegramListenerTests(unittest.TestCase):
+    def test_handler_exception_does_not_kill_listener(self) -> None:
+        class FlakyRouter:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, object]] = []
+
+            def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+                self.calls.append({"user_id": user_id, "text": text})
+                if len(self.calls) == 1:
+                    raise ValueError("simulated handler crash")
+                return {"ok": True, "message": "第二則訊息仍可處理"}
+
+        client = RecordingClient(
+            [
+                {
+                    "update_id": 11,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/status",
+                    },
+                },
+                {
+                    "update_id": 12,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/agent status",
+                    },
+                },
+            ]
+        )
+        router = FlakyRouter()
+        listener = TelegramListener(client=client, router=router)
+
+        with self.assertLogs(listener_module.logger, level="ERROR") as captured:
+            listener.run_once()
+
+        self.assertEqual(
+            client.sent_messages,
+            [
+                {"chat_id": 1001, "text": "指令執行失敗：ValueError"},
+                {"chat_id": 1001, "text": "第二則訊息仍可處理"},
+            ],
+        )
+        self.assertEqual(listener.offset, 13)
+        self.assertIn("HANDLER_ERROR user=7 chat=1001 text='/status'", "\n".join(captured.output))
+        self.assertIn("Traceback", "\n".join(captured.output))
+        self.assertEqual(
+            router.calls,
+            [
+                {"user_id": 7, "text": "/status"},
+                {"user_id": 7, "text": "/agent status"},
+            ],
+        )
+
+    def test_keyboard_interrupt_propagates(self) -> None:
+        class InterruptingRouter:
+            def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+                raise KeyboardInterrupt
+
+        listener = TelegramListener(client=RecordingClient([]), router=InterruptingRouter())
+
+        with self.assertRaises(KeyboardInterrupt):
+            listener.process_update(
+                {
+                    "update_id": 1,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/status",
+                    },
+                }
+            )
+
     def test_command_router_formats_agent_status_and_actions(self) -> None:
         class AgentCommandDaemon:
             def __init__(self, response: dict[str, object]) -> None:
@@ -513,7 +587,7 @@ class TelegramListenerTests(unittest.TestCase):
         )
         self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
 
-    def test_run_once_does_not_advance_offset_when_processing_raises(self) -> None:
+    def test_run_once_advances_offset_after_handler_exception_isolated(self) -> None:
         class RaisingRouter:
             def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
                 raise ValueError("boom")
@@ -532,10 +606,12 @@ class TelegramListenerTests(unittest.TestCase):
         )
         listener = TelegramListener(client=client, router=RaisingRouter())
 
-        with self.assertRaisesRegex(ValueError, "boom"):
+        with self.assertLogs(listener_module.logger, level="ERROR") as captured:
             listener.run_once()
 
-        self.assertIsNone(listener.offset)
+        self.assertEqual(client.sent_messages, [{"chat_id": 1001, "text": "指令執行失敗：ValueError"}])
+        self.assertEqual(listener.offset, 12)
+        self.assertIn("HANDLER_ERROR user=7 chat=1001 text='/status'", "\n".join(captured.output))
 
     def test_run_forever_backs_off_after_polling_error(self) -> None:
         class FlakyClient(RecordingClient):
