@@ -58,7 +58,7 @@ def _existing_manifest_job_id(path: Path) -> str | None:
         return None
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return None
     if not isinstance(payload, dict):
         return None

@@ -199,6 +199,24 @@ class CompleteTickReconcileTests(unittest.TestCase):
             self.assertEqual(summary["completed"], [{"slice_id": "slice-corrupt", "gate_status": "passed"}])
             self.assertEqual(summary["errors"], [])
 
+    def test_invalid_utf8_manifest_is_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-invalid-utf8")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "slice-invalid-utf8.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_bytes(b"\x80not-utf8")
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["job_id"], job["job_id"])
+            self.assertEqual(manifest["gate_status"], "passed")
+            self.assertEqual(summary["completed"], [{"slice_id": "slice-invalid-utf8", "gate_status": "passed"}])
+            self.assertEqual(summary["errors"], [])
+
 
 class CompleteTickShadowGateTests(unittest.TestCase):
     def test_shadow_gate_verdict_recorded_but_does_not_block(self) -> None:
