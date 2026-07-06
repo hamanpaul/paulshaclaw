@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import pytest
 from uuid import UUID
 
 from paulshaclaw.control import constants, contract
@@ -60,3 +61,13 @@ def test_request_done_and_status_round_trip_include_schema_version(monkeypatch, 
     assert request["schema_version"] == constants.SCHEMA_VERSION
     assert done["schema_version"] == constants.SCHEMA_VERSION
     assert status["schema_version"] == constants.SCHEMA_VERSION
+
+
+def test_build_dispatch_request():
+    req = contract.build_request(req_type="dispatch", args={"slice_id": "s1", "force_hold": True}, requested_by="telegram:42")
+    assert req["type"] == "dispatch" and req["args"]["slice_id"] == "s1"
+
+
+def test_unknown_type_still_raises():
+    with pytest.raises(ValueError):
+        contract.build_request(req_type="nope", args={}, requested_by="x")
