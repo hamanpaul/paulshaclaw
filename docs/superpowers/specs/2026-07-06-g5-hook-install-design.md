@@ -23,7 +23,7 @@ hooks 部署是「複製非 symlink」：改 repo 內 hook 檔後 `git pull` 不
 
 ### 3.1 install.sh hooks 段冪等化
 - hooks 複製清單集中宣告（單一陣列，含 P0-1 warn hook）；每檔 `install -m 700` 冪等覆蓋；settings reconcile（Claude UserPromptSubmit/PostToolUse、codex/copilot 對應）重複執行不重複註冊（既有 reconcile 函式沿用，補測試）。
-- 新增 `install.sh --verify`：逐 hook import/語法健檢（python hooks `py_compile`、shell hooks `bash -n`）＋ settings 註冊存在性檢查＋ `EnvironmentFile`／secret 檔存在性檢查（值不印出）；exit 非零＝部署不完整。
+- 新增 `install.sh --verify`：逐 hook import/語法健檢（python hooks `py_compile`、shell hooks `bash -n`）＋ settings 註冊存在性檢查＋ env/secret 檔存在性檢查（沿 deploy 三分 split 模型：`~/.agents/core/runtime/*.env` 與 `~/.config/paulshaclaw/*.secret.env`，與 G3 的 per-service 清單共用宣告；值不印出）；exit 非零＝部署不完整。
 
 ### 3.2 abspath 一致性
 - shell hooks：一律 `${PSC_REPO_ROOT}`（launcher.py:179 已注入之既例；本機互動 session 由 env 檔提供）。

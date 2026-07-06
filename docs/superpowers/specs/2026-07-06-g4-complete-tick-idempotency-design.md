@@ -30,8 +30,9 @@ manifest 已存在時讀出既有 `job_id` 比對當前 terminal job：
 2. **不同 `job_id`** → **overwrite**（新 run 勝：gate_status／verdict／completed_at 全重算重寫）——requeue 解卡的核心。
 3. **manifest 壞檔／缺 `job_id`**（舊格式或損毀）→ overwrite（fail-safe：無法證明同 run 即視為舊帳，新結果勝；舊格式檔一次性自然升級）。
 
-### 3.3 邊界
-- 同 slice 併發兩 job 同時 terminal：後掃到者勝（順序由 registry.list_jobs 確定性序決定）；此為既有「一 slice 一活躍 job」慣例下的理論案例，測試釘住行為即可，不加鎖（YAGNI）。
+### 3.3 邊界（review 修正：不變量顯式化）
+- **「一 slice 一活躍 job」是本設計 overwrite 正確性的前提不變量**，由兩道防線維持：既有 `run_tick` 對自動 fanout 過濾 active jobs（現況已成立）＋ **G1 手動 dispatch 的 `already-active` guard**（G1 spec §3.2-5；G1 落地前手動路徑不存在，不變量無破口）。不變量成立時，任何「不同 job_id 的 terminal job」必然是 manifest 所記 run 之後的新 run → overwrite＝新 run 勝，語意良定義。
+- 同 slice 併發雙 terminal（不變量被繞過的異常案例）：後掃到者勝（registry.list_jobs 確定性序）；測試釘住此行為並在 log 記 warning（`same-slice concurrent terminals`）供異常偵測，不加鎖（YAGNI——防線在 dispatch 側）。
 - `released` 觀測（before/after ready 差集）語意不變——overwrite 造成 gate_status failed→passed 時，本輪 released 正確反映新解鎖。
 
 ## 4. 測試
