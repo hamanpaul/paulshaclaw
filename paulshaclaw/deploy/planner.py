@@ -16,6 +16,8 @@ class TemplateAsset:
     target_path: str
     rename_rule: str
     expected_suffix: str
+    deploy_enabled: bool = True
+    deprecated: bool = False
 
     @property
     def template_path(self) -> Path:
@@ -28,6 +30,8 @@ class TemplateAsset:
             "target_path": self.target_path,
             "rename_rule": self.rename_rule,
             "expected_suffix": self.expected_suffix,
+            "deploy_enabled": self.deploy_enabled,
+            "deprecated": self.deprecated,
         }
 
 
@@ -68,56 +72,104 @@ class CommandPlan:
         }
 
 
-_TEMPLATE_CATALOG: tuple[tuple[str, str, str], ...] = (
+_TEMPLATE_CATALOG: tuple[tuple[str, str, str, bool, bool], ...] = (
     (
         "core",
         "core/systemd/__INSTANCE__.service.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "core",
         "core/systemd/__INSTANCE__-telegram.service.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "core",
         "core/runtime/__INSTANCE__.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "core",
         "core/runtime/__INSTANCE__-telegram.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "core",
         "core/systemd/__INSTANCE__-manager.service.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "core",
         "core/systemd/__INSTANCE__-manager.timer.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        False,
+        True,
     ),
     (
         "core",
         "core/runtime/__INSTANCE__-manager.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
+    ),
+    (
+        "core",
+        "core/systemd/__INSTANCE__-dream.service.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
+    ),
+    (
+        "core",
+        "core/systemd/__INSTANCE__-cost.service.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
+    ),
+    (
+        "core",
+        "core/runtime/__INSTANCE__-dream.env.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
+    ),
+    (
+        "core",
+        "core/runtime/__INSTANCE__-cost.env.tmpl",
+        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "state",
         "state/config/__INSTANCE__.state.json.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "secret",
         "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
     (
         "secret",
         "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
         "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        True,
+        False,
     ),
 )
 
@@ -202,7 +254,7 @@ def _expected_suffix(target_path: str) -> str:
 
 def list_template_assets(*, instance_name: str = "paulshaclaw") -> tuple[TemplateAsset, ...]:
     assets: list[TemplateAsset] = []
-    for plane, template_relpath, rename_rule in _TEMPLATE_CATALOG:
+    for plane, template_relpath, rename_rule, deploy_enabled, deprecated in _TEMPLATE_CATALOG:
         target_path = resolve_template_target(template_relpath, instance_name=instance_name)
         assets.append(
             TemplateAsset(
@@ -211,6 +263,8 @@ def list_template_assets(*, instance_name: str = "paulshaclaw") -> tuple[Templat
                 target_path=target_path,
                 rename_rule=rename_rule,
                 expected_suffix=_expected_suffix(target_path),
+                deploy_enabled=deploy_enabled,
+                deprecated=deprecated,
             )
         )
     return tuple(assets)
@@ -282,11 +336,12 @@ def build_command_plan(command: str, *, instance_name: str, root_dir: str) -> Co
         raise ValueError(f"不支援的 command: {command}")
 
     matrix = _COMMAND_MATRIX[command]
+    templates = tuple(asset for asset in list_template_assets(instance_name=instance_name) if asset.deploy_enabled)
     return CommandPlan(
         command=command,
         instance_name=instance_name,
         root_dir=root_dir,
-        templates=list_template_assets(instance_name=instance_name),
+        templates=templates,
         steps=matrix["steps"],
         rollback_checkpoints=matrix["rollback_checkpoints"],
         rollback_actions=matrix["rollback_actions"],

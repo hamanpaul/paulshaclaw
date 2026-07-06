@@ -45,7 +45,7 @@ class TemplateMappingTests(unittest.TestCase):
         self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env", telegram_unit_text)
         self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env", telegram_unit_text)
         self.assertIn("EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env", telegram_unit_text)
-        self.assertIn("ExecStart=/usr/bin/env python3 -m paulshaclaw.bot.listener", telegram_unit_text)
+        self.assertIn("ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-bot.sh", telegram_unit_text)
         self.assertIn("Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_unit_text)
 
         telegram_runtime = next(
@@ -200,19 +200,72 @@ class ManagerUnitCatalogTests(unittest.TestCase):
 
         svc = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.service.tmpl")
         svc_text = svc.template_path.read_text(encoding="utf-8")
-        self.assertIn("Type=oneshot", svc_text)
-        self.assertIn("-m paulshaclaw.coordinator tick", svc_text)
+        self.assertIn("ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-manager.sh", svc_text)
+        self.assertIn("Restart=on-failure", svc_text)
+        self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env", svc_text)
 
         timer = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.timer.tmpl")
         timer_text = timer.template_path.read_text(encoding="utf-8")
         self.assertIn("OnUnitActiveSec", timer_text)
-        self.assertIn("WantedBy=timers.target", timer_text)
+        self.assertIn("DEPRECATED", timer_text)
+        self.assertTrue(timer.deprecated)
+        self.assertFalse(timer.deploy_enabled)
 
         env = next(a for a in assets if a.template_relpath == "core/runtime/__INSTANCE__-manager.env.tmpl")
-        self.assertIn("PSC_MANAGER_EXECUTOR=", env.template_path.read_text(encoding="utf-8"))
+        env_text = env.template_path.read_text(encoding="utf-8")
+        self.assertIn("PSC_MANAGER_EXECUTOR=", env_text)
+        self.assertIn("PSC_CONTROL_ROOT=", env_text)
 
         target = resolve_template_target("core/systemd/__INSTANCE__-manager.service.tmpl", instance_name="demo-agent")
         self.assertEqual(target, "core/systemd/demo-agent-manager.service")
+
+
+class AlwaysOnSystemdTemplateTests(unittest.TestCase):
+    def test_always_on_service_templates_and_env_catalog_are_present(self) -> None:
+        assets = list_template_assets()
+        relpaths = {a.template_relpath for a in assets}
+        self.assertIn("core/systemd/__INSTANCE__-dream.service.tmpl", relpaths)
+        self.assertIn("core/systemd/__INSTANCE__-cost.service.tmpl", relpaths)
+        self.assertIn("core/runtime/__INSTANCE__-dream.env.tmpl", relpaths)
+        self.assertIn("core/runtime/__INSTANCE__-cost.env.tmpl", relpaths)
+
+    def test_install_plan_does_not_deploy_deprecated_manager_timer(self) -> None:
+        plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
+        rendered = {asset.target_path for asset in plan.templates}
+        self.assertNotIn("core/systemd/demo-agent-manager.timer", rendered)
+
+    def test_service_units_use_root_dir_scripts_and_hardened_restart_policy(self) -> None:
+        cases = {
+            "core/systemd/__INSTANCE__-dream.service.tmpl": "service-dream.sh",
+            "core/systemd/__INSTANCE__-cost.service.tmpl": "service-cost.sh",
+            "core/systemd/__INSTANCE__-manager.service.tmpl": "service-manager.sh",
+            "core/systemd/__INSTANCE__-telegram.service.tmpl": "service-bot.sh",
+        }
+        for relpath, script_name in cases.items():
+            with self.subTest(relpath=relpath):
+                text = next(
+                    asset.template_path.read_text(encoding="utf-8")
+                    for asset in list_template_assets()
+                    if asset.template_relpath == relpath
+                )
+                self.assertIn("Restart=on-failure", text)
+                self.assertIn("RestartSec=10", text)
+                self.assertIn("StartLimitIntervalSec=300", text)
+                self.assertIn("StartLimitBurst=5", text)
+                self.assertIn("KillMode=control-group", text)
+                self.assertIn(f"ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/{script_name}", text)
+                self.assertNotIn("/home/", text)
+
+    def test_manager_timer_template_is_marked_deprecated(self) -> None:
+        text = (
+            next(
+                asset.template_path
+                for asset in list_template_assets()
+                if asset.template_relpath == "core/systemd/__INSTANCE__-manager.timer.tmpl"
+            )
+            .read_text(encoding="utf-8")
+        )
+        self.assertIn("DEPRECATED", text)
 
 
 if __name__ == "__main__":

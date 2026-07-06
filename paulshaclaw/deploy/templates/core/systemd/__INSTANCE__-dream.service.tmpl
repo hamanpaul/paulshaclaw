@@ -1,5 +1,5 @@
 [Unit]
-Description=__INSTANCE__ persona manager daemon
+Description=__INSTANCE__ memory dream service
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=300
@@ -7,9 +7,8 @@ StartLimitBurst=5
 
 [Service]
 EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env
-Environment=PSC_MANAGER_SPECS_DIR=%h/.agents/specs
-EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-manager.env
-ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-manager.sh
+EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-dream.env
+ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-dream.sh
 KillMode=control-group
 Restart=on-failure
 RestartSec=10
