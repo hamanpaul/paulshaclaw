@@ -203,6 +203,7 @@ def load_combo(path: str | Path, cards: Mapping[str, Card]) -> Combo:
         if g["after"] not in seen:
             errors.append(f"gate_spine.after 指向不存在卡片: {g['after']}")
         exists = _str_tuple(g.get("exists"), g["after"], "gate_spine.exists", errors)
+        _check_placeholders(g["after"], exists, errors)
         spine.append(GateCheck(after=g["after"], exists=exists))
 
     if errors:

@@ -98,3 +98,10 @@ def test_load_combo_cycle_rejected(tmp_path):
     )
     with pytest.raises(DeckSchemaError, match="循環"):
         load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_load_combo_unknown_placeholder_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace("<task-slug>", "<feature-name>")
+    with pytest.raises(DeckSchemaError, match="feature-name"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
