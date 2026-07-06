@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
+from paulshaclaw.control.client import ControlPlaneCoordinator
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_registry import CommandRegistry, load_default_command_registry
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
@@ -215,13 +216,24 @@ class UnavailableCoordinator:
         raise ValueError("coordinator backend 未設定")
 
 
+def _build_coordinator(config: AppConfig) -> UnavailableCoordinator | ControlPlaneCoordinator:
+    backend = config.coordinator.backend
+    if backend is None:
+        return UnavailableCoordinator()
+    if backend == "control":
+        return ControlPlaneCoordinator()
+    if backend == "local":
+        raise ValueError("coordinator backend local 為 test-only")
+    raise ValueError(f"不支援的 coordinator backend: {backend}")
+
+
 def build_dispatch_guard_daemon(
     config: AppConfig,
     command_registry: CommandRegistry | None = None,
 ) -> PaulShiaBroDaemon:
     return PaulShiaBroDaemon(
         config=config,
-        coordinator=UnavailableCoordinator(),
+        coordinator=_build_coordinator(config),
         command_registry=command_registry,
     )
 

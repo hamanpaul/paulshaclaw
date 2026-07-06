@@ -16,6 +16,7 @@ def _require_fields(payload: Mapping[str, object], *, prefix: str, fields: tuple
 @dataclass(frozen=True)
 class CoordinatorSettings:
     phase: str
+    backend: str | None
     default_payload: dict[str, object]
 
 
@@ -36,7 +37,12 @@ class AppConfig:
     pane_assignments: tuple[PaneAssignment, ...]
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, object]) -> "AppConfig":
+    def from_dict(
+        cls,
+        payload: Mapping[str, object],
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> "AppConfig":
         _require_fields(
             payload,
             prefix="config",
@@ -46,6 +52,13 @@ class AppConfig:
         if not isinstance(coordinator_payload, Mapping):
             raise ValueError("config.coordinator 缺失")
         _require_fields(coordinator_payload, prefix="config.coordinator", fields=("phase",))
+        resolved_env = os.environ if env is None else env
+        backend_override = resolved_env.get("PSC_COORDINATOR_BACKEND", "").strip() or None
+        backend = backend_override
+        if backend is None:
+            raw_backend = coordinator_payload.get("backend")
+            if raw_backend is not None:
+                backend = str(raw_backend).strip() or None
 
         raw_panes = payload.get("pane_assignments")
         if not isinstance(raw_panes, list):
@@ -75,6 +88,7 @@ class AppConfig:
             allowed_user_ids=tuple(int(value) for value in payload.get("allowed_user_ids", [])),
             coordinator=CoordinatorSettings(
                 phase=str(coordinator_payload["phase"]),
+                backend=backend,
                 default_payload=dict(coordinator_payload.get("default_payload", {})),
             ),
             pane_assignments=tuple(pane_assignments),
@@ -96,4 +110,4 @@ def load_config(
 
     if not isinstance(payload, dict):
         raise ValueError("設定檔格式錯誤")
-    return AppConfig.from_dict(payload)
+    return AppConfig.from_dict(payload, env=resolved_env)

@@ -253,6 +253,51 @@ def test_poll_done_returns_record_or_none(monkeypatch, tmp_path):
     assert client.poll_done("missing", timeout=0.0, poll_interval=0.0) is None
 
 
+def test_control_plane_coordinator_submits_dispatch_request(monkeypatch, tmp_path):
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+
+    coordinator = client.ControlPlaneCoordinator()
+
+    job = coordinator.create_job(
+        phase="stage1",
+        scope="slice-a",
+        payload={"specs_dir": "/repo/specs", "force_hold": True, "ignored": "value"},
+    )
+
+    request_path = constants.requests_dir() / f"{job['job_id']}.json"
+    request = contract.read_json(request_path)
+
+    assert job == {"job_id": job["job_id"], "phase": "stage1", "scope": "slice-a"}
+    assert request is not None
+    assert request["type"] == "dispatch"
+    assert request["requested_by"] == "telegram"
+    assert request["args"] == {
+        "slice_id": "slice-a",
+        "specs_dir": "/repo/specs",
+        "force_hold": True,
+    }
+
+
+def test_control_plane_coordinator_wait_done_reads_done(monkeypatch, tmp_path):
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+
+    coordinator = client.ControlPlaneCoordinator()
+    done_payload = contract.build_done(
+        req_id="req-123",
+        status="ok",
+        result={"job_id": "job-1", "slice_id": "slice-a"},
+    )
+    contract.atomic_write_json(constants.done_dir() / "req-123.json", done_payload)
+
+    found = coordinator.wait_done("req-123", timeout=0.0, poll_interval=0.0)
+
+    assert found == done_payload
+
+
 def test_client_module_imports_without_coordinator(monkeypatch):
     attempted: list[str] = []
     real_import = builtins.__import__

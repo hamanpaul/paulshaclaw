@@ -43,6 +43,8 @@ class ManagerClient(Protocol):
 
 @dataclass
 class LocalCoordinator:
+    """Test-only fallback coordinator for direct daemon and unit-test wiring."""
+
     counter: int = 0
 
     def create_job(self, *, phase: str, scope: str, payload: dict[str, object]) -> dict[str, object]:

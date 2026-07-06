@@ -8,6 +8,25 @@ from typing import Any
 from . import constants, contract
 
 
+class ControlPlaneCoordinator:
+    def __init__(self, *, requested_by: str = "telegram") -> None:
+        self.requested_by = requested_by
+
+    def create_job(self, *, phase: str, scope: str, payload: dict[str, object]) -> dict[str, object]:
+        args: dict[str, Any] = {"slice_id": scope}
+        specs_dir = payload.get("specs_dir")
+        if isinstance(specs_dir, str) and specs_dir.strip():
+            args["specs_dir"] = specs_dir
+        force_hold = payload.get("force_hold")
+        if isinstance(force_hold, bool):
+            args["force_hold"] = force_hold
+        req_id = submit_request("dispatch", args, self.requested_by)
+        return {"job_id": req_id, "phase": phase, "scope": scope}
+
+    def wait_done(self, req_id: str, timeout: float, poll_interval: float = 0.5) -> dict[str, Any] | None:
+        return poll_done(req_id, timeout=timeout, poll_interval=poll_interval)
+
+
 def submit_request(req_type: str, args: dict[str, Any], requested_by: str) -> str:
     request = contract.build_request(req_type=req_type, args=args, requested_by=requested_by)
     contract.atomic_write_json(constants.requests_dir() / f"{request['req_id']}.json", request)
