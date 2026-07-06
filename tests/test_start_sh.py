@@ -56,6 +56,11 @@ FAKE_PYTHON = textwrap.dedent(
         if module == "paulshaclaw.bot.listener":
             pidfile = Path(os.environ["FAKE_TELEGRAM_PIDFILE"])
             pidfile.write_text(str(os.getpid()), encoding="utf-8")
+            countfile_path = os.environ.get("FAKE_TELEGRAM_COUNTFILE")
+            if countfile_path:
+                countfile = Path(countfile_path)
+                current_count = int(countfile.read_text(encoding="utf-8") or "0") if countfile.exists() else 0
+                countfile.write_text(str(current_count + 1), encoding="utf-8")
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             mode = os.environ.get("FAKE_TELEGRAM_MODE", "ready")
             if mode == "init-fail":
@@ -184,6 +189,69 @@ FAKE_SYSTEMCTL = textwrap.dedent(
 
 
 class StartScriptLifecycleTests(unittest.TestCase):
+    def test_bot_supervisor_respawns_failed_command_with_backoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            ok_file = tmpdir_path / "ok"
+            attempts_file = tmpdir_path / "attempts"
+            stub = tmpdir_path / "bot_stub.sh"
+            stub.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    attempts_file={attempts_file!s}
+                    ok_file={ok_file!s}
+                    count=0
+                    if [[ -f "$attempts_file" ]]; then
+                      count="$(cat "$attempts_file")"
+                    fi
+                    count=$((count + 1))
+                    printf '%s\\n' "$count" > "$attempts_file"
+                    if (( count >= 3 )); then
+                      : > "$ok_file"
+                      exec sleep 60
+                    fi
+                    exit 1
+                    """
+                ),
+                encoding="utf-8",
+            )
+            stub.chmod(0o755)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    "-c",
+                    textwrap.dedent(
+                        f"""\
+                        set -euo pipefail
+                        source "{START_SH}" --source-only
+                        PSC_BOT_BACKOFF_BASE=0
+                        start_bot_supervised "{stub}"
+                        deadline=$((SECONDS + 5))
+                        while [[ ! -f "{ok_file}" ]] && (( SECONDS < deadline )); do
+                          sleep 0.05
+                        done
+                        [[ -f "{ok_file}" ]]
+                        kill -TERM "$TELEGRAM_PID"
+                        wait "$TELEGRAM_PID" || true
+                        """
+                    ),
+                ],
+                cwd=PROJECT_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertTrue(ok_file.exists())
+            self.assertEqual(attempts_file.read_text(encoding="utf-8").strip(), "3")
+            self.assertIn("respawn #1", result.stderr)
+            self.assertIn("respawn #2", result.stderr)
+
     def test_paulshaclaw_module_launches_carry_pythonpath(self) -> None:
         # Regression for #92: every `python -m paulshaclaw.*` launch in start.sh
         # must export PYTHONPATH="$REPO" so the (non-editable-installed) package
@@ -356,13 +424,16 @@ class StartScriptLifecycleTests(unittest.TestCase):
             preseed_telegram_log="Telegram listener ready\n",
         )
 
-    def test_ready_then_die_fails_closed(self) -> None:
+    def test_ready_then_die_is_respawned(self) -> None:
         self._run_lifecycle_test(
             telegram_enabled=True,
             telegram_mode="ready-then-die",
-            expect_cockpit_started=False,
-            expect_returncode=1,
+            cockpit_mode="exit",
+            expect_cockpit_started=True,
+            expect_returncode=0,
             capture_output=True,
+            extra_env={"PSC_BOT_BACKOFF_BASE": "0"},
+            expect_telegram_starts_at_least=2,
         )
 
     def test_telegram_init_failure_prevents_success(self) -> None:
@@ -415,6 +486,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
         preseed_telegram_log: str | None = None,
         extra_env: dict[str, str] | None = None,
         preseed_manager_lock_pid: int | None = None,
+        expect_telegram_starts_at_least: int | None = None,
     ) -> str | None:
         telegram_should_start = telegram_enabled and telegram_token is not None and telegram_config_state == "present"
         if expect_manager_started is None:
@@ -433,6 +505,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             stage1_config = tmpdir_path / "stage1.json"
             telegram_log = home_dir / ".agents" / "log" / "telegram.log"
             telegram_readyfile = home_dir / ".agents" / "run" / "telegram.ready"
+            telegram_countfile = tmpdir_path / "telegram.count"
 
             fake_bin.mkdir(parents=True)
             fake_scripts.mkdir(parents=True)
@@ -475,6 +548,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
             env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
             env["FAKE_MANAGER_PIDFILE"] = str(manager_pidfile)
+            env["PSC_TELEGRAM_STARTUP_TIMEOUT"] = "2"
             if telegram_enabled:
                 if telegram_config_state == "present":
                     stage1_config.write_text("{}", encoding="utf-8")
@@ -491,6 +565,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     env["PSC_TELEGRAM_BOT_TOKEN"] = telegram_token
                 env["FAKE_TELEGRAM_PIDFILE"] = str(telegram_pidfile)
                 env["FAKE_TELEGRAM_READYFILE"] = str(telegram_readyfile)
+                env["FAKE_TELEGRAM_COUNTFILE"] = str(telegram_countfile)
                 env["FAKE_TELEGRAM_MODE"] = telegram_mode
                 env["FAKE_TELEGRAM_READY_DELAY"] = str(telegram_ready_delay)
             if cockpit_mode is not None:
@@ -551,7 +626,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
                             self._wait_for_empty_file(telegram_readyfile)
                         else:
                             self._wait_for_file(telegram_readyfile)
-                            if expect_cockpit_started:
+                            if expect_cockpit_started and expect_telegram_starts_at_least is None:
                                 self.assertLessEqual(telegram_readyfile.stat().st_mtime_ns, cockpit_started.stat().st_mtime_ns)
                 else:
                     self._wait_for_missing_file(telegram_pidfile)
@@ -585,6 +660,11 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 if expect_manager_started:
                     with self.assertRaises(ProcessLookupError):
                         os.kill(manager_pid, 0)
+                if expect_telegram_starts_at_least is not None:
+                    self.assertGreaterEqual(
+                        int(telegram_countfile.read_text(encoding="utf-8").strip()),
+                        expect_telegram_starts_at_least,
+                    )
 
                 if capture_output:
                     output = proc.communicate(timeout=10)[0]
@@ -1138,7 +1218,7 @@ class StartScriptDreamLoopTests(unittest.TestCase):
     def test_heavy_services_are_staggered_by_two_seconds(self) -> None:
         text = START_SH.read_text(encoding="utf-8")
         monitor_index = text.index('echo "monitor pid=$MONITOR_PID"')
-        telegram_index = text.index('"$PY" -m paulshaclaw.bot.listener')
+        telegram_index = text.index("start_bot_supervised run_telegram_listener_once")
         cockpit_index = text.index('"$PY" -m paulshaclaw.cockpit')
 
         first_sleep = text.index("sleep 2", monitor_index)
