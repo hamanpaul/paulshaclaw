@@ -371,10 +371,10 @@ class RekeyProjectTests(unittest.TestCase):
             root = Path(tmp)
             other = _slice(
                 root,
-                "airoha",
-                "airoha",
+                "vendor-b",
+                "vendor-b",
                 "note--sl-b1.md",
-                "airoha 真筆記",
+                "vendor-b 真筆記",
                 title="note",
             )
             _slice(root, OLD_DIR, OLD_KEY, "uart-fix--sl-a1.md", "內容")
@@ -389,7 +389,7 @@ class RekeyProjectTests(unittest.TestCase):
 
             self.assertTrue(other.exists())
             fm, _body = fio.read(other.read_text(encoding="utf-8"))
-            self.assertEqual(fm["project"], "airoha")
+            self.assertEqual(fm["project"], "vendor-b")
 
     def test_unsafe_new_slug_raises(self):
         with TemporaryDirectory() as tmp:

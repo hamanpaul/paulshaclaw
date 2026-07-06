@@ -19,7 +19,7 @@
 
 - **doc-fragment 判準（A：corpus 逐字比對）**：否決純結構啟發式（`## N.` heading + 指令標記）——對 instruction 文件無標記的短段落（1-5 章節）易漏判、對真有編號小節的知識易誤判。corpus 逐字比對只在「heading 與 ≥2 內容行皆逐字命中 instruction 語料」時判 noise，誤刪面最小。
 - **語料為選用參數**：`classify_noise(fm, body, *, doc_corpus=None)`，None/空語料時 doc-fragment 規則惰性 → 既有測試與行為零變更。語料 IO 與探測落在 `instruction_corpus`（CLI/產生端組裝），`noise.py` 保持純函式 + `DocCorpus` 型別。
-- **語料探測邊界化**：curated roots（`~/.claude`、`~`、`~/.codex`、`~/.agents`、`~/.gemini`、`~/prj_pri`、`~/prj_arc`、repo 自身），os.walk 限深 + skip-list（`.git`/`node_modules`/`archive`/`knowledge`/`.copilot`…）。避開記憶教訓中 `~/.copilot`（3.3GB）無邊界掃描 OOM。
+- **語料探測邊界化**：curated roots（`~/.claude`、`~`、`~/.codex`、`~/.agents`、`~/.gemini`、`~/prj_pri`、`~/prj_ext`、repo 自身），os.walk 限深 + skip-list（`.git`/`node_modules`/`archive`/`knowledge`/`.copilot`…）。避開記憶教訓中 `~/.copilot`（3.3GB）無邊界掃描 OOM。
 - **slugify 保留 CJK（根因修法）**：`[^a-z0-9]+` → `[^\w]+`（re.UNICODE，含 CJK 文字與數字）。純標點/空字串仍 fallback `untitled`。零既有 churn（驗證現存 slice `title:` 欄位皆 ASCII，故 reconcile 不重命名既有檔）。
 - **retitle 走獨立一次性 migration**（非 atomize；`_split_pass` 對 promoted session 冪等 skip）。候選＝`title==untitled` 或 `untitled--` 檔名、且非 doc-fragment（雙重防護，避免 retitle 應刪的碎片）。gemma4 body 蒸餾，runner 可注入（測試不依賴線上 LLM）；離線 slice skip 記 manifest，migration 不失敗。
 - **改名保留 slice_id**：以 `naming.slugify(title)` 算新檔名 `<slug>--<slice_id>.md`，slice_id 不變；MOC/relations 以 slice_id 索引，rename 安全。stamp `title`/`atom_title`/`aliases`。**不**動 `session_title`：MOC leaf label 取 `atom_title or session_title or basename`，stamp `atom_title` 已修好 brief 可見的 leaf 標題；`session_title` 只餵 parent spine 分組，且現存 untitled slice 的 `session_title` 多為真值（如「修正 start.sh…」），無需改寫。rename 目標已被占用（重複 slice_id）時只 stamp 不改名、manifest 記 `stamped`，交由 `run_moc`/`reconcile` 以 mtime 收斂。

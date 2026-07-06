@@ -2,7 +2,7 @@
 
 audit `untitled-and-orphan-dirs`（verdict=PARTIAL，VERIFY corrections 已納入）確認 Stage 2 knowledge 層兩個獨立根因與一組殘留：
 
-1. **project key 碎裂**：`paulshaclaw/memory/importer/project_resolver.py:114` 對未登錄 `projects.yaml` 的 repo fallback 回傳 raw remote（如 `github.com/hamanpaul/testpilot`）。2026-06-18 hardening 前產生的 8 筆真筆記（testpilot 4 + airoha 4）因 recall 兩條路徑都以 project 嚴格相等過濾（`moc/search.py:100` `AND m.project = ?`；`wakeup/builder.py:88-112` sanitize 目錄掃描＋frontmatter 相等），對新 slug session 永久不可見。目前 repo 沒有任何 rekey 遷移工具。
+1. **project key 碎裂**：`paulshaclaw/memory/importer/project_resolver.py:114` 對未登錄 `projects.yaml` 的 repo fallback 回傳 raw remote（如 `github.com/hamanpaul/testpilot`）。2026-06-18 hardening 前產生的 8 筆真筆記（testpilot 4 + vendor-b 4）因 recall 兩條路徑都以 project 嚴格相等過濾（`moc/search.py:100` `AND m.project = ?`；`wakeup/builder.py:88-112` sanitize 目錄掃描＋frontmatter 相等），對新 slug session 永久不可見。目前 repo 沒有任何 rekey 遷移工具。
 2. **untitled 殘留**：13 筆 `title: untitled` 全在 `knowledge/serialwrap/`（#151 修復前舊檔）；retitle 是 one-shot 且只跑過 `--project paulshaclaw`，dream loop 只有 atomize/janitor/moc 三個 pass，沒有常駐機制會發現或撿走殘留。
 3. **清理工具缺口**：VERIFY 實測推翻「拿現行 serialwrap AGENTS.md 當 corpus 對 serialwrap 全桶 prune」的修法——manifest 會出 ~34 列（僅含 8/13 untitled，另掃進 26 筆有標題真筆記）；且 5/13 untitled 因 body 僅 heading+1 行、低於 `noise.py:92` `_DOC_FRAGMENT_MIN_CONTENT_HITS=2`，設計上永遠不會被判 doc-fragment。清理 13 筆需要「固定清單」刪除模式，而 prune-noise 目前只有 corpus 掃描模式。
 

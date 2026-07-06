@@ -265,7 +265,7 @@ start_dream_loop() {
         --instruction-root "$HOME/.agents" \
         --instruction-root "$HOME/.gemini" \
         --instruction-root "$HOME/prj_pri" \
-        --instruction-root "$HOME/prj_arc" \
+        ${PSC_EXTRA_CORPUS_ROOT:+--instruction-root "$PSC_EXTRA_CORPUS_ROOT"} \
         >>"$dream_log" 2>&1 || true
     done
   ) 200>&- &
