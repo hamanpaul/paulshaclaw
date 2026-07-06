@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 from datetime import datetime, timezone
@@ -52,6 +53,19 @@ def _satisfied_pred(handoff_dir: str):
     return lambda slice_id: autonomy.default_is_satisfied(slice_id, handoff_dir=handoff_dir)
 
 
+def _existing_manifest_job_id(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    job_id = payload.get("job_id")
+    return job_id if isinstance(job_id, str) and job_id else None
+
+
 def complete_tick(
     dispatcher,
     *,
@@ -99,8 +113,8 @@ def complete_tick(
                 errors.append({"job_id": job_id, "error": f"job 缺合法/安全 task/slice_id: {slice_id!r}"})
                 continue
             manifest_path = hdir / f"{slice_id}.json"
-            if manifest_path.is_file():
-                continue  # 冪等：已寫過
+            if _existing_manifest_job_id(manifest_path) == job_id:
+                continue  # 真冪等：同一個 terminal job 已落盤
 
             gate_status = "passed" if status == "done" else "failed"
             try:
@@ -112,6 +126,7 @@ def complete_tick(
                 manifest_path,
                 {
                     "slice_id": slice_id,
+                    "job_id": job_id,
                     "gate_status": gate_status,
                     "completion": status,
                     "exit_code": job.get("exit_code"),

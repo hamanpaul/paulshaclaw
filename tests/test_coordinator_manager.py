@@ -101,18 +101,103 @@ class CompleteTickReconcileTests(unittest.TestCase):
             self.assertEqual(summary["completed"], [{"slice_id": "slice-d", "gate_status": "passed"}])
             self.assertEqual(summary["polled"], [])
 
-    def test_idempotent_second_tick_no_rewrite(self) -> None:
+    def test_same_job_rescan_is_noop(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
             job = _make_job(reg, "slice-e")
             disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
             hdir = Path(d) / "handoff"
             manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+            manifest_path = hdir / "slice-e.json"
+            first_text = manifest_path.read_text(encoding="utf-8")
+            first_mtime_ns = manifest_path.stat().st_mtime_ns
             second = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T1")
-            manifest = json.loads((hdir / "slice-e.json").read_text(encoding="utf-8"))
+            second_text = manifest_path.read_text(encoding="utf-8")
+            second_mtime_ns = manifest_path.stat().st_mtime_ns
+            manifest = json.loads(second_text)
+            self.assertEqual(manifest["job_id"], job["job_id"])
             self.assertEqual(manifest["completed_at"], "T0")
+            self.assertEqual(first_text, second_text)
+            self.assertEqual(first_mtime_ns, second_mtime_ns)
             self.assertEqual(second["completed"], [])
             self.assertEqual(second["polled"], [])
+
+    def test_requeue_overwrites_manifest_for_new_job_id(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            first = _make_job(reg, "slice-requeue")
+            disp = FakeDispatcher(reg, poll_map={first["job_id"]: "failed"})
+            hdir = Path(d) / "handoff"
+
+            manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+
+            second_job = _make_job(reg, "slice-requeue")
+            disp = FakeDispatcher(
+                reg,
+                poll_map={first["job_id"]: "failed", second_job["job_id"]: "done"},
+            )
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T1")
+
+            manifest = json.loads((hdir / "slice-requeue.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["job_id"], second_job["job_id"])
+            self.assertEqual(manifest["gate_status"], "passed")
+            self.assertEqual(manifest["completion"], "done")
+            self.assertEqual(manifest["completed_at"], "T1")
+            self.assertEqual(summary["completed"], [{"slice_id": "slice-requeue", "gate_status": "passed"}])
+            from paulshaclaw.coordinator import autonomy
+            self.assertTrue(autonomy.default_is_satisfied("slice-requeue", handoff_dir=str(hdir)))
+
+    def test_legacy_manifest_without_job_id_is_upgraded(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-legacy")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "slice-legacy.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "slice_id": "slice-legacy",
+                        "gate_status": "failed",
+                        "completion": "failed",
+                        "exit_code": 1,
+                        "branch": "feature/legacy",
+                        "gate_verdict": None,
+                        "completed_at": "OLD",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["job_id"], job["job_id"])
+            self.assertEqual(manifest["gate_status"], "passed")
+            self.assertEqual(manifest["completed_at"], "T0")
+            self.assertEqual(summary["completed"], [{"slice_id": "slice-legacy", "gate_status": "passed"}])
+
+    def test_corrupt_manifest_is_overwritten(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-corrupt")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "slice-corrupt.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text("{not json", encoding="utf-8")
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["job_id"], job["job_id"])
+            self.assertEqual(manifest["gate_status"], "passed")
+            self.assertEqual(summary["completed"], [{"slice_id": "slice-corrupt", "gate_status": "passed"}])
+            self.assertEqual(summary["errors"], [])
 
 
 class CompleteTickShadowGateTests(unittest.TestCase):
