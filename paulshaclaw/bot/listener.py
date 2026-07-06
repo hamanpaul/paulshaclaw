@@ -310,7 +310,14 @@ class TelegramListener:
             return
 
         logger.info("IN  user=%d chat=%d text=%r", user_id, chat_id, text)
-        result = self.router.handle_message(user_id=user_id, text=text)
+        try:
+            result = self.router.handle_message(user_id=user_id, text=text)
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as error:
+            logger.exception("HANDLER_ERROR user=%d chat=%d text=%r", user_id, chat_id, text)
+            self._safe_send(chat_id=chat_id, text=f"指令執行失敗：{type(error).__name__}")
+            return
         reply = str(result["message"])
         self._safe_send(chat_id=chat_id, text=reply)
 

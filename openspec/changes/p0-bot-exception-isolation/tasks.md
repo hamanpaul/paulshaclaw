@@ -1,8 +1,8 @@
 ## 1. handler 例外隔離（TDD）
 
-- [ ] 1.1 RED：測試 fake handler 拋 `ValueError`／任意 `Exception` → listener 應續 poll＋回覆錯誤（現行會死，先看它 fail）
-- [ ] 1.2 dispatch 外圈 broad `except Exception`：檔案 log 完整 traceback＋Telegram 單行錯誤回覆＋continue；`KeyboardInterrupt`/`SystemExit` 放行
-- [ ] 1.3 GREEN＋既有 telegram listener 測試零回歸（含 fail-closed dispatch 守門）
+- [x] 1.1 RED：測試 fake handler 拋 `ValueError`／任意 `Exception` → listener 應續 poll＋回覆錯誤（現行會死，先看它 fail）
+- [x] 1.2 dispatch 外圈 broad `except Exception`：檔案 log 完整 traceback＋Telegram 單行錯誤回覆＋continue；`KeyboardInterrupt`/`SystemExit` 放行
+- [x] 1.3 GREEN＋既有 telegram listener 測試零回歸（含 fail-closed dispatch 守門）
 
 ## 2. start.sh respawn
 
