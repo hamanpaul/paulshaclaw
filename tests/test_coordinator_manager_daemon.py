@@ -1017,6 +1017,57 @@ def test_dispatch_without_registry_is_fail_closed(monkeypatch, tmp_path):
     assert launcher.calls == []
 
 
+def test_control_plane_dispatch_e2e_and_same_slice_second_request_rejected(monkeypatch, tmp_path):
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    from paulshaclaw.control import client as control_client
+
+    launcher = RecordingLauncher()
+    registry = FakeRegistry()
+    dispatcher = FakeDispatcher(registry, worktree_creator=FakeWorktreeCreator(tmp_path / "worktrees"))
+    request_executor = manager_daemon.build_request_executor(
+        dispatcher=dispatcher,
+        specs_dir=str(tmp_path / "specs"),
+        handoff_dir=str(tmp_path / "handoff"),
+        launcher=launcher,
+        scan_specs_fn=lambda specs_dir: [{"slice_id": "slice-a", "dispatch": "auto", "plan": "a.md", "depends_on": []}],
+    )
+
+    first_req_id = control_client.submit_request("dispatch", {"slice_id": "slice-a"}, "telegram")
+    second_req_id = control_client.submit_request("dispatch", {"slice_id": "slice-a"}, "telegram")
+    first_request_path = constants.requests_dir() / f"{first_req_id}.json"
+    second_request_path = constants.requests_dir() / f"{second_req_id}.json"
+    os.utime(first_request_path, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(second_request_path, ns=(2_000_000_000, 2_000_000_000))
+
+    started = manager_daemon.run_loop(
+        request_executor=request_executor,
+        status_provider=lambda: {"ready": [], "held": [], "in_flight": [], "recent_done": []},
+        periodic_tick_runner=lambda: {"dispatch_skipped": False},
+        poll_interval=0.0,
+        tick_interval=300.0,
+        now_fn=lambda: "2026-07-03T09:05:00+00:00",
+        monotonic_fn=lambda: 0.0,
+        sleep_fn=lambda _: None,
+        pid=1,
+        max_rounds=1,
+    )
+
+    first_done = contract.read_json(constants.done_dir() / f"{first_req_id}.json")
+    second_done = contract.read_json(constants.done_dir() / f"{second_req_id}.json")
+
+    assert started is True
+    assert first_done["status"] == "ok"
+    assert first_done["result"] == {
+        "job_id": "slice-a-1",
+        "slice_id": "slice-a",
+        "branch": "feature/slice-a",
+        "worktree": str(tmp_path / "worktrees" / "feature__slice-a"),
+    }
+    assert second_done["status"] == "error"
+    assert second_done["error"].endswith("already-active")
+    assert [call["slice_id"] for call in launcher.calls] == ["slice-a"]
+
+
 def test_second_instance_is_refused_by_lock(monkeypatch, tmp_path):
     monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
     first = manager_daemon.acquire_lock(pid=111, pid_alive=lambda pid: True)

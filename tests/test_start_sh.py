@@ -23,6 +23,7 @@ FAKE_PYTHON = textwrap.dedent(
     from __future__ import annotations
 
     import os
+    import json
     import signal
     import sys
     import time
@@ -93,6 +94,9 @@ FAKE_PYTHON = textwrap.dedent(
             pidfile_path = os.environ.get("FAKE_MANAGER_PIDFILE")
             if pidfile_path:
                 Path(pidfile_path).write_text(str(os.getpid()), encoding="utf-8")
+            argv_log = os.environ.get("FAKE_MANAGER_ARGV_LOG")
+            if argv_log:
+                Path(argv_log).write_text(json.dumps(sys.argv[1:]), encoding="utf-8")
             if os.environ.get("FAKE_MANAGER_MODE") == "exit":
                 time.sleep(0.2)
                 return 1
@@ -1115,6 +1119,69 @@ class StartScriptDreamLoopTests(unittest.TestCase):
 
         self.assertIn("manager_startup_checks", function_text)
         self.assertNotIn("SECONDS", function_text)
+
+    def test_manager_loop_passes_repo_specs_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir_path = Path(tmpdir)
+            repo_root = tmpdir_path / "repo"
+            home_dir = tmpdir_path / "home"
+            fake_bin = repo_root / ".venv" / "bin"
+            fake_scripts = repo_root / "scripts"
+            manager_argv_log = tmpdir_path / "manager-argv.json"
+            monitor_pidfile = tmpdir_path / "monitor.pid"
+            cockpit_pidfile = tmpdir_path / "cockpit.pid"
+            cockpit_started = tmpdir_path / "cockpit.started"
+
+            fake_bin.mkdir(parents=True)
+            fake_scripts.mkdir(parents=True)
+            home_dir.mkdir(parents=True)
+
+            fake_python = fake_bin / "python"
+            fake_python.write_text(FAKE_PYTHON, encoding="utf-8")
+            fake_python.chmod(0o755)
+
+            fake_tmux = fake_bin / "tmux"
+            fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
+            fake_tmux.chmod(0o755)
+
+            start_sh = fake_scripts / "start.sh"
+            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
+            start_sh.chmod(0o755)
+
+            env = dict(os.environ)
+            env["HOME"] = str(home_dir)
+            env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["TMUX"] = str(tmpdir_path / "tmux.sock")
+            env["TMUX_PANE"] = "%0"
+            runtime_dir = tmpdir_path / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            env["XDG_RUNTIME_DIR"] = str(runtime_dir)
+            env["PSC_COST_REFRESH_DISABLED"] = "1"
+            env["PSC_DREAM_DISABLED"] = "1"
+            env["FAKE_MANAGER_ARGV_LOG"] = str(manager_argv_log)
+            env["FAKE_MONITOR_PIDFILE"] = str(monitor_pidfile)
+            env["FAKE_COCKPIT_PIDFILE"] = str(cockpit_pidfile)
+            env["FAKE_COCKPIT_STARTED"] = str(cockpit_started)
+            env["FAKE_COCKPIT_MODE"] = "exit"
+            env["FAKE_TMUX_LOG"] = str(tmpdir_path / "tmux.log")
+
+            completed = subprocess.run(
+                ["bash", str(start_sh)],
+                cwd=repo_root,
+                env=env,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            manager_argv = json.loads(manager_argv_log.read_text(encoding="utf-8"))
+            self.assertIn("--specs-dir", manager_argv)
+            self.assertEqual(
+                manager_argv[manager_argv.index("--specs-dir") + 1],
+                str(repo_root / "docs" / "superpowers" / "specs"),
+            )
 
     def test_cleanup_distinguishes_spawned_vs_adopted_manager(self) -> None:
         text = START_SH.read_text(encoding="utf-8")
