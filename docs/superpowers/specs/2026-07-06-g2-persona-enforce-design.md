@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: g2-persona-enforce
-plan: null
+plan: docs/superpowers/plans/2026-07-06-g2-persona-enforce.md
 depends_on: [g1-coordinator-adapter]
 ---
 

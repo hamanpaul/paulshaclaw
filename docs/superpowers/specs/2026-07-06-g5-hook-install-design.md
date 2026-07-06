@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: g5-hook-install
-plan: null
+plan: docs/superpowers/plans/2026-07-06-g5-hook-install.md
 depends_on: [p2-usability-phase0]
 ---
 

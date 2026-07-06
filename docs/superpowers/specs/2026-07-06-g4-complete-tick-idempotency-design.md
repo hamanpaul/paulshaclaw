@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: g4-complete-tick-idempotency
-plan: null
+plan: docs/superpowers/plans/2026-07-06-g4-complete-tick-idempotency.md
 depends_on: []
 ---
 

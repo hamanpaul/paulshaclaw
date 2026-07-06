@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: g1-coordinator-adapter
-plan: null
+plan: docs/superpowers/plans/2026-07-06-g1-coordinator-adapter.md
 depends_on: []
 ---
 

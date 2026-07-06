@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: g3-systemd-services
-plan: null
+plan: docs/superpowers/plans/2026-07-06-g3-systemd-services.md
 depends_on: []
 ---
 
