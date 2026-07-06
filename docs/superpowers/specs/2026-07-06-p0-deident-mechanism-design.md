@@ -76,7 +76,7 @@ flowchart LR
 
 **本 repo**：
 - [ ] dry-run（步 2）盤點結果 == #201 清單（不多不少；多出 = #201 漏列要補）。
-- [ ] Stage A 後：`git grep`（tracked、排除 `ref/` 與宣告過的 fixture）結構/字面命中 = 0。
+- [ ] Stage A 後：以**安全驗證器**確認 tracked 檔（排除 `ref/` 與宣告過的 fixture）結構/字面命中 = 0。驗證器自本機 secret 空間／CI secret env 讀字面表，輸出**僅含計數、遮蔽後的 marker 代號與檔案路徑**，**永不印出命中行文字**——raw `git grep` 會把敏感值複製進 terminal／PR／CI log，禁止作為驗收 oracle。公開 CI 僅依賴輸出遮蔽的 R-21 路徑。
 - [ ] 既有測試全綠（fixture 改名後）；`tests/` 對 2 處 env 化的行為測試（env 未設 → 預設不含第 2 root；env 設 → 生效）。
 - [ ] pin bump 後 Policy Check 綠、且 R-21 對本 repo 實際執行（非 PASS-not-applicable）。
 - [ ] hook：對含結構樣式的寫入發 warn 且不阻塞；字面表缺席不報錯。

@@ -18,8 +18,8 @@ depends_on: []
 
 ### G1（#14）coordinator 真 adapter —— 規模 L，動工時出細 spec
 - **裁決：filesystem-queue adapter**。理由：對齊 #191 manager 檔案契約（`~/.agents/control/` 檔案協定 + 常駐 daemon）與 repo 運作模型（artifact-first / event-first：canonical state 落檔案與 event log）；CLI-command adapter 降為 fallback 選項，tmux 類 adapter 不採（seams 已刻意把 tmux 隔在 Protocol 後）。
-- 契約要點（細 spec 展開）：`coordinator.backend` config 欄位（未設 → 維持 UnavailableCoordinator fail-closed）；job 檔 schema 帶版本欄；狀態遷移落 events.jsonl。
-- **DoD**：Telegram `/dispatch` → 真 job id + events.jsonl 記錄 + worktree 建立的 e2e 測試綠；`LocalCoordinator` stub 標記 test-only。
+- 契約要點（細 spec 展開）：**擴充既有 `paulshaclaw.control.contract`，不得另起第二條 queue**——現行契約為 `~/.agents/control/` 下 `requests/*.json`／`done/*.json`／`status.json`＋`manager.lock`，request 型別 `tick`／`fanout`；G1 以**新增 request 型別（如 `dispatch`）**與對應 done 紀錄承載 job 語意（schema 帶版本欄），附契約測試與遷移註記。`coordinator.backend` config 欄位（未設 → 維持 UnavailableCoordinator fail-closed）。
+- **DoD**：Telegram `/dispatch` → 落 `requests/*.json` → manager daemon 處理 → `done/*.json` 可查真 job id → worktree 建立的 e2e 測試綠；cockpit／既有 control client 對新 request 型別不誤讀（相容測試）；`LocalCoordinator` stub 標記 test-only。
 
 ### G2（#124）persona enforce 翻牌 —— 規模 M
 - **裁決：分批 rollout**。`scope_ci` 加 `--enforce`，讀 `personas.yaml` per-persona `enforcement` 欄位；先翻 1 個 persona（建議 builder 類，write_paths 最明確）試點 ≥1 週，無誤傷再全開；`persona-scope` workflow 設 branch protection required check。
@@ -55,6 +55,7 @@ flowchart LR
 - 主線 G1→G2（enforce 要有真 dispatch 流量才有意義的試點資料）。
 - G3/G4/G5 互相獨立、與 G1 平行；G5 等 P2 PR-B facade。
 - **G3 連續運轉驗收**（≥2 週無人工介入）與其他閘重疊計時，不串行等待。
+- **調度語意註記（機讀依賴）**：本傘狀件 frontmatter `dispatch: hold`、`depends_on: []` 為**永久**——傘狀件不可派工。G1–G5 動工時各開子 spec/slice，上述依賴邊**必須寫進子件 frontmatter `depends_on`**（G2 子件 depends_on G1 子件、G5 子件 depends_on `p2-usability-phase0`），使 autonomy 排程可機器讀取；本文 prose 排序不具執行力。
 
 ## 4. 驗收（傘狀層）
 
