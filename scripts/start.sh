@@ -463,8 +463,7 @@ run_telegram_listener_once() {
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
   : > "$TELEGRAM_READY_FILE"
   export PSC_TELEGRAM_READY_FILE="$TELEGRAM_READY_FILE"
-  local listener_module="paulshaclaw.bot.listener"
-  PYTHONPATH="$REPO" "$PY" -m "$listener_module" 200>&- >> "$TELEGRAM_LOG" 2>&1 &
+  PYTHONPATH="$REPO" "$PY" -m paulshaclaw.bot.listener 200>&- >> "$TELEGRAM_LOG" 2>&1 &
   telegram_listener_pid=$!
 
   local telegram_ready_deadline=$((SECONDS + TELEGRAM_STARTUP_TIMEOUT))
