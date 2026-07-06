@@ -24,8 +24,21 @@ if [[ ! "$interval" =~ ^[0-9]+$ ]]; then
   interval=3600
 fi
 
+child_pid=""
+terminate() {
+  if [[ -n "$child_pid" ]]; then
+    kill -TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  exit 143
+}
+trap terminate TERM INT
+
 while true; do
-  sleep "$interval"
+  sleep "$interval" &
+  child_pid=$!
+  wait "$child_pid"
+  child_pid=""
   PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
     --memory-root "$dream_root" --require-idle --promoter llm \
     --instruction-root "$HOME/.claude/CLAUDE.md" \
@@ -36,5 +49,8 @@ while true; do
     --instruction-root "$HOME/.agents" \
     --instruction-root "$HOME/.gemini" \
     --instruction-root "$HOME/prj_pri" \
-    --instruction-root "$HOME/prj_arc" || true
+    --instruction-root "$HOME/prj_arc" &
+  child_pid=$!
+  wait "$child_pid" 2>/dev/null || true
+  child_pid=""
 done

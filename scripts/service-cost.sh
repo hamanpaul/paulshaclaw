@@ -36,7 +36,23 @@ if [[ ! "${interval}" =~ ^[0-9]+$ ]]; then
   interval=30
 fi
 
+child_pid=""
+terminate() {
+  if [[ -n "$child_pid" ]]; then
+    kill -TERM "$child_pid" 2>/dev/null || true
+    wait "$child_pid" 2>/dev/null || true
+  fi
+  exit 143
+}
+trap terminate TERM INT
+
 while true; do
-  PYTHONPATH="$REPO" "$PY" -m paulshaclaw.cost --once || true
-  sleep "$interval"
+  PYTHONPATH="$REPO" "$PY" -m paulshaclaw.cost --once &
+  child_pid=$!
+  wait "$child_pid" 2>/dev/null || true
+  child_pid=""
+  sleep "$interval" &
+  child_pid=$!
+  wait "$child_pid"
+  child_pid=""
 done

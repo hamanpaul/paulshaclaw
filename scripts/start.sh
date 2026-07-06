@@ -58,9 +58,22 @@ cleanup() {
     fi
   done
 
+  wait_for_service_exit() {
+    local pid="$1"
+    local shutdown_checks=100
+    while (( shutdown_checks > 0 )) && kill -0 "$pid" 2>/dev/null; do
+      sleep 0.05
+      shutdown_checks=$((shutdown_checks - 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+    wait "$pid" 2>/dev/null || true
+  }
+
   for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}"; do
     if [[ -n "${pid}" ]]; then
-      wait "$pid" 2>/dev/null || true
+      wait_for_service_exit "$pid"
     fi
   done
   if [[ -n "${MANAGER_PID:-}" ]]; then
@@ -414,15 +427,16 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
     echo "telegram listener exited after ready" >&2
     exit 1
   fi
-  telegram_ready_stabilize_deadline=$((SECONDS + 1))
-  while true; do
+  telegram_ready_stabilize_checks=20
+  while (( telegram_ready_stabilize_checks > 0 )); do
     telegram_state=$(ps -o stat= -p "$TELEGRAM_PID" 2>/dev/null | tr -d '[:space:]')
     if [[ -z "$telegram_state" || "$telegram_state" == *Z* ]]; then
       wait "$TELEGRAM_PID" 2>/dev/null || true
       echo "telegram listener not healthy after ready" >&2
       exit 1
     fi
-    if (( SECONDS >= telegram_ready_stabilize_deadline )); then
+    telegram_ready_stabilize_checks=$((telegram_ready_stabilize_checks - 1))
+    if (( telegram_ready_stabilize_checks == 0 )); then
       break
     fi
     sleep 0.05

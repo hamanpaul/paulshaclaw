@@ -21,6 +21,7 @@ SERVICE_SCRIPT_NAMES = (
     "service-manager.sh",
     "service-bot.sh",
 )
+PROCESS_EXIT_TIMEOUT = 20.0
 
 
 FAKE_PYTHON = textwrap.dedent(
@@ -201,6 +202,20 @@ def _install_start_scripts(target_dir: Path, *, repo_root: Path | None = None) -
         target = target_dir / name
         target.write_text(text, encoding="utf-8")
         target.chmod(0o755)
+
+
+def _wait_for_process_exit(proc: subprocess.Popen[str], timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"timed out waiting for process exit: pid={proc.pid}")
+
+
+def _kill_process_group(pgid: int, sig: signal.Signals) -> None:
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(pgid, sig)
 
 
 class StartScriptLifecycleTests(unittest.TestCase):
@@ -546,6 +561,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 stderr=stderr,
                 text=True,
             )
+            proc_pgid = os.getpgid(proc.pid)
             output: str | None = None
             try:
                 if not expect_monitor_started:
@@ -576,13 +592,13 @@ class StartScriptLifecycleTests(unittest.TestCase):
                     self._wait_for_missing_file(telegram_pidfile)
 
                 if signal_to_wrapper is None:
-                    proc.wait(timeout=10)
+                    _wait_for_process_exit(proc, timeout=PROCESS_EXIT_TIMEOUT)
                 else:
                     if signal_to_wrapper == signal.SIGINT:
                         os.killpg(os.getpgid(proc.pid), signal_to_wrapper)
                     else:
                         os.kill(proc.pid, signal_to_wrapper)
-                    proc.wait(timeout=10)
+                    _wait_for_process_exit(proc, timeout=PROCESS_EXIT_TIMEOUT)
 
                 if expect_returncode is not None:
                     self.assertEqual(proc.returncode, expect_returncode)
@@ -630,9 +646,9 @@ class StartScriptLifecycleTests(unittest.TestCase):
                         self.assertIn("manager loop disabled", output)
 
             finally:
+                _kill_process_group(proc_pgid, signal.SIGKILL)
                 if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=10)
+                    _wait_for_process_exit(proc, timeout=PROCESS_EXIT_TIMEOUT)
                 if monitor_pidfile.exists():
                     try:
                         monitor_pid_text = monitor_pidfile.read_text(encoding="utf-8").strip()
@@ -851,10 +867,11 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+            proc_pgid = os.getpgid(proc.pid)
             try:
                 self._wait_for_pidfile_int(dream_pidfile, timeout=8.0)
                 os.kill(proc.pid, signal.SIGTERM)
-                proc.wait(timeout=10)
+                _wait_for_process_exit(proc, timeout=PROCESS_EXIT_TIMEOUT)
 
                 second_env = dict(env)
                 second_env["PSC_DREAM_DISABLED"] = "1"
@@ -869,9 +886,9 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
                     timeout=10,
                 )
             finally:
+                _kill_process_group(proc_pgid, signal.SIGKILL)
                 if proc.poll() is None:
-                    proc.kill()
-                    proc.wait(timeout=10)
+                    _wait_for_process_exit(proc, timeout=PROCESS_EXIT_TIMEOUT)
                 for pidfile in (monitor_pidfile, cockpit_pidfile, dream_pidfile):
                     if not pidfile.exists():
                         continue
@@ -1111,6 +1128,15 @@ class StartScriptDreamLoopTests(unittest.TestCase):
 
         self.assertIn("manager_startup_checks", function_text)
         self.assertNotIn("SECONDS", function_text)
+
+    def test_telegram_ready_probe_avoids_integer_second_deadline(self) -> None:
+        text = START_SH.read_text(encoding="utf-8")
+        start = text.index("telegram_ready_deadline=")
+        end = text.index('echo "telegram pid=$TELEGRAM_PID"', start)
+        function_text = text[start:end]
+
+        self.assertIn("telegram_ready_stabilize_checks", function_text)
+        self.assertNotIn("telegram_ready_stabilize_deadline", function_text)
 
     def test_cleanup_distinguishes_spawned_vs_adopted_manager(self) -> None:
         text = START_SH.read_text(encoding="utf-8")
