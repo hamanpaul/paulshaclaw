@@ -28,7 +28,7 @@
 
 ### start.sh 語料 roots 比照 `instruction_corpus.default_roots()`
 
-傳入的 roots 為 `~/.claude/CLAUDE.md`、`~/CLAUDE.md`、`~/AGENTS.md`、`~/GEMINI.md`、`~/.codex`、`~/.gemini`、`~/.agents`、`~/prj_pri`、`~/prj_arc`（共 9 個，= `instruction_corpus.default_roots()`）。理由：
+傳入的 roots 為 `~/.claude/CLAUDE.md`、`~/CLAUDE.md`、`~/AGENTS.md`、`~/GEMINI.md`、`~/.codex`、`~/.gemini`、`~/.agents`、`~/prj_pri`、`~/prj_ext`（共 9 個，= `instruction_corpus.default_roots()`）。理由：
 
 - #156 起 `moc/runner.py:21` 已用 `load_corpus()`（同一組 default roots）在 index 端 pool-exclude；產生端用同一組來源，等於「index 反正不收的就不要寫進 knowledge」，消除 wakeup brief / MOC 看得到、retrieval 看不到的不一致。
 - 探測本身 bounded（depth ≤3、skip `.copilot` 等重目錄，`instruction_corpus.py:21-27`），且生產環境每輪 dream 的 moc pass 已在做同樣掃描，無新增成本量級。

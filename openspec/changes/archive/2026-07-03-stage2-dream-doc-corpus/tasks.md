@@ -6,7 +6,7 @@
 
 ## 2. start.sh 生產 dream loop 傳語料 roots
 
-- [x] 2.1 RED：新增 `paulshaclaw/memory/tests/test_start_sh_dream_flags.py`——讀 `scripts/start.sh`，擷取 `memory dream run` 命令段（至 `>>"$dream_log"` 止），assert 含 `--promoter llm`、`--instruction-root` 恰 9 個、且含 `$HOME/.claude/CLAUDE.md`、`$HOME/CLAUDE.md`、`$HOME/prj_pri`、`$HOME/prj_arc` 四個關鍵 root。確認 FAIL。
+- [x] 2.1 RED：新增 `paulshaclaw/memory/tests/test_start_sh_dream_flags.py`——讀 `scripts/start.sh`，擷取 `memory dream run` 命令段（至 `>>"$dream_log"` 止），assert 含 `--promoter llm`、`--instruction-root` 恰 9 個、且含 `$HOME/.claude/CLAUDE.md`、`$HOME/CLAUDE.md`、`$HOME/prj_pri`、`$HOME/prj_ext` 四個關鍵 root。確認 FAIL。
 - [x] 2.2 GREEN：`scripts/start.sh` dream run 命令（現行 :195-196）補 9 行 `--instruction-root`（= `instruction_corpus.default_roots()` 集合），其餘行不動。`bash -n scripts/start.sh` 通過、guard test 綠後 commit。
 
 ## 3. 回歸與收尾

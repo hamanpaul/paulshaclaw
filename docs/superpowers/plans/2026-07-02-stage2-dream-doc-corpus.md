@@ -387,7 +387,7 @@ class StartShDreamFlagsTests(unittest.TestCase):
         for root in ('"$HOME/.claude/CLAUDE.md"', '"$HOME/CLAUDE.md"',
                      '"$HOME/AGENTS.md"', '"$HOME/GEMINI.md"',
                      '"$HOME/.codex"', '"$HOME/.agents"', '"$HOME/.gemini"',
-                     '"$HOME/prj_pri"', '"$HOME/prj_arc"'):
+                     '"$HOME/prj_pri"', '"$HOME/prj_ext"'):
             self.assertIn(f"--instruction-root {root}", cmd)
 
 
@@ -425,7 +425,7 @@ Expected: **RED** —— `test_dream_run_passes_default_instruction_roots` 失�
         --instruction-root "$HOME/.agents" \
         --instruction-root "$HOME/.gemini" \
         --instruction-root "$HOME/prj_pri" \
-        --instruction-root "$HOME/prj_arc" \
+        --instruction-root "$HOME/prj_ext" \
         >>"$dream_log" 2>&1 || true
 ```
 

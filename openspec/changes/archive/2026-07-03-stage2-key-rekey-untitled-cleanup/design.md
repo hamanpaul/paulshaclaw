@@ -3,7 +3,7 @@
 issue #177（audit wf_2bd0b606 `untitled-and-orphan-dirs`，PARTIAL 驗證後修正版）。關聯 #100、#151、#147。
 
 live 現況（2026-07-02）：
-- 8 筆真筆記卡在舊 raw-remote key：`github.com/hamanpaul/testpilot` 4 筆（06-17 06:49 UTC）、`vcs-sw2.arcadyan.com.tw/airoha/airoha_openwrt_feed` 4 筆（06-17 06:27 UTC）；retrieval.db 同時存在新 slug（testpilot=33、airoha=6）與舊 key（各 4）。
+- 8 筆真筆記卡在舊 raw-remote key：`github.com/hamanpaul/testpilot` 4 筆（06-17 06:49 UTC）、`git.example.com/vendor-b/vendor-b_openwrt_feed` 4 筆（06-17 06:27 UTC）；retrieval.db 同時存在新 slug（testpilot=33、vendor-b=6）與舊 key（各 4）。
 - 13 筆 `title: untitled` 全在 `knowledge/serialwrap/`（4 筆 created_at=2026-06-22、9 筆=2026-06-25，皆在 #151 修復前；9 個 distinct checksum、4 對跨 session 重複）。
 - 12 個空目錄 + 對應孤兒 `<key>-moc.md` 殘留在 knowledge root。
 
@@ -66,7 +66,7 @@ lint 規則落在 `janitor/rules.py` 新純函式 `plan_lint(records)`（與 `pl
 | 1 | 13 筆 untitled：`ls ~/.agents/memory/knowledge/serialwrap/untitled--*.md` 產固定清單檔 → `memory knowledge prune-noise --paths <file> --dry-run` | manifest 恰 13 列、reason 全 `listed`；超出即停 |
 | 2 | 同命令 `--apply` | 13 筆刪除、serialwrap 其餘 71 筆不動 |
 | 3 | `memory knowledge rekey --from github.com/hamanpaul/testpilot --to testpilot --dry-run` → 核 manifest 恰 4 列 → `--apply` | 4 筆入 `knowledge/testpilot/`、`memory search --project testpilot` 可召回 |
-| 4 | `memory knowledge rekey --from vcs-sw2.arcadyan.com.tw/airoha/airoha_openwrt_feed --to airoha` 同上 | 4 筆入 `knowledge/airoha/` |
+| 4 | `memory knowledge rekey --from git.example.com/vendor-b/vendor-b_openwrt_feed --to vendor-b` 同上 | 4 筆入 `knowledge/vendor-b/` |
 | 5 | 12 空目錄 + 孤兒 `-moc.md`：`find ~/.agents/memory/knowledge -maxdepth 1 -type d -empty` 核對清單後刪除（rekey 已自動清掉步驟 3/4 的兩組） | `passes.janitor.lint == {"untitled": 0, "raw_remote_key": 0}`，且不再出現 `lint:` warnings |
 
 回滾：rekey/prune 的 manifest 是完整審計記錄；刪除為 hard delete，apply 前 dry-run 核對是唯一防線（與既有 prune-noise 一致）。

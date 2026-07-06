@@ -74,7 +74,7 @@ def discover_instruction_docs(
 def default_roots() -> list[Path]:
     """Curated, bounded set of locations where agent-instruction docs live."""
     home = Path.home()
-    return [
+    roots = [
         home / ".claude" / "CLAUDE.md",
         home / "CLAUDE.md",
         home / "AGENTS.md",
@@ -83,8 +83,12 @@ def default_roots() -> list[Path]:
         home / ".agents",
         home / ".gemini",
         home / "prj_pri",
-        home / "prj_arc",
     ]
+    # 額外工作樹 corpus root 由 env 提供（去識別化：不硬編個人/雇主目錄名）。
+    extra = os.environ.get("PSC_EXTRA_CORPUS_ROOT", "").strip()
+    if extra:
+        roots.append(Path(extra).expanduser())
+    return roots
 
 
 def load_corpus(

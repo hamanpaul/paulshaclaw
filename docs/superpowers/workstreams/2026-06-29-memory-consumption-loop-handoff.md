@@ -15,14 +15,14 @@
 ## 開放項 3：broad-corpus 過度排除真知識（retrieval 側，非破壞，**優先**）
 
 ### 觀察（2026-06-29 實機數據）
-`moc/runner.run_moc` 呼叫 `search.build_index(..., doc_corpus=instruction_corpus.load_corpus())`，`load_corpus()` 用**broad default roots**（`~/.claude/CLAUDE.md`、`~/CLAUDE.md`、`~/AGENTS.md`、`~/.codex`、`~/.agents`、`~/prj_pri`、`~/prj_arc`…）。對 doc-fragment 做逐字比對排除後，各 project 被排除於檢索之外的比例：
+`moc/runner.run_moc` 呼叫 `search.build_index(..., doc_corpus=instruction_corpus.load_corpus())`，`load_corpus()` 用**broad default roots**（`~/.claude/CLAUDE.md`、`~/CLAUDE.md`、`~/AGENTS.md`、`~/.codex`、`~/.agents`、`~/prj_pri`、`~/prj_ext`…）。對 doc-fragment 做逐字比對排除後，各 project 被排除於檢索之外的比例：
 
 | project | total | indexed | excluded |
 |---|---:|---:|---:|
 | testpilot | 82 | 29 | **53（65%）** |
 | serialwrap | 74 | 26 | **48（65%）** |
 | paulshaclaw | 46 | 41 | 5（11%） |
-| paulsha-conventions / paul_chen / airoha | — | =total | 0 |
+| paulsha-conventions / paul_chen / vendor-b | — | =total | 0 |
 
 ### 風險
 testpilot / serialwrap 的 per-project `AGENTS.md` **內嵌真架構知識**（RPC routing / session 狀態機 / WAL 等，見 [[project_doc_fragment_corpus_scoping]]），broad corpus 會把「verbatim 命中 AGENTS.md 段落」的**真知識**判為 doc-fragment 而排除。65% 排除率高度疑似**過度排除**→ 消費迴路對這兩個 project 形同半盲（短清單檢索不到大半知識）。paulshaclaw 11% 才合理（其 AGENTS.md 片段確為噪音）。

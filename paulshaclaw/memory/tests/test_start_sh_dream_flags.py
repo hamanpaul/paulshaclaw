@@ -26,7 +26,8 @@ class StartShDreamFlagsTests(unittest.TestCase):
 
     def test_dream_run_passes_default_instruction_roots(self):
         cmd = self._dream_cmd()
-        self.assertEqual(cmd.count("--instruction-root"), 9)
+        # 8 個靜態 root + 1 個 env 條件式（去識別化：額外 root 由 PSC_EXTRA_CORPUS_ROOT 提供）。
+        self.assertEqual(cmd.count('--instruction-root "$HOME/'), 8)
         for root in (
             '"$HOME/.claude/CLAUDE.md"',
             '"$HOME/CLAUDE.md"',
@@ -36,9 +37,11 @@ class StartShDreamFlagsTests(unittest.TestCase):
             '"$HOME/.agents"',
             '"$HOME/.gemini"',
             '"$HOME/prj_pri"',
-            '"$HOME/prj_arc"',
         ):
             self.assertIn(f"--instruction-root {root}", cmd)
+        self.assertIn(
+            '${PSC_EXTRA_CORPUS_ROOT:+--instruction-root "$PSC_EXTRA_CORPUS_ROOT"}', cmd
+        )
 
 
 if __name__ == "__main__":
