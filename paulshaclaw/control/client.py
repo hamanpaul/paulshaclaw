@@ -26,10 +26,10 @@ def read_status() -> dict[str, Any]:
         # window; only flag it once it has stalled far beyond any real request.
         if age is not None and age <= constants.STATUS_STALLED_AFTER_SECONDS:
             return _ok_status(payload, updated_at)
-        return _degraded_status("stalled")
+        return _degraded_status("stalled", payload)
     # No live daemon pid to confirm — fall back to age-based staleness.
     if age is None or age > constants.STATUS_STALE_AFTER_SECONDS:
-        return _degraded_status("stale")
+        return _degraded_status("stale", payload)
     return _ok_status(payload, updated_at)
 
 
@@ -74,13 +74,13 @@ def poll_done(req_id: str, timeout: float, poll_interval: float = 0.5) -> dict[s
             time.sleep(poll_interval)
 
 
-def _degraded_status(reason: str) -> dict[str, Any]:
+def _degraded_status(reason: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "schema_version": constants.SCHEMA_VERSION,
         "updated_at": None,
         "daemon": None,
         "ready": [],
-        "held": [],
+        "held": list(payload.get("held", [])) if isinstance(payload, dict) else [],
         "in_flight": [],
         "recent_done": [],
         "degraded": True,

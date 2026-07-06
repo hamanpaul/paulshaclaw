@@ -184,6 +184,54 @@ def test_read_status_normalizes_missing_held_to_empty_list(monkeypatch, tmp_path
     assert status["held"] == []
 
 
+def test_read_status_preserves_held_on_degraded_snapshots(monkeypatch, tmp_path):
+    import os
+
+    from paulshaclaw.control import client
+
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path))
+    held = [{"slice_id": "slice-held", "reasons": ["dispatch-hold"]}]
+
+    stale_updated_at = "2000-01-01T00:00:00+00:00"
+    contract.atomic_write_json(
+        constants.status_path(),
+        {
+            "schema_version": constants.SCHEMA_VERSION,
+            "updated_at": stale_updated_at,
+            "daemon": {"pid": 424242, "last_tick_at": stale_updated_at, "idle": False},
+            "ready": ["slice-a"],
+            "held": held,
+            "in_flight": [],
+            "recent_done": [],
+        },
+    )
+
+    monkeypatch.setattr(client.os, "kill", lambda pid, sig: (_ for _ in ()).throw(ProcessLookupError()))
+    stale = client.read_status()
+    assert stale["degraded"] is True
+    assert stale["held"] == held
+
+    live_updated_at = (
+        datetime.now(timezone.utc) - timedelta(seconds=constants.STATUS_STALLED_AFTER_SECONDS + 30)
+    ).isoformat()
+    contract.atomic_write_json(
+        constants.status_path(),
+        {
+            "schema_version": constants.SCHEMA_VERSION,
+            "updated_at": live_updated_at,
+            "daemon": {"pid": os.getpid(), "last_tick_at": live_updated_at, "idle": False},
+            "ready": ["slice-a"],
+            "held": held,
+            "in_flight": [],
+            "recent_done": [],
+        },
+    )
+
+    stalled = client.read_status()
+    assert stalled["degraded"] is True
+    assert stalled["held"] == held
+
+
 def test_poll_done_returns_record_or_none(monkeypatch, tmp_path):
     from paulshaclaw.control import client
 
