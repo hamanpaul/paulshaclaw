@@ -6,6 +6,7 @@ start_bot_supervised() {
   if [[ ! "$delay" =~ ^[0-9]+$ ]]; then
     delay=5
   fi
+  if (( delay > 120 )); then delay=120; fi  # 初值也套 120s 上限（誤設 PSC_BOT_BACKOFF_BASE 防護，review nitpick）
   local -a cmd=("$@")
   if [[ "${#cmd[@]}" -eq 0 ]]; then
     echo "start_bot_supervised requires a command" >&2
