@@ -217,6 +217,24 @@ class CompleteTickReconcileTests(unittest.TestCase):
             self.assertEqual(summary["completed"], [{"slice_id": "slice-invalid-utf8", "gate_status": "passed"}])
             self.assertEqual(summary["errors"], [])
 
+    def test_symlink_manifest_path_is_rejected_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            job = _make_job(reg, "slice-symlink")
+            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "slice-symlink.json"
+            target_path = Path(d) / "outside.json"
+            target_path.write_text('{"outside": true}\n', encoding="utf-8")
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.symlink_to(target_path)
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+
+            self.assertEqual(target_path.read_text(encoding="utf-8"), '{"outside": true}\n')
+            self.assertEqual(summary["completed"], [])
+            self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
+
 
 class CompleteTickShadowGateTests(unittest.TestCase):
     def test_shadow_gate_verdict_recorded_but_does_not_block(self) -> None:
@@ -274,6 +292,25 @@ class CompleteTickErrorAndReleaseTests(unittest.TestCase):
             self.assertIn("down", summary["released"])
             from paulshaclaw.coordinator import autonomy
             self.assertTrue(autonomy.default_is_satisfied("up", handoff_dir=str(hdir)))
+
+    def test_invalid_utf8_manifest_repair_still_reports_released(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            up = _make_job(reg, "up")
+            disp = FakeDispatcher(reg, poll_map={up["job_id"]: "done"})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "up.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_bytes(b"\x80not-utf8")
+            metas = [
+                {"slice_id": "down", "dispatch": "auto", "plan": "p-down.md", "depends_on": ["up"]},
+            ]
+
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), metas=metas, clock=lambda: "T0")
+
+            self.assertEqual(summary["completed"], [{"slice_id": "up", "gate_status": "passed"}])
+            self.assertIn("down", summary["released"])
+            self.assertEqual(summary["errors"], [])
 
 
 class CompleteTickGuardTests(unittest.TestCase):
@@ -366,6 +403,25 @@ class RunTickTests(unittest.TestCase):
             self.assertFalse(summary["dispatch_skipped"])
             self.assertTrue(any(e.get("stage") == "fanout" for e in summary["errors"]))
             self.assertEqual(summary["completed"], [{"slice_id": "done-slice", "gate_status": "passed"}])
+
+    def test_invalid_utf8_dependency_manifest_does_not_create_fanout_error(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            reg = _reg(d)
+            disp = FakeDispatcher(reg, poll_map={})
+            hdir = Path(d) / "handoff"
+            manifest_path = hdir / "up.json"
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_bytes(b"\x80not-utf8")
+            metas = [
+                {"slice_id": "down", "dispatch": "auto", "plan": "p-down.md", "depends_on": ["up"]},
+            ]
+
+            summary = manager.run_tick(
+                disp, metas=metas, launcher=None, handoff_dir=str(hdir), clock=lambda: "T0",
+            )
+
+            self.assertEqual(summary["dispatched"], [])
+            self.assertFalse(any(e.get("stage") == "fanout" for e in summary["errors"]))
 
     def test_in_flight_slice_not_redispatched(self) -> None:
         # slice 已有 dispatched job → 本趟 fanout 不得再對它派工（review F-A 冪等）

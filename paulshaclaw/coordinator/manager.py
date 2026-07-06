@@ -50,7 +50,13 @@ def _default_gate_runner(job: dict) -> dict | None:
 
 
 def _satisfied_pred(handoff_dir: str):
-    return lambda slice_id: autonomy.default_is_satisfied(slice_id, handoff_dir=handoff_dir)
+    def _pred(slice_id: str) -> bool:
+        try:
+            return autonomy.default_is_satisfied(slice_id, handoff_dir=handoff_dir)
+        except (OSError, ValueError):
+            return False
+
+    return _pred
 
 
 def _existing_manifest_job_id(path: Path) -> str | None:
@@ -113,6 +119,11 @@ def complete_tick(
                 errors.append({"job_id": job_id, "error": f"job 缺合法/安全 task/slice_id: {slice_id!r}"})
                 continue
             manifest_path = hdir / f"{slice_id}.json"
+            if manifest_path.is_symlink():
+                errors.append(
+                    {"job_id": job_id, "error": f"handoff manifest path 拒絕 symlink: {manifest_path}"}
+                )
+                continue
             if _existing_manifest_job_id(manifest_path) == job_id:
                 continue  # 真冪等：同一個 terminal job 已落盤
 
