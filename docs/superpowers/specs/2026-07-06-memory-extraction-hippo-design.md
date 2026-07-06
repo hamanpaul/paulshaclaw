@@ -173,7 +173,7 @@ hippo wakeup
 
 ## 8. 測試與 CI 歸屬
 
-- **hippo**：87 個 memory test 檔隨包搬；CI 四道——tests（R-19）、policy-check（1.0.12、R-20）、lib import-lint、deident gate（#201，day-1）。
+- **hippo**：87 個 memory test 檔隨包搬；CI 四道保證——tests（R-19）、policy-check（1.0.12、R-20）、lib import-lint、deident gate（#201，day-1）。實作映射（2026-07-06 p0-p3 merge 後定案）：import-lint 以 pytest 併入 tests；deident 以 conventions **R-21（`tier: shareable`）**併入 policy-check（P0-1「上游為正主」，markers 基線在引擎內）——實體 workflow 為兩道。
 - **主 repo**：跨包 consumer tests 留守（#125 建議）；合併後 unit/integration 全綠才算完（integration_test_gate）。**必備 consumer tests（審查修正）**：(a) hippo installed 且 `paulshaclaw.memory` 不存在時 `/agent start/status` 綠；(b) 舊 `PSC_*` hooks 與 hippo 服務解析到同一 memory root；(c) systemd-unavailable 環境 fallback 路徑可用。
 
 ## 9. 風險與對策
