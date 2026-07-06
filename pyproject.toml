@@ -8,6 +8,9 @@ version = "0.1.0"
 requires-python = ">=3.10"
 description = "paulshaclaw agent workflow system"
 
+[project.scripts]
+psc = "paulshaclaw.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["paulshaclaw*"]
