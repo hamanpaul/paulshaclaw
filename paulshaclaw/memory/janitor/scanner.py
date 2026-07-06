@@ -48,7 +48,7 @@ def _build_lc_state(memory_root: Path) -> dict[str, dict[str, str]]:
     return result
 
 
-def _build_import_index(memory_root: Path) -> dict[str, list[dict[str, str]]]:
+def _build_import_index(memory_root: Path) -> tuple[dict[str, list[dict[str, str]]], int]:
     """
     Build import index mapping source_key -> import events.
     
@@ -56,13 +56,15 @@ def _build_import_index(memory_root: Path) -> dict[str, list[dict[str, str]]]:
     as source_key for matching with records).
     
     Returns:
-        Dict mapping source_key to list of dicts with 'status' and 'recorded_at'.
-        Only ``written``/``updated`` imports are indexed: those are the events
-        that carry new evidence and may legitimately reactivate a decayed
-        record. ``hash-duplicate``/``stale-skip`` add nothing and are ignored.
+        Tuple of:
+        - Dict mapping source_key to list of dicts with 'status' and 'recorded_at'.
+          Only ``written``/``updated`` imports are indexed: those are the events
+          that carry new evidence and may legitimately reactivate a decayed
+          record. ``hash-duplicate``/``stale-skip`` add nothing and are ignored.
+        - Count of skipped malformed/blank lines.
     """
     import_path = memory_root / "runtime" / "ledger" / "import.jsonl"
-    records = import_log.read_import_records(import_path)
+    records, bad_line_count = import_log.read_import_records_tolerant(import_path)
 
     index: dict[str, list[dict[str, str]]] = {}
     for rec in records:
@@ -85,7 +87,7 @@ def _build_import_index(memory_root: Path) -> dict[str, list[dict[str, str]]]:
             "recorded_at": recorded_at
         })
 
-    return index
+    return index, bad_line_count
 
 
 def _persist_event(memory_root: Path, event: dict[str, Any]) -> None:
@@ -160,10 +162,13 @@ def run_scan(
     # Build import index. import.jsonl is an auxiliary reactivation signal, so a
     # corrupt line degrades (skip reactivation) rather than aborting the scan.
     try:
-        import_index = _build_import_index(memory_root)
+        import_index, import_bad_line_count = _build_import_index(memory_root)
     except ValueError as exc:
         import_index = {}
+        import_bad_line_count = 0
         warnings.append(f"import.jsonl unreadable; reactivation signals skipped: {exc}")
+    if import_bad_line_count:
+        warnings.append(f"skipped {import_bad_line_count} bad line(s)")
 
     # Plan scan
     if source_path_exists is None:
