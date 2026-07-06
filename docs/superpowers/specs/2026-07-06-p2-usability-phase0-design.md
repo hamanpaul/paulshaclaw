@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: p2-usability-phase0
-plan: null
+plan: docs/superpowers/plans/2026-07-06-p2-usability-phase0.md
 depends_on: []
 ---
 

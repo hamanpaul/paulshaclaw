@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: p1-memory-three-gaps
-plan: null
+plan: docs/superpowers/plans/2026-07-06-p1-memory-three-gaps.md
 depends_on: []
 ---
 

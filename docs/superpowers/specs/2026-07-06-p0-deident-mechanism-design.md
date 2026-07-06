@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: p0-deident-mechanism
-plan: null
+plan: docs/superpowers/plans/2026-07-06-p0-deident-mechanism.md
 depends_on: []
 ---
 

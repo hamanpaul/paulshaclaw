@@ -1,7 +1,7 @@
 ---
 dispatch: hold
 slice_id: p0-bot-exception-isolation
-plan: null
+plan: docs/superpowers/plans/2026-07-06-p0-bot-exception-isolation.md
 depends_on: []
 ---
 
