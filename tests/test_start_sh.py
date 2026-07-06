@@ -108,6 +108,17 @@ FAKE_PYTHON = textwrap.dedent(
             Path(os.environ["FAKE_COCKPIT_STARTED"]).write_text("started", encoding="utf-8")
             Path(os.environ["FAKE_COCKPIT_PIDFILE"]).write_text(str(os.getpid()), encoding="utf-8")
             if os.environ.get("FAKE_COCKPIT_MODE") == "exit":
+                required_telegram_starts = int(os.environ.get("FAKE_COCKPIT_WAIT_FOR_TELEGRAM_STARTS", "0"))
+                countfile_path = os.environ.get("FAKE_TELEGRAM_COUNTFILE")
+                if required_telegram_starts > 0 and countfile_path:
+                    countfile = Path(countfile_path)
+                    deadline = time.monotonic() + 5.0
+                    while time.monotonic() < deadline:
+                        if countfile.exists():
+                            count_text = countfile.read_text(encoding="utf-8").strip()
+                            if count_text and int(count_text) >= required_telegram_starts:
+                                break
+                        time.sleep(0.02)
                 for pidfile_name in ("FAKE_MONITOR_PIDFILE", "FAKE_TELEGRAM_PIDFILE"):
                     pidfile_path = os.environ.get(pidfile_name)
                     if not pidfile_path:
@@ -432,7 +443,10 @@ class StartScriptLifecycleTests(unittest.TestCase):
             expect_cockpit_started=True,
             expect_returncode=0,
             capture_output=True,
-            extra_env={"PSC_BOT_BACKOFF_BASE": "0"},
+            extra_env={
+                "PSC_BOT_BACKOFF_BASE": "0",
+                "FAKE_COCKPIT_WAIT_FOR_TELEGRAM_STARTS": "2",
+            },
             expect_telegram_starts_at_least=2,
         )
 
