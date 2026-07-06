@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 import subprocess
 import unittest
 from pathlib import Path
@@ -28,6 +29,23 @@ class ServiceScriptTests(unittest.TestCase):
                     completed.returncode,
                     0,
                     f"{path.name} failed bash -n:\nstdout={completed.stdout}\nstderr={completed.stderr}",
+                )
+
+    def test_service_scripts_use_bash_shebang(self) -> None:
+        for name, path in self._service_scripts().items():
+            with self.subTest(script=name):
+                self.assertEqual(
+                    path.read_text(encoding="utf-8").splitlines()[0],
+                    "#!/usr/bin/env bash",
+                    f"{path.name} must start with a bash shebang",
+                )
+
+    def test_service_scripts_are_executable(self) -> None:
+        for name, path in self._service_scripts().items():
+            with self.subTest(script=name):
+                self.assertTrue(
+                    path.stat().st_mode & stat.S_IXUSR,
+                    f"{path.name} must keep the user executable bit",
                 )
 
     def test_cost_service_runs_cost_once_with_repo_pythonpath(self) -> None:

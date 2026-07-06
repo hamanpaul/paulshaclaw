@@ -308,6 +308,12 @@ class StartScriptLifecycleTests(unittest.TestCase):
             f"start.sh `-m paulshaclaw.*` launches missing PYTHONPATH=$REPO: {missing}",
         )
 
+    def test_start_sh_sources_all_extracted_service_scripts(self) -> None:
+        text = START_SH.read_text(encoding="utf-8")
+        for script in SERVICE_SCRIPTS:
+            with self.subTest(script=script.name):
+                self.assertIn(f'source "$script_dir/{script.name}" --source-only', text)
+
     def test_cleanup_bounds_owned_manager_wait_with_sigkill_fallback(self) -> None:
         # #187 review fix #3: the owned-manager shutdown path must be bounded
         # with a SIGKILL fallback so a wedged manager cannot hang cleanup on a
