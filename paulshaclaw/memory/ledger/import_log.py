@@ -62,6 +62,38 @@ def read_import_records(import_log_path: Path) -> list[dict]:
     return records
 
 
+def read_import_records_tolerant(import_log_path: Path) -> tuple[list[dict], int]:
+    """Read import records while skipping empty or malformed JSONL rows."""
+    if not import_log_path.exists():
+        return [], 0
+
+    try:
+        content = import_log_path.read_text()
+    except FileNotFoundError:
+        return [], 0
+
+    if not content.strip():
+        return [], 0
+
+    records: list[dict] = []
+    bad_line_count = 0
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            bad_line_count += 1
+            continue
+
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            bad_line_count += 1
+            continue
+
+        records.append(record)
+
+    return records, bad_line_count
+
+
 def recently_imported_record_ids(
     import_log_path: Path,
     *,
