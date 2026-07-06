@@ -122,41 +122,33 @@ class CompleteTickReconcileTests(unittest.TestCase):
             self.assertEqual(second["completed"], [])
             self.assertEqual(second["polled"], [])
 
-    def test_same_job_stale_manifest_is_repaired(self) -> None:
+    def test_concurrent_same_slice_terminals_warn_and_dedup(self) -> None:
+        # spec scenario 4：同輪同 slice 兩個 terminal job（不變量異常，正常由 G1 already-active
+        # guard 防；此處釘住 complete_tick 的降級行為）——後者勝、記 warning、completed 去重。
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
-            job = _make_job(reg, "slice-stale")
-            disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
-            hdir = Path(d) / "handoff"
-            manifest_path = hdir / "slice-stale.json"
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.write_text(
-                json.dumps(
-                    {
-                        "slice_id": "slice-stale",
-                        "job_id": job["job_id"],
-                        "gate_status": "failed",
-                        "completion": "failed",
-                        "exit_code": 1,
-                        "branch": job["branch"],
-                        "gate_verdict": None,
-                        "completed_at": "OLD",
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
+            first = _make_job(reg, "slice-dup")
+            second = _make_job(reg, "slice-dup")
+            disp = FakeDispatcher(
+                reg,
+                poll_map={first["job_id"]: "failed", second["job_id"]: "done"},
             )
+            hdir = Path(d) / "handoff"
 
-            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T1")
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
 
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["job_id"], job["job_id"])
-            self.assertEqual(manifest["gate_status"], "passed")
-            self.assertEqual(manifest["completion"], "done")
-            self.assertEqual(manifest["completed_at"], "T1")
-            self.assertEqual(summary["completed"], [{"slice_id": "slice-stale", "gate_status": "passed"}])
+            # 去重：兩個 terminal job 同 slice 只回一筆 completed。
+            self.assertEqual(len(summary["completed"]), 1)
+            self.assertEqual(summary["completed"][0]["slice_id"], "slice-dup")
+            # warning 恰記一次。
+            self.assertEqual(
+                summary["warnings"],
+                [{"slice_id": "slice-dup", "warning": "same-slice concurrent terminals"}],
+            )
+            # 後者勝一致性：manifest 與 completed 的 gate_status 一致，job_id 為兩者之一。
+            manifest = json.loads((hdir / "slice-dup.json").read_text(encoding="utf-8"))
+            self.assertIn(manifest["job_id"], {first["job_id"], second["job_id"]})
+            self.assertEqual(summary["completed"][0]["gate_status"], manifest["gate_status"])
 
     def test_requeue_overwrites_manifest_for_new_job_id(self) -> None:
         with tempfile.TemporaryDirectory() as d:
@@ -271,21 +263,24 @@ class CompleteTickReconcileTests(unittest.TestCase):
             self.assertEqual(summary["completed"], [])
             self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
 
-    def test_symlink_handoff_dir_is_rejected_fail_closed(self) -> None:
+    def test_symlink_handoff_dir_still_writes_manifest(self) -> None:
+        # 迴歸釘死：本專案部署 handoff_dir 落在 symlink 樹下（~/.agents → ~/notes/...）。
+        # complete_tick MUST 正常寫盤，不得因上層 symlink 誤拒（原 _is_safe_handoff_root P0）。
         with tempfile.TemporaryDirectory() as d:
             reg = _reg(d)
             job = _make_job(reg, "slice-hdir-link")
             disp = FakeDispatcher(reg, poll_map={job["job_id"]: "done"})
-            target_dir = Path(d) / "outside"
-            target_dir.mkdir()
-            hdir = Path(d) / "handoff"
-            hdir.symlink_to(target_dir, target_is_directory=True)
+            real_dir = Path(d) / "real_state"
+            real_dir.mkdir()
+            hdir = Path(d) / "agents_link"  # symlink → real_state
+            hdir.symlink_to(real_dir, target_is_directory=True)
 
-            summary = manager.complete_tick(disp, handoff_dir=str(hdir), clock=lambda: "T0")
+            summary = manager.complete_tick(disp, handoff_dir=str(hdir / "handoff"), clock=lambda: "T0")
 
-            self.assertFalse((target_dir / "slice-hdir-link.json").exists())
-            self.assertEqual(summary["completed"], [])
-            self.assertEqual([e["job_id"] for e in summary["errors"]], [job["job_id"]])
+            manifest = json.loads((real_dir / "handoff" / "slice-hdir-link.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["gate_status"], "passed")
+            self.assertEqual(summary["completed"], [{"slice_id": "slice-hdir-link", "gate_status": "passed"}])
+            self.assertEqual(summary["errors"], [])
 
 
 class CompleteTickShadowGateTests(unittest.TestCase):
@@ -475,29 +470,6 @@ class RunTickTests(unittest.TestCase):
             self.assertEqual(summary["dispatched"], [])
             self.assertFalse(any(e.get("stage") == "fanout" for e in summary["errors"]))
 
-    def test_symlink_dependency_manifest_does_not_create_fanout_error(self) -> None:
-        with tempfile.TemporaryDirectory() as d:
-            reg = _reg(d)
-            disp = FakeDispatcher(reg, poll_map={})
-            hdir = Path(d) / "handoff"
-            target_path = Path(d) / "outside-up.json"
-            target_path.write_text(
-                json.dumps({"slice_id": "up", "gate_status": "passed"}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            manifest_path = hdir / "up.json"
-            manifest_path.parent.mkdir(parents=True, exist_ok=True)
-            manifest_path.symlink_to(target_path)
-            metas = [
-                {"slice_id": "down", "dispatch": "auto", "plan": "p-down.md", "depends_on": ["up"]},
-            ]
-
-            summary = manager.run_tick(
-                disp, metas=metas, launcher=None, handoff_dir=str(hdir), clock=lambda: "T0",
-            )
-
-            self.assertEqual(summary["dispatched"], [])
-            self.assertFalse(any(e.get("stage") == "fanout" for e in summary["errors"]))
 
     def test_in_flight_slice_not_redispatched(self) -> None:
         # slice 已有 dispatched job → 本趟 fanout 不得再對它派工（review F-A 冪等）
