@@ -1,9 +1,9 @@
 ## 1. Gap ①：retrieval scoped corpus（PR-1，可平行）
 
-- [ ] 1.1 RED：兩 project fixture——A 的 instruction 內容出現在 B 的 slice，現行 broad corpus 會誤排除 B（先證明 fail）
-- [ ] 1.2 `build_index` 改 per-project scoped corpus（projects.yaml roots → `corpus_for_roots()`；無 roots → 空語料不排除）
-- [ ] 1.3 per-project `indexed/excluded/exclude_rate` 遙測＋>40% WARN（含 50% fixture 觸發測試）
-- [ ] 1.4 GREEN＋全套件回歸；rebuild live index，驗證 testpilot/serialwrap 覆蓋 >90%、paulshaclaw 不退化、短清單能 offer 兩桶
+- [x] 1.1 RED：兩 project fixture——A 的 instruction 內容出現在 B 的 slice，現行 broad corpus 會誤排除 B（先證明 fail）
+- [x] 1.2 `build_index` 改 per-project scoped corpus（projects.yaml roots → `corpus_for_roots()`；無 roots → 空語料不排除）
+- [x] 1.3 per-project `indexed/excluded/exclude_rate` 遙測＋>40% WARN（含 50% fixture 觸發測試）
+- [x] 1.4 GREEN＋全套件回歸；rebuild live index，驗證 testpilot/serialwrap 覆蓋 >90%、paulshaclaw 不退化、短清單能 offer 兩桶
 
 ## 2. Gap ③：janitor ledger 容錯（PR-2，可平行）
 
