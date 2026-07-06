@@ -218,6 +218,52 @@ def build_request_executor(
         request_specs_dir = args.get("specs_dir") or specs_dir
         metas = scan_specs_fn(request_specs_dir)
         allow_unsafe = bool(args.get("allow_unsafe", False))
+        persona = args.get("persona", default_persona)
+        if request["type"] == "dispatch":
+            slice_id = args.get("slice_id")
+            target = next((meta for meta in metas if meta.get("slice_id") == slice_id), None)
+            if target is None:
+                raise ValueError("unknown-slice")
+            if not (isinstance(target.get("plan"), str) and target["plan"]):
+                raise ValueError("no-plan")
+            missing_deps = [dep for dep in target.get("depends_on", []) if not predicate(dep)]
+            if missing_deps:
+                raise ValueError(f"deps-unsatisfied: {', '.join(missing_deps)}")
+            force_hold = bool(args.get("force_hold", False))
+            if target.get("dispatch") != "auto" and not force_hold:
+                raise ValueError("dispatch-hold")
+            registry = getattr(dispatcher, "_registry", None)
+            if registry is None:
+                raise RuntimeError("dispatch requires registry for already-active guard")
+            if any(
+                job.get("task") == slice_id and job.get("status") in manager.IN_FLIGHT_STATUSES
+                for job in registry.list_jobs()
+            ):
+                raise ValueError("already-active")
+            active_launcher = _resolve_launcher(
+                args.get("executor", default_executor),
+                launcher,
+                allow_unsafe=allow_unsafe,
+                model=args.get("model"),
+            )
+            dispatched = dispatch_ready_fn(
+                [{**target, "dispatch": "auto"}],
+                lambda _slice_id: True,
+                dispatcher,
+                persona=persona,
+                launcher=active_launcher,
+            )
+            job = dispatched[0]
+            result = {
+                "job_id": job.get("job_id"),
+                "worktree": job.get("worktree"),
+                "branch": job.get("branch"),
+                "slice_id": slice_id,
+            }
+            if force_hold and target.get("dispatch") != "auto":
+                result["override"] = "hold"
+                result["requested_by"] = request["requested_by"]
+            return result
         _refuse_unsafe_fanout(metas, predicate, allow_unsafe=allow_unsafe)
         active_launcher = _resolve_launcher(
             args.get("executor", default_executor),
@@ -225,7 +271,6 @@ def build_request_executor(
             allow_unsafe=allow_unsafe,
             model=args.get("model"),
         )
-        persona = args.get("persona", default_persona)
         if request["type"] == "fanout":
             jobs = dispatch_ready_fn(
                 metas,
