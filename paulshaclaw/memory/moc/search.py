@@ -1,15 +1,39 @@
 # paulshaclaw/memory/moc/search.py
 from __future__ import annotations
 
+import logging
 import sqlite3
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from .. import instruction_corpus
+from ..importer.config import default_projects_path, load_projects_config
 from ..ledger import lifecycle
 from ..ledger import retrieval_set
 from ..noise import classify_noise, pool_exclude_reason
 from . import frontmatter_io as fio
 
 INDEX_WRITE_BATCH_SIZE = 100
+LOGGER = logging.getLogger("paulshaclaw.memory.moc.search")
+
+
+@dataclass
+class ProjectIndexStats:
+    indexed: int = 0
+    excluded: int = 0
+
+    @property
+    def exclude_rate(self) -> float:
+        total = self.indexed + self.excluded
+        if total == 0:
+            return 0.0
+        return self.excluded / total
+
+
+@dataclass
+class BuildIndexStats:
+    per_project: dict[str, ProjectIndexStats] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
 
 class SearchIndexError(Exception):
@@ -20,13 +44,23 @@ def index_path(memory_root: Path) -> Path:
     return memory_root / "runtime" / "indexes" / "retrieval.db"
 
 
+def _project_roots(memory_root: Path) -> dict[str, tuple[str, ...]]:
+    config = load_projects_config(default_projects_path(memory_root))
+    return {project.slug: project.roots for project in config.projects}
+
+
 def build_index(memory_root: Path, link_weights: dict[str, int],
-                doc_corpus: "object | None" = None) -> None:
+                doc_corpus: "object | None" = None) -> BuildIndexStats:
     path = index_path(memory_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.unlink()
     conn = sqlite3.connect(path)
+    project_roots = _project_roots(memory_root)
+    corpus_by_project: dict[str, object] = {}
+    empty_corpus = instruction_corpus.corpus_for_roots(())
+    stats = BuildIndexStats()
+
     try:
         conn.execute("CREATE VIRTUAL TABLE slices_fts USING fts5("
                      "slice_id UNINDEXED, project, title, tags, body, tokenize='unicode61')")
@@ -59,6 +93,19 @@ def build_index(memory_root: Path, link_weights: dict[str, int],
                 ],
             )
 
+        def project_corpus(project: str) -> object:
+            cached = corpus_by_project.get(project)
+            if cached is not None:
+                return cached
+            if project in project_roots:
+                corpus = instruction_corpus.corpus_for_roots(project_roots[project])
+            elif doc_corpus is not None and not project_roots:
+                corpus = doc_corpus
+            else:
+                corpus = empty_corpus
+            corpus_by_project[project] = corpus
+            return corpus
+
         rows: list[tuple[str, str, str, str, str, str, str]] = []
         if knowledge.exists():
             for fpath in sorted(knowledge.rglob("*.md")):
@@ -70,16 +117,30 @@ def build_index(memory_root: Path, link_weights: dict[str, int],
                     continue
                 if pool_exclude_reason(fm) is not None:
                     continue
-                if classify_noise(fm, body, doc_corpus=doc_corpus).is_noise:
+                project = str(fm.get("project", ""))
+                project_stats = stats.per_project.setdefault(project, ProjectIndexStats())
+                if classify_noise(fm, body, doc_corpus=project_corpus(project)).is_noise:
+                    project_stats.excluded += 1
                     continue
-                rows.append((str(sid), str(fm.get("project", "")), str(fm.get("title", "")),
+                project_stats.indexed += 1
+                rows.append((str(sid), project, str(fm.get("title", "")),
                              " ".join(fm.get("tags", []) if isinstance(fm.get("tags"), list) else []),
                              body, str(fm.get("captured_at", "")), str(fpath)))
                 if len(rows) >= INDEX_WRITE_BATCH_SIZE:
                     flush_batch(rows)
                     rows.clear()
         flush_batch(rows)
+        for project, project_stats in sorted(stats.per_project.items()):
+            if project_stats.exclude_rate <= 0.40:
+                continue
+            warning = (
+                f"search index project {project}: indexed={project_stats.indexed} "
+                f"excluded={project_stats.excluded} exclude_rate={project_stats.exclude_rate:.2f}"
+            )
+            LOGGER.warning(warning)
+            stats.warnings.append(warning)
         conn.commit()
+        return stats
     finally:
         conn.close()
 
