@@ -55,12 +55,14 @@ def build_index(memory_root: Path, link_weights: dict[str, int],
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         path.unlink()
-    conn = sqlite3.connect(path)
+    # 先讀 projects.yaml/建語料，全部成功後才開 sqlite 連線——否則 scoping-config
+    # 壞掉會洩漏連線且把整個 retrieval index 打掉（reviewer Important）。
     project_roots = _project_roots(memory_root)
     corpus_by_project: dict[str, object] = {}
     empty_corpus = instruction_corpus.corpus_for_roots(())
     stats = BuildIndexStats()
 
+    conn = sqlite3.connect(path)
     try:
         conn.execute("CREATE VIRTUAL TABLE slices_fts USING fts5("
                      "slice_id UNINDEXED, project, title, tags, body, tokenize='unicode61')")
