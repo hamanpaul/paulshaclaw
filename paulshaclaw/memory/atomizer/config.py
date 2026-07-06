@@ -8,6 +8,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from paulshaclaw.config import paths
+
 # Default config directory is package location
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -114,7 +116,7 @@ def _resolve_override(override_path):
     if override_path is None:
         return None
     elif override_path is _DEFAULT_SENTINEL:
-        return Path.home() / ".config" / "paulshaclaw" / "atomizer.override.yaml"
+        return paths.config_root() / "atomizer.override.yaml"
     else:
         return Path(override_path)
 

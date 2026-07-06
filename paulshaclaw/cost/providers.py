@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from paulshaclaw.config import paths
 from paulshaclaw.cost.config import CopilotAccountConfig, CostConfig
 from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
 
@@ -732,7 +733,7 @@ def _event_month(payload: Mapping[str, Any]) -> tuple[int, int] | None:
 
 
 def _read_local_observed_metrics(year: int | None = None, month: int | None = None) -> tuple[int, int]:
-    root = Path.home() / ".copilot" / "session-state"
+    root = paths.copilot_state_root()
     if not root.exists():
         return 0, 0
 

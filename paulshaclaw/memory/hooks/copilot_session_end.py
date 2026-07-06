@@ -20,21 +20,20 @@ import subprocess
 import sys
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 TOOL = "copilot-cli"
 
 
 def _memory_root() -> Path:
-    env = os.environ.get("PSC_MEMORY_ROOT", "").strip()
-    if env:
-        return Path(env)
-    return Path.home() / ".agents" / "memory"
+    return paths.memory_root()
 
 
 def _config_root() -> Path:
     env = os.environ.get("PSC_CONFIG_ROOT", "").strip()
     if env:
         return Path(env)
-    return Path.home()
+    return paths.home()
 
 
 def _log_warn(root: Path, msg: str) -> None:

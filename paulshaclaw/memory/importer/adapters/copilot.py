@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 from .base import (
     AdapterResult,
     build_session,
@@ -20,7 +22,7 @@ def extract(queue_path: str | Path) -> AdapterResult:
     config_root = (
         payload.get("psc_config_root")
         or payload.get("PSC_CONFIG_ROOT")
-        or str(Path.home())
+        or str(paths.home())
     )
     extract_from = payload
     if session_id:

@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from paulshaclaw.config import paths
 from paulshaclaw.memory.atomizer import cli as atomizer_cli
 from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.memory.atomizer.agent_exec import AgentExecClient
@@ -246,11 +247,11 @@ def run_optimize(
 
 
 def _default_memory_root() -> Path:
-    return Path.home() / ".agents" / "memory"
+    return paths.memory_root()
 
 
 def _default_reference_root() -> Path:
-    return Path.home() / "notes"
+    return paths.notes_root()
 
 
 def _resolve_skill_path(args: argparse.Namespace, config: atomizer_config.AtomizerConfig) -> Path:

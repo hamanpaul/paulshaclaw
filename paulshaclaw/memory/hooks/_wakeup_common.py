@@ -20,13 +20,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 
 def memory_root() -> Path:
     """Resolve memory root from PSC_MEMORY_ROOT env var or default."""
-    env = os.environ.get("PSC_MEMORY_ROOT", "").strip()
-    if env:
-        return Path(env)
-    return Path.home() / ".agents" / "memory"
+    return paths.memory_root()
 
 
 def log_warn(root: Path, tool: str, msg: str) -> None:

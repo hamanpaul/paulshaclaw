@@ -6,10 +6,12 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 # job.status 合法值（設計 §7 / spec）
 VALID_STATUSES = frozenset({"dispatched", "running", "done", "failed"})
 
-DEFAULT_STATE_PATH = Path.home() / ".agents" / "coordinator" / "jobs.json"
+DEFAULT_STATE_PATH = paths.agents_root() / "coordinator" / "jobs.json"
 
 
 def _now_iso() -> str:

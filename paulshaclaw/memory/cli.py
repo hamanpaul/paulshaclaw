@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from paulshaclaw.config import paths
+
 from . import policy as memory_policy
 from .moc import frontmatter_io as _fio
 from .moc import moc_builder as _moc_builder
@@ -99,8 +101,8 @@ def _build_parser() -> argparse.ArgumentParser:
     skillopt = memory_subparsers.add_parser("skillopt")
     skillopt_subparsers = skillopt.add_subparsers(dest="skillopt_command", required=True)
     skillopt_run = skillopt_subparsers.add_parser("run")
-    skillopt_run.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
-    skillopt_run.add_argument("--reference-root", default=str(Path.home() / "notes"))
+    skillopt_run.add_argument("--memory-root", default=str(paths.memory_root()))
+    skillopt_run.add_argument("--reference-root", default=str(paths.notes_root()))
     skillopt_run.add_argument("--skill-path", default=None)
     skillopt_run.add_argument("--budget", type=int, default=1)
     skillopt_run.add_argument("--dry-run", action="store_true")
@@ -126,7 +128,7 @@ def _build_parser() -> argparse.ArgumentParser:
     search_p.set_defaults(func=_search)
 
     wakeup_p = memory_subparsers.add_parser("wakeup")
-    wakeup_p.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
+    wakeup_p.add_argument("--memory-root", default=str(paths.memory_root()))
     wakeup_p.add_argument("--project", default=None)
     wakeup_p.add_argument("--cwd", default=None)
     wakeup_p.add_argument("--k", type=int, default=8)

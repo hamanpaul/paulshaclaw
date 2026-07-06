@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from paulshaclaw.bot.listener import TelegramApiClient, TelegramApiError, load_bot_settings
+from paulshaclaw.config import paths
 from paulshaclaw.core.config import load_config
 
-DEFAULT_CONFIG_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.state.json"
-DEFAULT_SECRET_ENV_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.telegram.secret.env"
-DEFAULT_BINDINGS_PATH = Path.home() / ".agents/state/telegram-chat-bindings.json"
+DEFAULT_CONFIG_PATH = paths.config_root() / "paulshaclaw.state.json"
+DEFAULT_SECRET_ENV_PATH = paths.config_root() / "paulshaclaw.telegram.secret.env"
+DEFAULT_BINDINGS_PATH = paths.agents_root() / "state" / "telegram-chat-bindings.json"
 
 
 @dataclass(frozen=True)

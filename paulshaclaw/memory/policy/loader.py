@@ -7,6 +7,8 @@ from dataclasses import asdict, is_dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from paulshaclaw.config import paths
+
 from .models import (
     BoundaryPolicy,
     ClassificationPolicy,
@@ -100,7 +102,7 @@ def load_policy(
 
 def _resolve_override_file(override_path: str | Path | None | object) -> Path | None:
     if override_path is _USE_DEFAULT_OVERRIDE:
-        return Path.home() / ".config" / "paulshaclaw" / "policy.override.yaml"
+        return paths.config_root() / "policy.override.yaml"
     if override_path is None:
         return None
     return Path(override_path)

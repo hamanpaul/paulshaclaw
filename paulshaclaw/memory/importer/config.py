@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 
 LOGGER = logging.getLogger("paulshaclaw.memory.importer")
 
@@ -34,7 +36,7 @@ def default_projects_path(memory_root: str | Path | None = None) -> Path:
     if config_root:
         return Path(config_root) / ".agents" / "config" / "projects.yaml"
     if memory_root is None:
-        return Path.home() / ".agents" / "config" / "projects.yaml"
+        return paths.agents_root() / "config" / "projects.yaml"
     return Path(memory_root).parent / "config" / "projects.yaml"
 
 
