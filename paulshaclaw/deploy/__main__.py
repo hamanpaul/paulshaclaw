@@ -4,6 +4,7 @@ import argparse
 import json
 from typing import Sequence
 
+from .installer import run_install
 from .planner import build_command_plan
 
 
@@ -18,6 +19,9 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--instance", default="paulshaclaw")
         subparser.add_argument("--root-dir", required=True)
+        if command == "install":
+            subparser.add_argument("--apply", action="store_true")
+            subparser.add_argument("--verify", action="store_true")
 
     return parser
 
@@ -25,6 +29,17 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+
+    if args.command == "install" and (args.apply or args.verify):
+        report, exit_code = run_install(
+            instance_name=args.instance,
+            root_dir=args.root_dir,
+            apply=args.apply,
+            verify=args.verify,
+        )
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return exit_code
+
     plan = build_command_plan(
         args.command,
         instance_name=args.instance,
