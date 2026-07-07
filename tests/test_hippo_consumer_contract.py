@@ -10,7 +10,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def test_main_repo_imports_only_hippo_lib():
     offenders = []
-    for py in sorted((REPO_ROOT / "paulshaclaw").rglob("*.py")):
+    scan_roots = [REPO_ROOT / "paulshaclaw", REPO_ROOT / "scripts"]
+    for py in sorted(p for root in scan_roots for p in root.rglob("*.py")):
         if "__pycache__" in py.parts:
             continue
         tree = ast.parse(py.read_text(encoding="utf-8"))

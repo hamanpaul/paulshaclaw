@@ -18,9 +18,15 @@ start_dream_loop() {
     echo "dream loop disabled (PSC_DREAM_DISABLED=1)"
     return 0
   fi
-  # #125 cutover：dream 蒸餾由 paulsha-hippo 提供——未安裝則跳過並警告，
-  # 不殘留對 paulshaclaw.memory 的呼叫（hippo-consumer spec）。
-  if ! "$PY" -c "import paulsha_hippo" >/dev/null 2>&1; then
+  # #125 cutover：dream 蒸餾由 paulsha-hippo 提供。偵測順序（#228 F2）：
+  # HIPPO_BIN > PATH 上的 hippo（pipx 情境）> repo venv 模組；全無 → 跳過+警告。
+  local hippo_bin="${HIPPO_BIN:-}"
+  if [[ "$hippo_bin" == "disabled" ]]; then
+    hippo_bin=""
+  elif [[ -z "$hippo_bin" ]]; then
+    hippo_bin="$(command -v hippo || true)"
+  fi
+  if [[ -z "$hippo_bin" ]] && ! "$PY" -c "import paulsha_hippo" >/dev/null 2>&1; then
     echo "dream loop skipped: paulsha-hippo 未安裝（pipx install git+https://github.com/hamanpaul/paulsha-hippo）" >&2
     return 0
   fi
@@ -35,6 +41,14 @@ start_dream_loop() {
   fi
   mkdir -p "$HOME/.agents/log"
   local dream_log="$HOME/.agents/log/dream.log"
+  # hippo binary 可用時交給 hippo 自有 supervise（首輪延後語意相同）
+  if [[ -n "$hippo_bin" ]]; then
+    "$hippo_bin" dream supervise --interval "$interval" --memory-root "$dream_root" \
+      >>"$dream_log" 2>&1 &
+    DREAM_PID=$!
+    echo "dream pid=$DREAM_PID (hippo supervise, interval=${interval}s, root=$dream_root)"
+    return 0
+  fi
   (
     while true; do
       # Defer the first run by one full interval: right after boot the 1-minute

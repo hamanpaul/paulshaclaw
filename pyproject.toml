@@ -10,7 +10,7 @@ description = "paulshaclaw agent workflow system"
 # #125 Phase 1：memory 子系統由 paulsha-hippo 提供——pin 不可變 commit SHA
 # （tag 僅人讀標記；PyPI 上線後改 version pin + hash，見 hippo-consumer spec）
 dependencies = [
-    "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@5d8b65cf4f47ea5f9a53a6f6156e4e0cb2c46aa8",
+    "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@39dbad9e0b22a98e411f2f202743e5749a9f7eb6",
 ]
 
 [project.scripts]
