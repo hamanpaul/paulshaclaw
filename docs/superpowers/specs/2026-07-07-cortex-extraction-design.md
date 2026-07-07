@@ -34,10 +34,14 @@ cortex 從「治理 runtime」升級為**完整 task-management plane**：`coord
 - **不鋪 REST-mesh**——會重新引入 runtime 耦合、違背 hub-and-spoke
 
 ### R1.6 project registry（monitor 監控集 = 兩份 merge）
-monitor 監控集 = `paulsha/project-cortex.yaml`（手寫，由 `paulshaclaw.yaml` 改名，curated intent）**⊍** `paulsha/project-hippo.yaml`（hippo 產生，discovered activity）。檔案契約（cortex 讀共享檔非 import hippo，零依賴不破）、union 依路徑/身分**去重**。
-- monitor 側：加 merge adapter（把 workspaces walk 與明確 roots 歸一成 project 路徑集）——本 repo scope（Plan 1b）。缺 `project-hippo.yaml` 時 graceful 退回 manual-only。
-- **base dir**：兩份 merge-source 應**同 config root 共置**（cortex 現讀 `~/.config/paulshaclaw/`、hippo 現讀 `~/.agents/config/`——Plan 1b 動工時定案統一位置，傾向 `~/.agents/config/paulsha/`；保留讀舊路徑的相容過渡）。
-- hippo 側：hippo 從既有 `resolve_project`（git toplevel/remote）持久化 mapping——**paulsha-hippo#14（deferred，含 auto-append／保留手改／opt-in）**，與 cortex 拆分分軌。
+monitor 監控集 = `project-cortex.yaml`（手寫，由 `paulshaclaw.yaml` 改名，curated intent）**⊍** `project-hippo.yaml`（hippo 產生，discovered activity）。檔案契約（cortex 讀共享檔非 import hippo，零依賴不破）。**契約下列各項為 Plan 1b 硬需求，非留白**（對抗審查 finding 2）：
+
+- **canonical base dir**：`~/.agents/config/paulsha/`（兩份 merge-source 共置；project registry 屬 runtime 共享狀態，歸 agents config root）。→ `~/.agents/config/paulsha/project-cortex.yaml`、`~/.agents/config/paulsha/project-hippo.yaml`。新增 `paths.project_config_root()`，env 覆寫 `PSC_PROJECT_CONFIG_ROOT`。
+- **manual 讀取順序（含 legacy 過渡）**：`PSC_MONITOR_CONFIG`（顯式）> `PAULSHACLAW_CONFIG`（既有 env，deprecated 警告）> `~/.agents/config/paulsha/project-cortex.yaml` > `~/.config/paulshaclaw/paulshaclaw.yaml`（legacy，deprecated 警告）。命中第一個存在者為 manual 來源。
+- **merge 語意**：union；**dedupe key = 解析後絕對路徑（realpath）**；同 path 出現於兩份 → 算一個 project、manual 的顯式欄位（name 等）優先。
+- **缺檔行為**：`project-hippo.yaml` 缺 → graceful 退 manual-only；manual（含 legacy）全缺但 hippo 在 → hippo-only；**兩來源皆缺 → FAIL 並印明確訊息**（monitor 無對象可監控，不得靜默空跑）。
+- monitor 側：加 merge adapter（把 workspaces walk 與明確 roots 歸一成 project 路徑集）——Plan 1b scope，驗收情境見 openspec `cortex-consumer`。
+- hippo 側：hippo 從既有 `resolve_project`（git toplevel/remote）持久化 mapping 寫 `project-hippo.yaml`——**paulsha-hippo#14（deferred，含 auto-append／保留手改／opt-in）**，與 cortex 拆分分軌。
 
 ### R1.7 persona 重定義（#233 §2）
 persona = manager 與 guardrail 共同引用的**角色契約資料**（role profile + scope subject）；**不是**執行者（AgentInstance = runtime session）、**不是**安全管理者（guardrail／policy engine 讀契約做 enforcement）。code 已分離 `PersonaContract`／`PersonaGuardrail` → 多為 docs/命名澄清（**Plan 1b 實查確認無 code 把 contract 與 enforcement 混在一起**）。

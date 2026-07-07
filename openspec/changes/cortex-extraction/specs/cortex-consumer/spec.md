@@ -8,11 +8,11 @@
 - **THEN** 解析到的 paulsha-cortex 內容 MUST 與 pinned SHA 完全一致，且重跑結果相同
 
 ### Requirement: 允許 import 面限定
-主 repo 對 paulsha-cortex 的 Python import MUST 限定於 `paulsha_cortex.control.client`（bot/listener、cockpit/app、core/daemon）與 `psc` CLI shim 對 cortex CLI 入口的 lazy import；MUST NOT import 其他 cortex internals（coordinator、persona 內部模組）。
+主 repo 對 paulsha-cortex 的 Python import MUST 限定於 `paulsha_cortex.control.client`（bot/listener、cockpit/app、core/daemon）與 `psc` CLI shim 對 cortex CLI 入口（coordinator／deck／monitor 子命令）的 lazy import；MUST NOT import 其他 cortex internals（coordinator／persona／deck／monitor 內部模組）。monitor 的 live-query 消費（如 cockpit）MUST 經 Unix socket，MUST NOT 以 python import `paulsha_cortex.monitor`。
 
 #### Scenario: import 面 CI 檢查
 - **WHEN** CI 掃描主 repo 對 `paulsha_cortex` 的 import
-- **THEN** 出現允許清單以外的 import MUST 使檢查失敗
+- **THEN** 出現允許清單以外的 import（含 `paulsha_cortex.deck`／`paulsha_cortex.monitor` 內部模組）MUST 使檢查失敗
 
 ### Requirement: cortex 零 hippo 依賴
 paulsha-cortex 的依賴解析 MUST NOT 含 paulsha-hippo——persona 可單獨安裝是本拆分的核心要求，不得被記憶產品綁架。
@@ -37,15 +37,34 @@ paulsha-cortex 的依賴解析 MUST NOT 含 paulsha-hippo——persona 可單獨
 - **THEN** 主 repo 對齊測試 MUST 失敗
 
 ### Requirement: path-split 相容與零資料遷移
-拆包後 cortex 各表面（daemon、CLI、control client）解析之 control root MUST 與主 repo 既有 `~/.agents/control` 契約一致：預設值相同、`PSC_*` env 覆寫 MUST 仍被讀取。既有 runtime 資料（control 檔案、job registry）MUST 零遷移可用。persona loader 對 `paulshaclaw.deck.schema` 的 lazy import MUST 維持 fail-open：deck 缺席時靜默跳過 skills shadow 驗證（warning 級 lint，非 enforcement），MUST NOT 進入 cortex install_requires。
+拆包後 cortex 各表面（daemon、CLI、control client）解析之 control root MUST 與主 repo 既有 `~/.agents/control` 契約一致：預設值相同、`PSC_*` env 覆寫 MUST 仍被讀取。既有 runtime 資料（control 檔案、job registry）MUST 零遷移可用。（R1 走 B 後 deck 已在 cortex 內：persona loader 對 deck.schema 改為**同包 import**，skills shadow 驗證恆對 cortex 自帶 deck 執行；原「deck 缺席 fail-open」情境不再適用。）
 
 #### Scenario: control 檔案零遷移
 - **WHEN** 主 repo 舊 manager 寫入的 control root 檔案存在，cutover 後 cortex daemon 以預設 config 啟動
 - **THEN** cortex daemon MUST 讀到同一 control root 的既有狀態，不得分家
 
-#### Scenario: standalone 安裝 deck 缺席
+#### Scenario: standalone 安裝含 deck
 - **WHEN** 僅安裝 paulsha-cortex（無主 repo）並載入 persona catalog
-- **THEN** 載入 MUST 成功，skills shadow 驗證靜默跳過，schema 硬驗證（raise 級）行為不變
+- **THEN** 載入 MUST 成功，skills shadow 驗證對 cortex 自帶 deck 正常執行，schema 硬驗證（raise 級）行為不變
+
+### Requirement: monitor 監控集 merge 契約
+monitor 監控集 MUST = manual `project-cortex.yaml` **⊍** hippo `project-hippo.yaml`（canonical `~/.agents/config/paulsha/`）。manual 讀取順序 MUST 為 `PSC_MONITOR_CONFIG` > `PAULSHACLAW_CONFIG`(deprecated) > `~/.agents/config/paulsha/project-cortex.yaml` > `~/.config/paulshaclaw/paulshaclaw.yaml`(legacy, deprecated)。union MUST 依解析後絕對路徑（realpath）去重、同 path 只算一個 project 且 manual 顯式欄位優先。
+
+#### Scenario: 缺 hippo registry
+- **WHEN** `project-cortex.yaml` 存在、`project-hippo.yaml` 不存在
+- **THEN** 監控集 MUST = manual 全集（graceful，不報錯）
+
+#### Scenario: 兩來源皆缺
+- **WHEN** manual（含 legacy 路徑）與 `project-hippo.yaml` 皆不存在
+- **THEN** monitor MUST 以明確錯誤訊息 FAIL（不得靜默空跑）
+
+#### Scenario: legacy-only 過渡
+- **WHEN** 新 `project-cortex.yaml` 不存在但 legacy `~/.config/paulshaclaw/paulshaclaw.yaml` 存在
+- **THEN** MUST 讀 legacy 為 manual 來源並輸出 deprecated 警告
+
+#### Scenario: 重複 roots 去重
+- **WHEN** 同一 project 路徑同時出現於 `project-cortex.yaml` 與 `project-hippo.yaml`
+- **THEN** 該 project MUST 只被監控一次（依 realpath 去重），不得重複計數
 
 ### Requirement: systemd cutover 協議
 manager systemd 單元 MUST 改由 cortex `install service` 出貨。cutover MUST 依序：停用（stop + disable）舊 manager 單元 → enable cortex 單元；`install service` MUST 冪等（重跑不留半套狀態）；rollback 路徑 = revert 主 repo pin + 重 enable 舊單元。單寫者不變量（manager daemon 以 flock 持 `control_root()/manager.lock`）MUST 隨包平移並保留測試。
