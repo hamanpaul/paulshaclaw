@@ -385,10 +385,12 @@ def _resolve_config_source(config_path: Path | None) -> Path | None:
 
 （確認檔頭 `import os` 已存在；`ENV_CONFIG_VAR` 常數若被別處引用，保留為 `"PAULSHACLAW_CONFIG"`。）
 
-- [ ] **Step 4: 跑測試確認通過 + 既有 monitor 測試不回歸**
+**F3：本 Step 一併移除 `paulshaclaw.sample.yaml` fallback**——原 `config.py`（Task 4 平移進來）的 `_resolve_config_source` 在缺 manual 時 fallback 到 bundled read-only sample（原始碼約 line 49-56），R1.6 改為「兩來源皆缺 → FAIL」，故**不保留 sample fallback、不搬 sample 進 cortex**；同步更新 `load_config` docstring（移除「bundled sample (read-only)」字樣）。
+
+- [ ] **Step 4: 跑測試確認通過 + stage9 測試因移除 sample fallback 的適配**
 
 Run: `python -m pytest tests/test_monitor_config_resolution.py tests/test_stage9_project_monitor.py -q`
-Expected: 全 PASS（`load_config` 對 `None` 來源的處理於 Task 7 定案；本 Task 若既有測試因「缺檔回 None」失敗，於 Task 7 Step 3 一併收斂——暫時在該測試標 `@pytest.mark.xfail(reason="Task 7 merge")`）
+Expected: 全 PASS。若 stage9 有 case 依賴「bare `load_config()` 命中 sample/default」→ 改為顯式 `config_path=` 或 `PSC_MONITOR_CONFIG` temp fixture（sample fallback 已移除）；`test_load_config_supports_env_fallback` 現會發 `PAULSHACLAW_CONFIG deprecated` 警告，若該測試 `-W error` 或斷言無警告，改用 `PSC_MONITOR_CONFIG`。`load_config` 對 `None` 來源回傳的最終定案在 Task 7（本 Task 若因此 FAIL，暫標 `@pytest.mark.xfail(reason="Task 7 merge")`，Task 7 Step 4 解除）。
 
 - [ ] **Step 5: Commit**
 
@@ -409,10 +411,11 @@ git commit -m "feat: monitor 配置改名 project-cortex.yaml + base dir + legac
 **Interfaces:**
 - Consumes: `_resolve_config_source`（Task 6）、`paths.project_config_root()`
 - Produces:
-  - `registry.load_hippo_roots(path: Path | None = None) -> list[Path]`（讀 `project-hippo.yaml` 的 project roots，絕對路徑；缺檔回 `[]`）
-  - `registry.merge_project_dirs(manual_dirs: list[Path], hippo_roots: list[Path]) -> list[Path]`（union，依 `Path.resolve()` 去重、保序、manual 優先）
-  - **`MonitorConfig` 新增欄位 `project_dirs: tuple[Path, ...] = ()`**（hippo roots）——`load_config` **簽名不變**（仍回 `MonitorConfig`），只多填此欄，**不打斷 Task 4 平移測試與既有 caller**
-  - `scanner.scan_workspaces(config)`（讀 `config.workspaces`（walk）+ `config.project_dirs`（明確），合併去重後每個 project dir 產 `ProjectState`）
+  - `registry.ProjectEntry(path, name, source)`（frozen dataclass；F1 保 metadata：manual name / hippo slug）
+  - `registry.load_hippo_projects(path=None) -> list[ProjectEntry]`（讀 `project-hippo.yaml`，source='hippo'、name=slug、path=realpath；缺檔回 `[]`）
+  - `registry.merge_projects(manual: list[ProjectEntry], hippo: list[ProjectEntry]) -> list[ProjectEntry]`（union，依 `entry.path`(realpath) 去重、保序、**同 path 保留 manual entry**）
+  - **`MonitorConfig` 追加欄位 `hippo_projects: tuple[ProjectEntry, ...] = ()`**——`load_config` **簽名不變**（仍回 `MonitorConfig`）、**用 `dataclasses.replace` 疊加以保留所有既有欄位**（`poll_interval_seconds`/`rescan_interval_seconds`/`watch_debounce_ms`/`legacy_policy`/`socket_path`），不打斷 Task 4 平移測試與既有 caller
+  - `scanner.scan_workspaces(config)`（manual workspaces walk → ProjectEntry + `config.hippo_projects`，`merge_projects` 去重後每個 entry 產 `ProjectState`，workspace 名取 entry.name）
 
 - [ ] **Step 1: 寫失敗測試（4 驗收情境）**
 
@@ -424,25 +427,40 @@ from paulsha_cortex.monitor import registry
 from paulsha_cortex.monitor.config import load_config
 
 
-def test_merge_dedupes_by_realpath(tmp_path):
-    p = tmp_path / "proj"
-    p.mkdir()
-    merged = registry.merge_project_dirs([p], [p])  # 同 path 出現兩份
-    assert merged == [p.resolve()]                   # 只算一個
+def _entry(p, name, source):
+    return registry.ProjectEntry(path=p.resolve(), name=name, source=source)
+
+
+def test_merge_dedupes_by_realpath_manual_wins(tmp_path):
+    p = tmp_path / "proj"; p.mkdir()
+    manual = _entry(p, "manual-name", "manual")
+    hippo = _entry(p, "hippo-slug", "hippo")
+    merged = registry.merge_projects([manual], [hippo])   # 同 path 兩份
+    assert len(merged) == 1                                # 只算一個
+    assert merged[0].name == "manual-name"                # manual metadata 勝出
 
 
 def test_merge_union_order_manual_first(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir(); b.mkdir()
-    assert registry.merge_project_dirs([a], [b]) == [a.resolve(), b.resolve()]
+    out = registry.merge_projects([_entry(a, "a", "manual")], [_entry(b, "b", "hippo")])
+    assert [e.path for e in out] == [a.resolve(), b.resolve()]
 
 
-def test_load_hippo_roots_missing_returns_empty(tmp_path):
-    assert registry.load_hippo_roots(tmp_path / "nope.yaml") == []
+def test_load_hippo_projects_missing_returns_empty(tmp_path):
+    assert registry.load_hippo_projects(tmp_path / "nope.yaml") == []
+
+
+def test_load_hippo_projects_reads_slug_roots(tmp_path):
+    src = tmp_path / "project-hippo.yaml"
+    src.write_text(f"projects:\n  - slug: proj-x\n    roots: [{tmp_path}]\n", encoding="utf-8")
+    entries = registry.load_hippo_projects(src)
+    assert entries[0].source == "hippo" and entries[0].name == "proj-x"
+    assert entries[0].path == tmp_path.resolve()
 
 
 def test_load_config_missing_hippo_graceful(monkeypatch, tmp_path):
-    # manual 在、hippo 缺 → manual-only（project_dirs 空），不報錯
+    # manual 在、hippo 缺 → manual-only（hippo_projects 空），不報錯
     monkeypatch.delenv("PSC_MONITOR_CONFIG", raising=False)
     monkeypatch.delenv("PAULSHACLAW_CONFIG", raising=False)
     monkeypatch.setenv("PSC_PROJECT_CONFIG_ROOT", str(tmp_path))
@@ -450,7 +468,7 @@ def test_load_config_missing_hippo_graceful(monkeypatch, tmp_path):
         f"workspaces:\n  - {{name: a, path: {tmp_path}}}\n", encoding="utf-8"
     )
     cfg = load_config()                # 簽名不變，回 MonitorConfig
-    assert cfg.project_dirs == ()
+    assert cfg.hippo_projects == ()
 
 
 def test_load_config_both_missing_fails(monkeypatch, tmp_path):
@@ -460,12 +478,27 @@ def test_load_config_both_missing_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("PSC_CONFIG_ROOT", str(tmp_path / "legacy"))
     with pytest.raises(FileNotFoundError, match="無 project 設定"):
         load_config()
+
+
+def test_scan_dedupes_manual_and_hippo_to_one_state(monkeypatch, tmp_path):
+    # F1 整合：同一 project 同時在 manual workspace 與 hippo roots → 一個 ProjectState、用 manual metadata
+    from paulsha_cortex.monitor.scanner import scan_workspaces
+    from paulsha_cortex.monitor.config import MonitorConfig, WorkspaceConfig
+    ws_root = tmp_path / "ws"; (ws_root / "projX").mkdir(parents=True)
+    cfg = MonitorConfig(
+        workspaces=(WorkspaceConfig(path=ws_root, name="curated"),),
+        hippo_projects=(_entry(ws_root / "projX", "hippo-slug", "hippo"),),
+    )
+    states = scan_workspaces(cfg)
+    matches = [s for s in states if Path(s.path).resolve() == (ws_root / "projX").resolve()]
+    assert len(matches) == 1                          # 去重成一個
+    assert matches[0].workspace == "curated"          # manual metadata 勝
 ```
 
 - [ ] **Step 2: 跑測試確認失敗**
 
 Run: `python -m pytest tests/test_monitor_registry_merge.py -v`
-Expected: FAIL（`registry` 不存在、`load_config` 未回 tuple）
+Expected: FAIL（`registry.ProjectEntry`/`merge_projects` 不存在、`MonitorConfig.hippo_projects` 未定義）
 
 - [ ] **Step 3: 實作 registry + 併入 load_config/scan**
 
@@ -487,83 +520,86 @@ def _default_hippo_path() -> Path:
     return paths.project_config_root() / "project-hippo.yaml"
 
 
-def load_hippo_roots(path: Path | None = None) -> list[Path]:
-    """讀 project-hippo.yaml 的 project roots（絕對路徑）。缺檔回 []。
+@dataclass(frozen=True)
+class ProjectEntry:
+    path: Path       # 解析後 realpath
+    name: str        # manual: workspace.name；hippo: slug（F1：保留 metadata）
+    source: str      # "manual" | "hippo"
+
+
+def load_hippo_projects(path: Path | None = None) -> list[ProjectEntry]:
+    """讀 project-hippo.yaml → ProjectEntry（source='hippo'、name=slug、path=realpath）。缺檔回 []。
     schema：projects: [ {slug, roots: [..]} ]（hippo 產生端 paulsha-hippo#14）。"""
     src = path or _default_hippo_path()
     if not src.exists():
         return []
     data = yaml.safe_load(src.read_text(encoding="utf-8")) or {}
-    roots: list[Path] = []
+    entries: list[ProjectEntry] = []
     for project in data.get("projects", []) or []:
+        slug = str(project.get("slug") or "")
         for root in project.get("roots", []) or []:
-            roots.append(Path(str(root)).expanduser())
-    return roots
+            p = Path(str(root)).expanduser().resolve()
+            entries.append(ProjectEntry(path=p, name=slug or p.name, source="hippo"))
+    return entries
 
 
-def merge_project_dirs(manual_dirs: list[Path], hippo_roots: list[Path]) -> list[Path]:
-    """union；依 realpath 去重、保序、manual 優先。"""
+def merge_projects(manual: list[ProjectEntry], hippo: list[ProjectEntry]) -> list[ProjectEntry]:
+    """union；依 realpath（entry.path）去重、保序、**同 path 保留 manual entry（manual 優先）**。"""
     seen: set[Path] = set()
-    out: list[Path] = []
-    for candidate in [*manual_dirs, *hippo_roots]:
-        resolved = candidate.resolve()
-        if resolved in seen:
+    out: list[ProjectEntry] = []
+    for entry in [*manual, *hippo]:      # manual 先 → 同 path 時 manual 勝出
+        if entry.path in seen:
             continue
-        seen.add(resolved)
-        out.append(resolved)
+        seen.add(entry.path)
+        out.append(entry)
     return out
 ```
 
-`config.py`：`MonitorConfig` 加 `project_dirs` 欄位；`load_config` **簽名不變**，多填 `project_dirs`、兩來源皆缺時 FAIL：
+（registry.py 頂部需 `from dataclasses import dataclass`。`ProjectEntry.path` 一律 realpath；manual entry 由 scanner 建構時 `.resolve()`。）
+
+`config.py`（**MODIFY 既有，勿縮寫掉欄位**）：`MonitorConfig` **追加一欄**、`load_config` 尾端注入 hippo 與兩缺 FAIL——**其餘欄位（`poll_interval_seconds`／`rescan_interval_seconds`／`watch_debounce_ms`／`legacy_policy`／`socket_path` 等）與既有解析邏輯全數保留**（用 `dataclasses.replace` 疊加，避免重列漏欄）：
 
 ```python
-@dataclass(frozen=True)
-class MonitorConfig:
-    workspaces: tuple[WorkspaceConfig, ...] = ()
-    socket_path: Path = field(default_factory=default_socket_path)
-    project_dirs: tuple[Path, ...] = ()    # hippo project-hippo.yaml roots
+from dataclasses import replace
+from paulsha_cortex.monitor.registry import ProjectEntry, load_hippo_projects
 
+# MonitorConfig 既有欄位全部保留，僅追加：
+#     hippo_projects: tuple[ProjectEntry, ...] = ()
 
 def load_config(*, config_path: Path | None = None) -> MonitorConfig:
-    from paulsha_cortex.monitor import registry
-
     source = _resolve_config_source(config_path)
-    hippo_roots = tuple(registry.load_hippo_roots())
-    if source is None:
-        if not hippo_roots:
+    hippo = tuple(load_hippo_projects())
+    if source is None:                       # manual 全缺
+        if not hippo:
             raise FileNotFoundError(
                 "無 project 設定：manual（project-cortex.yaml / legacy）與 project-hippo.yaml 皆不存在"
             )
-        return MonitorConfig(workspaces=(), project_dirs=hippo_roots)   # hippo-only
-    text = Path(source).read_text(encoding="utf-8")
-    parsed = yaml.safe_load(text) or {}
-    monitor = parsed.get("monitor", parsed)     # 沿用既有 schema：workspaces + optional socket_path
-    workspaces = _parse_workspaces(monitor.get("workspaces"))
-    socket_raw = monitor.get("socket_path")
-    socket_path = Path(str(socket_raw)).expanduser() if socket_raw else default_socket_path()
-    return MonitorConfig(workspaces=workspaces, socket_path=socket_path, project_dirs=hippo_roots)
+        return MonitorConfig(workspaces=(), hippo_projects=hippo)   # hippo-only（其餘取 dataclass 預設）
+    base = _parse_full_config(source)         # ← 既有解析（workspaces + 所有 interval/legacy/socket 欄位），原封不動
+    return replace(base, hippo_projects=hippo)
 ```
 
-（`_parse_workspaces` / socket 解析沿用 Task 4 平移進來的既有實作，僅把回傳包成含 `project_dirs` 的 `MonitorConfig`。）
+（`_parse_full_config` 代表 Task 4 平移進來的既有解析（含 `poll_interval_seconds`/`rescan_interval_seconds`/`watch_debounce_ms`/`legacy_policy`/`socket_path`）；實作時就地把既有 `load_config` body 保留、僅在 `return` 前改為 `return replace(既有結果, hippo_projects=hippo)`。**勿以縮寫版 `MonitorConfig(workspaces=, socket_path=)` 取代——會漏欄位**。）
 
-`scanner.py` 的 `scan_workspaces(config)` **簽名不變**，改為讀 `config.workspaces`（walk）+ `config.project_dirs`（明確）合併：
+`scanner.py`（**MODIFY**）：manual workspaces walk → `ProjectEntry(source='manual', name=workspace.name)`，與 `config.hippo_projects` 經 `merge_projects` 去重，per entry 產 `ProjectState`（帶入 entry.name 為 workspace，F1 保 manual metadata）：
 
 ```python
 def scan_workspaces(config) -> tuple[ProjectState, ...]:
-    from paulsha_cortex.monitor.registry import merge_project_dirs
+    from paulsha_cortex.monitor.registry import ProjectEntry, merge_projects
 
-    manual_dirs: list[Path] = []
+    manual: list[ProjectEntry] = []
     for workspace in config.workspaces:
-        manual_dirs.extend(_list_project_dirs(workspace.path, _IGNORE_DIRS))
+        for project_dir in _list_project_dirs(workspace.path, _IGNORE_DIRS):
+            manual.append(ProjectEntry(path=project_dir.resolve(), name=workspace.name, source="manual"))
     states = []
-    for project_dir in merge_project_dirs(manual_dirs, list(config.project_dirs)):
-        state = _project_state(project_dir)   # 沿用既有「由 dir 產 ProjectState」邏輯
+    for entry in merge_projects(manual, list(config.hippo_projects)):
+        state = _project_state(entry)   # 沿用既有 per-dir 推導；workspace 名取 entry.name
         if state is not None:
             states.append(state)
     return tuple(states)
 ```
 
-（`_IGNORE_DIRS` 與 `_project_state` 對齊 Task 4 平移進來的 scanner 內既有 ignore 常數與 per-dir 推導函式——**動工前先讀 `paulsha_cortex/monitor/scanner.py` 確認實名**，勿發明；此處僅示意合併點。）
+（`_IGNORE_DIRS`／`_list_project_dirs`／`_project_state` 對齊平移進來的 scanner 既有名稱與簽名——**動工前先讀 `paulsha_cortex/monitor/scanner.py`**；`_project_state` 若原本接 `(dir, workspace_name)` 或自 dir 推 workspace，改為接受 `ProjectEntry` 或傳入 `entry.path`+`entry.name`，確保 manual/hippo 的 name 生效；勿發明簽名。）
 
 呼叫端 `__main__`（`--once`）與 `ProjectMonitorService`：`load_config` 簽名不變，故**無需改動**；`scan_workspaces(config)` 簽名不變亦無需改。
 
@@ -608,7 +644,10 @@ def test_install_service_installs_monitor_unit(tmp_path, monkeypatch):
     assert (unit_dir / "cortex-manager.service").exists()
     assert (unit_dir / "cortex-monitor.service").exists()
     monitor_unit = (unit_dir / "cortex-monitor.service").read_text()
-    assert "cortex monitor" in monitor_unit or "paulsha_cortex.monitor" in monitor_unit
+    assert "paulsha_cortex.monitor" in monitor_unit
+    # F4：monitor 與 manager 共用同一層 env（operator override 對兩者一致生效）
+    assert "__INSTANCE__.env".replace("__INSTANCE__", "cortex") in monitor_unit or "cortex.env" in monitor_unit
+    assert "cortex-manager.env" in monitor_unit
 ```
 
 - [ ] **Step 2: 跑測試確認失敗**
@@ -629,6 +668,7 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
+EnvironmentFile=-%h/.agents/core/runtime/__INSTANCE__.env
 EnvironmentFile=-%h/.agents/core/runtime/__INSTANCE__-manager.env
 ExecStart=__PY__ -m paulsha_cortex.monitor
 KillMode=control-group
@@ -744,9 +784,15 @@ grep -n -A2 'dependencies' pyproject.toml                          # 僅 PyYAML
 
 Expected: hippo import = `0`；dependencies 僅 `PyYAML>=6`
 
-- [ ] **Step 3: package-data 涵蓋 monitor 模板 + 全測試**
+- [ ] **Step 3: package-data 涵蓋 deck data + monitor 模板（F2：wheel 漏檔防護）**
 
-確認 `[tool.setuptools.package-data]` 的 `"paulsha_cortex.deploy" = ["templates/*.tmpl"]` 已涵蓋 `monitor.service.tmpl`（同目錄，glob 命中）。
+`deck/schema.py` 的 `DEFAULT_CARDS_PATH = Path(__file__).with_name("data")/"cards.yaml"`、`DEFAULT_COMBOS_DIR = .../data/combos`——wheel 安裝後 `__file__` 指 site-packages，**data/*.yaml 未宣告 package-data 即漏**，`cortex deck compile/list` 安裝後必壞（hippo「wheel 佈局 bug 只有 fresh-install 攔得到」同型）。`pyproject.toml` `[tool.setuptools.package-data]` 補：
+
+```toml
+"paulsha_cortex.deck" = ["data/*.yaml", "data/combos/*.yaml"]
+```
+
+（`"paulsha_cortex.deploy" = ["templates/*.tmpl"]` 已涵蓋 `monitor.service.tmpl`，同目錄 glob 命中。）
 
 Run: `python -m pip install -e . -q && python -m pytest tests/ -q`
 Expected: 全 PASS（Plan 1 的 277 + deck/monitor/registry/config 新增）
@@ -776,12 +822,14 @@ git commit -m "docs: README 補 deck/monitor + registry；去識別化/零依賴
 
 ```bash
 rm -rf /tmp/c1b && python -m venv /tmp/c1b && /tmp/c1b/bin/pip install ~/prj_pri/paulsha-cortex -q
-cd /tmp && /tmp/c1b/bin/cortex deck --help >/dev/null; echo "deck exit=$?"
+cd /tmp   # 必須離開 source tree，否則 import 吃到本地碼（Plan 1 踩過）
+# F2：跑會「載入 default cards/combos」的命令，證明 deck data 真的進了 wheel
+/tmp/c1b/bin/cortex deck compile feature-oneshot --task "smoke" >/dev/null 2>&1; echo "deck compile exit=$?"
 /tmp/c1b/bin/cortex monitor --once >/dev/null 2>&1; echo "monitor once exit=$?"
 /tmp/c1b/bin/pip show paulsha-cortex | grep -i requires
 ```
 
-Expected: deck/monitor 入口可跑（monitor --once 在無 config 時 exit 1 並印「無 project 設定」屬預期）；`Requires:` 僅 PyYAML（無 paulsha-hippo）
+Expected: `deck compile exit=0`（實際載入 wheel 內 `data/cards.yaml` + `data/combos/feature-oneshot.yaml`——若漏 package-data 這裡會非 0）；monitor --once 在無 config 時 exit 1 並印「無 project 設定」屬預期；`Requires:` 僅 PyYAML（無 paulsha-hippo）
 
 - [ ] **Step 2: push + 開 PR**
 
