@@ -948,6 +948,19 @@ def test_compile_missing_change_placeholder_errors():
     cards, combo = _feature_oneshot()
     with pytest.raises(DeckCompileError, match="--change"):
         compile_combo(combo, cards, "示例 LED 功能", allow_external=True)
+
+
+def test_compile_frontmatter_exact_keyset():
+    # W0 對抗審查修正交棒：parse_spec_frontmatter 會忽略未知欄位，
+    # 所以必須直接解析 compiler 原始輸出的 YAML frontmatter key set 精確比對
+    import yaml
+    from paulshaclaw.deck.schema import EMITTED_FRONTMATTER_FIELDS
+
+    cards, combo = _feature_oneshot()
+    result = compile_combo(combo, cards, "示例 LED 功能", change="demo", allow_external=True)
+    for s in result.slices:
+        block = s.content.split("---\n")[1]
+        assert set(yaml.safe_load(block)) == set(EMITTED_FRONTMATTER_FIELDS)
 ```
 
 （第一個測試中以精確清單斷言為準，移除示意行。）

@@ -82,6 +82,10 @@ def _check_placeholders(card_id: str, globs: tuple[str, ...], errors: list[str])
         for name in _PLACEHOLDER_RE.findall(g):
             if name not in ALLOWED_PLACEHOLDERS:
                 errors.append(f"{card_id}: 非法佔位符 <{name}>（白名單: {sorted(ALLOWED_PLACEHOLDERS)}）")
+        # fail-closed：移除可解析的 token 後，任何殘餘角括號（<>、<<x>>、未閉合 <）一律拒絕
+        residue = _PLACEHOLDER_RE.sub("", g)
+        if "<" in residue or ">" in residue:
+            errors.append(f"{card_id}: glob 含空白/巢狀/未閉合角括號: {g!r}")
 
 
 def _str_tuple(value, card_id: str, field_name: str, errors: list[str]) -> tuple[str, ...]:
@@ -122,36 +126,42 @@ def load_cards(path: str | Path) -> dict[str, Card]:
     if raw.get("version") != SCHEMA_VERSION:
         errors.append(f"cards: version 不符，預期 {SCHEMA_VERSION}，實際 {raw.get('version')!r}")
     cards: dict[str, Card] = {}
+    seen_ids: set[str] = set()
     for rec in raw["cards"]:
         if not isinstance(rec, Mapping) or not isinstance(rec.get("id"), str) or not rec["id"]:
             errors.append("卡片缺 id 或格式錯誤")
             continue
         cid = rec["id"]
-        _check_unknown_keys(cid, rec, _CARD_KEYS, errors)
-        if cid in cards:
+        # 重複偵測獨立於卡片建構成敗（用 seen_ids 而非 cards），避免前一張壞卡遮蔽後續 duplicate
+        if cid in seen_ids:
             errors.append(f"{cid}: 重複的 card id")
             continue
+        seen_ids.add(cid)
+        # 逐卡獨立錯誤域：前一張壞卡不得污染本卡的建構判斷
+        rec_errors: list[str] = []
+        _check_unknown_keys(cid, rec, _CARD_KEYS, rec_errors)
         kind = rec.get("kind")
         ctype = rec.get("type")
         cclass = rec.get("class")
         skill_ref = rec.get("skill_ref")
         if kind not in CARD_KINDS:
-            errors.append(f"{cid}: kind 非法值 {kind!r}")
+            rec_errors.append(f"{cid}: kind 非法值 {kind!r}")
         if ctype not in CARD_TYPES:
-            errors.append(f"{cid}: type 非法值 {ctype!r}")
+            rec_errors.append(f"{cid}: type 非法值 {ctype!r}")
         if cclass not in CARD_CLASSES:
-            errors.append(f"{cid}: class 非法值 {cclass!r}")
+            rec_errors.append(f"{cid}: class 非法值 {cclass!r}")
         if not isinstance(skill_ref, str) or not skill_ref:
-            errors.append(f"{cid}: skill_ref 必須為非空字串")
-        requires = _str_tuple(rec.get("requires"), cid, "requires", errors)
-        produces = _str_tuple(rec.get("produces"), cid, "produces", errors)
-        _check_placeholders(cid, requires + produces, errors)
-        persona_binding = _optional_str(rec.get("persona_binding"), cid, "persona_binding", errors)
-        provider_binding = _optional_str(rec.get("provider_binding"), cid, "provider_binding", errors)
+            rec_errors.append(f"{cid}: skill_ref 必須為非空字串")
+        requires = _str_tuple(rec.get("requires"), cid, "requires", rec_errors)
+        produces = _str_tuple(rec.get("produces"), cid, "produces", rec_errors)
+        _check_placeholders(cid, requires + produces, rec_errors)
+        persona_binding = _optional_str(rec.get("persona_binding"), cid, "persona_binding", rec_errors)
+        provider_binding = _optional_str(rec.get("provider_binding"), cid, "provider_binding", rec_errors)
         slice_group = rec.get("slice_group")
         if slice_group is not None and (not isinstance(slice_group, str) or not slice_group):
-            errors.append(f"{cid}: slice_group 必須為非空字串")
-        if errors:
+            rec_errors.append(f"{cid}: slice_group 必須為非空字串")
+        if rec_errors:
+            errors.extend(rec_errors)
             continue
         cards[cid] = Card(
             id=cid,

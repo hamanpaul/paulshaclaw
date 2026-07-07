@@ -173,3 +173,43 @@ def test_load_combo_empty_gate_exists_rejected(tmp_path):
     )
     with pytest.raises(DeckSchemaError, match="exists"):
         load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_bad_first_card_still_reports_later_duplicate(tmp_path):
+    # 對抗審查回歸：首卡壞 enum + 後續重複 id——兩類錯誤都要完整回報，
+    # 不得因全域錯誤狀態讓後續卡的 duplicate 偵測失效
+    bad_first = VALID_CARDS.replace("type: interactive", "type: batch")
+    dup = bad_first + VALID_CARDS.split("cards:\n")[1]
+    with pytest.raises(DeckSchemaError) as exc:
+        load_cards(_write(tmp_path, "cards.yaml", dup))
+    msg = str(exc.value)
+    assert "type 非法值" in msg
+    assert "重複" in msg
+
+
+def test_load_cards_empty_or_non_mapping_rejected(tmp_path):
+    for content in ("", "[]", "42", "cards: null"):
+        with pytest.raises(DeckSchemaError):
+            load_cards(_write(tmp_path, "cards.yaml", content))
+
+
+def test_load_cards_malformed_angle_tokens_rejected(tmp_path):
+    # fail-closed：空 <>、巢狀 <<>>、未閉合 <、孤立 > 一律拒絕
+    for bad_glob in ("docs/<>.md", "docs/<<task-slug>>.md", "docs/<task-slug.md", "docs/x>y.md"):
+        bad = VALID_CARDS.replace("docs/superpowers/plans/*<task-slug>*.md", bad_glob)
+        with pytest.raises(DeckSchemaError, match="角括號"):
+            load_cards(_write(tmp_path, "cards.yaml", bad))
+
+
+def test_load_combo_root_non_mapping_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    for content in ("", "[]", "combo: []"):
+        with pytest.raises(DeckSchemaError):
+            load_combo(_write(tmp_path, "c.yaml", content), cards)
+
+
+def test_gate_spine_unknown_after_rejected(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    bad = VALID_COMBO.replace("after: writing-plans", "after: no-such-card")
+    with pytest.raises(DeckSchemaError, match="no-such-card"):
+        load_combo(_write(tmp_path, "demo.yaml", bad), cards)
