@@ -249,7 +249,11 @@ def load_combo(path: str | Path, cards: Mapping[str, Card]) -> Combo:
         entries.append(ComboEntry(ref=ref, depends_on=deps))
 
     spine: list[GateCheck] = []
-    for g in rec.get("gate_spine") or []:
+    raw_spine = rec.get("gate_spine")
+    if raw_spine is not None and not isinstance(raw_spine, list):
+        errors.append(f"combo: gate_spine 必須是清單，實際 {type(raw_spine).__name__}")
+        raw_spine = []
+    for g in raw_spine or []:
         if not isinstance(g, Mapping) or not isinstance(g.get("after"), str):
             errors.append("gate_spine 項目缺 after")
             continue

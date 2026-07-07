@@ -213,3 +213,12 @@ def test_gate_spine_unknown_after_rejected(tmp_path):
     bad = VALID_COMBO.replace("after: writing-plans", "after: no-such-card")
     with pytest.raises(DeckSchemaError, match="no-such-card"):
         load_combo(_write(tmp_path, "demo.yaml", bad), cards)
+
+
+def test_gate_spine_non_list_rejected(tmp_path):
+    # GitHub review 修正：gate_spine 誤填字串/物件要有明確錯誤，不得逐字元迭代
+    cards = load_cards(_write(tmp_path, "cards.yaml", VALID_CARDS))
+    for bad_spine in ('gate_spine: "oops"', "gate_spine: {after: writing-plans}"):
+        bad_yaml = VALID_COMBO.split("  gate_spine:")[0] + "  " + bad_spine + "\n"
+        with pytest.raises(DeckSchemaError, match="gate_spine 必須是清單"):
+            load_combo(_write(tmp_path, "demo.yaml", bad_yaml), cards)
