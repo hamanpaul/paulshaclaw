@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from paulshaclaw.config import paths
 from paulshaclaw.core.config import load_config
 
 from .planner import CommandPlan, TemplateAsset, build_command_plan
@@ -193,7 +194,7 @@ def verify_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, objec
 
 def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool, home_dir: str | Path | None = None) -> tuple[dict[str, object], int]:
     plan = build_command_plan("install", instance_name=instance_name, root_dir=root_dir)
-    resolved_home = Path(home_dir).expanduser() if home_dir is not None else Path.home()
+    resolved_home = Path(home_dir).expanduser() if home_dir is not None else paths.home_root()
     report: dict[str, object] = {
         "command": "install",
         "instance_name": instance_name,
