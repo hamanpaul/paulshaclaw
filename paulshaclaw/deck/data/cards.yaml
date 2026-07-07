@@ -107,3 +107,12 @@ cards:
     requires: ["reports/review/*<task-slug>*.md"]
     produces: ["reports/review/*<task-slug>*-adversarial.md"]
     persona_binding: reviewer
+
+  - id: mcu-hw-evidence
+    kind: skill
+    type: interactive
+    class: niche
+    skill_ref: "mcu-coding-skill"
+    requires: []
+    produces: ["docs/superpowers/specs/*<task-slug>*-hw-evidence.md"]
+    persona_binding: planner

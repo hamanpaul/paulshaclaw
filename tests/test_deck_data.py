@@ -17,6 +17,16 @@ PHASE_CARDS = [
     "adversarial-review",   # 11 codex adversarial
 ]
 
+MCU_FEATURE_CARDS = [
+    "mcu-hw-evidence",
+    "writing-plans",
+    "worktree-isolation",
+    "tdd-red",
+    "subagent-build",
+    "code-review",
+    "verification",
+]
+
 
 def test_cards_yaml_loads_and_covers_11_phases():
     cards = load_cards(DEFAULT_CARDS_PATH)
@@ -27,7 +37,12 @@ def test_cards_yaml_loads_and_covers_11_phases():
 def test_interactive_headless_typing():
     cards = load_cards(DEFAULT_CARDS_PATH)
     interactive = {c.id for c in cards.values() if c.type == "interactive"}
-    assert interactive == {"brainstorming", "openspec-propose", "writing-plans"}
+    assert interactive == {
+        "brainstorming",
+        "openspec-propose",
+        "writing-plans",
+        "mcu-hw-evidence",
+    }
     assert {c.id for c in cards.values() if c.type == "headless"} == set(PHASE_CARDS) - interactive
     assert cards["worktree-isolation"].slice_group == "build"
     assert cards["tdd-red"].slice_group == "build"
@@ -49,3 +64,31 @@ def test_feature_oneshot_combo_loads():
         ("openspec-archive", ("openspec/changes/archive/*<change>*",)),
         ("adversarial-review", ("reports/review/*<task-slug>*-adversarial.md",)),
     ]
+
+
+def test_mcu_feature_combo_loads():
+    cards = load_cards(DEFAULT_CARDS_PATH)
+    combo = load_combo(DEFAULT_COMBOS_DIR / "mcu-feature.yaml", cards)
+    assert combo.id == "mcu-feature"
+    assert combo.task_type == "mcu-feature"
+    assert cards["mcu-hw-evidence"].card_class == "niche"
+    assert cards["mcu-hw-evidence"].skill_ref == "mcu-coding-skill"
+    assert [entry.ref for entry in combo.cards] == MCU_FEATURE_CARDS
+    assert [(gate.after, gate.exists) for gate in combo.gate_spine] == [
+        ("mcu-hw-evidence", ("docs/superpowers/specs/*<task-slug>*-hw-evidence.md",)),
+    ]
+
+
+def test_mcu_feature_real_data_compiles_to_hold_specs(tmp_path):
+    from paulshaclaw.coordinator.autonomy import detect_cycles, ready_units, scan_specs
+    from paulshaclaw.deck.compile import compile_combo, emit
+
+    cards = load_cards(DEFAULT_CARDS_PATH)
+    combo = load_combo(DEFAULT_COMBOS_DIR / "mcu-feature.yaml", cards)
+    result = compile_combo(combo, cards, "cc2674 pwm led bring-up", allow_external=True)
+    out = tmp_path / "specs"
+    emit(result, out)
+    metas = scan_specs(out)
+    assert len(metas) == len(result.slices)
+    detect_cycles(metas)
+    assert ready_units(metas, lambda sid: True) == []
