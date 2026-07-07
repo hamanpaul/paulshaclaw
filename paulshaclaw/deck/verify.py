@@ -52,10 +52,10 @@ def verify_card(
         pattern = _subst(raw, task_slug, change)
         _guard_pattern(card.id, pattern)
         try:
-            hits = list(base.glob(pattern))
+            hit = next(iter(base.glob(pattern)), None)  # 只需「至少一個命中」，短路避免寬 pattern 全列舉
         except (NotImplementedError, ValueError) as exc:
             raise DeckVerifyError(f"{card.id}: 非法 glob 樣式 {pattern!r}: {exc}") from exc
-        if hits:
+        if hit is not None:
             matched.append(pattern)
         else:
             missing.append(raw if pattern == raw else pattern)
