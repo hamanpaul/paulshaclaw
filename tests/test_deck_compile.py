@@ -1,8 +1,153 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
-from paulshaclaw.deck.compile import DeckCompileError, slugify_task, specs_dir
+from paulshaclaw.deck.compile import DeckCompileError, compile_combo, slugify_task, specs_dir
+from paulshaclaw.deck.schema import load_cards, load_combo
+
+CARDS_YAML = """\
+version: 0
+cards:
+  - id: brainstorming
+    kind: skill
+    type: interactive
+    class: core
+    skill_ref: "superpowers:brainstorming"
+    requires: []
+    produces: ["docs/superpowers/specs/*<task-slug>*-design.md"]
+    persona_binding: planner
+  - id: openspec-propose
+    kind: skill
+    type: interactive
+    class: core
+    skill_ref: "openspec-propose"
+    requires: ["docs/superpowers/specs/*<task-slug>*-design.md"]
+    produces:
+      - "openspec/changes/<change>/proposal.md"
+      - "openspec/changes/<change>/tasks.md"
+    persona_binding: planner
+  - id: writing-plans
+    kind: skill
+    type: interactive
+    class: core
+    skill_ref: "superpowers:writing-plans"
+    requires: ["openspec/changes/<change>/proposal.md"]
+    produces: ["docs/superpowers/plans/*<task-slug>*.md"]
+    persona_binding: planner
+  - id: worktree-isolation
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "superpowers:using-git-worktrees"
+    slice_group: build
+    requires: ["docs/superpowers/plans/*<task-slug>*.md"]
+    produces: []
+    persona_binding: builder
+  - id: tdd-red
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "superpowers:test-driven-development"
+    slice_group: build
+    requires: []
+    produces: []
+    persona_binding: builder
+  - id: subagent-build
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "superpowers:subagent-driven-development"
+    slice_group: build
+    requires: []
+    produces: []
+    persona_binding: builder
+  - id: code-review
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "superpowers:requesting-code-review"
+    requires: []
+    produces: ["reports/review/*<task-slug>*.md"]
+    persona_binding: reviewer
+  - id: verification
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "superpowers:verification-before-completion"
+    requires: []
+    produces: ["reports/verify/*<task-slug>*.md"]
+    persona_binding: reviewer
+  - id: openspec-archive
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "openspec-archive-change"
+    slice_group: ship
+    requires: ["openspec/changes/<change>/tasks.md"]
+    produces: ["openspec/changes/archive/*<change>*"]
+    persona_binding: manager
+  - id: policy-commit
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "conventional-commit"
+    slice_group: ship
+    requires: []
+    produces: []
+    persona_binding: manager
+  - id: adversarial-review
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "codex:adversarial-review"
+    requires: ["reports/review/*<task-slug>*.md"]
+    produces: ["reports/review/*<task-slug>*-adversarial.md"]
+    persona_binding: reviewer
+  - id: mcu-hw-evidence
+    kind: skill
+    type: interactive
+    class: niche
+    skill_ref: "mcu-coding-skill"
+    requires: []
+    produces: ["docs/superpowers/specs/*<task-slug>*-hw-evidence.md"]
+    persona_binding: planner
+"""
+
+FEATURE_ONESHOT_YAML = """\
+combo:
+  id: feature-oneshot
+  task_type: feature
+  cards:
+    - ref: brainstorming
+    - ref: openspec-propose
+    - ref: writing-plans
+    - ref: worktree-isolation
+    - ref: tdd-red
+    - ref: subagent-build
+    - ref: code-review
+    - ref: verification
+    - ref: openspec-archive
+    - ref: policy-commit
+    - ref: adversarial-review
+  gate_spine:
+    - after: writing-plans
+      exists: ["docs/superpowers/plans/*<task-slug>*.md"]
+    - after: code-review
+      exists: ["reports/review/*<task-slug>*.md"]
+"""
+
+
+def _write(tmp_path, name: str, text: str):
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _feature_oneshot(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", CARDS_YAML))
+    combo = load_combo(_write(tmp_path, "feature-oneshot.yaml", FEATURE_ONESHOT_YAML), cards)
+    return cards, combo
 
 
 def test_slugify_basic():
@@ -28,3 +173,44 @@ def test_specs_dir_equals_manager_default(monkeypatch):
 
     monkeypatch.delenv("PSC_MANAGER_SPECS_DIR", raising=False)
     assert str(specs_dir()) == default_specs_dir()
+
+
+def test_compile_slice_grouping_and_chain(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "示例 LED 功能", change="demo", allow_external=True)
+    ids = [slice_doc.slice_id for slice_doc in result.slices]
+    slug = result.task_slug
+    assert ids == [
+        f"{slug}-build",
+        f"{slug}-code-review",
+        f"{slug}-verification",
+        f"{slug}-ship",
+        f"{slug}-adversarial-review",
+    ]
+    assert len(result.checklist) == 3
+
+
+def test_compile_frontmatter_hold_and_chain(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "示例 LED 功能", change="demo", allow_external=True)
+    first = result.slices[0].content
+    assert first.startswith("---\n")
+    assert "dispatch: hold" in first
+    second = result.slices[1].content
+    assert f"- {result.task_slug}-build" in second
+
+
+def test_compile_missing_change_placeholder_errors(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    with pytest.raises(DeckCompileError, match="--change"):
+        compile_combo(combo, cards, "示例 LED 功能", allow_external=True)
+
+
+def test_compile_frontmatter_exact_keyset(tmp_path):
+    from paulshaclaw.deck.schema import EMITTED_FRONTMATTER_FIELDS
+
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "示例 LED 功能", change="demo", allow_external=True)
+    for slice_doc in result.slices:
+        block = slice_doc.content.split("---\n")[1]
+        assert set(yaml.safe_load(block)) == set(EMITTED_FRONTMATTER_FIELDS)

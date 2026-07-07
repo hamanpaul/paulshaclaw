@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping, Sequence
+
+from .schema import Card, Combo, ComboEntry
 
 
 class DeckCompileError(ValueError):
@@ -26,3 +30,172 @@ def specs_dir() -> Path:
     if override:
         return Path(override)
     return Path.home() / ".agents" / "specs"
+
+
+@dataclass(frozen=True)
+class SliceDoc:
+    slice_id: str
+    filename: str
+    content: str
+
+
+@dataclass(frozen=True)
+class CompileResult:
+    task_slug: str
+    slices: tuple[SliceDoc, ...]
+    checklist: tuple[str, ...]
+    verify_commands: tuple[str, ...]
+    external: tuple[str, ...]
+
+
+def _subst(glob: str, slug: str, change: str | None) -> str:
+    out = glob.replace("<task-slug>", slug)
+    if "<change>" in out:
+        if not change:
+            raise DeckCompileError("卡片 glob 使用 <change>，需提供 --change <name>")
+        out = out.replace("<change>", change)
+    return out
+
+
+def _resolve_hand(
+    combo: Combo,
+    cards: Mapping[str, Card],
+    with_cards: Sequence[str],
+    only: Sequence[str],
+) -> list[ComboEntry]:
+    if with_cards or only:
+        raise DeckCompileError("additive/--only 於 Task 9 實作")
+    return list(combo.cards)
+
+
+def _check_requires_coverage(
+    entries: Sequence[ComboEntry],
+    cards: Mapping[str, Card],
+    allow_external: bool,
+) -> tuple[str, ...]:
+    return ()
+
+
+def _group_slices(
+    entries: Sequence[ComboEntry],
+    cards: Mapping[str, Card],
+    slug: str,
+) -> list[tuple[str, list[Card]]]:
+    groups: list[tuple[str, list[Card]]] = []
+    for entry in entries:
+        card = cards[entry.ref]
+        if card.type != "headless":
+            continue
+        if card.slice_group:
+            slice_id = f"{slug}-{card.slice_group}"
+        else:
+            slice_id = f"{slug}-{card.id}"
+        if groups and groups[-1][0] == slice_id:
+            groups[-1][1].append(card)
+            continue
+        groups.append((slice_id, [card]))
+    return groups
+
+
+def _render_frontmatter(slice_id: str, plan_ref: str, deps: Sequence[str]) -> str:
+    lines = [
+        "---",
+        "dispatch: hold",
+        f"slice_id: {slice_id}",
+        f"plan: {plan_ref}",
+    ]
+    if deps:
+        lines.append("depends_on:")
+        lines.extend(f"  - {dep}" for dep in deps)
+    else:
+        lines.append("depends_on: []")
+    lines.append("---")
+    return "\n".join(lines)
+
+
+def _default_plan_ref(
+    entries: Sequence[ComboEntry],
+    cards: Mapping[str, Card],
+    slug: str,
+    change: str | None,
+) -> str | None:
+    for entry in reversed(entries):
+        card = cards[entry.ref]
+        if card.type == "interactive" and card.produces:
+            return _subst(card.produces[0], slug, change)
+    return None
+
+
+def compile_combo(
+    combo: Combo,
+    cards: Mapping[str, Card],
+    task: str,
+    *,
+    change: str | None = None,
+    with_cards: Sequence[str] = (),
+    only: Sequence[str] = (),
+    allow_external: bool = False,
+    plan_ref: str | None = None,
+) -> CompileResult:
+    slug = slugify_task(task)
+    entries = _resolve_hand(combo, cards, with_cards, only)
+    external = _check_requires_coverage(entries, cards, allow_external)
+
+    interactive_cards = [cards[entry.ref] for entry in entries if cards[entry.ref].type == "interactive"]
+    checklist = tuple(
+        f"[{card.id}] {card.skill_ref} → 產出: "
+        + ", ".join(_subst(glob, slug, change) for glob in card.produces)
+        for card in interactive_cards
+    )
+    if plan_ref is None:
+        plan_ref = _default_plan_ref(entries, cards, slug, change)
+    if not plan_ref:
+        raise DeckCompileError("無法決定 plan 參照：無 interactive produces，請給 --plan")
+
+    explicit_deps = {entry.ref: entry.depends_on for entry in entries}
+    slices: list[SliceDoc] = []
+    verify_commands: list[str] = []
+    previous_slice_id: str | None = None
+
+    for slice_id, members in _group_slices(entries, cards, slug):
+        deps: list[str] = []
+        for member in members:
+            for dep_ref in explicit_deps.get(member.id, ()):
+                dep_card = cards.get(dep_ref)
+                if dep_card is None or dep_card.type != "headless":
+                    continue
+                if dep_card.slice_group:
+                    deps.append(f"{slug}-{dep_card.slice_group}")
+                else:
+                    deps.append(f"{slug}-{dep_card.id}")
+        deps = sorted(set(dep for dep in deps if dep != slice_id))
+        if not deps and previous_slice_id:
+            deps = [previous_slice_id]
+
+        requires = [_subst(glob, slug, change) for member in members for glob in member.requires]
+        produces = [_subst(glob, slug, change) for member in members for glob in member.produces]
+        requires_block = "".join(f"\n- {item}" for item in requires) or "\n-（無）"
+        produces_block = "".join(f"\n- {item}" for item in produces) or "\n-（無，完成偵測=exit sentinel）"
+        content = (
+            _render_frontmatter(slice_id, plan_ref, deps)
+            + "\n"
+            + f"# {slice_id}\n\n"
+            + f"任務：{task}\n"
+            + f"combo：{combo.id}（cards: {', '.join(member.id for member in members)}）\n\n"
+            + f"requires（翻 auto 前人工確認）：{requires_block}\n\n"
+            + f"produces（deck verify 驗收）：{produces_block}\n"
+        )
+        slices.append(SliceDoc(slice_id=slice_id, filename=f"{slice_id}.md", content=content))
+
+        for member in members:
+            if member.produces:
+                verify_commands.append(f"psc deck verify {member.id} --task-slug {slug}")
+        previous_slice_id = slice_id
+
+    return CompileResult(
+        task_slug=slug,
+        slices=tuple(slices),
+        checklist=checklist,
+        verify_commands=tuple(dict.fromkeys(verify_commands)),
+        external=external,
+    )
