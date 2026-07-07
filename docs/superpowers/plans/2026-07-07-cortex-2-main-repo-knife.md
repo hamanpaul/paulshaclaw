@@ -123,30 +123,62 @@ git commit -m "refactor: control.client 消費者改指 paulsha_cortex（含 coc
 
 ```python
 # tests/test_psc_cli_shim.py
-import subprocess, sys
+from pathlib import Path
+import pytest
+import paulsha_cortex.cli
 from paulshaclaw.cli import main
 
 
-def test_deck_routes_to_cortex(monkeypatch):
-    seen = {}
-    import paulsha_cortex.cli
-    monkeypatch.setattr(paulsha_cortex.cli, "main", lambda argv=None: seen.setdefault("a", list(argv or [])) or 0)
-    assert main(["deck", "verify"]) == 0
-    assert seen["a"] == ["deck", "verify"]
+@pytest.fixture
+def fake_cortex(monkeypatch):
+    calls = {}
+    def fake_main(argv=None):        # 回 0（不是 argv list！否則 int(list) → TypeError）
+        calls["argv"] = list(argv or [])
+        return 0
+    monkeypatch.setattr(paulsha_cortex.cli, "main", fake_main)
+    return calls
 
 
-def test_monitor_routes_to_cortex(monkeypatch):
-    seen = {}
-    import paulsha_cortex.cli
-    monkeypatch.setattr(paulsha_cortex.cli, "main", lambda argv=None: seen.setdefault("a", list(argv or [])) or 0)
-    assert main(["monitor", "--once"]) == 0
-    assert seen["a"] == ["monitor", "--once"]
+@pytest.mark.parametrize("sub,rest", [
+    ("coordinator", ["status"]),
+    ("deck", ["verify", "--change", "x"]),
+    ("monitor", ["--once"]),
+])
+def test_cortex_backed_subcommands_route_to_cortex(fake_cortex, sub, rest):
+    assert main([sub, *rest]) == 0
+    assert fake_cortex["argv"] == [sub, *rest]   # 傘狀 cortex CLI 認 [sub, *rest]
 
 
-def test_no_paulshaclaw_deck_route():
-    # 確保不再 import 主 repo deck（Plan 2 已刪）
-    src = (__import__("pathlib").Path("paulshaclaw/cli.py")).read_text(encoding="utf-8")
-    assert "paulshaclaw.deck" not in src and "paulshaclaw.coordinator" not in src
+@pytest.mark.parametrize("sub", ["coordinator", "deck", "monitor"])
+def test_missing_cortex_tombstone_exit2(monkeypatch, capsys, sub):
+    # 模擬 cortex 未安裝：import paulsha_cortex.cli 失敗
+    import builtins
+    real_import = builtins.__import__
+    def boom(name, *a, **k):
+        if name == "paulsha_cortex.cli" or name.startswith("paulsha_cortex"):
+            raise ImportError("No module named paulsha_cortex")
+        return real_import(name, *a, **k)
+    monkeypatch.setattr(builtins, "__import__", boom)
+    assert main([sub, "x"]) == 2
+    assert "paulsha-cortex" in capsys.readouterr().err  # 安裝指引
+
+
+def test_memory_tombstone_preserved(capsys):
+    assert main(["memory", "status"]) == 2
+    assert "paulsha-hippo" in capsys.readouterr().err
+
+
+def test_unknown_and_empty_usage(capsys):
+    assert main(["nosuch"]) == 2
+    assert main([]) == 2
+    assert "usage" in capsys.readouterr().err.lower()
+
+
+def test_no_paulshaclaw_package_route():
+    # 確保不再 import 主 repo 已刪的包
+    src = Path("paulshaclaw/cli.py").read_text(encoding="utf-8")
+    for pkg in ("paulshaclaw.deck", "paulshaclaw.coordinator", "paulshaclaw.monitor"):
+        assert pkg not in src
 ```
 
 - [ ] **Step 2: 跑測試確認失敗**
@@ -175,17 +207,17 @@ def main(argv=None):
         sys.stderr.write(_MEMORY_MOVED)
         return 2
     if head in _CORTEX_SUBS:
-        try:
-            from paulsha_cortex.cli import main as cortex_main
-        except ImportError:
+        import importlib.util
+        if importlib.util.find_spec("paulsha_cortex") is None:   # 真的沒裝才 tombstone
             sys.stderr.write(_CORTEX_MOVED.format(sub=head))
             return 2
+        from paulsha_cortex.cli import main as cortex_main        # 內部 ImportError 讓它 propagate（不誤標未安裝）
         return int(cortex_main([head, *rest]) or 0)
     sys.stderr.write(_USAGE)
     return 2
 ```
 
-（保留既有 `_MEMORY_MOVED`。cortex CLI 傘狀入口本身即認 `coordinator`/`deck`/`monitor` 子命令，故傳 `[head, *rest]`。）
+（保留既有 `_MEMORY_MOVED`。cortex CLI 傘狀入口本身即認 `coordinator`/`deck`/`monitor` 子命令，故傳 `[head, *rest]`。`find_spec` 判存在性——cortex 內部有 bug 的 ImportError 應 propagate 讓人看到，而非被吞成「未安裝」。）
 
 - [ ] **Step 4: 跑測試確認通過**
 
@@ -212,10 +244,20 @@ git commit -m "feat: psc coordinator|deck|monitor 改 cortex thin shim（未裝 
 - Consumes: Task 2/3 已無 runtime 消費者殘留
 - Produces: 5 包與其測試/腳本自主 repo 移除；grep 清零
 
-- [ ] **Step 1: 刪包與遷出物**
+- [ ] **Step 1: 先建刪除前的完整引用清單（rg inventory，非只 glob）**
 
 ```bash
 cd ~/prj_pri/paulshaclaw
+echo '=== src 引用 ==='; grep -rln 'paulshaclaw\.\(persona\|coordinator\|control\|deck\|monitor\)\|from \.\.\(persona\|coordinator\|control\|deck\|monitor\)' paulshaclaw --include='*.py' | grep -v __pycache__
+echo '=== tests 引用（含被刪 scripts/module）==='; grep -rln 'paulshaclaw\.\(persona\|coordinator\|control\|deck\|monitor\)\|service-manager\.sh\|scripts/coordinator\|manager_daemon\|persona-scope' tests/
+echo '=== workflows 引用 ==='; grep -rln 'persona\.scope_ci\|paulshaclaw\.\(coordinator\|deck\|monitor\)' .github/workflows/
+```
+
+記錄全部命中——**src 面已由 Task 2/3 清（僅剩 cli.py shim 指 paulsha_cortex，不算殘留）**；tests 面已知含 glob 外 7 檔：`test_config_paths.py`、`test_service_scripts.py`、`test_stage7_deploy_three_plane.py`、`test_stage7_deploy_install.py`、`test_stage11_operator_cockpit.py`、`test_psc_cli.py`、`test_start_sh.py`。
+
+- [ ] **Step 2: 刪包 + 遷出物 + 逐一處理 glob 外測試**
+
+```bash
 git rm -r paulshaclaw/persona paulshaclaw/coordinator paulshaclaw/control paulshaclaw/deck paulshaclaw/monitor
 git rm tests/test_persona_*.py tests/test_coordinator_*.py tests/test_control_*.py \
        tests/test_deck_*.py tests/test_stage4_persona_contract.py tests/test_stage9_*.py \
@@ -223,20 +265,27 @@ git rm tests/test_persona_*.py tests/test_coordinator_*.py tests/test_control_*.
 git rm -r scripts/coordinator scripts/service-manager.sh .github/workflows/persona-scope.yml
 ```
 
-- [ ] **Step 2: grep 清零（含相對 import）**
+glob 外 7 檔逐一裁決（**rewire-to-cortex 或 delete-with-rationale，勿留紅**）：
+- `test_psc_cli.py`：改為 `test_psc_cli_shim.py`（Task 3 已建新版）——`git rm test_psc_cli.py`（舊版 patch `paulshaclaw.coordinator/deck`，已被新 shim 測試取代）。
+- `test_config_paths.py`：若僅 import coordinator/monitor 驗 paths → 移除該 import 與相關 case（paths 契約改由 `test_cortex_alignment.py` Task 6 守）；純 config.paths 的 case 保留。
+- `test_service_scripts.py`、`test_start_sh.py`：斷言 `service-manager.sh`/`scripts/coordinator`/`paulshaclaw.monitor` 的 case→改為斷言 cortex 委派路徑（見 Task 5 的 start.sh 新契約）或移除；start.sh 不再擁有 manager/monitor process。
+- `test_stage7_deploy_three_plane.py`、`test_stage7_deploy_install.py`：斷言 manager 單元模板的 case→移除（manager 單元改由 cortex 出貨，Task 5）。
+- `test_stage11_operator_cockpit.py`：若 import 已刪包→改 `paulsha_cortex.*` 或移除該 case（cockpit 讀 monitor 走 socket 非 import）。
+
+- [ ] **Step 3: grep 清零（src + tests + workflows）**
 
 ```bash
-grep -rn 'paulshaclaw\.\(persona\|coordinator\|control\|deck\|monitor\)\|from \.\.\(persona\|coordinator\|control\|deck\|monitor\)' paulshaclaw --include='*.py' | grep -v __pycache__ || echo CLEAN
+grep -rn 'paulshaclaw\.\(persona\|coordinator\|control\|deck\|monitor\)\|from \.\.\(persona\|coordinator\|control\|deck\|monitor\)\|service-manager\.sh\|scripts/coordinator' paulshaclaw tests scripts .github/workflows --include='*.py' --include='*.sh' --include='*.yml' | grep -v __pycache__ | grep -v 'paulsha_cortex' || echo CLEAN
 ```
 
-Expected: `CLEAN`（若有殘留，多半是漏改的相對 import 或間接引用——逐一處理；`psc` shim 對 cortex 的 import 不算殘留，那是 `paulsha_cortex`）
+Expected: `CLEAN`（`paulsha_cortex.*` 不算殘留）
 
-- [ ] **Step 3: 全測試（主 repo 剩餘）跑綠**
+- [ ] **Step 4: 全測試（主 repo 剩餘）跑綠**
 
-Run: `python -m pytest tests/ -q -x`
-Expected: 全 PASS（W7 整合測試改線見 Task 5；若此步因 W7 import 已刪的 coordinator 而 FAIL，先跳過該檔至 Task 5）
+Run: `python -m pytest tests/ -q`
+Expected: 全 PASS（W7 整合測試改線見 Task 5；本 Task 完成後測試套件不得有紅——glob 外 7 檔已逐一處理）
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git commit -m "feat!: 刪除 persona/coordinator/control/deck/monitor（已遷入 paulsha-cortex）"
@@ -258,11 +307,29 @@ git commit -m "feat!: 刪除 persona/coordinator/control/deck/monitor（已遷�
 
 `paulshaclaw/deploy/planner.py`：刪除 line 119-163 的 manager service/timer/env 模板條目（改由 cortex `install service` 出貨）；`git rm` 對應 `.tmpl`。
 
-- [ ] **Step 2: start.sh manager/monitor 改指 cortex**
+- [ ] **Step 2: start.sh manager/monitor 改指 cortex（針對 LIVE 路徑）**
 
-`scripts/start.sh`：
-- `start_manager_service()` 的 `install-manager-units.sh` 引用改為 `cortex install service --repo-root "$REPO"`（cortex 一次裝 manager+monitor）；移除 `source service-manager.sh`（已刪）。
-- Stage 9 monitor 段 `python -m paulshaclaw.monitor` → 移除（monitor 現由 `cortex install service` 的 monitor unit 常駐，start.sh 只 `systemctl --user enable/start`）。
+**先讀 start.sh 確認 live path**：現行 live 啟動是 `source scripts/service-manager.sh --source-only`（line 84）+ 直接呼叫 `start_manager_loop`（line 271）+ 依賴 `MANAGER_PID`/`MANAGER_PID_OWNED`/`wait_for_manager_shutdown`（line 94-119）——**不是** `start_manager_service()`（存在但未被呼叫）。改法：
+- 移除 `source .../service-manager.sh`（Task 4 已刪該檔）與 `start_manager_loop` 呼叫；改為 `cortex install service --repo-root "$REPO"` + `systemctl --user enable --now cortex-manager.timer cortex-monitor.service`（systemd 不可用則 fallback 前景 `cortex coordinator` supervise，仿 dream supervise）。
+- 清掉 `MANAGER_PID`/`MANAGER_PID_OWNED`/`wait_for_manager_shutdown` 相關段（manager 生命週期改由 systemd 擁有，start.sh 只協調——R1.4）。
+- Stage 9 monitor 段 `python -m paulshaclaw.monitor`（line 255）+ `MONITOR_PID` → 移除（monitor 由 cortex monitor unit 常駐）。
+- 死掉的 `start_manager_service()` 函式（若確無其他呼叫）一併刪。
+
+- [ ] **Step 2b: 加 start.sh 靜態斷言測試（防漏改）**
+
+```python
+# tests/test_start_sh_cortex_cutover.py
+from pathlib import Path
+def test_start_sh_has_no_deleted_refs():
+    src = Path("scripts/start.sh").read_text(encoding="utf-8")
+    for dead in ("service-manager.sh", "scripts/coordinator", "paulshaclaw.monitor",
+                 "start_manager_loop", "paulshaclaw.coordinator.manager_daemon"):
+        assert dead not in src, f"start.sh 仍引用已刪的 {dead}"
+    assert "cortex install service" in src   # 改指 cortex
+```
+
+Run: `python -m pytest tests/test_start_sh_cortex_cutover.py -v && bash -n scripts/start.sh`
+Expected: PASS + syntax ok
 
 - [ ] **Step 3: W7 整合測試改線**
 
@@ -301,22 +368,50 @@ def test_phases_equal_across_hippo_and_cortex():
     assert tuple(CORTEX) == tuple(HIPPO)
 
 
-def test_paths_equivalence(monkeypatch, tmp_path):
+import pytest
+
+
+@pytest.mark.parametrize("fn,env", [
+    ("control_root", "PSC_CONTROL_ROOT"),
+    ("coordinator_root", "PSC_COORDINATOR_ROOT"),
+    ("specs_root", "PSC_SPECS_ROOT"),
+    ("worktree_root", "PSC_WORKTREE_ROOT"),
+    ("repo_root", "PSC_REPO_ROOT"),
+])
+def test_paths_equivalence_all_five_roots(monkeypatch, tmp_path, fn, env):
     from paulshaclaw.config import paths as claw
     from paulsha_cortex.config import paths as cortex
-    monkeypatch.setenv("PSC_CONTROL_ROOT", str(tmp_path / "ctl"))
-    monkeypatch.setenv("PSC_SPECS_ROOT", str(tmp_path / "spc"))
-    assert claw.control_root() == cortex.control_root()
-    assert claw.specs_root() == cortex.specs_root()
+    monkeypatch.setenv(env, str(tmp_path / fn))   # env 覆寫下兩邊必等
+    assert getattr(claw, fn)() == getattr(cortex, fn)(), f"{fn} 兩邊不一致"
+
+
+def test_paths_equivalence_defaults(monkeypatch, tmp_path):
+    from paulshaclaw.config import paths as claw
+    from paulsha_cortex.config import paths as cortex
+    for env in ("PSC_CONTROL_ROOT", "PSC_COORDINATOR_ROOT", "PSC_SPECS_ROOT"):
+        monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(tmp_path / "agents"))
+    assert claw.control_root() == cortex.control_root()   # 預設值亦須等
+
+
+def test_deck_persona_binding_alignment():
+    # deck cards 的 persona_binding 必對得上 cortex personas.yaml 的 role
+    from paulsha_cortex.deck.schema import load_cards, DEFAULT_CARDS_PATH
+    from paulsha_cortex.persona.loader import load_catalog   # 實名以 cortex loader 為準
+    cards = load_cards(DEFAULT_CARDS_PATH)
+    roles = set(load_catalog().keys())
+    for cid, card in cards.items():
+        binding = getattr(card, "persona_binding", None)
+        if binding:
+            assert binding in roles, f"deck card {cid} 綁定不存在的 persona role {binding}"
 
 
 def test_cortex_has_no_hippo_dependency():
-    import subprocess, sys, json
-    out = subprocess.run(
-        [sys.executable, "-m", "pip", "show", "paulsha-cortex"],
-        capture_output=True, text=True,
-    ).stdout
-    requires = next((l for l in out.splitlines() if l.lower().startswith("requires:")), "Requires:")
+    import subprocess, sys
+    probe = subprocess.run([sys.executable, "-m", "pip", "show", "paulsha-cortex"],
+                           capture_output=True, text=True)
+    assert probe.returncode == 0, "paulsha-cortex 必須已安裝（對齊測試前置）"   # 沒裝就 fail，不空過
+    requires = next((l for l in probe.stdout.splitlines() if l.lower().startswith("requires:")), "")
     assert "paulsha-hippo" not in requires
 ```
 
