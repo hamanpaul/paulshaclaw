@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -168,6 +170,7 @@ combo:
 
 def _write(tmp_path, name: str, text: str):
     path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
     return path
 
@@ -359,6 +362,35 @@ def test_emit_force_overwrites_atomically(tmp_path):
     written = emit(result, tmp_path, force=True)
     assert written
     assert all(path.read_text(encoding="utf-8").startswith("---") for path in written)
+
+
+def test_emit_force_rolls_back_on_replace_failure(tmp_path, monkeypatch):
+    from paulshaclaw.deck import compile as deck_compile
+
+    cards, combo = _feature_oneshot(tmp_path / "deck")
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    target = tmp_path / "specs"
+    target.mkdir()
+    originals = {}
+    for index, slice_doc in enumerate(result.slices):
+        final_path = target / slice_doc.filename
+        text = f"old-{index}"
+        final_path.write_text(text, encoding="utf-8")
+        originals[final_path] = text
+
+    real_replace = deck_compile.os.replace
+    failing_target = target / result.slices[1].filename
+
+    def flaky_replace(src, dst):
+        if Path(dst) == failing_target and str(src).endswith(".tmp"):
+            raise OSError("boom")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(deck_compile.os, "replace", flaky_replace)
+    with pytest.raises(DeckCompileError, match="emit"):
+        emit(result, target, force=True)
+    for path, text in originals.items():
+        assert path.read_text(encoding="utf-8") == text
 
 
 def test_compile_rejects_duplicate_slice_ids_from_split_group(tmp_path):

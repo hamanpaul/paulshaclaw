@@ -301,6 +301,8 @@ def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) 
         raise DeckCompileError("emit 目標已存在同名 spec（--force 才覆蓋）：" + ", ".join(conflicts))
 
     written: list[Path] = []
+    temp_paths: list[Path] = []
+    backups: list[tuple[Path, Path | None]] = []
     try:
         for slice_doc in result.slices:
             final_path = directory / slice_doc.filename
@@ -311,10 +313,28 @@ def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) 
                     dir=directory,
                 )
                 temp_path = Path(temp_name)
+                temp_paths.append(temp_path)
                 try:
                     with os.fdopen(fd, "w", encoding="utf-8") as handle:
                         handle.write(slice_doc.content)
-                    os.replace(temp_path, final_path)
+                    backup_path: Path | None = None
+                    if final_path.exists():
+                        backup_fd, backup_name = tempfile.mkstemp(
+                            prefix=f"{slice_doc.filename}.",
+                            suffix=".bak",
+                            dir=directory,
+                        )
+                        os.close(backup_fd)
+                        backup_path = Path(backup_name)
+                        backup_path.unlink(missing_ok=True)
+                        os.replace(final_path, backup_path)
+                    try:
+                        os.replace(temp_path, final_path)
+                    except OSError:
+                        if backup_path is not None and backup_path.exists():
+                            os.replace(backup_path, final_path)
+                        raise
+                    backups.append((final_path, backup_path))
                 finally:
                     temp_path.unlink(missing_ok=True)
             else:
@@ -327,8 +347,20 @@ def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) 
                     raise
             written.append(final_path)
     except OSError as exc:
-        if not force:
+        if force:
+            for final_path, backup_path in reversed(backups):
+                if backup_path is not None and backup_path.exists():
+                    os.replace(backup_path, final_path)
+                else:
+                    final_path.unlink(missing_ok=True)
+        else:
             for path in written:
                 path.unlink(missing_ok=True)
         raise DeckCompileError(f"emit 寫入失敗: {exc}") from exc
+    finally:
+        for temp_path in temp_paths:
+            temp_path.unlink(missing_ok=True)
+        for _, backup_path in backups:
+            if backup_path is not None:
+                backup_path.unlink(missing_ok=True)
     return written
