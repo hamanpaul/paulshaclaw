@@ -53,14 +53,15 @@ def _canonical_repo_root(repo: Path) -> Path:
 
 
 def worktree_root() -> Path:
+    """coordinator 派工 worktree 池——鏡射 scripts/using-git-worktrees.sh 契約。
+
+    預設一律為 sibling `<repo>-worktrees`；僅 PSC_WORKTREE_ROOT 顯式覆寫可改。
+    （repo 內 `.worktrees/` 屬其他工具的池，勿自動偏好——#218 對抗審查 F2。）
+    """
     override = _env_path("PSC_WORKTREE_ROOT")
     if override is not None:
         return override
     repo = _canonical_repo_root(repo_root())
-    if (repo / ".worktrees").exists():
-        return repo / ".worktrees"
-    if (repo / "worktrees").exists():
-        return repo / "worktrees"
     return repo.parent / f"{repo.name}-worktrees"
 
 

@@ -22,16 +22,14 @@ import sys
 import uuid
 from pathlib import Path
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
-from paulshaclaw.config import paths
-
 TOOL = "codex"
 
 
 def _memory_root() -> Path:
-    return paths.memory_root()
+    env = os.environ.get("PSC_MEMORY_ROOT", "").strip()
+    if env:
+        return Path(env)
+    return Path.home() / ".agents" / "memory"
 
 
 def _log_warn(root: Path, msg: str) -> None:

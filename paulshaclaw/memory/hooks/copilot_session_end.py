@@ -20,20 +20,21 @@ import subprocess
 import sys
 from pathlib import Path
 
-if __package__ in {None, ""}:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-
-from paulshaclaw.config import paths
-
 TOOL = "copilot-cli"
 
 
 def _memory_root() -> Path:
-    return paths.memory_root()
+    env = os.environ.get("PSC_MEMORY_ROOT", "").strip()
+    if env:
+        return Path(env)
+    return Path.home() / ".agents" / "memory"
 
 
 def _config_root() -> Path:
-    return paths.copilot_root()
+    env = os.environ.get("PSC_CONFIG_ROOT", "").strip()
+    if env:
+        return Path(env)
+    return Path.home()
 
 
 def _log_warn(root: Path, msg: str) -> None:
@@ -53,7 +54,7 @@ def _sanitize_id(value: str) -> str:
 
 def _supplement_from_history(payload: dict, session_id: str, config_root: Path) -> dict:
     """Merge fields from the latest matching history file into payload."""
-    history_dir = config_root / "history-session-state"
+    history_dir = config_root / ".copilot" / "history-session-state"
     if not history_dir.is_dir():
         return payload
 
