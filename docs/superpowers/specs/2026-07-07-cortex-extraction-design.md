@@ -3,6 +3,24 @@
 > 真相源：本檔為 #125 Phase 2（治理包）拆分的架構設計。裁決過程見 2026-07-07 session（brainstorming 流程）。
 > 相關：#125（切包 umbrella，Phase 2 定義處）、#186 §6（deck 歸屬三分裁決）、#124（G2 enforce 翻牌，本次非目標）、`2026-07-06-memory-extraction-hippo-design.md`（Phase 1 刀法先例）。
 
+> ## ⚠️ 修訂 R1（2026-07-07，採 #233「走 B」）——本區塊覆寫下方受影響決策
+>
+> **定位擴大**：cortex 從「治理 runtime」升級為 **完整 task-management plane**——涵蓋 `define → dispatch → govern → observe` 全迴圈。
+>
+> **scope 變更（推翻 §2「deck 去留=留主 repo」與 §7 非目標「deck 搬移」）**：`deck/`（835 行，任務定義／combo 編譯）與 `monitor/`（1412 行，跨 project 任務狀態快照）**納入 cortex**。
+>
+> **裁決理由（standalone user lens）**：一般 user 裝了 cortex 要走完 define→dispatch→govern→observe；形式 A（只 coordinator+control+persona）連「定義任務」都得跳回主 repo 的 deck，完不成自己的迴圈。deck 是非作者 user 的「建立任務」前門（作者可手寫 slice spec，一般 user 不會）→ 核心；monitor 是 Flower 型觀察 companion → 便宜同捆。依賴實測支持：deck/monitor 各只 import `config.paths`（cortex 已自帶）、coordinator 不 import 兩者、彼此靠檔案/HTTP 解耦 → 搬移零新耦合，**A′ 零依賴不變**。
+>
+> **persona 重定義（採 #233 §2）**：persona = manager 與 guardrail **共同引用的角色契約資料**（role profile + scope subject）；**不是**任務執行者（那是 AgentInstance／runtime session），**也不是**安全管理者（那是 guardrail／policy engine 讀 persona 契約做 enforcement）。純澄清、寫入 docs/命名。
+>
+> **主 repo 終態**：純 operator shell（cockpit / bot / cost / deploy glue / 跨包對齊測試），不再持有任務定義（deck）與任務狀態（monitor）。
+>
+> **修訂後 plan 鏈**：Plan 1 ✅（persona+coordinator+control 已 merged，pin `2e67100`）→ **Plan 1b**（deck+monitor 進 cortex，同 A′ 剪線模式，產新 pin）→ Plan 2（主 repo 刪 **5** 包、pin、import 改線、shim、對齊測試）→ Plan 3（E2E + systemd cutover）。**#186 deck Phase B/C 隨 deck 移入 cortex repo**。
+>
+> **CLI 終態**：`cortex coordinator|deck|monitor …`（各自可獨立用、組成迴圈）；主 repo `psc deck|coordinator|monitor` 轉 thin shim。
+>
+> 下方 §1–§9 為 R1 前（形式 A）原文，保留裁決軌跡；與本區塊衝突處以本區塊為準。
+
 ## 1. 目標與定位
 
 把治理平面（manager 派工決策 + persona scope 護欄 + control 檔案契約控制面）拆為獨立 repo **paulsha-cortex**（package 名 `paulsha_cortex`），命名延續 paulsha-hippo 的腦區隱喻（前額葉皮質 = 執行功能 + 行為抑制）。

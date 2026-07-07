@@ -12,22 +12,32 @@
 
 > **codex 對抗審查（兩輪）已解**：R1 F2/F3/F4（PY 解譯器 persist、`--repo-root`+PSC_REPO_ROOT、`cortex relay-hook` + 剝 bro-return glue）、R2（env 只更新 managed keys、execv 對 0644 bash fallback）。F1（`stop_legacy_manager_timer` 自停）為 paulshaclaw verbatim 繼承、非拆分回歸 → cortex issue #2 follow-up。fresh-install 0644 fallback 實測通過。
 
-## 2. 主 repo 遷移刀
+## 1b. deck + monitor 進 cortex（R1 採 B 新增，於 paulsha-cortex repo 內，另出 Plan 1b）
 
-- [ ] 2.1 pyproject 新增 `paulsha-cortex @ git+https://...@<sha>` pin
-- [ ] 2.2 刪除 `paulshaclaw/{persona,coordinator,control}/**`
-- [ ] 2.3 `bot/listener.py`、`cockpit/app.py`、`core/daemon.py` import 改 `paulsha_cortex.control.client`
-- [ ] 2.4 `psc coordinator` thin shim：lazy import cortex CLI、未安裝時 tombstone 文案 + exit 2
+- [ ] 1b.1 平移 `deck/**`（835 行）+ `monitor/**`（1412 行）+ 各自測試進 cortex；import 改 `paulsha_cortex.*`（兩者僅 import `config.paths`，cortex 已自帶 → 零新剪線）
+- [ ] 1b.2 CLI：`cortex deck …`、`cortex monitor …` 子命令接線；`cortex` 傘狀入口路由
+- [ ] 1b.3 persona↔deck：既有 fail-open lazy import 可改為正常 import（同包後不再需要 fail-open）；或保留亦可
+- [ ] 1b.4 monitor systemd/service 出貨（若有）併入 cortex `install`
+- [ ] 1b.5 去識別化 + 零依賴（deck/monitor 不引入新依賴）；cortex 全測試綠
+- [ ] 1b.6 #186 deck Phase B/C 續作入口隨 deck 移入 cortex repo（openspec/issue 轉址）
+- [ ] 1b.7 產出新 pin SHA（Plan 2 以此 pin，取代 §1 的 `2e67100`）
+
+## 2. 主 repo 遷移刀（R1：刪 5 包）
+
+- [ ] 2.1 pyproject 新增 `paulsha-cortex @ git+https://...@<1b 新 sha>` pin
+- [ ] 2.2 刪除 `paulshaclaw/{persona,coordinator,control,deck,monitor}/**`
+- [ ] 2.3 主 repo 消費者 import 改線：`control.client`（bot/listener、cockpit/app、core/daemon，含**相對 import** `from ..control`）、deck 消費者（cli.py、persona—已隨包移出）、monitor 消費者（cockpit 若 python import；否則 HTTP/檔案不動）→ 改 `paulsha_cortex.*`
+- [ ] 2.4 `psc coordinator|deck|monitor` thin shim：lazy import cortex CLI、未安裝時 tombstone + exit 2
 - [ ] 2.5 `deploy/planner.py` 移除 manager 單元模板引用；刪除 `__INSTANCE__-manager.{service,timer}.tmpl`
-- [ ] 2.6 移除 `scripts/coordinator/**`、`scripts/service-manager.sh`、`.github/workflows/persona-scope.yml`
+- [ ] 2.6 移除 `scripts/coordinator/**`、`scripts/service-manager.sh`、`.github/workflows/persona-scope.yml`、deck/monitor 相關 workflow
 - [ ] 2.7 遷出測試檔移除；W7 整合測試改 import cortex
-- [ ] 2.8 grep 清零：`paulshaclaw.persona|paulshaclaw.coordinator|paulshaclaw.control` 無殘留（shim 除外）；import 面 CI 檢查落地（cortex 允許清單 + hippo runtime import 清零、tests 僅限對齊測試）
+- [ ] 2.8 grep 清零：`paulshaclaw.{persona,coordinator,control,deck,monitor}`（含相對 import 形式）無殘留（shim 除外）；import 面 CI 檢查落地
 
 ## 3. 對齊測試（主 repo 為契約交會點）
 
 - [ ] 3.1 PHASES 相等性測試：cortex 自帶常數 == `paulsha_hippo.lib.lifecycle.schema.PHASES`
 - [ ] 3.2 paths 等價測試：cortex paths 模組與 `config.paths` facade 於相同 env 覆寫組合下五個 root 全等
-- [ ] 3.3 `test_deck_contract_alignment` 改線：deck `persona_binding` 對照 cortex personas.yaml
+- [ ] 3.3 deck↔persona 對齊：`persona_binding` 對照 cortex personas.yaml（deck 已在 cortex 內 → 改為 cortex 內部測試 + 主 repo 消費面 smoke）
 - [ ] 3.4 cortex 零 hippo 依賴斷言（依賴解析集合不含 paulsha-hippo）
 
 ## 4. 文件與 spec 遷移

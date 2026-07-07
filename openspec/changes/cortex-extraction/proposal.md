@@ -1,3 +1,5 @@
+> **修訂 R1（2026-07-07，採 #233「走 B」）**：cortex scope 擴大為**完整 task-management plane**，`deck`（任務定義）+ `monitor`（任務狀態）納入 cortex（原「deck 留主 repo」非目標作廢）。裁決依據見設計 spec R1 區塊。plan 鏈變為 Plan 1 ✅ → **Plan 1b（deck+monitor 進 cortex）** → Plan 2（主 repo 刪 5 包）→ Plan 3。以下 Why/What/Capabilities/Impact 為 R1 前原文，deck/monitor 相關以 R1 為準。
+
 ## Why
 
 #125 Phase 2：治理平面（persona scope 護欄 + coordinator 派工 + control 檔案契約控制面，合計約 3.3k 行）與主 repo 生命週期解耦後，persona 的跨 vendor 定位需要「可單獨安裝、不被記憶產品綁架」的出貨形式；G2 enforce（#124）動工前先定邊界，避免大改後再搬家。設計依據：`docs/superpowers/specs/2026-07-07-cortex-extraction-design.md`（已含 2026-07-07 Codex 對抗審查裁決軌跡：cutover 協議與單寫者不變量採納、control root 隔離與 persona fail-close 重設計推回）。
