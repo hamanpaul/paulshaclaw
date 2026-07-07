@@ -3,7 +3,7 @@
 ## ADDED Requirements
 
 ### Requirement: personas.yaml skills 欄位載入與保留
-`personas.yaml` 各 role SHALL 可宣告 `skills:`（card id 清單）；`persona/loader.py` MUST 讀取並保留該欄位至 `PersonaContract`（現行 loader 會丟棄未知欄位，需擴充），validator 對缺省該欄位的 role 維持相容（欄位可選）。
+`personas.yaml` 各 role SHALL 可宣告 `skills:`（card id 清單）；`persona/loader.py` MUST 讀取並保留該欄位至 `PersonaContract`（現行 loader 會丟棄未知欄位，需擴充），validator 對缺省該欄位的 role 維持相容（欄位可選；顯式 `skills: null` 等同未宣告——YAML 空值容錯，對抗審查裁決）。
 
 #### Scenario: skills 欄位存續到 contract
 - **WHEN** 某 role 宣告 `skills: [writing-plans, code-review]`
