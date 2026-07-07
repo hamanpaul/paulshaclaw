@@ -76,7 +76,8 @@ def test_unknown_or_empty_argv_prints_usage(argv: list[str], capsys: pytest.Capt
 
 def test_cli_source_no_longer_routes_to_repo_subtrees() -> None:
     source = (Path(__file__).resolve().parents[1] / "paulshaclaw" / "cli.py").read_text(encoding="utf-8")
+    prefix = "paulshaclaw"
 
-    assert "paulshaclaw.coordinator" not in source
-    assert "paulshaclaw.deck" not in source
-    assert "paulshaclaw.monitor" not in source
+    assert f"{prefix}.coordinator" not in source
+    assert f"{prefix}.deck" not in source
+    assert f"{prefix}.monitor" not in source

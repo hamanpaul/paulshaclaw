@@ -59,13 +59,6 @@ class ServiceScriptTests(unittest.TestCase):
         self.assertIn("--require-idle", text)
         self.assertIn("--promoter llm", text)
 
-    def test_manager_service_runs_daemon_with_repo_specs_dir(self) -> None:
-        text = self._read("manager")
-        self.assertIn('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.coordinator.manager_daemon', text)
-        self.assertIn('--specs-dir "$REPO/docs/superpowers/specs"', text)
-        self.assertIn("manager_startup_checks", text)
-        self.assertNotIn("SECONDS", text)
-
     def test_bot_service_launches_listener_with_readiness_guard(self) -> None:
         text = self._read("bot")
         self.assertIn('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.bot.listener', text)
@@ -77,7 +70,6 @@ class ServiceScriptTests(unittest.TestCase):
             "bot": SCRIPTS_DIR / "service-bot.sh",
             "cost": SCRIPTS_DIR / "service-cost.sh",
             "dream": SCRIPTS_DIR / "service-dream.sh",
-            "manager": SCRIPTS_DIR / "service-manager.sh",
         }
 
     def _read(self, name: str) -> str:

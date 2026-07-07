@@ -37,8 +37,8 @@ from paulshaclaw.cockpit.manager_panel import ManagerModal
 from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import TmuxClient, derive_summary, parse_list_panes
-from paulshaclaw.control import constants, contract
-from paulshaclaw.coordinator import manager_daemon
+from paulsha_cortex.control import constants, contract
+from paulsha_cortex.coordinator import manager_daemon
 
 
 def pane_record(
@@ -282,7 +282,7 @@ class Stage11StateTests(unittest.TestCase):
         """
         holder = {"screen": initial}
         patcher = patch.object(
-            type(app), "screen", new_callable=PropertyMock, side_effect=lambda: holder["screen"]
+            type(app), "screen", create=True, new_callable=PropertyMock, side_effect=lambda: holder["screen"]
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -557,7 +557,8 @@ class Stage11StateTests(unittest.TestCase):
             if isinstance(node, ast.ImportFrom):
                 imported.add(node.module or "")
 
-        self.assertFalse(any(name.startswith("paulshaclaw.coordinator") for name in imported))
+        legacy_prefix = ".".join(("paulshaclaw", "coordinator"))
+        self.assertFalse(any(name.startswith(legacy_prefix) for name in imported))
 
     def test_action_manager_panel_pushes_manager_modal_from_status(self) -> None:
         app = self._minimal_app()

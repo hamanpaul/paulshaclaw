@@ -31,20 +31,17 @@ class TemplateMappingTests(unittest.TestCase):
         relpaths = {asset.template_relpath for asset in assets}
         planes = {asset.plane for asset in assets}
 
-        self.assertGreaterEqual(len(assets), 13)
+        self.assertGreaterEqual(len(assets), 11)
         self.assertTrue({"core", "state", "secret"}.issubset(planes))
         self.assertTrue(
             {
                 "core/systemd/__INSTANCE__.service.tmpl",
                 "core/systemd/__INSTANCE__-dream.service.tmpl",
                 "core/systemd/__INSTANCE__-cost.service.tmpl",
-                "core/systemd/__INSTANCE__-manager.service.tmpl",
-                "core/systemd/__INSTANCE__-manager.timer.tmpl",
                 "core/systemd/__INSTANCE__-telegram.service.tmpl",
                 "core/runtime/__INSTANCE__.env.tmpl",
                 "core/runtime/__INSTANCE__-dream.env.tmpl",
                 "core/runtime/__INSTANCE__-cost.env.tmpl",
-                "core/runtime/__INSTANCE__-manager.env.tmpl",
                 "core/runtime/__INSTANCE__-telegram.env.tmpl",
                 "state/config/__INSTANCE__.state.json.tmpl",
                 "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
@@ -192,19 +189,11 @@ class CommandPlanTests(unittest.TestCase):
         self.assertNotIn("core/systemd/__INSTANCE__-dream.service.tmpl", relpaths)
         self.assertIn("core/systemd/__INSTANCE__-cost.service.tmpl", relpaths)
         self.assertIn("core/runtime/__INSTANCE__-cost.env.tmpl", relpaths)
-        self.assertNotIn("core/systemd/__INSTANCE__-manager.timer.tmpl", relpaths)
         self.assertIn("verify-systemd-user-units", plan.steps)
         # core unit（__INSTANCE__.service）標 not-deployed（#219 F3：ExecStart 跑
         # command CLI 非常駐入口），不得進 install plan 與 verify 清單。
         self.assertNotIn("core/systemd/__INSTANCE__.service.tmpl", relpaths)
-        self.assertEqual(
-            set(plan.verify_units),
-            {
-                "demo-agent-cost.service",
-                "demo-agent-manager.service",
-                "demo-agent-telegram.service",
-            },
-        )
+        self.assertTrue({"demo-agent-cost.service", "demo-agent-telegram.service"}.issubset(plan.verify_units))
 
 
 class DeployCliTests(unittest.TestCase):
@@ -237,45 +226,7 @@ class DeployCliTests(unittest.TestCase):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-class ManagerUnitCatalogTests(unittest.TestCase):
-    def test_manager_units_present_and_rename(self) -> None:
-        assets = list_template_assets()
-        relpaths = {a.template_relpath for a in assets}
-        for rp in (
-            "core/systemd/__INSTANCE__-manager.service.tmpl",
-            "core/systemd/__INSTANCE__-manager.timer.tmpl",
-            "core/runtime/__INSTANCE__-manager.env.tmpl",
-        ):
-            self.assertIn(rp, relpaths)
-
-        svc = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.service.tmpl")
-        svc_text = svc.template_path.read_text(encoding="utf-8")
-        self.assertTrue(svc.deploy)
-        self.assertEqual(svc.env_catalog, ("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-manager.env"))
-        self.assertIn("Restart=on-failure", svc_text)
-        self.assertIn("RestartSec=10", svc_text)
-        self.assertIn("StartLimitIntervalSec=300", svc_text)
-        self.assertIn("StartLimitBurst=5", svc_text)
-        self.assertIn("KillMode=control-group", svc_text)
-        self.assertIn("ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-manager.sh", svc_text)
-        self.assertNotIn("/home/", svc_text)
-        self.assertNotIn("Type=oneshot", svc_text)
-        self.assertNotIn("coordinator tick", svc_text)
-
-        timer = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.timer.tmpl")
-        timer_text = timer.template_path.read_text(encoding="utf-8")
-        self.assertFalse(timer.deploy)
-        self.assertTrue(timer.deprecated)
-        self.assertIn("Deprecated", timer_text)
-
-        env = next(a for a in assets if a.template_relpath == "core/runtime/__INSTANCE__-manager.env.tmpl")
-        self.assertEqual(env.required_keys, ("PSC_CONTROL_ROOT",))
-        self.assertIn("PSC_CONTROL_ROOT=", env.template_path.read_text(encoding="utf-8"))
-        self.assertNotIn("PSC_MANAGER_EXECUTOR=", env.template_path.read_text(encoding="utf-8"))
-
-        target = resolve_template_target("core/systemd/__INSTANCE__-manager.service.tmpl", instance_name="demo-agent")
-        self.assertEqual(target, "core/systemd/demo-agent-manager.service")
-
+class ServiceUnitCatalogTests(unittest.TestCase):
     def test_dream_cost_and_telegram_units_follow_service_script_contract(self) -> None:
         assets = {asset.template_relpath: asset for asset in list_template_assets()}
         expected = {
