@@ -108,6 +108,17 @@ cards:
     produces: ["reports/review/*<task-slug>*-adversarial.md"]
     persona_binding: reviewer
 
+  - id: receiving-code-review
+    kind: skill
+    type: headless
+    class: core
+    skill_ref: "superpowers:receiving-code-review"
+    requires: ["reports/review/*<task-slug>*.md"]
+    produces: []          # findings 處理證據 = fix commits + re-review，Phase A 不機驗
+    persona_binding: builder
+
+  # 註：hw-evidence.md 為 deck 投影新造的 artifact 契約（SKILL 硬體證據規則的
+  # 可機驗載體）；內容正確性由 mcu-coding-skill 執行時自律，deck 只驗存在。
   - id: mcu-hw-evidence
     kind: skill
     type: interactive

@@ -8,6 +8,7 @@ combo:
     - ref: tdd-red
     - ref: subagent-build
     - ref: code-review
+    - ref: receiving-code-review
     - ref: verification
   gate_spine:
     - after: mcu-hw-evidence

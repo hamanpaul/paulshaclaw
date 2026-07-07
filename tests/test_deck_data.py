@@ -24,6 +24,7 @@ MCU_FEATURE_CARDS = [
     "tdd-red",
     "subagent-build",
     "code-review",
+    "receiving-code-review",
     "verification",
 ]
 
@@ -43,7 +44,7 @@ def test_interactive_headless_typing():
         "writing-plans",
         "mcu-hw-evidence",
     }
-    assert {c.id for c in cards.values() if c.type == "headless"} == set(PHASE_CARDS) - interactive
+    assert {c.id for c in cards.values() if c.type == "headless"} == (set(PHASE_CARDS) - interactive) | {"receiving-code-review"}
     assert cards["worktree-isolation"].slice_group == "build"
     assert cards["tdd-red"].slice_group == "build"
     assert cards["subagent-build"].slice_group == "build"
@@ -86,6 +87,21 @@ def test_mcu_feature_real_data_compiles_to_hold_specs(tmp_path):
     cards = load_cards(DEFAULT_CARDS_PATH)
     combo = load_combo(DEFAULT_COMBOS_DIR / "mcu-feature.yaml", cards)
     result = compile_combo(combo, cards, "cc2674 pwm led bring-up", allow_external=True)
+    slug = result.task_slug
+    # 對抗審查補強：鎖定 slice 結構（build 三卡合組 + 三個獨立 slice）
+    assert [s.slice_id for s in result.slices] == [
+        f"{slug}-build",
+        f"{slug}-code-review",
+        f"{slug}-receiving-code-review",
+        f"{slug}-verification",
+    ]
+    # external 精確內容：mcu 任務接續既有 plan，writing-plans 的 proposal requires
+    # 無上游（combo 無 openspec-propose）→ 誠實標記為 external
+    assert result.external == (
+        "writing-plans: openspec/changes/<change>/proposal.md",
+    )
+    # hw-evidence gate 與卡 produces 一致
+    assert combo.gate_spine[0].exists == cards["mcu-hw-evidence"].produces
     out = tmp_path / "specs"
     emit(result, out)
     metas = scan_specs(out)
