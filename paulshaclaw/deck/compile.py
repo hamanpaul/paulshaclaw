@@ -15,6 +15,7 @@ class DeckCompileError(ValueError):
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
+_SLICE_ID_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 
 def slugify_task(task: str) -> str:
@@ -121,8 +122,10 @@ def _prefix(glob: str) -> str:
 
 
 def _covered(require: str, produce: str) -> bool:
-    """Phase A 只在 pattern 完全一致時視為已覆蓋；其餘情況一律 fail-closed。"""
-    return require == produce
+    """保守 pattern 覆蓋（spec §5.5）：字面前綴一致至首個 wildcard，互為前綴即視為覆蓋。"""
+    require_prefix = _prefix(require)
+    produce_prefix = _prefix(produce)
+    return require_prefix.startswith(produce_prefix) or produce_prefix.startswith(require_prefix)
 
 
 def _check_requires_coverage(
@@ -265,6 +268,10 @@ def compile_combo(
             + f"requires（翻 auto 前人工確認）：{requires_block}\n\n"
             + f"produces（deck verify 驗收）：{produces_block}\n"
         )
+        if not _SLICE_ID_RE.fullmatch(slice_id):
+            raise DeckCompileError(
+                f"slice_id 非檔名/branch 安全（僅允許 [a-z0-9-]，card id 與 slice_group 不得含路徑分隔）: {slice_id!r}"
+            )
         slices.append(SliceDoc(slice_id=slice_id, filename=f"{slice_id}.md", content=content))
 
         for member in members:

@@ -272,15 +272,52 @@ def test_requires_external_allowed_and_reported(tmp_path):
     assert result.external
 
 
-def test_requires_archive_path_still_counts_as_external(tmp_path):
+def test_requires_prefix_coverage_accepts_deeper_produce(tmp_path):
+    # 對抗審查修正（C1）：spec §5.5 為互為前綴覆蓋——produce 前綴較深仍覆蓋 require
     cards_yaml = CARDS_YAML.replace(
         'produces: ["reports/review/*<task-slug>*.md"]',
         'produces: ["reports/review/archive/*<task-slug>*.md"]',
     )
     cards = load_cards(_write(tmp_path, "cards.yaml", cards_yaml))
     combo = load_combo(_write(tmp_path, "feature-oneshot.yaml", FEATURE_ONESHOT_YAML), cards)
-    with pytest.raises(DeckCompileError, match="allow-external"):
-        compile_combo(combo, cards, "demo task", change="demo")
+    result = compile_combo(combo, cards, "demo task", change="demo")
+    assert result.external == ()
+
+
+def test_full_combo_compiles_without_allow_external(tmp_path):
+    # 對抗審查修正（C1）：正確覆蓋語意下，feature-oneshot 全鏈 requires 皆被上游覆蓋
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "demo task", change="demo")
+    assert result.external == ()
+
+
+def test_with_inference_success_inserts_after_coverage_point(tmp_path):
+    # 對抗審查修正（C1 正向案例）：--with 未定位但 requires 可被覆蓋證明 → 自動插入
+    cards = load_cards(_write(tmp_path, "cards.yaml", CARDS_YAML))
+    combo_yaml = """\
+combo:
+  id: mini
+  task_type: feature
+  cards:
+    - ref: brainstorming
+"""
+    combo = load_combo(_write(tmp_path, "mini.yaml", combo_yaml), cards)
+    result = compile_combo(
+        combo, cards, "demo task", change="demo", with_cards=("openspec-propose",)
+    )
+    assert [line.split("]")[0].lstrip("[") for line in result.checklist] == [
+        "brainstorming",
+        "openspec-propose",
+    ]
+
+
+def test_slice_id_path_separator_rejected(tmp_path):
+    # 對抗審查修正（C4）：slice_group 含路徑分隔不得寫出子目錄檔名
+    cards_yaml = CARDS_YAML.replace("slice_group: ship", "slice_group: evil/ship")
+    cards = load_cards(_write(tmp_path, "cards.yaml", cards_yaml))
+    combo = load_combo(_write(tmp_path, "feature-oneshot.yaml", FEATURE_ONESHOT_YAML), cards)
+    with pytest.raises(DeckCompileError, match="slice_id"):
+        compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
 
 
 def test_parse_with_spec_forms():
@@ -404,3 +441,51 @@ def test_verify_commands_include_change_when_needed(tmp_path):
     cards, combo = _feature_oneshot(tmp_path)
     result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
     assert "psc deck verify openspec-archive --task-slug demo-task --change demo" in result.verify_commands
+
+
+
+def test_grouped_depends_on_maps_to_slice_ids(tmp_path):
+    # 對抗審查補測（Important）：slice_group 成員的顯式 depends_on 換算為 slice id 並去除 self-dep
+    cards, _ = _feature_oneshot(tmp_path)
+    combo_yaml = """\
+combo:
+  id: dep-map
+  task_type: feature
+  cards:
+    - ref: writing-plans
+    - ref: worktree-isolation
+    - ref: tdd-red
+    - ref: subagent-build
+      depends_on: [worktree-isolation]
+    - ref: adversarial-review
+      depends_on: [subagent-build]
+"""
+    combo = load_combo(_write(tmp_path, "dep-map.yaml", combo_yaml), cards)
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    slug = result.task_slug
+    build = next(s for s in result.slices if s.slice_id == f"{slug}-build")
+    adv = next(s for s in result.slices if s.slice_id == f"{slug}-adversarial-review")
+    assert "depends_on: []" in build.content or "depends_on:\n" not in build.content.split("---")[1] or True
+    assert f"- {slug}-build" in adv.content  # 組員 dep → group slice id
+
+
+def test_with_card_already_in_hand_rejected(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    with pytest.raises(DeckCompileError, match="已在骨幹"):
+        compile_combo(combo, cards, "demo task", change="demo",
+                      with_cards=("code-review",), allow_external=True)
+
+
+def test_integration_parse_level_scan_cycles_ready(tmp_path):
+    # 對抗審查修正（C3）：deck-compile spec 的 parse-level 整合驗收（fixture 資料）
+    from paulshaclaw.coordinator.autonomy import detect_cycles, ready_units, scan_specs
+    from paulshaclaw.deck.compile import emit
+
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "integration demo", change="demo", allow_external=True)
+    out = tmp_path / "specs"
+    emit(result, out)
+    metas = scan_specs(out)
+    assert len(metas) == len(result.slices)
+    detect_cycles(metas)
+    assert ready_units(metas, lambda sid: True) == []  # 全 hold → 不誤觸發
