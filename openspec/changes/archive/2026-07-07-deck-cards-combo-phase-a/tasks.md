@@ -53,6 +53,6 @@
 
 ## 8. 收尾
 
-- [x] 8.1 乾淨環境實走：`psc deck compile feature-oneshot --task <樣例> --emit` → hold specs 落地 → `psc deck verify` checklist 可執行（Phase A DoD）
+- [x] 8.1 乾淨環境實走：`psc deck compile feature-oneshot --task <樣例> --change <change> --emit` → hold specs 落地 → `psc deck verify` checklist 可執行（Phase A DoD）
 - [x] 8.2 README/docs 對齊（R-18）：deck 章節 + `#186` 進度更新
 - [x] 8.3 facade `specs_dir()` 後續提案（開 issue 或併 #91，設計 Open Question 裁決）
