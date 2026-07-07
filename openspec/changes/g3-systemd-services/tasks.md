@@ -23,5 +23,5 @@
 
 ## 5. adr 與收尾
 
-- [ ] 5.1 adr-001-always-on-deployment（實測依據/選路/rollback/運維指令表）
+- [x] 5.1 adr-001-always-on-deployment（實測依據/選路/rollback/運維指令表）
 - [ ] 5.2 全套件綠；PR body `Closes #126`
