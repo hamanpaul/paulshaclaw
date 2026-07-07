@@ -6,6 +6,10 @@ from pathlib import Path
 from .schema import Card
 
 
+class DeckVerifyError(ValueError):
+    """verify 參數/樣式錯誤（非 artifact 缺失）：佔位符未解析、絕對路徑、路徑逃逸。"""
+
+
 @dataclass(frozen=True)
 class VerifyResult:
     card_id: str
@@ -21,6 +25,18 @@ def _subst(glob: str, task_slug: str, change: str | None) -> str:
     return out
 
 
+def _guard_pattern(card_id: str, pattern: str) -> None:
+    """fail-closed 樣式守門（schema 載入已擋一輪，此處為縱深防禦——
+    Card 可被直接建構，不必然經過 load_cards）。"""
+    if "<" in pattern or ">" in pattern:
+        raise DeckVerifyError(
+            f"{card_id}: 佔位符未解析（卡片用到 <change> 需提供 change 參數）: {pattern!r}")
+    if pattern.startswith(("/", "~")) or Path(pattern).is_absolute():
+        raise DeckVerifyError(f"{card_id}: produces glob 不得為絕對路徑: {pattern!r}")
+    if ".." in pattern.split("/"):
+        raise DeckVerifyError(f"{card_id}: produces glob 不得含 .. 路徑段（root 逃逸）: {pattern!r}")
+
+
 def verify_card(
     card: Card,
     task_slug: str,
@@ -34,7 +50,11 @@ def verify_card(
     matched: list[str] = []
     for raw in card.produces:
         pattern = _subst(raw, task_slug, change)
-        hits = list(base.glob(pattern))
+        _guard_pattern(card.id, pattern)
+        try:
+            hits = list(base.glob(pattern))
+        except (NotImplementedError, ValueError) as exc:
+            raise DeckVerifyError(f"{card.id}: 非法 glob 樣式 {pattern!r}: {exc}") from exc
         if hits:
             matched.append(pattern)
         else:
