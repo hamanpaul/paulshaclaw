@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **硬前置 gate**：Plan 1b 已 merge 且產出 cortex main 的新 pin SHA（下稱 `<1b-pin-sha>`，取代 Plan 1 的 `2e67100`）。本計劃所有 `<1b-pin-sha>` 佔位符於動工時填實值。
+- **硬前置 gate**：Plan 1b 已 merge（PR #3，2026-07-08），cortex main 新 pin SHA = `c42ae7e6423d8dcca715afab1490a5973388204b`（取代 Plan 1 的 `2e67100`），已填入本計劃各處。
 - 工作 repo：`~/prj_pri/paulshaclaw`，於 worktree `.worktrees/232-cortex-extraction`（分支 `feature/232-cortex-extraction`，已含 spec/openspec/Plan 1b/2/3 文件）。
 - 主 repo runtime 程式碼 **MUST NOT** import `paulsha_cortex` 內部模組——僅允許 `paulsha_cortex.control.client`（bot/cockpit/core）與 `psc` shim 對 cortex CLI 入口（coordinator/deck/monitor）的 lazy import（openspec `cortex-consumer`「允許 import 面限定」）。
 - 測試面例外：主 repo 測試 MAY import `paulsha_hippo.lib.lifecycle.schema`，僅供 PHASES 對齊測試。
@@ -26,7 +26,7 @@
 - Modify: `pyproject.toml`
 
 **Interfaces:**
-- Produces: `paulsha-cortex @ git+…@<1b-pin-sha>` 依賴；`paulsha-hippo` pin 保留（PHASES 對齊測試需同裝）
+- Produces: `paulsha-cortex @ git+…@c42ae7e6423d8dcca715afab1490a5973388204b` 依賴；`paulsha-hippo` pin 保留（PHASES 對齊測試需同裝）
 
 - [ ] **Step 1: 寫失敗測試（依賴宣告存在性）**
 
@@ -52,12 +52,12 @@ Expected: FAIL（尚無 cortex 依賴）
 
 - [ ] **Step 3: pyproject 加 pin**
 
-`pyproject.toml` `dependencies` 追加（`<1b-pin-sha>` 填實值）：
+`pyproject.toml` `dependencies` 追加（`c42ae7e6423d8dcca715afab1490a5973388204b` 填實值）：
 
 ```toml
 dependencies = [
     "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@30ebbbd598ec1e43c8b663c12f4ff1cffde3fc79",
-    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@<1b-pin-sha>",
+    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@c42ae7e6423d8dcca715afab1490a5973388204b",
 ]
 ```
 
@@ -70,7 +70,7 @@ Expected: 安裝成功、PASS
 
 ```bash
 git add pyproject.toml tests/test_cortex_consumer_pin.py
-git commit -m "feat: pin paulsha-cortex 依賴（<1b-pin-sha>）"
+git commit -m "feat: pin paulsha-cortex 依賴（c42ae7e6423d8dcca715afab1490a5973388204b）"
 ```
 
 ---

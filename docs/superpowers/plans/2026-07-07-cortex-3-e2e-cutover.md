@@ -25,7 +25,7 @@
 - （驗證；無 code）
 
 **Interfaces:**
-- Consumes: Plan 2 merged 的主 repo main（pin cortex `<1b-pin-sha>` + hippo）
+- Consumes: Plan 2 merged 的主 repo main（pin cortex `c42ae7e6423d8dcca715afab1490a5973388204b` + hippo）
 - Produces: 乾淨環境安裝證明——主 repo import 不破、psc shim 通、依賴解析含 cortex+hippo
 
 - [ ] **Step 1: 乾淨 venv 安裝主 repo**
@@ -160,10 +160,10 @@ Expected: `gate ok`。**FAIL（自停或 lock owner 錯）→ 停 Plan 3**：確
 
 - [ ] **Step 2: complete tick（明確命令+參數+斷言，F3.6）**
 
-動工前 `cortex coordinator --help` 確認 tick 子命令實名；complete-tick 需 `--specs-dir`：
+動工前 `cortex coordinator --help` 確認 tick 子命令實名；tick 需 `--specs-dir`：
 
 ```bash
-/tmp/psc-e2e/bin/cortex coordinator complete-tick --specs-dir "$HOME/.agents/specs"; echo "tick exit=$?"
+/tmp/psc-e2e/bin/cortex coordinator tick --specs-dir "$HOME/.agents/specs"; echo "tick exit=$?"
 ```
 
 Expected: `tick exit=0`（無 ready unit 空跑亦 0——證明 daemon 讀對 control/specs root）。**非 0 → 定位（specs-dir/control root 解析）**

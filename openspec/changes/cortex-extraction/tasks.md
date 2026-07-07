@@ -12,17 +12,19 @@
 
 > **codex 對抗審查（兩輪）已解**：R1 F2/F3/F4（PY 解譯器 persist、`--repo-root`+PSC_REPO_ROOT、`cortex relay-hook` + 剝 bro-return glue）、R2（env 只更新 managed keys、execv 對 0644 bash fallback）。F1（`stop_legacy_manager_timer` 自停）為 paulshaclaw verbatim 繼承、非拆分回歸 → cortex issue #2 follow-up。fresh-install 0644 fallback 實測通過。
 
-## 1b. deck + monitor 進 cortex（R1 採 B 新增，於 paulsha-cortex repo 內，另出 Plan 1b）
+## 1b. deck + monitor 進 cortex（R1 採 B 新增）——✅ 完成 2026-07-08（PR #3 merged）
 
-- [ ] 1b.1 平移 `deck/**`（835 行）+ `monitor/**`（1412 行）+ 各自測試進 cortex；import 改 `paulsha_cortex.*`（兩者僅 import `config.paths`，cortex 已自帶 → 零新剪線）
-- [ ] 1b.2 CLI：`cortex deck …`、`cortex monitor …` 子命令接線；`cortex` 傘狀入口路由
-- [ ] 1b.3 persona↔deck：既有 fail-open lazy import 可改為正常 import（同包後不再需要 fail-open）；或保留亦可
-- [ ] 1b.4 monitor merge adapter（R1.6）：讀 `project-cortex.yaml`（手寫）⊍ `project-hippo.yaml`（缺則 graceful 退 manual-only）、依路徑/身分去重；config 由 `paulshaclaw.yaml` 改名 `project-cortex.yaml`、base dir 統一（相容過渡讀舊路徑）
-- [ ] 1b.5 monitor 服務併入 `cortex install service`（一次裝 manager + monitor 兩 unit，不拆；monitor single-instance 沿用 socket 佔用檢查）
-- [ ] 1b.6 persona 重定義（R1.7）：實查無 code 把 contract 與 enforcement 混在一起，docs/命名澄清（AgentInstance/Persona/Guardrail/Manager）
-- [ ] 1b.7 去識別化 + 零依賴（deck/monitor 不引入新依賴；讀 `project-hippo.yaml` 為檔案契約非 import hippo）；cortex 全測試綠
-- [ ] 1b.8 #186 deck Phase B/C 續作入口隨 deck 移入 cortex repo（openspec/issue 轉址）
-- [ ] 1b.9 產出新 pin SHA（Plan 2 以此 pin，取代 §1 的 `2e67100`）
+- [x] 1b.1 平移 `deck/**` + `monitor/**` + 各自測試進 cortex；import 改 `paulsha_cortex.*`（零新剪線）
+- [x] 1b.2 CLI：`cortex deck …`、`cortex monitor …` 子命令接線；`cortex` 傘狀入口路由
+- [x] 1b.3 persona↔deck：改同包正常 import（`load_catalog`）、docs 澄清 persona 為角色契約資料
+- [x] 1b.4 monitor merge adapter（R1.6）：`ProjectEntry`/`merge_projects`/`load_hippo_projects`、`MonitorConfig.hippo_projects`、`load_config` 用 `dataclasses.replace` 保欄位；config 改名 `project-cortex.yaml`、base dir `~/.agents/config/paulsha/`、legacy 讀取順序；realpath 去重（對抗審查 F2 補函式內正規化）
+- [x] 1b.5 monitor 併入 `cortex install service`（一次裝 manager + monitor；monitor.service 讀兩個 env file、socket 單實例）
+- [x] 1b.6 persona 重定義：contract/guardrail 本已分離、docs 澄清
+- [x] 1b.7 去識別化 CLEAN + 零依賴（runtime `paulsha_hippo`=0、deps 僅 PyYAML）；cortex 452 tests 綠
+- [ ] 1b.8 #186 deck Phase B/C 續作入口隨 deck 移入 cortex repo（openspec/issue 轉址）——**尾巴，待 Phase B 動工時做**
+- [x] 1b.9 新 pin SHA = **`c42ae7e6423d8dcca715afab1490a5973388204b`**（Plan 2 以此 pin，取代 §1 的 `2e67100`）
+
+> **codex 對抗審查（PR #3）**：F2 merge_projects realpath 去重已修；F1（掃描暫時錯誤假移除）/F3（非正 interval）為陳年繼承 → cortex issue #4 follow-up。**GitHub Copilot review**：`or True` 空測試、`_read_line` 64KiB 上限、`default_config_path` 指新路徑 已修；int interval 型別驗證歸 issue #4。deck 打包 data/*.yaml（F2 Plan 層）、monitor env 兩檔（F4）皆落地。
 
 > **閉環（R1.9）非 Plan 1b 範圍**：deck+monitor 只搬入、擺放不擋 feedback edge 接點；monitor→manager 觸發（含情境1 去重）、失敗 retry（情境2）、hold→auto 自動化（情境3/G2）皆為拆分後 feature。
 
