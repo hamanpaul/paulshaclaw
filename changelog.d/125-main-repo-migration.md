@@ -1,0 +1,2 @@
+### Changed
+- **BREAKING（#125 Phase 1 主 repo 刀）**：`paulshaclaw/memory/**`、`paulshaclaw/lifecycle/**` 遷出至 [paulsha-hippo](https://github.com/hamanpaul/paulsha-hippo)，pyproject 以 commit SHA pin 引回；`psc memory` 子樹移除（指引改用 `hippo`）；`core/daemon.py` agent argv 解耦為 `PSC_AGENT_COMMAND` env + wrapper 絕對路徑預設；`service-dream.sh` cutover 為呼叫 `paulsha_hippo.cli`（未裝則跳過+警告）；deploy 面 dream unit/env 退役移交 hippo installer；新增 hippo-consumer 契約測試（import 面限定 `paulsha_hippo.lib.*`）

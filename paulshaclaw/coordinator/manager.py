@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Protocol
 
 from ..persona import gate, handoff
-from ..memory.dream import idle
+from paulsha_hippo.lib import idle
 from . import autonomy
 
 IN_FLIGHT_STATUSES = frozenset({"dispatched", "running"})

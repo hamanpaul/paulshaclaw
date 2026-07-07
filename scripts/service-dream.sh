@@ -18,6 +18,12 @@ start_dream_loop() {
     echo "dream loop disabled (PSC_DREAM_DISABLED=1)"
     return 0
   fi
+  # #125 cutover：dream 蒸餾由 paulsha-hippo 提供——未安裝則跳過並警告，
+  # 不殘留對 paulshaclaw.memory 的呼叫（hippo-consumer spec）。
+  if ! "$PY" -c "import paulsha_hippo" >/dev/null 2>&1; then
+    echo "dream loop skipped: paulsha-hippo 未安裝（pipx install git+https://github.com/hamanpaul/paulsha-hippo）" >&2
+    return 0
+  fi
   local dream_root="${PSC_MEMORY_ROOT:-$HOME/.agents/memory}"
   if [[ ! -e "$dream_root" ]]; then
     echo "dream loop skipped: memory root not found ($dream_root)" >&2
@@ -37,7 +43,7 @@ start_dream_loop() {
       sleep "$interval"
       # #176: doc-fragment 產生端過濾。roots = instruction_corpus.default_roots()，
       # 與 moc/runner 的 index 端 broad corpus 同源——index 排除什麼、產生端就擋什麼。
-      PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run \
+      "$PY" -m paulsha_hippo.cli dream run \
         --memory-root "$dream_root" --require-idle --promoter llm \
         --instruction-root "$HOME/.claude/CLAUDE.md" \
         --instruction-root "$HOME/CLAUDE.md" \

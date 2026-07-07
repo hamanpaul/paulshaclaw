@@ -3,7 +3,11 @@ from __future__ import annotations
 import sys
 from typing import Sequence
 
-_USAGE = "usage: psc {memory|coordinator} <args...>\n"
+_USAGE = "usage: psc {coordinator} <args...>\n"
+_MEMORY_MOVED = (
+    "psc memory 已遷移至 paulsha-hippo（#125 Phase 1）。\n"
+    "改用：hippo <subcommand>（安裝：pipx install git+https://github.com/hamanpaul/paulsha-hippo）\n"
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -14,9 +18,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     head, rest = args[0], args[1:]
     if head == "memory":
-        from paulshaclaw.memory.cli import main as memory_main
-
-        return int(memory_main(["memory", *rest]) or 0)
+        sys.stderr.write(_MEMORY_MOVED)
+        return 2
     if head == "coordinator":
         from paulshaclaw.coordinator.cli import main as coordinator_main
 

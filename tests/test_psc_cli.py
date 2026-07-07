@@ -3,18 +3,14 @@ from __future__ import annotations
 from paulshaclaw import cli
 
 
-def test_route_memory(monkeypatch) -> None:
-    called: dict[str, object] = {}
-
-    def fake_main(argv):
-        called.setdefault("argv", argv)
-        return 0
-
-    monkeypatch.setattr("paulshaclaw.memory.cli.main", fake_main)
+def test_route_memory_moved_guidance(capsys) -> None:
+    # #125：memory 子樹已遷 paulsha-hippo——指引改用 hippo，exit 2
     rc = cli.main(["memory", "dream", "status"])
 
-    assert rc == 0
-    assert called["argv"] == ["memory", "dream", "status"]
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "paulsha-hippo" in err
+    assert "hippo" in err
 
 
 def test_route_coordinator(monkeypatch) -> None:

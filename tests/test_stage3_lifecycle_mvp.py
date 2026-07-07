@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from paulshaclaw.lifecycle import events, gate, schema, template
+from paulsha_hippo.lib.lifecycle import events, gate, schema, template
 
 
 def make_artifact_text(
@@ -68,7 +68,7 @@ class FrontmatterSchemaTests(unittest.TestCase):
                 [
                     sys.executable,
                     "-m",
-                    "paulshaclaw.lifecycle.gate",
+                    "paulsha_hippo.lib.lifecycle.gate",
                     "--artifact",
                     str(artifact_path),
                 ],

@@ -83,7 +83,7 @@ policy_version: 1.0.12
 ### 分階段生命週期（staged lifecycle）
 - Stage 0：工具／命名整理 + OpenSpec・Superpowers 骨架
 - Stage 1：`PaulShiaBro` daemon / TUI / Telegram bot / registry
-- Stage 2：`~/.agents/memory` 記憶基座
+- Stage 2：`~/.agents/memory` 記憶基座（#125 起實作移至 [paulsha-hippo](https://github.com/hamanpaul/paulsha-hippo)，本 repo 以 pip 依賴引回）
 - Stage 3：slash-command 生命週期（artifacts + gates）
 - Stage 4：persona 契約、handoff、護欄
 - Stage 5+：可觀測性、安全、部署加固

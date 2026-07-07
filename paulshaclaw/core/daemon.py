@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import json
 import shlex
 import subprocess
@@ -14,7 +15,6 @@ from paulshaclaw.control import client as control_client
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_dispatcher import CommandDispatcher
 from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry
-from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.core.tmate import TmateManager
 
 
@@ -260,11 +260,26 @@ class PaulShiaBroDaemon:
         return None
 
     def _agent_launch_argv(self) -> list[str]:
-        try:
-            config, _config_hash = atomizer_config.load_config()
-        except atomizer_config.AtomizerConfigError as exc:
-            raise ValueError(f"agent command unavailable: {exc}") from exc
-        return list(atomizer_config.resolve_command_argv(config.agent_exec_command))
+        """#125 解耦：daemon 自有 agent 命令來源，不再借 hippo（原 atomizer）config。
+
+        優先序：PSC_AGENT_COMMAND env（shlex）> 預設 repo 內 wrapper 絕對路徑。
+        安裝為套件後相對路徑會解析到 site-packages（#218 review F3 教訓），
+        故一律絕對化；缺檔時明確報錯、不靜默 fallback（agent-command spec）。
+        """
+        import shlex
+
+        from paulshaclaw.config import paths as _paths
+
+        env_command = os.environ.get("PSC_AGENT_COMMAND", "").strip()
+        if env_command:
+            return shlex.split(env_command)
+        wrapper = _paths.repo_root() / "scripts" / "claude-gemma4"
+        if not wrapper.is_file():
+            raise ValueError(
+                "agent command unavailable: 預設 wrapper 不存在 "
+                f"({wrapper})；請設 PSC_AGENT_COMMAND"
+            )
+        return [str(wrapper)]
 
     def _agent_status_payload(self, *, pane_id: str | None = None, pid: int | None = None) -> dict[str, object]:
         payload: dict[str, object] = {

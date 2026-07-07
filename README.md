@@ -71,7 +71,7 @@ flowchart LR
     SYNC["syncback / replay"] -.回填 / 復盤.-> ZK
 ```
 
-**資料流（deterministic pipeline，見 [`memory/routing.md`](./paulshaclaw/memory/routing.md)）**
+**資料流（deterministic pipeline，見 [paulsha-hippo routing.md](https://github.com/hamanpaul/paulsha-hippo/blob/main/paulsha_hippo/routing.md)）**
 
 | 階段 | 子模組 | 做什麼 |
 |---|---|---|
@@ -82,7 +82,7 @@ flowchart LR
 | 背景 | `dream` | 常駐的週期蒸餾迴圈，持續把新 transcript 煉成筆記 |
 | 治理 | `policy` · `ledger` · `syncback` · `replay` | 記憶安全政策（redaction / classification / audit）、事件 ledger 與完整性、回填與復盤 |
 
-輔以 `retrieval`（取用）、`retitle` / `rekey`（重寫標題 / 主鍵）、`noise`（去噪）、`usage`（用量）、`skillopt`、`lint` 等。實作見 [`paulshaclaw/memory/`](./paulshaclaw/memory/)。
+輔以 `retrieval`（取用）、`retitle` / `rekey`（重寫標題 / 主鍵）、`noise`（去噪）、`usage`（用量）、`skillopt`、`lint` 等。實作已於 #125 Phase 1 遷移至獨立 repo [paulsha-hippo](https://github.com/hamanpaul/paulsha-hippo)（`pipx install` 即可單獨使用；本 repo 以 SHA pin 依賴引回，`~/.agents/memory` 資料契約不變）。
 
 **設計重點**：地端 LLM 蒸餾（隱私留在本機）、跨 vendor 統一格式（adapter 正規化）、idempotent ledger（可重跑不重複）、fail-close 的 ingestion 安全契約。
 
@@ -194,7 +194,7 @@ cp config/paulshaclaw-stage1.sample.json config/paulshaclaw-stage1.json
 #   - 狀態 / secret 目錄（repo 外）
 
 # 4. 跑測試確認核心
-pytest tests/ paulshaclaw/memory/tests/
+pytest tests/
 ```
 
 **安全 / 不入庫**：密鑰、token、個人狀態一律放 repo 外（透過 config 指向 `~/.config/...`、`~/.agents/...`）。請勿把任何真實密鑰、內網主機名、客戶 / 專案代號寫進 repo。CI（[`.github/workflows/tests.yml`](./.github/workflows/tests.yml)）會在 push / PR 跑測試。
@@ -206,7 +206,7 @@ pytest tests/ paulshaclaw/memory/tests/
 本專案重度綁一套特定個人環境（見「環境前提」）；公開的價值在於**讀架構 / 設計**與**跑測試**，而非一鍵運行。
 
 - 從上方「心智模型」與三大支柱讀起，對照各模組原始碼。
-- 記憶 pipeline 的子模組與資料流見 [`paulshaclaw/memory/`](./paulshaclaw/memory/) 與 [`paulshaclaw/memory/routing.md`](./paulshaclaw/memory/routing.md)。
+- 記憶 pipeline 已遷至 [paulsha-hippo](https://github.com/hamanpaul/paulsha-hippo)——子模組與資料流見其 `paulsha_hippo/routing.md`。
 - manager 由 [`scripts/start.sh`](./scripts/start.sh) 拉起；介面層（core / bot / cockpit）透過 `~/.agents/control/` 檔案契約驅動它。
 - 設計與規格入口見 [`docs/`](./docs/)、[`openspec/`](./openspec/)。
 
@@ -217,7 +217,7 @@ pytest tests/ paulshaclaw/memory/tests/
 - 架構總覽：[`docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md`](./docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md)
 - Stage 3 生命週期 / slash-command / gate：[`docs/research/03...`](./docs/research/03.stage3-lifecycle-slash-commands-artifacts-phase-gating-research.md)
 - Stage 4 persona 契約 / handoff / 護欄：[`docs/research/04...`](./docs/research/04.stage4-persona-role-catalog-handoff-guardrails-research.md)
-- 記憶路由：[`paulshaclaw/memory/routing.md`](./paulshaclaw/memory/routing.md)
+- 記憶路由：[paulsha-hippo routing.md](https://github.com/hamanpaul/paulsha-hippo/blob/main/paulsha_hippo/routing.md)
 - 規格與變更：[`openspec/`](./openspec/)
 
 ---
