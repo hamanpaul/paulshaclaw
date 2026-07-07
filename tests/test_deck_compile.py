@@ -152,6 +152,19 @@ combo:
     - ref: adversarial-review
 """
 
+SPLIT_BUILD_COMBO = """\
+combo:
+  id: split-build
+  task_type: feature
+  cards:
+    - ref: brainstorming
+    - ref: openspec-propose
+    - ref: writing-plans
+    - ref: worktree-isolation
+    - ref: code-review
+    - ref: tdd-red
+"""
+
 
 def _write(tmp_path, name: str, text: str):
     path = tmp_path / name
@@ -256,6 +269,17 @@ def test_requires_external_allowed_and_reported(tmp_path):
     assert result.external
 
 
+def test_requires_archive_path_still_counts_as_external(tmp_path):
+    cards_yaml = CARDS_YAML.replace(
+        'produces: ["reports/review/*<task-slug>*.md"]',
+        'produces: ["reports/review/archive/*<task-slug>*.md"]',
+    )
+    cards = load_cards(_write(tmp_path, "cards.yaml", cards_yaml))
+    combo = load_combo(_write(tmp_path, "feature-oneshot.yaml", FEATURE_ONESHOT_YAML), cards)
+    with pytest.raises(DeckCompileError, match="allow-external"):
+        compile_combo(combo, cards, "demo task", change="demo")
+
+
 def test_parse_with_spec_forms():
     assert parse_with_spec("mcu-hw-evidence") == ("mcu-hw-evidence", None, None)
     assert parse_with_spec("x:after=code-review") == ("x", "after", "code-review")
@@ -304,6 +328,20 @@ def test_only_exclusive_mode(tmp_path):
     ]
 
 
+def test_with_and_only_are_mutually_exclusive(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    with pytest.raises(DeckCompileError, match="不可同時"):
+        compile_combo(
+            combo,
+            cards,
+            "demo task",
+            change="demo",
+            with_cards=("mcu-hw-evidence:after=brainstorming",),
+            only=("code-review",),
+            allow_external=True,
+        )
+
+
 def test_emit_writes_flat_and_refuses_overwrite(tmp_path):
     cards, combo = _feature_oneshot(tmp_path)
     result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
@@ -321,3 +359,16 @@ def test_emit_force_overwrites_atomically(tmp_path):
     written = emit(result, tmp_path, force=True)
     assert written
     assert all(path.read_text(encoding="utf-8").startswith("---") for path in written)
+
+
+def test_compile_rejects_duplicate_slice_ids_from_split_group(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", CARDS_YAML))
+    combo = load_combo(_write(tmp_path, "split-build.yaml", SPLIT_BUILD_COMBO), cards)
+    with pytest.raises(DeckCompileError, match="重複"):
+        compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+
+
+def test_verify_commands_include_change_when_needed(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    assert "psc deck verify openspec-archive --task-slug demo-task --change demo" in result.verify_commands

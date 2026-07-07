@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -73,6 +74,8 @@ def _resolve_hand(
     with_cards: Sequence[str],
     only: Sequence[str],
 ) -> list[ComboEntry]:
+    if with_cards and only:
+        raise DeckCompileError("--with 與 --only 不可同時使用")
     if only:
         combo_refs = {entry.ref for entry in combo.cards}
         unknown = [card_id for card_id in only if card_id not in combo_refs]
@@ -118,10 +121,8 @@ def _prefix(glob: str) -> str:
 
 
 def _covered(require: str, produce: str) -> bool:
-    """保守判斷 produce 是否覆蓋 require 的 pattern 前綴。"""
-    require_prefix = _prefix(require)
-    produce_prefix = _prefix(produce)
-    return require_prefix.startswith(produce_prefix) or produce_prefix.startswith(require_prefix)
+    """Phase A 只在 pattern 完全一致時視為已覆蓋；其餘情況一律 fail-closed。"""
+    return require == produce
 
 
 def _check_requires_coverage(
@@ -151,6 +152,7 @@ def _group_slices(
     slug: str,
 ) -> list[tuple[str, list[Card]]]:
     groups: list[tuple[str, list[Card]]] = []
+    seen_ids: set[str] = set()
     for entry in entries:
         card = cards[entry.ref]
         if card.type != "headless":
@@ -162,6 +164,9 @@ def _group_slices(
         if groups and groups[-1][0] == slice_id:
             groups[-1][1].append(card)
             continue
+        if slice_id in seen_ids:
+            raise DeckCompileError(f"combo 產生重複 slice_id: {slice_id}")
+        seen_ids.add(slice_id)
         groups.append((slice_id, [card]))
     return groups
 
@@ -193,6 +198,10 @@ def _default_plan_ref(
         if card.type == "interactive" and card.produces:
             return _subst(card.produces[0], slug, change)
     return None
+
+
+def _uses_change(card: Card) -> bool:
+    return any("<change>" in pattern for pattern in card.requires + card.produces)
 
 
 def compile_combo(
@@ -260,7 +269,10 @@ def compile_combo(
 
         for member in members:
             if member.produces:
-                verify_commands.append(f"psc deck verify {member.id} --task-slug {slug}")
+                command = f"psc deck verify {member.id} --task-slug {slug}"
+                if _uses_change(member):
+                    command += f" --change {change}"
+                verify_commands.append(command)
         previous_slice_id = slice_id
 
     return CompileResult(
@@ -275,17 +287,48 @@ def compile_combo(
 def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) -> list[Path]:
     """將 compiled slices 寫成平鋪 specs 檔。"""
     directory = Path(target_dir)
-    directory.mkdir(parents=True, exist_ok=True)
+    filenames = [slice_doc.filename for slice_doc in result.slices]
+    duplicates = sorted({name for name in filenames if filenames.count(name) > 1})
+    if duplicates:
+        raise DeckCompileError("emit 結果含重複檔名: " + ", ".join(duplicates))
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise DeckCompileError(f"emit 目標目錄不可用: {directory}: {exc}") from exc
 
-    conflicts = [slice_doc.filename for slice_doc in result.slices if (directory / slice_doc.filename).exists()]
+    conflicts = [filename for filename in filenames if (directory / filename).exists()]
     if conflicts and not force:
         raise DeckCompileError("emit 目標已存在同名 spec（--force 才覆蓋）：" + ", ".join(conflicts))
 
     written: list[Path] = []
-    for slice_doc in result.slices:
-        final_path = directory / slice_doc.filename
-        temp_path = directory / f"{slice_doc.filename}.tmp"
-        temp_path.write_text(slice_doc.content, encoding="utf-8")
-        os.replace(temp_path, final_path)
-        written.append(final_path)
+    try:
+        for slice_doc in result.slices:
+            final_path = directory / slice_doc.filename
+            if force:
+                fd, temp_name = tempfile.mkstemp(
+                    prefix=f"{slice_doc.filename}.",
+                    suffix=".tmp",
+                    dir=directory,
+                )
+                temp_path = Path(temp_name)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                        handle.write(slice_doc.content)
+                    os.replace(temp_path, final_path)
+                finally:
+                    temp_path.unlink(missing_ok=True)
+            else:
+                fd = os.open(final_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                        handle.write(slice_doc.content)
+                except Exception:
+                    final_path.unlink(missing_ok=True)
+                    raise
+            written.append(final_path)
+    except OSError as exc:
+        if not force:
+            for path in written:
+                path.unlink(missing_ok=True)
+        raise DeckCompileError(f"emit 寫入失敗: {exc}") from exc
     return written

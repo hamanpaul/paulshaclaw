@@ -195,3 +195,24 @@ def test_compile_emit_writes_hold_specs(tmp_path, monkeypatch):
     files = sorted(specs_root.glob("*.md"))
     assert files
     assert all("dispatch: hold" in path.read_text(encoding="utf-8") for path in files)
+
+
+def test_compile_out_file_path_reports_error(tmp_path, capsys, monkeypatch):
+    _seed_fixture(tmp_path / "deck", monkeypatch)
+    out_file = tmp_path / "not-a-dir"
+    out_file.write_text("occupied", encoding="utf-8")
+    rc = deck_cli.main(
+        [
+            "compile",
+            "feature-oneshot",
+            "--task",
+            "demo task",
+            "--change",
+            "demo",
+            "--allow-external",
+            "--out",
+            str(out_file),
+        ]
+    )
+    assert rc == 1
+    assert "deck:" in capsys.readouterr().err
