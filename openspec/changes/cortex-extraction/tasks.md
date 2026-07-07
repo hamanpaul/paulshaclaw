@@ -1,14 +1,16 @@
-## 1. Cortex repo 建立（外部前置，於 paulsha-cortex repo 內執行）
+## 1. Cortex repo 建立（外部前置，於 paulsha-cortex repo 內執行）——✅ 完成 2026-07-07（PR #1 merged）
 
-- [ ] 1.1 Phase 0 骨架：new-project-template 起 repo（無歷史）、pyproject（package `paulsha_cortex`）、tests CI（R-19）、policy engine pin v1.0.12、tag ruleset、R-21 shareable tier
-- [ ] 1.2 Phase 1 平移：`persona/**`、`coordinator/**`、`control/**` 三包與約 25 個測試檔遷入
-- [ ] 1.3 剪線一：PHASES 7 字串常數自帶（persona contract 改讀本地常數，移除 `paulsha_hippo.lib.lifecycle` import）
-- [ ] 1.4 剪線二：`lib/idle.py` 23 行 vendor 進 cortex（含來源 hippo commit 註記）
-- [ ] 1.5 剪線三：cortex 自帶 paths 模組（`control_root`/`coordinator_root`/`repo_root`/`specs_root`/`worktree_root`，遵守 `PSC_*` env 覆寫契約）
-- [ ] 1.6 cortex console script 與 `install service`（manager systemd 單元出貨、冪等實作）
-- [ ] 1.7 `scripts/coordinator/**`、`service-manager.sh` 平移；persona-scope CI workflow 於 cortex 續跑
-- [ ] 1.8 cortex 全測試綠；單寫者 flock（`manager.lock`）測試隨包平移確認
-- [ ] 1.9 產出 pin 用 commit SHA（gate：主 repo 遷移刀依賴此 SHA 才能動工）
+- [x] 1.1 Phase 0 骨架：new-project-template 起 repo（無歷史）、pyproject（package `paulsha_cortex`）、tests CI（R-19）、policy engine pin v1.0.12、tag ruleset、R-21 shareable tier
+- [x] 1.2 Phase 1 平移：`persona/**`、`coordinator/**`、`control/**` 三包與約 25 個測試檔遷入
+- [x] 1.3 剪線一：PHASES 7 字串常數自帶（persona contract 改讀本地常數，移除 `paulsha_hippo.lib.lifecycle` import）
+- [x] 1.4 剪線二：`lib/idle.py` 23 行 vendor 進 cortex（含來源 hippo commit 註記）
+- [x] 1.5 剪線三：cortex 自帶 paths 模組（`control_root`/`coordinator_root`/`repo_root`/`specs_root`/`worktree_root`，遵守 `PSC_*` env 覆寫契約；repo_root 改 `PSC_REPO_ROOT`→cwd）
+- [x] 1.6 cortex console script 與 `install service`（manager systemd 單元出貨、冪等實作）
+- [x] 1.7 relay-hook/notifier/hooks json 平移（`dispatch-stage-wave-a.sh`/`copilot-stage-worker.sh` 留主 repo）；`service-manager.sh` 參數化；persona-scope CI workflow 於 cortex 續跑
+- [x] 1.8 cortex 全測試綠（277 passed）；單寫者 flock（`manager.lock`）測試隨包平移確認
+- [x] 1.9 產出 pin 用 commit SHA：**`2e67100d1184bcaa26bce313f84c388e86f35928`**（Plan 2 主 repo 遷移刀以此 pin）
+
+> **codex 對抗審查（兩輪）已解**：R1 F2/F3/F4（PY 解譯器 persist、`--repo-root`+PSC_REPO_ROOT、`cortex relay-hook` + 剝 bro-return glue）、R2（env 只更新 managed keys、execv 對 0644 bash fallback）。F1（`stop_legacy_manager_timer` 自停）為 paulshaclaw verbatim 繼承、非拆分回歸 → cortex issue #2 follow-up。fresh-install 0644 fallback 實測通過。
 
 ## 2. 主 repo 遷移刀
 
