@@ -45,4 +45,7 @@ def test_feature_oneshot_combo_loads():
     assert [(gate.after, gate.exists) for gate in combo.gate_spine] == [
         ("writing-plans", ("docs/superpowers/plans/*<task-slug>*.md",)),
         ("code-review", ("reports/review/*<task-slug>*.md",)),
+        ("verification", ("reports/verify/*<task-slug>*.md",)),
+        ("openspec-archive", ("openspec/changes/archive/*<change>*",)),
+        ("adversarial-review", ("reports/review/*<task-slug>*-adversarial.md",)),
     ]
