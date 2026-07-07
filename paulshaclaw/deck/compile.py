@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from paulshaclaw.config import paths
+
 from .schema import Card, Combo, ComboEntry
 
 
@@ -27,11 +29,13 @@ def slugify_task(task: str) -> str:
 
 
 def specs_dir() -> Path:
-    """鏡射 manager_daemon.default_specs_dir 的 specs 路徑契約。"""
+    """鏡射 manager_daemon.default_specs_dir 的 specs 路徑契約：
+    PSC_MANAGER_SPECS_DIR → paths.specs_root()（吃 PSC_SPECS_ROOT/PSC_AGENTS_ROOT）。
+    facade 為允許依賴（零 import 鐵律僅涵蓋 lifecycle/memory）。"""
     override = os.environ.get("PSC_MANAGER_SPECS_DIR")
     if override:
         return Path(override)
-    return Path.home() / ".agents" / "specs"
+    return paths.specs_root()
 
 
 @dataclass(frozen=True)

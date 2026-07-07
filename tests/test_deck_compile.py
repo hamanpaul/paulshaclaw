@@ -489,3 +489,24 @@ def test_integration_parse_level_scan_cycles_ready(tmp_path):
     assert len(metas) == len(result.slices)
     detect_cycles(metas)
     assert ready_units(metas, lambda sid: True) == []  # 全 hold → 不誤觸發
+
+
+
+def test_specs_dir_env_matrix_matches_manager(monkeypatch, tmp_path):
+    # 對抗審查修正（C2）：與 manager 契約在全部 env 組合下一致
+    from paulshaclaw.coordinator.manager_daemon import default_specs_dir
+    from paulshaclaw.deck.compile import specs_dir
+
+    cases = (
+        {"PSC_MANAGER_SPECS_DIR": str(tmp_path / "m")},
+        {"PSC_SPECS_ROOT": str(tmp_path / "s")},
+        {"PSC_AGENTS_ROOT": str(tmp_path / "a")},
+        {"PSC_MANAGER_SPECS_DIR": str(tmp_path / "m"), "PSC_SPECS_ROOT": str(tmp_path / "s")},
+        {},
+    )
+    for env in cases:
+        for var in ("PSC_MANAGER_SPECS_DIR", "PSC_SPECS_ROOT", "PSC_AGENTS_ROOT"):
+            monkeypatch.delenv(var, raising=False)
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        assert str(specs_dir()) == default_specs_dir(), f"env={env}"
