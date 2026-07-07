@@ -9,11 +9,8 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from paulshaclaw.bot.listener import TelegramApiClient, TelegramApiError, load_bot_settings
+from paulshaclaw.config import paths
 from paulshaclaw.core.config import load_config
-
-DEFAULT_CONFIG_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.state.json"
-DEFAULT_SECRET_ENV_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.telegram.secret.env"
-DEFAULT_BINDINGS_PATH = Path.home() / ".agents/state/telegram-chat-bindings.json"
 
 
 @dataclass(frozen=True)
@@ -98,6 +95,18 @@ class TelegramReplyBridge:
         return targets
 
 
+def default_config_path() -> Path:
+    return paths.config_path("paulshaclaw.state.json")
+
+
+def default_secret_env_path() -> Path:
+    return paths.config_path("paulshaclaw.telegram.secret.env")
+
+
+def default_bindings_path() -> Path:
+    return paths.state_path("telegram-chat-bindings.json")
+
+
 def load_reply_env(
     *,
     secret_env_path: str | Path | None = None,
@@ -126,13 +135,16 @@ def build_reply_bridge(
     env: Mapping[str, str] | None = None,
 ) -> TelegramReplyBridge:
     reply_env = load_reply_env(secret_env_path=secret_env_path, env=env)
-    if config_path is None and "PSC_STAGE1_CONFIG" not in reply_env and DEFAULT_CONFIG_PATH.exists():
+    resolved_default_config_path = default_config_path()
+    if config_path is None and "PSC_STAGE1_CONFIG" not in reply_env and resolved_default_config_path.exists():
         reply_env = dict(reply_env)
-        reply_env["PSC_STAGE1_CONFIG"] = str(DEFAULT_CONFIG_PATH)
+        reply_env["PSC_STAGE1_CONFIG"] = str(resolved_default_config_path)
 
     settings = load_bot_settings(reply_env)
     config = load_config(config_path=config_path, env=reply_env)
-    bindings = TelegramChatBindingStore(bindings_path or reply_env.get("PSC_TELEGRAM_BINDINGS_PATH") or DEFAULT_BINDINGS_PATH)
+    bindings = TelegramChatBindingStore(
+        bindings_path or reply_env.get("PSC_TELEGRAM_BINDINGS_PATH") or default_bindings_path()
+    )
     return TelegramReplyBridge(
         client=TelegramApiClient(settings.token, opener=opener),
         bindings=bindings,
@@ -185,8 +197,9 @@ def _default_secret_env_path(env: Mapping[str, str]) -> Path | None:
     raw_path = env.get("PSC_TELEGRAM_SECRET_ENV", "").strip()
     if raw_path:
         return Path(raw_path)
-    if DEFAULT_SECRET_ENV_PATH.exists():
-        return DEFAULT_SECRET_ENV_PATH
+    resolved_default_secret_env_path = default_secret_env_path()
+    if resolved_default_secret_env_path.exists():
+        return resolved_default_secret_env_path
     return None
 
 

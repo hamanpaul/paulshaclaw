@@ -34,6 +34,7 @@ _COMBO_KEYS = frozenset({"id", "task_type", "cards", "gate_spine"})
 _COMBO_ENTRY_KEYS = frozenset({"ref", "depends_on"})
 _GATE_CHECK_KEYS = frozenset({"after", "exists"})
 _PLACEHOLDER_RE = re.compile(r"<([^<>]+)>")
+_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 DEFAULT_CARDS_PATH = Path(__file__).with_name("data") / "cards.yaml"
 DEFAULT_COMBOS_DIR = Path(__file__).with_name("data") / "combos"
@@ -86,6 +87,11 @@ def _check_placeholders(card_id: str, globs: tuple[str, ...], errors: list[str])
         residue = _PLACEHOLDER_RE.sub("", g)
         if "<" in residue or ">" in residue:
             errors.append(f"{card_id}: glob 含空白/巢狀/未閉合角括號: {g!r}")
+        # fail-closed：glob 一律相對於 verify --root，拒絕絕對/rooted 路徑與 .. 逃逸
+        if g.startswith(("/", "~")) or _DRIVE_RE.match(g):
+            errors.append(f"{card_id}: glob 不得為絕對/rooted 路徑: {g!r}")
+        elif ".." in g.split("/"):
+            errors.append(f"{card_id}: glob 不得含 .. 路徑段: {g!r}")
 
 
 def _str_tuple(value, card_id: str, field_name: str, errors: list[str]) -> tuple[str, ...]:

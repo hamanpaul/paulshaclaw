@@ -370,7 +370,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
 
     def test_cost_config_falls_back_to_sample_when_runtime_config_missing(self) -> None:
         with (
-            patch.object(cost_config_module, "DEFAULT_CONFIG_PATH", Path("missing-cost-config.yaml")),
+            patch.object(cost_config_module, "default_config_path", return_value=Path("missing-cost-config.yaml")),
             patch.dict("os.environ", {}, clear=True),
         ):
             cfg = load_cost_config()

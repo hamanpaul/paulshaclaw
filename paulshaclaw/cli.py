@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from typing import Sequence
 
-_USAGE = "usage: psc {memory|coordinator} <args...>\n"
+_USAGE = "usage: psc {memory|coordinator|deck} <args...>\n"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -21,6 +21,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         from paulshaclaw.coordinator.cli import main as coordinator_main
 
         return int(coordinator_main(rest) or 0)
+    if head == "deck":
+        from paulshaclaw.deck.cli import main as deck_main
+
+        return int(deck_main(rest) or 0)
 
     sys.stderr.write(_USAGE)
     return 2

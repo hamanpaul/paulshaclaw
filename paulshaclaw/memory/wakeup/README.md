@@ -35,7 +35,7 @@ python3 -m paulshaclaw.memory.cli memory wakeup \
 
 # 自動判定專案（從 cwd）
 python3 -m paulshaclaw.memory.cli memory wakeup \
-  --cwd /home/user/prj_pri/paulshaclaw
+  --cwd ~/prj_pri/paulshaclaw
 
 # 調整檢索參數
 python3 -m paulshaclaw.memory.cli memory wakeup \

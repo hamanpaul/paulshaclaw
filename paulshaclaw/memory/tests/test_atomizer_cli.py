@@ -136,6 +136,7 @@ class AtomizeCliLlmTests(unittest.TestCase):
         promoter = cli._build_promoter(args, cfg, Path("/tmp/does-not-matter"))
         inner = promoter._agent._inner
         self.assertEqual(inner._env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"], str(cfg.agent_exec_max_output_tokens))
+        self.assertEqual(inner._env["PSC_CLAUDE_GEMMA4_UPSTREAM_URL"], cfg.agent_exec_upstream_url)
 
 
 if __name__ == "__main__":

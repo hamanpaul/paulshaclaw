@@ -2,15 +2,23 @@
 import copy
 import hashlib
 import json
+import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
+from paulshaclaw.config import paths
+
 # Default config directory is package location
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_AGENT_EXEC_COMMAND = ("scripts/claude-gemma4",)
+DEFAULT_AGENT_EXEC_TIMEOUT = 600
+DEFAULT_AGENT_EXEC_MODEL = "unknown"
+DEFAULT_AGENT_EXEC_MAX_OUTPUT_TOKENS = 8192
+DEFAULT_AGENT_EXEC_UPSTREAM_URL = "http://192.0.2.10:8001"
 
 # Supported schema version
 _SUPPORTED_SCHEMA = "1"
@@ -34,13 +42,14 @@ class AtomizerConfig:
     phase_map: Mapping[str, str]
     default_artifact_kind: str = "report"
     default_phase: str = "review"
-    agent_exec_command: tuple[str, ...] = ("scripts/claude-gemma4",)
-    agent_exec_timeout: int = 600
-    agent_exec_model: str = "unknown"
-    agent_exec_max_output_tokens: int = 8192
+    agent_exec_command: tuple[str, ...] = DEFAULT_AGENT_EXEC_COMMAND
+    agent_exec_timeout: int = DEFAULT_AGENT_EXEC_TIMEOUT
+    agent_exec_model: str = DEFAULT_AGENT_EXEC_MODEL
+    agent_exec_max_output_tokens: int = DEFAULT_AGENT_EXEC_MAX_OUTPUT_TOKENS
+    agent_exec_upstream_url: str = DEFAULT_AGENT_EXEC_UPSTREAM_URL
     default_promoter: str = "identity"
     skill_path: str = "skills/atomize-knowledge-slice.md"
-    known_projects_file: str = "~/.agents/config/projects.yaml"
+    known_projects_file: str = field(default_factory=lambda: str(paths.projects_config_path()))
 
 
 def _read_mapping(path: Path) -> Mapping[str, Any]:
@@ -114,7 +123,7 @@ def _resolve_override(override_path):
     if override_path is None:
         return None
     elif override_path is _DEFAULT_SENTINEL:
-        return Path.home() / ".config" / "paulshaclaw" / "atomizer.override.yaml"
+        return paths.config_path("atomizer.override.yaml")
     else:
         return Path(override_path)
 
@@ -195,6 +204,31 @@ def resolve_command_argv(
             continue
         resolved.append(token)
     return tuple(resolved)
+
+
+def resolve_agent_exec_settings() -> tuple[tuple[str, ...], str]:
+    env_upstream = os.environ.get("PSC_CLAUDE_GEMMA4_UPSTREAM_URL")
+    try:
+        cfg, _ = load_config()
+        command = resolve_command_argv(cfg.agent_exec_command)
+        upstream = cfg.agent_exec_upstream_url
+    except Exception:
+        command = resolve_command_argv(DEFAULT_AGENT_EXEC_COMMAND)
+        upstream = DEFAULT_AGENT_EXEC_UPSTREAM_URL
+    if env_upstream is not None:
+        return command, env_upstream
+    return command, upstream
+
+
+def build_agent_exec_env(
+    *,
+    upstream_url: str,
+    max_output_tokens: int | None = None,
+) -> dict[str, str]:
+    env = {"PSC_CLAUDE_GEMMA4_UPSTREAM_URL": upstream_url}
+    if max_output_tokens is not None:
+        env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] = str(max_output_tokens)
+    return env
 
 
 def load_config(
@@ -279,19 +313,32 @@ def load_config(
             f"agent_exec must be a mapping, got {type(agent_exec_config).__name__}"
         )
     agent_exec_command = _parse_agent_exec_command(
-        agent_exec_config.get("command", ["scripts/claude-gemma4"])
+        agent_exec_config.get("command", list(DEFAULT_AGENT_EXEC_COMMAND))
     )
     agent_exec_timeout = _parse_positive_int(
-        agent_exec_config.get("timeout_seconds", 600),
+        agent_exec_config.get("timeout_seconds", DEFAULT_AGENT_EXEC_TIMEOUT),
         "agent_exec.timeout_seconds",
     )
     agent_exec_model = _require_non_empty_string(
-        agent_exec_config.get("model", "unknown"),
+        agent_exec_config.get("model", DEFAULT_AGENT_EXEC_MODEL),
         "agent_exec.model",
     )
     agent_exec_max_output_tokens = _parse_positive_int(
-        agent_exec_config.get("max_output_tokens", 8192),
+        agent_exec_config.get(
+            "max_output_tokens",
+            DEFAULT_AGENT_EXEC_MAX_OUTPUT_TOKENS,
+        ),
         "agent_exec.max_output_tokens",
+    )
+    agent_exec_upstream_url = _require_non_empty_string(
+        agent_exec_config.get(
+            "upstream_url",
+            os.environ.get(
+                "PSC_CLAUDE_GEMMA4_UPSTREAM_URL",
+                DEFAULT_AGENT_EXEC_UPSTREAM_URL,
+            ),
+        ),
+        "agent_exec.upstream_url",
     )
 
     default_promoter = _require_non_empty_string(
@@ -305,7 +352,7 @@ def load_config(
         "skill_path",
     )
     known_projects_file = _require_non_empty_string(
-        config_data.get("known_projects_file", "~/.agents/config/projects.yaml"),
+        config_data.get("known_projects_file", str(paths.projects_config_path())),
         "known_projects_file",
     )
     
@@ -322,6 +369,7 @@ def load_config(
         agent_exec_timeout=agent_exec_timeout,
         agent_exec_model=agent_exec_model,
         agent_exec_max_output_tokens=agent_exec_max_output_tokens,
+        agent_exec_upstream_url=agent_exec_upstream_url,
         default_promoter=default_promoter,
         skill_path=skill_path,
         known_projects_file=known_projects_file,

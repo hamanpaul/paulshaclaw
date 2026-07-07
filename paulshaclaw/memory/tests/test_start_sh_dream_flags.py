@@ -9,12 +9,12 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-_START_SH = Path(__file__).resolve().parents[3] / "scripts" / "start.sh"
+_SERVICE_DREAM_SH = Path(__file__).resolve().parents[3] / "scripts" / "service-dream.sh"
 
 
 class StartShDreamFlagsTests(unittest.TestCase):
     def _dream_cmd(self) -> str:
-        text = _START_SH.read_text(encoding="utf-8")
+        text = _SERVICE_DREAM_SH.read_text(encoding="utf-8")
         start = text.index("memory dream run")
         end = text.index('>>"$dream_log"', start)
         return text[start:end]

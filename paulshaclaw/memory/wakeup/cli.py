@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
+from paulshaclaw.config import paths
 from ..importer.project_resolver import resolve_project
 from .builder import build_brief
 from datetime import datetime, timezone
@@ -33,7 +34,7 @@ def run(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="psc memory wakeup")
-    parser.add_argument("--memory-root", default=str(Path.home() / ".agents" / "memory"))
+    parser.add_argument("--memory-root", default=str(paths.memory_root()))
     parser.add_argument("--project", default=None)
     parser.add_argument("--cwd", default=None)
     parser.add_argument("--k", type=int, default=8)

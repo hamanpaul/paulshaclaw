@@ -23,6 +23,12 @@ def test_route_coordinator(monkeypatch) -> None:
     assert cli.main(["coordinator", "jobs"]) == 0
 
 
+def test_route_deck(monkeypatch) -> None:
+    monkeypatch.setattr("paulshaclaw.deck.cli.main", lambda argv: 0)
+
+    assert cli.main(["deck", "list"]) == 0
+
+
 def test_unknown_subcommand_exit_2(capsys) -> None:
     assert cli.main(["nosuch"]) == 2
     assert "usage" in capsys.readouterr().err.lower()

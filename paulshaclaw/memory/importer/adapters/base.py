@@ -181,7 +181,15 @@ def read_claude_transcript(path: str | Path) -> dict[str, Any]:
 
 
 def read_copilot_history(config_root: str | Path, session_id: str) -> dict[str, Any]:
-    base_dir = Path(config_root) / ".copilot" / "history-session-state"
+    base = Path(config_root)
+    if base.name == "history-session-state":
+        base_dir = base
+    elif base.name == ".copilot":
+        base_dir = base / "history-session-state"
+    elif base.name == "paulshaclaw" and base.parent.name == ".config":
+        base_dir = base.parents[1] / ".copilot" / "history-session-state"
+    else:
+        base_dir = base / ".copilot" / "history-session-state"
     matches = sorted(base_dir.glob(f"session_{session_id}_*.json")) if base_dir.is_dir() else []
     if not matches:
         return {"user_prompts": [], "assistant_summary": ""}
@@ -230,4 +238,3 @@ def read_codex_rollout(path: str | Path) -> dict[str, Any]:
                 if isinstance(block, dict) and isinstance(block.get("text"), str) and block["text"].strip():
                     prompts.append(block["text"])
     return {"user_prompts": prompts}
-

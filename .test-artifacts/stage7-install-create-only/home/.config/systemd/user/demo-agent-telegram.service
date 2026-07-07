@@ -1,0 +1,19 @@
+[Unit]
+Description=demo-agent Telegram listener
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+EnvironmentFile=%h/.agents/core/runtime/demo-agent.env
+EnvironmentFile=%h/.agents/core/runtime/demo-agent-telegram.env
+EnvironmentFile=%h/.config/paulshaclaw/demo-agent.telegram.secret.env
+Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/demo-agent.state.json
+ExecStart=/usr/bin/env bash /srv/paulshaclaw/scripts/service-bot.sh
+KillMode=control-group
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -6,10 +6,14 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 # job.status 合法值（設計 §7 / spec）
 VALID_STATUSES = frozenset({"dispatched", "running", "done", "failed"})
 
-DEFAULT_STATE_PATH = Path.home() / ".agents" / "coordinator" / "jobs.json"
+
+def _default_state_path() -> Path:
+    return paths.coordinator_root() / "jobs.json"
 
 
 def _now_iso() -> str:
@@ -27,7 +31,7 @@ class JobRegistry:
     """
 
     def __init__(self, state_path: str | Path | None = None, seq_start: int = 0) -> None:
-        self._state_path = Path(state_path) if state_path is not None else DEFAULT_STATE_PATH
+        self._state_path = Path(state_path) if state_path is not None else _default_state_path()
         self._jobs: list[dict[str, object]] = []
         self._seq = seq_start
         self._load()

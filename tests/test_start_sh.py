@@ -15,6 +15,25 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 START_SH = PROJECT_ROOT / "scripts" / "start.sh"
+SERVICE_DREAM_SH = PROJECT_ROOT / "scripts" / "service-dream.sh"
+SERVICE_MANAGER_SH = PROJECT_ROOT / "scripts" / "service-manager.sh"
+SERVICE_SCRIPTS = (
+    PROJECT_ROOT / "scripts" / "service-bot.sh",
+    PROJECT_ROOT / "scripts" / "service-cost.sh",
+    SERVICE_DREAM_SH,
+    SERVICE_MANAGER_SH,
+)
+
+
+def _install_start_script_bundle(target_dir: Path, *, start_text: str | None = None) -> Path:
+    start_sh = target_dir / "start.sh"
+    start_sh.write_text(START_SH.read_text(encoding="utf-8") if start_text is None else start_text, encoding="utf-8")
+    start_sh.chmod(0o755)
+    for script in SERVICE_SCRIPTS:
+        target = target_dir / script.name
+        target.write_text(script.read_text(encoding="utf-8"), encoding="utf-8")
+        target.chmod(0o755)
+    return start_sh
 
 
 FAKE_PYTHON = textwrap.dedent(
@@ -289,6 +308,12 @@ class StartScriptLifecycleTests(unittest.TestCase):
             f"start.sh `-m paulshaclaw.*` launches missing PYTHONPATH=$REPO: {missing}",
         )
 
+    def test_start_sh_sources_all_extracted_service_scripts(self) -> None:
+        text = START_SH.read_text(encoding="utf-8")
+        for script in SERVICE_SCRIPTS:
+            with self.subTest(script=script.name):
+                self.assertIn(f'source "$script_dir/{script.name}" --source-only', text)
+
     def test_cleanup_bounds_owned_manager_wait_with_sigkill_fallback(self) -> None:
         # #187 review fix #3: the owned-manager shutdown path must be bounded
         # with a SIGKILL fallback so a wedged manager cannot hang cleanup on a
@@ -544,13 +569,11 @@ class StartScriptLifecycleTests(unittest.TestCase):
                 fake_systemctl.write_text(FAKE_SYSTEMCTL, encoding="utf-8")
                 fake_systemctl.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
             start_sh_text = START_SH.read_text(encoding="utf-8")
             self.assertIn('BASH_SOURCE[0]', start_sh_text)
             self.assertNotIn("set -m", start_sh_text)
             self.assertNotIn("while kill -0", start_sh_text)
-            start_sh.write_text(start_sh_text, encoding="utf-8")
-            start_sh.chmod(0o755)
+            start_sh = _install_start_script_bundle(fake_scripts, start_text=start_sh_text)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -813,9 +836,7 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
             fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
             fake_tmux.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
-            start_sh.chmod(0o755)
+            start_sh = _install_start_script_bundle(fake_scripts)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -901,9 +922,7 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
             fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
             fake_tmux.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
-            start_sh.chmod(0o755)
+            start_sh = _install_start_script_bundle(fake_scripts)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1009,15 +1028,13 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
             fake_tmux.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(
-                START_SH.read_text(encoding="utf-8").replace(
+            start_sh = _install_start_script_bundle(
+                fake_scripts,
+                start_text=START_SH.read_text(encoding="utf-8").replace(
                     "REPO=/home/paul_chen/prj_pri/paulshaclaw",
                     f"REPO={repo_root}",
                 ),
-                encoding="utf-8",
             )
-            start_sh.chmod(0o755)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1088,15 +1105,13 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
             fake_tmux.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(
-                START_SH.read_text(encoding="utf-8").replace(
+            start_sh = _install_start_script_bundle(
+                fake_scripts,
+                start_text=START_SH.read_text(encoding="utf-8").replace(
                     "REPO=/home/paul_chen/prj_pri/paulshaclaw",
                     f"REPO={repo_root}",
                 ),
-                encoding="utf-8",
             )
-            start_sh.chmod(0o755)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1155,15 +1170,13 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
             fake_tmux.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(
-                START_SH.read_text(encoding="utf-8").replace(
+            start_sh = _install_start_script_bundle(
+                fake_scripts,
+                start_text=START_SH.read_text(encoding="utf-8").replace(
                     "REPO=/home/paul_chen/prj_pri/paulshaclaw",
                     f"REPO={repo_root}",
                 ),
-                encoding="utf-8",
             )
-            start_sh.chmod(0o755)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1206,9 +1219,9 @@ class StartScriptDreamLoopTests(unittest.TestCase):
         self.assertNotIn("start_manager_service\n", main_flow)
 
     def test_manager_startup_probe_avoids_integer_second_deadline(self) -> None:
-        text = START_SH.read_text(encoding="utf-8")
+        text = SERVICE_MANAGER_SH.read_text(encoding="utf-8")
         start = text.index("start_manager_loop()")
-        end = text.index("# Phase C:", start)
+        end = text.index("if [[ \"${1:-}\" == \"--source-only\" ]]", start)
         function_text = text[start:end]
 
         self.assertIn("manager_startup_checks", function_text)
@@ -1238,9 +1251,7 @@ class StartScriptDreamLoopTests(unittest.TestCase):
             fake_tmux.write_text(FAKE_TMUX, encoding="utf-8")
             fake_tmux.chmod(0o755)
 
-            start_sh = fake_scripts / "start.sh"
-            start_sh.write_text(START_SH.read_text(encoding="utf-8"), encoding="utf-8")
-            start_sh.chmod(0o755)
+            start_sh = _install_start_script_bundle(fake_scripts)
 
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
@@ -1287,9 +1298,9 @@ class StartScriptDreamLoopTests(unittest.TestCase):
         self.assertIn("wait_for_manager_shutdown", cleanup_block)
 
     def test_dream_loop_sleeps_before_first_run(self) -> None:
-        text = START_SH.read_text(encoding="utf-8")
+        text = SERVICE_DREAM_SH.read_text(encoding="utf-8")
         start = text.index("start_dream_loop() {")
-        end = text.index("# Telegram listener", start)
+        end = text.index("if [[ \"${1:-}\" == \"--source-only\" ]]", start)
         dream_block = text[start:end]
 
         sleep_index = dream_block.index('sleep "$interval"')

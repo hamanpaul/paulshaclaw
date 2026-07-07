@@ -15,14 +15,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from paulshaclaw.config import paths
 from paulshaclaw.memory.importer.adapters.base import (
     read_codex_rollout,
     read_copilot_history,
 )
 
 BRO_RE = re.compile(r"^\s*\[bro:(\d+)\]")
-REPLY_BRIDGE = Path.home() / ".agents" / "skills" / "bro" / "scripts" / "reply_bridge.py"
-LOG = Path.home() / ".agents" / "log" / "bro-hook.log"
+REPLY_BRIDGE = paths.agents_path("skills", "bro", "scripts", "reply_bridge.py")
+LOG = paths.log_root() / "bro-hook.log"
 EMPTY_NOTICE = "（已完成，無文字輸出）"
 
 
@@ -63,7 +67,7 @@ def resolve(platform: str, event: dict) -> tuple[list[str], str | None]:
         # copilot agentStop payload 用 camelCase sessionId（見 copilot adapter / fixtures）；
         # 兩種鍵都收，否則 sid 空 → read_copilot_history 找不到 → 回程靜默 no-op。
         sid = str(event.get("session_id") or event.get("sessionId") or "")
-        data = read_copilot_history(Path.home(), sid)
+        data = read_copilot_history(paths.copilot_root(), sid)
         prompts = data.get("user_prompts", []) or []
         if not prompts and sid:
             _log("copilot", RuntimeError(f"history 無 prompts（session={sid}）→ no-op"))
