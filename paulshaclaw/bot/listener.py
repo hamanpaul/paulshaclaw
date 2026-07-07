@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from paulshaclaw.bot.telegram import TelegramCommandRouter
-from paulshaclaw.control.client import ControlPlaneCoordinator
+from paulsha_cortex.control.client import ControlPlaneCoordinator
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_registry import CommandRegistry, load_default_command_registry
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
