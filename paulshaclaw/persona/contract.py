@@ -20,6 +20,7 @@ class PersonaContract:
     allowed_phases: tuple[str, ...]
     write_paths: tuple[str, ...]
     allowed_tools: tuple[str, ...]
+    skills: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
