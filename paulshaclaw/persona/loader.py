@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Mapping
+import warnings
 
 import yaml
 
@@ -52,6 +53,11 @@ def load_catalog(path: str | Path | None = None) -> dict[str, PersonaContract]:
 
     catalog: dict[str, PersonaContract] = {}
     for role, rec in records.items():
+        raw_skills = rec.get("skills", [])
+        if raw_skills is None:
+            raw_skills = []
+        if not isinstance(raw_skills, list) or any(not isinstance(s, str) for s in raw_skills):
+            raise ValueError(f"persona catalog schema 不合法: {role}: skills 必須是字串清單")
         catalog[role] = PersonaContract(
             role=rec["role"],
             version=rec["version"],
@@ -59,5 +65,24 @@ def load_catalog(path: str | Path | None = None) -> dict[str, PersonaContract]:
             allowed_phases=tuple(rec["allowed_phases"]),
             write_paths=tuple(rec["write_paths"]),
             allowed_tools=tuple(rec["allowed_tools"]),
+            skills=tuple(raw_skills),
         )
+    _warn_unknown_skills(catalog)
     return catalog
+
+
+def _warn_unknown_skills(catalog: dict[str, PersonaContract]) -> None:
+    """shadow 驗證：fail-open 僅限 deck 缺席；壞目錄要警示、邏輯 bug 不吞。"""
+    try:
+        from paulshaclaw.deck.schema import DeckSchemaError, DEFAULT_CARDS_PATH, load_cards
+    except ImportError:
+        return  # deck 套件缺席（如未來拆包）→ 靜默跳過
+    try:
+        cards = load_cards(DEFAULT_CARDS_PATH)
+    except DeckSchemaError as exc:
+        warnings.warn(f"skills shadow 驗證跳過（deck 卡片目錄不可用）: {exc}", stacklevel=2)
+        return
+    for role, contract in catalog.items():
+        for sid in contract.skills:
+            if sid not in cards:
+                warnings.warn(f"persona {role} 引用未知 deck card: {sid}", stacklevel=2)
