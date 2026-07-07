@@ -47,14 +47,14 @@ class TestWakeupCLI(unittest.TestCase):
 
     def test_wakeup_main_parsing_defaults(self):
         # Integration-level test: calling wakeup.cli.main should parse defaults
-        from pathlib import Path
+        from paulshaclaw.config import paths
         import paulshaclaw.memory.wakeup.cli as wakeup_cli
 
-        default_root = str(Path.home() / ".agents" / "memory")
-
-        with mock.patch('paulshaclaw.memory.wakeup.cli.build_brief', return_value='BRIEF') as bb:
-            # call main without specifying --memory-root; should use default
-            rc = wakeup_cli.main(['--project', 'myproj'])
+        with mock.patch.dict("os.environ", {"PSC_AGENTS_ROOT": "/tmp/psc-agents"}, clear=False):
+            default_root = str(paths.memory_root())
+            with mock.patch('paulshaclaw.memory.wakeup.cli.build_brief', return_value='BRIEF') as bb:
+                # call main without specifying --memory-root; should use facade default
+                rc = wakeup_cli.main(['--project', 'myproj'])
             bb.assert_called_once()
             called_args, called_kwargs = bb.call_args
             # first positional arg is memory_root Path

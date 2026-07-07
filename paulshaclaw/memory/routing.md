@@ -57,6 +57,13 @@ MVP 設計與驗證細節見：
 
 > **T3.2 已落地（2026-06）：** `psc memory atomize --promoter llm` 會載入 `atomizer/skills/atomize-knowledge-slice.md`，透過 configurable `agent_exec.command`（預設 `scripts/claude-gemma4`，可替換 stub/fake）做 per-session 語意 promoter；`relates_to`/`mentions` 等語意關係寫入 `runtime/ledger/relations.jsonl`，整個 session 維持 fail-closed promotion，設計見 `docs/superpowers/specs/2026-06-02-stage2-llm-atomizer-design.md`。
 
+> **PR-B（#91）補充（2026-07）：** LLM backend 路徑/連線設定已收斂到同一條 override chain：
+> 1. repo 預設：`paulshaclaw/memory/atomizer/atomizer.yaml`
+> 2. 本機覆寫：`~/.config/paulshaclaw/atomizer.override.yaml`
+> 3. 臨時 upstream 熱切換：`PSC_CLAUDE_GEMMA4_UPSTREAM_URL`
+>
+> `agent_exec.command` 與 `agent_exec.upstream_url` 會同時影響 atomizer promoter、SkillOpt rollout 與 importer title 生成；改 backend 時不要只改單一路徑。
+
 > **T4 已落地（2026-05）：** decayed/reactivation 事件由最小 janitor 寫入 `runtime/ledger/lifecycle.jsonl`，active 集合由 `paulshaclaw.memory.ledger.retrieval_set.active_records()` 提供。掃描入口：`psc memory janitor scan`。設計見 `docs/superpowers/specs/2026-05-31-stage2-t4-ledger-janitor-design.md`。
 
 > **T5 已落地（2026-06）：** `psc memory dream run`（idle-gated systemd timer 範本 Mon..Fri 05:00）編排 atomize→janitor 並記 `runtime/ledger/dream.jsonl`;`psc memory dream status` 回最後 run + backlog。`psc memory bundle --project/--tag/--entity` 組 replay bundle（只含 distilled slices + ledger，`raw_excluded:true`）。proposal-first 框架於 `runtime/proposals/`。設計見 `docs/superpowers/specs/2026-06-02-stage2-dream-service-design.md`。

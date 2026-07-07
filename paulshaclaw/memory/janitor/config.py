@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from paulshaclaw.config import paths
+
 
 class JanitorConfigError(Exception):
     """Configuration error in janitor subsystem."""
@@ -161,7 +163,7 @@ def load_config(
     
     # Determine override path
     if override_path is _DEFAULT_SENTINEL:
-        override_path = Path.home() / ".config" / "paulshaclaw" / "janitor.override.yaml"
+        override_path = paths.config_path("janitor.override.yaml")
         if not override_path.exists():
             override_path = None
     elif override_path is not None:

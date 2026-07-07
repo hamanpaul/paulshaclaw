@@ -454,13 +454,13 @@ def build_listener(
     poll_timeout: int = 30,
     command_registry: CommandRegistry | None = None,
 ) -> TelegramListener:
-    from paulshaclaw.bot.reply import DEFAULT_BINDINGS_PATH, TelegramChatBindingStore
+    from paulshaclaw.bot.reply import TelegramChatBindingStore, default_bindings_path
 
     config = load_config(config_path=config_path)
     resolved_registry = command_registry or load_default_command_registry()
     daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
     router = TelegramCommandRouter(daemon=daemon)
-    bindings_path = os.environ.get("PSC_TELEGRAM_BINDINGS_PATH", "").strip() or str(DEFAULT_BINDINGS_PATH)
+    bindings_path = os.environ.get("PSC_TELEGRAM_BINDINGS_PATH", "").strip() or str(default_bindings_path())
     return TelegramListener(
         client=client or TelegramApiClient(settings.token),
         router=router,

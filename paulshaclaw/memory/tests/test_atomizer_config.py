@@ -138,9 +138,61 @@ class AgentExecConfigTests(unittest.TestCase):
 
         self.assertTrue(cfg.agent_exec_command)
         self.assertGreater(cfg.agent_exec_timeout, 0)
+        self.assertTrue(cfg.agent_exec_upstream_url.startswith("http"))
         self.assertIn(cfg.default_promoter, ("identity", "llm"))
         self.assertTrue(cfg.skill_path)
         self.assertTrue(cfg.known_projects_file)
+
+    def test_upstream_url_override_and_hash(self):
+        import pathlib
+        from paulshaclaw.memory.atomizer import config as cfgmod
+
+        base = (
+            "schema_version: 1\n"
+            "split:\n"
+            "  boundary_patterns:\n"
+            "    - '^#'\n"
+            "  max_fragment_chars: 8000\n"
+            "agent_exec:\n"
+            "  upstream_url: http://10.0.0.5:9001\n"
+        )
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d)
+            (p / "atomizer.yaml").write_text(base, encoding="utf-8")
+            cfg, hash_value = cfgmod.load_config(default_dir=p, override_path=None)
+            self.assertEqual(cfg.agent_exec_upstream_url, "http://10.0.0.5:9001")
+            self.assertEqual(len(hash_value), 64)
+
+    def test_resolve_agent_exec_settings_prefers_env_upstream(self):
+        from paulshaclaw.memory.atomizer import config as cfgmod
+
+        with unittest.mock.patch.dict(
+            "os.environ",
+            {"PSC_CLAUDE_GEMMA4_UPSTREAM_URL": "http://10.0.0.9:9002"},
+            clear=False,
+        ):
+            _, upstream = cfgmod.resolve_agent_exec_settings()
+        self.assertEqual(upstream, "http://10.0.0.9:9002")
+
+    def test_missing_known_projects_file_uses_facade_default(self):
+        from paulshaclaw.memory.atomizer import config as cfgmod
+
+        base = "schema_version: 1\nsplit:\n  boundary_patterns:\n    - '^#'\n  max_fragment_chars: 8000\n"
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d)
+            (p / "atomizer.yaml").write_text(base, encoding="utf-8")
+            agents_root = p / "custom-agents"
+            with unittest.mock.patch.dict(
+                "os.environ",
+                {"PSC_AGENTS_ROOT": str(agents_root)},
+                clear=False,
+            ):
+                cfg, _ = cfgmod.load_config(default_dir=p, override_path=None)
+
+            self.assertEqual(
+                cfg.known_projects_file,
+                str(agents_root / "config" / "projects.yaml"),
+            )
 
     def test_invalid_timeout_fails_closed_with_config_error(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

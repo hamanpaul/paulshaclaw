@@ -12,6 +12,7 @@ from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from paulshaclaw.config import paths
 from paulshaclaw.cost.config import CopilotAccountConfig, CostConfig
 from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
 
@@ -442,13 +443,13 @@ def collect_codex(
         return _unknown_codex()
 
     resolved_now = now or _now_utc().astimezone(_display_zone(timezone))
-    resolved_auth_path = auth_path or Path("~/.codex/auth.json").expanduser()
+    resolved_auth_path = auth_path or (paths.codex_root() / "auth.json")
     resolved_fetcher = fetcher or _fetch_codex_usage
     resolved_token_reader = token_reader or _read_codex_token
 
     # Prefer the trusted quota Codex already wrote locally (correct, no network);
     # the live usage endpoint is often 403 for non-OAuth/team plans.
-    local_windows = _codex_local_rate_limits(codex_home or Path("~/.codex").expanduser(), resolved_now)
+    local_windows = _codex_local_rate_limits(codex_home or paths.codex_root(), resolved_now)
     if local_windows:
         return ProviderSnapshot(source_status="fresh", windows=local_windows)
 
@@ -482,7 +483,7 @@ def collect_codex(
 
     if local_fallback:
         tokens = _codex_local_token_total(
-            codex_home or Path("~/.codex").expanduser(),
+            codex_home or paths.codex_root(),
             now=resolved_now,
         )
         if tokens > 0:
@@ -505,7 +506,7 @@ def collect_claude(
     timezone: str = "Asia/Taipei",
 ) -> ProviderSnapshot:
     resolved_now = now or _now_utc().astimezone(_display_zone(timezone))
-    sidecar = statusline_sidecar or Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
+    sidecar = statusline_sidecar or paths.state_path("cost", "claude_rate_limits.json")
     if _file_is_fresh(sidecar, max_age_seconds):
         payload = _read_json_file(sidecar)
         rate_limits = payload.get("rate_limits") if payload else None
@@ -522,7 +523,7 @@ def collect_claude(
 
     if local_fallback:
         tokens = _claude_local_token_total(
-            claude_home or Path("~/.claude").expanduser(),
+            claude_home or paths.claude_root(),
             now=resolved_now,
         )
         if tokens > 0:
@@ -732,7 +733,7 @@ def _event_month(payload: Mapping[str, Any]) -> tuple[int, int] | None:
 
 
 def _read_local_observed_metrics(year: int | None = None, month: int | None = None) -> tuple[int, int]:
-    root = Path.home() / ".copilot" / "session-state"
+    root = paths.copilot_session_state_root()
     if not root.exists():
         return 0, 0
 

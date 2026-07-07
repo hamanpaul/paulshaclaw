@@ -6,10 +6,16 @@ import json
 import re
 import subprocess
 import time
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
+
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from paulshaclaw.config import paths
 
 CHECKBOX_RE = re.compile(r"^- \[ \]", re.MULTILINE)
 TERMINAL = {"done", "failed", "stopped", "killed"}
@@ -78,7 +84,7 @@ def load_meta(path: Path) -> List[TaskMeta]:
 def latest_job_status_by_topic(state_root: Path, limit: int = 500) -> Dict[str, str]:
     cmd = [
         "bash",
-        "/home/paul_chen/prj_pri/custom-skills/coordinator/scripts/coordinator.sh",
+        str(paths.home_root() / "prj_pri" / "custom-skills" / "coordinator" / "scripts" / "coordinator.sh"),
         "--state-root",
         str(state_root),
         "jobs",
@@ -113,7 +119,7 @@ def main() -> int:
     parser.add_argument("--meta-file", required=True)
     parser.add_argument("--state-root", required=True)
     parser.add_argument("--interval-sec", type=int, default=1800)
-    parser.add_argument("--api-token-path", default=str(Path.home() / ".max" / "api-token"))
+    parser.add_argument("--api-token-path", default=str(paths.max_root() / "api-token"))
     args = parser.parse_args()
 
     meta = load_meta(Path(args.meta_file))
