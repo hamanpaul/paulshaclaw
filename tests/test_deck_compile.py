@@ -6,6 +6,7 @@ import yaml
 from paulshaclaw.deck.compile import (
     DeckCompileError,
     compile_combo,
+    emit,
     parse_with_spec,
     slugify_task,
     specs_dir,
@@ -301,3 +302,22 @@ def test_only_exclusive_mode(tmp_path):
         f"{result.task_slug}-code-review",
         f"{result.task_slug}-verification",
     ]
+
+
+def test_emit_writes_flat_and_refuses_overwrite(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    written = emit(result, tmp_path)
+    assert all(path.parent == tmp_path for path in written)
+    assert {path.name for path in written} == {slice_doc.filename for slice_doc in result.slices}
+    with pytest.raises(DeckCompileError, match="已存在"):
+        emit(result, tmp_path)
+
+
+def test_emit_force_overwrites_atomically(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    emit(result, tmp_path)
+    written = emit(result, tmp_path, force=True)
+    assert written
+    assert all(path.read_text(encoding="utf-8").startswith("---") for path in written)

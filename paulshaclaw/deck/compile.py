@@ -270,3 +270,22 @@ def compile_combo(
         verify_commands=tuple(dict.fromkeys(verify_commands)),
         external=external,
     )
+
+
+def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) -> list[Path]:
+    """將 compiled slices 寫成平鋪 specs 檔。"""
+    directory = Path(target_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    conflicts = [slice_doc.filename for slice_doc in result.slices if (directory / slice_doc.filename).exists()]
+    if conflicts and not force:
+        raise DeckCompileError("emit 目標已存在同名 spec（--force 才覆蓋）：" + ", ".join(conflicts))
+
+    written: list[Path] = []
+    for slice_doc in result.slices:
+        final_path = directory / slice_doc.filename
+        temp_path = directory / f"{slice_doc.filename}.tmp"
+        temp_path.write_text(slice_doc.content, encoding="utf-8")
+        os.replace(temp_path, final_path)
+        written.append(final_path)
+    return written
