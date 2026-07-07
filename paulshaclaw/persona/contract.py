@@ -105,6 +105,12 @@ def validate_persona_schema(
         if not isinstance(allowed_tools, (list, tuple)) or not allowed_tools:
             errors.append(f"{role}: allowed_tools must be a non-empty list")
 
+        skills = record.get("skills")
+        if skills is not None and (
+            not isinstance(skills, (list, tuple)) or any(not isinstance(skill, str) for skill in skills)
+        ):
+            errors.append(f"{role}: skills 必須是字串清單")
+
     return ValidationResult(ok=not errors, errors=tuple(errors))
 
 

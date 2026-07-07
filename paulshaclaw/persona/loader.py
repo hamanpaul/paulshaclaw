@@ -53,7 +53,9 @@ def load_catalog(path: str | Path | None = None) -> dict[str, PersonaContract]:
 
     catalog: dict[str, PersonaContract] = {}
     for role, rec in records.items():
-        raw_skills = rec.get("skills") or []
+        raw_skills = rec.get("skills", [])
+        if raw_skills is None:
+            raw_skills = []
         if not isinstance(raw_skills, list) or any(not isinstance(s, str) for s in raw_skills):
             raise ValueError(f"persona catalog schema 不合法: {role}: skills 必須是字串清單")
         catalog[role] = PersonaContract(
