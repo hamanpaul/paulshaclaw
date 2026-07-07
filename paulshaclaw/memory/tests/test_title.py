@@ -120,6 +120,30 @@ def test_gemma4_reachable_false_on_malformed_upstream(monkeypatch):
     assert attempts["n"] == 0  # malformed URL never triggers a connection (no localhost probe)
 
 
+def test_default_runner_threads_upstream_env(monkeypatch):
+    import importlib
+    import subprocess
+    import paulshaclaw.memory.importer.title as t
+
+    t = importlib.reload(t)
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(command, 0, stdout="標題", stderr="")
+
+    monkeypatch.setattr(t, "_gemma4_reachable", lambda *a, **k: True)
+    monkeypatch.setattr(
+        t.atomizer_config,
+        "resolve_agent_exec_settings",
+        lambda: (("scripts/claude-gemma4",), "http://10.0.0.5:9001"),
+    )
+    monkeypatch.setattr(t.subprocess, "run", fake_run)
+
+    assert t._default_runner("prompt", ("scripts/claude-gemma4",), 60) == "標題"
+    assert seen["env"]["PSC_CLAUDE_GEMMA4_UPSTREAM_URL"] == "http://10.0.0.5:9001"
+
+
 def test_generate_returns_neutral_marker_when_no_content():
     def boom(text, cmd, timeout):
         raise AssertionError("LLM must not be called for a content-less session")

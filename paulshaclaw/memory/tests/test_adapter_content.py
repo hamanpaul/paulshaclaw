@@ -29,6 +29,19 @@ def test_read_copilot_history_extracts_from_chatmessages(tmp_path):
     assert out["assistant_summary"] == "已整理 PON HLAPI 對照表。"
 
 
+def test_read_copilot_history_accepts_contract_config_root(tmp_path):
+    d = tmp_path / ".copilot" / "history-session-state"
+    d.mkdir(parents=True)
+    (d / "session_cop-1_123.json").write_text((FIX / "copilot_history.json").read_text(), encoding="utf-8")
+    config_root = tmp_path / ".config" / "paulshaclaw"
+    config_root.mkdir(parents=True)
+
+    out = base.read_copilot_history(config_root, "cop-1")
+
+    assert out["user_prompts"] == ["列出 PON HLAPI"]
+    assert out["assistant_summary"] == "已整理 PON HLAPI 對照表。"
+
+
 def test_read_codex_rollout_extracts_prompts_only():
     out = base.read_codex_rollout(FIX / "codex_rollout.jsonl")
     assert out["user_prompts"] == ["請幫我產生 codex 範例"]

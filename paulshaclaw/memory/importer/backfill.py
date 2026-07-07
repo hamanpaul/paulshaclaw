@@ -12,6 +12,8 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from paulshaclaw.config import paths
+
 from . import _git, title
 from .classifier import classify_session
 from .frontmatter import render_markdown
@@ -69,7 +71,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Backfill Stage 2 inbox content+title from archived queue payloads"
     )
-    ap.add_argument("--memory-root", default="/home/paul_chen/.agents/memory")
+    ap.add_argument("--memory-root", default=str(paths.memory_root()))
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     res = run(args.memory_root, dry_run=args.dry_run)

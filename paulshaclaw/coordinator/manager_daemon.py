@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from paulshaclaw.config import paths
 from ..control import constants, contract
 from . import autonomy, broker_reaper, manager
 from .cli import _refuse_unsafe_fanout, _resolve_launcher
@@ -102,7 +103,7 @@ def default_specs_dir() -> str:
     override = os.environ.get("PSC_MANAGER_SPECS_DIR")
     if override:
         return override
-    return str(Path.home() / ".agents" / "specs")
+    return str(paths.specs_root())
 
 
 def default_executor() -> str:

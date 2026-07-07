@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from paulshaclaw.config import paths
 from paulshaclaw.memory.atomizer import cli as atomizer_cli
 from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.memory.atomizer.agent_exec import AgentExecClient
@@ -20,7 +21,6 @@ from .scorer import make_hybrid_score
 from .valset import build_valset
 
 HookFactory = Callable[[], Callable[..., Any]]
-DEFAULT_SKILLOPT_CONFIG_PATH = Path("~/.agents/config/skillopt.yaml")
 DEFAULT_ALPHA = 0.4
 DEFAULT_VAL_RATIO = 0.2
 DEFAULT_MIN_PROJECT_SAMPLE = 2
@@ -38,6 +38,10 @@ class SkillOptConfig:
 
 class SkillOptConfigError(ValueError):
     """Raised when the optional skillopt config is invalid."""
+
+
+def _default_skillopt_config_path() -> Path:
+    return paths.agents_path("config", "skillopt.yaml")
 
 
 def _default_skillopt_config(
@@ -113,7 +117,7 @@ def load_skillopt_config(
     resolved = (
         Path(config_path).expanduser()
         if config_path is not None
-        else DEFAULT_SKILLOPT_CONFIG_PATH.expanduser()
+        else _default_skillopt_config_path()
     )
     defaults = _default_skillopt_config(atomizer_cfg)
     if not resolved.exists():
@@ -246,11 +250,11 @@ def run_optimize(
 
 
 def _default_memory_root() -> Path:
-    return Path.home() / ".agents" / "memory"
+    return paths.memory_root()
 
 
 def _default_reference_root() -> Path:
-    return Path.home() / "notes"
+    return paths.notes_root()
 
 
 def _resolve_skill_path(args: argparse.Namespace, config: atomizer_config.AtomizerConfig) -> Path:
@@ -268,7 +272,13 @@ def _build_default_hooks(
     judge_command = list(skillopt_config.judge_command)
 
     def make_rollout():
-        agent = AgentExecClient(list(command), timeout=config.agent_exec_timeout)
+        agent = AgentExecClient(
+            list(command),
+            timeout=config.agent_exec_timeout,
+            env=atomizer_config.build_agent_exec_env(
+                upstream_url=config.agent_exec_upstream_url,
+            ),
+        )
         return make_atomize_rollout(agent, known_projects, config=config)
 
     def make_score():

@@ -9,9 +9,14 @@ import sys
 import time
 from pathlib import Path
 
-DEFAULT_STATE_DIR = Path.home() / ".agents" / "state" / "bro-hook"
-REPLY_BRIDGE = Path.home() / ".agents" / "skills" / "bro" / "scripts" / "reply_bridge.py"
-LOG = Path.home() / ".agents" / "log" / "bro-hook.log"
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from paulshaclaw.config import paths
+
+DEFAULT_STATE_DIR = paths.state_path("bro-hook")
+REPLY_BRIDGE = paths.agents_path("skills", "bro", "scripts", "reply_bridge.py")
+LOG = paths.log_root() / "bro-hook.log"
 EMPTY_NOTICE = "（已完成，無文字輸出）"
 # At Stop-hook time the current turn's assistant record may not be flushed to the
 # transcript yet. Poll briefly for it rather than grabbing the previous turn's
