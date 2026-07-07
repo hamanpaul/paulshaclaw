@@ -282,3 +282,43 @@ class DeployInstallCliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ApplyInstallPlanCreateOnlyTests(unittest.TestCase):
+    """#219 對抗審查 F1：rerun 不得以 placeholder 覆寫使用者持有檔。"""
+
+    def test_rerun_preserves_state_secret_and_runtime_env_but_updates_units(self) -> None:
+        from paulshaclaw.deploy.installer import apply_install_plan
+        from paulshaclaw.deploy.planner import build_command_plan
+
+        scratch = make_test_dir("stage7-install-create-only")
+        if True:
+            home_dir = scratch / "home"
+            home_dir.mkdir(parents=True, exist_ok=True)
+            plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
+
+            first = apply_install_plan(plan, home_dir=home_dir)
+            self.assertEqual(first["skipped_existing"], [])
+
+            secret_path = home_dir / ".config" / "paulshaclaw" / "demo-agent.telegram.secret.env"
+            state_path = home_dir / ".agents" / "state" / "config" / "demo-agent.state.json"
+            env_path = home_dir / ".agents" / "core" / "runtime" / "demo-agent-dream.env"
+            unit_path = home_dir / ".config" / "systemd" / "user" / "demo-agent-dream.service"
+            for p in (secret_path, state_path, env_path, unit_path):
+                self.assertTrue(p.is_file(), p)
+
+            secret_path.write_text("PSC_TELEGRAM_BOT_TOKEN=real-operator-token\n", encoding="utf-8")
+            state_path.write_text('{"allowed_user_ids": [42]}\n', encoding="utf-8")
+            env_path.write_text("PSC_DREAM_INTERVAL_SECONDS=7200\n", encoding="utf-8")
+            unit_path.write_text("[Unit]\nDescription=stale unit to be upgraded\n", encoding="utf-8")
+
+            second = apply_install_plan(plan, home_dir=home_dir)
+
+            self.assertIn("real-operator-token", secret_path.read_text(encoding="utf-8"))
+            self.assertIn("[42]", state_path.read_text(encoding="utf-8"))
+            self.assertIn("7200", env_path.read_text(encoding="utf-8"))
+            self.assertNotIn("stale unit", unit_path.read_text(encoding="utf-8"))  # unit 檔允許覆寫
+            self.assertIn(str(secret_path), second["skipped_existing"])
+            self.assertIn(str(state_path), second["skipped_existing"])
+            self.assertIn(str(env_path), second["skipped_existing"])
+            self.assertIn(str(unit_path), second["written"])

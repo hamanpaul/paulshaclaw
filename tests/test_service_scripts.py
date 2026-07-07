@@ -84,5 +84,26 @@ class ServiceScriptTests(unittest.TestCase):
         return self._service_scripts()[name].read_text(encoding="utf-8")
 
 
+class CostServiceSystemdBehaviorTests(unittest.TestCase):
+    """#219 對抗審查 F2：systemd 直跑（無 TMUX）不得靜默 exit 0 不動。"""
+
+    def test_cost_service_runs_without_tmux_reaches_loop_logic(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "scripts" / "service-cost.sh"
+        env = {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "PSC_COST_REFRESH_DISABLED": "1"}
+        completed = subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            env=env,  # 無 TMUX——模擬 systemd 環境
+            timeout=15,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        # guard 移除後必須抵達 loop 邏輯（此處由 disabled 訊息證明），
+        # 而非在 TMUX 檢查就 return 0 靜默結束。
+        self.assertIn("cost refresh loop disabled", completed.stdout)
+
+
+
 if __name__ == "__main__":
     unittest.main()

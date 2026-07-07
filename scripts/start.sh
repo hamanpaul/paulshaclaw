@@ -190,7 +190,11 @@ apply_stage8_footer() {
 }
 
 apply_stage8_footer
-start_cost_refresh_loop
+# TMUX guard 在呼叫端（保 main 行為：tmux 外的 dev 啟動不跑 cost loop）；
+# systemd 路徑由 service-cost.sh 直跑、不受此限（#219 F2）。
+if [[ -n "${TMUX:-}" ]]; then
+  start_cost_refresh_loop
+fi
 
 # Phase C: persona manager tick via systemd --user timer. start.sh 不擁有 manager
 # 進程，只 toggle；systemctl --user 不可用（WSL 無 user systemd）→ graceful skip。

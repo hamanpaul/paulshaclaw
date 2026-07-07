@@ -93,6 +93,10 @@ _TEMPLATE_CATALOG: tuple[_TemplateSpec, ...] = (
         plane="core",
         template_relpath="core/systemd/__INSTANCE__.service.tmpl",
         rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        # not-deployed（#219 對抗審查 F3）：ExecStart 跑 core.daemon（command CLI，
+        # 非常駐入口）必於參數解析失敗；core 服務化另案，先排除於 install/verify。
+        deploy=False,
+        deprecated=True,
     ),
     _TemplateSpec(
         plane="core",

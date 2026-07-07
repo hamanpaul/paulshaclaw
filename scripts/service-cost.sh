@@ -25,10 +25,9 @@ print(config.tmux_refresh_seconds)
 ' 2>/dev/null || printf '30\n'
 }
 
+# TMUX guard 屬 start.sh 呼叫端（dev/tmux 情境）；systemd 直跑本腳本不設 TMUX，
+# guard 留在此處會讓 unit exit 0 靜默不動（#219 對抗審查 F2）。
 start_cost_refresh_loop() {
-  if [[ -z "${TMUX:-}" ]]; then
-    return 0
-  fi
   if [[ "${PSC_COST_REFRESH_DISABLED:-0}" == "1" ]]; then
     echo "cost refresh loop disabled (PSC_COST_REFRESH_DISABLED=1)"
     return 0

@@ -150,10 +150,24 @@ def _verify_systemd_units(plan: CommandPlan, *, home_dir: Path) -> dict[str, obj
     }
 
 
-def apply_install_plan(plan: CommandPlan, *, home_dir: Path) -> list[str]:
+def _asset_is_overwritable(asset: TemplateAsset) -> bool:
+    """僅 unit 檔（core/systemd/**）允許覆寫（模板演進屬部署面職責）。
+
+    core/runtime env 值檔、state、secret 為使用者持有：rerun 覆寫會以
+    placeholder 毀掉真實設定（#219 對抗審查 F1；硬規範「不可破壞」），
+    故一律 create-only——存在即跳過，強制重建走明確刪檔或 uninstall。
+    """
+    return asset.template_relpath.startswith("core/systemd/")
+
+
+def apply_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, list[str]]:
     written_files: list[str] = []
+    skipped_existing: list[str] = []
     for asset in plan.templates:
         destination = resolve_install_path(asset, home_dir=home_dir)
+        if destination.exists() and not _asset_is_overwritable(asset):
+            skipped_existing.append(str(destination))
+            continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
             render_template(asset, instance_name=plan.instance_name, root_dir=plan.root_dir),
@@ -161,7 +175,7 @@ def apply_install_plan(plan: CommandPlan, *, home_dir: Path) -> list[str]:
         )
         _apply_permissions(asset, destination)
         written_files.append(str(destination))
-    return sorted(written_files)
+    return {"written": sorted(written_files), "skipped_existing": sorted(skipped_existing)}
 
 
 def verify_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, object]:
@@ -188,7 +202,9 @@ def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool,
     }
 
     if apply:
-        report["applied_files"] = apply_install_plan(plan, home_dir=resolved_home)
+        applied = apply_install_plan(plan, home_dir=resolved_home)
+        report["applied_files"] = applied["written"]
+        report["skipped_existing"] = applied["skipped_existing"]
         report["linger"] = _ensure_linger_enabled()
         report["daemon_reload"] = _run_daemon_reload()
 

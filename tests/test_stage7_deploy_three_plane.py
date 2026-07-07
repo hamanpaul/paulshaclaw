@@ -194,10 +194,12 @@ class CommandPlanTests(unittest.TestCase):
         self.assertIn("core/runtime/__INSTANCE__-cost.env.tmpl", relpaths)
         self.assertNotIn("core/systemd/__INSTANCE__-manager.timer.tmpl", relpaths)
         self.assertIn("verify-systemd-user-units", plan.steps)
+        # core unit（__INSTANCE__.service）標 not-deployed（#219 F3：ExecStart 跑
+        # command CLI 非常駐入口），不得進 install plan 與 verify 清單。
+        self.assertNotIn("core/systemd/__INSTANCE__.service.tmpl", relpaths)
         self.assertEqual(
             set(plan.verify_units),
             {
-                "demo-agent.service",
                 "demo-agent-dream.service",
                 "demo-agent-cost.service",
                 "demo-agent-manager.service",
