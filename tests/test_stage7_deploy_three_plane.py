@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import unittest
-from tempfile import TemporaryDirectory
+from pathlib import Path
 
 from paulshaclaw.deploy import (
     build_command_plan,
@@ -14,6 +15,15 @@ from paulshaclaw.deploy import (
     validate_plane_permissions,
 )
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def make_test_dir(name: str) -> Path:
+    path = REPO_ROOT / ".test-artifacts" / name
+    shutil.rmtree(path, ignore_errors=True)
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 class TemplateMappingTests(unittest.TestCase):
     def test_template_assets_cover_three_planes(self) -> None:
@@ -21,13 +31,20 @@ class TemplateMappingTests(unittest.TestCase):
         relpaths = {asset.template_relpath for asset in assets}
         planes = {asset.plane for asset in assets}
 
-        self.assertGreaterEqual(len(assets), 7)
+        self.assertGreaterEqual(len(assets), 13)
         self.assertTrue({"core", "state", "secret"}.issubset(planes))
         self.assertTrue(
             {
                 "core/systemd/__INSTANCE__.service.tmpl",
+                "core/systemd/__INSTANCE__-dream.service.tmpl",
+                "core/systemd/__INSTANCE__-cost.service.tmpl",
+                "core/systemd/__INSTANCE__-manager.service.tmpl",
+                "core/systemd/__INSTANCE__-manager.timer.tmpl",
                 "core/systemd/__INSTANCE__-telegram.service.tmpl",
                 "core/runtime/__INSTANCE__.env.tmpl",
+                "core/runtime/__INSTANCE__-dream.env.tmpl",
+                "core/runtime/__INSTANCE__-cost.env.tmpl",
+                "core/runtime/__INSTANCE__-manager.env.tmpl",
                 "core/runtime/__INSTANCE__-telegram.env.tmpl",
                 "state/config/__INSTANCE__.state.json.tmpl",
                 "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
@@ -45,8 +62,16 @@ class TemplateMappingTests(unittest.TestCase):
         self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env", telegram_unit_text)
         self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env", telegram_unit_text)
         self.assertIn("EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env", telegram_unit_text)
-        self.assertIn("ExecStart=/usr/bin/env python3 -m paulshaclaw.bot.listener", telegram_unit_text)
+        self.assertIn("ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-bot.sh", telegram_unit_text)
         self.assertIn("Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_unit_text)
+        self.assertEqual(
+            telegram_unit.env_catalog,
+            (
+                "core/runtime/__INSTANCE__.env",
+                "core/runtime/__INSTANCE__-telegram.env",
+                "secret/bootstrap/__INSTANCE__.telegram.secret.env",
+            ),
+        )
 
         telegram_runtime = next(
             asset for asset in assets if asset.template_relpath == "core/runtime/__INSTANCE__-telegram.env.tmpl"
@@ -159,10 +184,32 @@ class CommandPlanTests(unittest.TestCase):
         self.assertIn("preserve-state", uninstall.rollback_actions)
         self.assertIn("preserve-secret", uninstall.rollback_actions)
 
+    def test_install_plan_excludes_deprecated_timer_and_wires_service_verify_targets(self) -> None:
+        plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
+        relpaths = {asset.template_relpath for asset in plan.templates}
+
+        self.assertIn("core/systemd/__INSTANCE__-dream.service.tmpl", relpaths)
+        self.assertIn("core/systemd/__INSTANCE__-cost.service.tmpl", relpaths)
+        self.assertIn("core/runtime/__INSTANCE__-dream.env.tmpl", relpaths)
+        self.assertIn("core/runtime/__INSTANCE__-cost.env.tmpl", relpaths)
+        self.assertNotIn("core/systemd/__INSTANCE__-manager.timer.tmpl", relpaths)
+        self.assertIn("verify-systemd-user-units", plan.steps)
+        self.assertEqual(
+            set(plan.verify_units),
+            {
+                "demo-agent.service",
+                "demo-agent-dream.service",
+                "demo-agent-cost.service",
+                "demo-agent-manager.service",
+                "demo-agent-telegram.service",
+            },
+        )
+
 
 class DeployCliTests(unittest.TestCase):
     def test_cli_subcommands_emit_json_plan(self) -> None:
-        with TemporaryDirectory() as tmpdir:
+        tmpdir = make_test_dir("stage7-deploy-cli")
+        try:
             for command in ("install", "upgrade", "uninstall"):
                 completed = subprocess.run(
                     [
@@ -173,7 +220,7 @@ class DeployCliTests(unittest.TestCase):
                         "--instance",
                         "demo-agent",
                         "--root-dir",
-                        tmpdir,
+                        str(tmpdir),
                     ],
                     check=False,
                     capture_output=True,
@@ -185,6 +232,8 @@ class DeployCliTests(unittest.TestCase):
                 self.assertEqual(payload["instance_name"], "demo-agent")
                 self.assertTrue(payload["templates"])
                 self.assertTrue(payload["rollback_checkpoints"])
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 class ManagerUnitCatalogTests(unittest.TestCase):
@@ -200,19 +249,77 @@ class ManagerUnitCatalogTests(unittest.TestCase):
 
         svc = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.service.tmpl")
         svc_text = svc.template_path.read_text(encoding="utf-8")
-        self.assertIn("Type=oneshot", svc_text)
-        self.assertIn("-m paulshaclaw.coordinator tick", svc_text)
+        self.assertTrue(svc.deploy)
+        self.assertEqual(svc.env_catalog, ("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-manager.env"))
+        self.assertIn("Restart=on-failure", svc_text)
+        self.assertIn("RestartSec=10", svc_text)
+        self.assertIn("StartLimitIntervalSec=300", svc_text)
+        self.assertIn("StartLimitBurst=5", svc_text)
+        self.assertIn("KillMode=control-group", svc_text)
+        self.assertIn("ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-manager.sh", svc_text)
+        self.assertNotIn("/home/", svc_text)
+        self.assertNotIn("Type=oneshot", svc_text)
+        self.assertNotIn("coordinator tick", svc_text)
 
         timer = next(a for a in assets if a.template_relpath == "core/systemd/__INSTANCE__-manager.timer.tmpl")
         timer_text = timer.template_path.read_text(encoding="utf-8")
-        self.assertIn("OnUnitActiveSec", timer_text)
-        self.assertIn("WantedBy=timers.target", timer_text)
+        self.assertFalse(timer.deploy)
+        self.assertTrue(timer.deprecated)
+        self.assertIn("Deprecated", timer_text)
 
         env = next(a for a in assets if a.template_relpath == "core/runtime/__INSTANCE__-manager.env.tmpl")
-        self.assertIn("PSC_MANAGER_EXECUTOR=", env.template_path.read_text(encoding="utf-8"))
+        self.assertEqual(env.required_keys, ("PSC_CONTROL_ROOT",))
+        self.assertIn("PSC_CONTROL_ROOT=", env.template_path.read_text(encoding="utf-8"))
+        self.assertNotIn("PSC_MANAGER_EXECUTOR=", env.template_path.read_text(encoding="utf-8"))
 
         target = resolve_template_target("core/systemd/__INSTANCE__-manager.service.tmpl", instance_name="demo-agent")
         self.assertEqual(target, "core/systemd/demo-agent-manager.service")
+
+    def test_dream_cost_and_telegram_units_follow_service_script_contract(self) -> None:
+        assets = {asset.template_relpath: asset for asset in list_template_assets()}
+        expected = {
+            "core/systemd/__INSTANCE__-dream.service.tmpl": {
+                "script": "service-dream.sh",
+                "env_catalog": ("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-dream.env"),
+            },
+            "core/systemd/__INSTANCE__-cost.service.tmpl": {
+                "script": "service-cost.sh",
+                "env_catalog": ("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-cost.env"),
+            },
+            "core/systemd/__INSTANCE__-telegram.service.tmpl": {
+                "script": "service-bot.sh",
+                "env_catalog": (
+                    "core/runtime/__INSTANCE__.env",
+                    "core/runtime/__INSTANCE__-telegram.env",
+                    "secret/bootstrap/__INSTANCE__.telegram.secret.env",
+                ),
+            },
+        }
+        required_lines = (
+            "Restart=on-failure",
+            "RestartSec=10",
+            "StartLimitIntervalSec=300",
+            "StartLimitBurst=5",
+            "KillMode=control-group",
+        )
+        for relpath, info in expected.items():
+            with self.subTest(template=relpath):
+                asset = assets[relpath]
+                text = asset.template_path.read_text(encoding="utf-8")
+                self.assertEqual(asset.env_catalog, info["env_catalog"])
+                for line in required_lines:
+                    self.assertIn(line, text)
+                self.assertIn(f"ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/{info['script']}", text)
+                self.assertNotIn("/home/", text)
+
+        dream_env = assets["core/runtime/__INSTANCE__-dream.env.tmpl"]
+        self.assertEqual(
+            dream_env.required_keys,
+            ("PSC_MEMORY_ROOT", "PSC_DREAM_INTERVAL_SECONDS", "PSC_EXTRA_CORPUS_ROOT"),
+        )
+
+        cost_env = assets["core/runtime/__INSTANCE__-cost.env.tmpl"]
+        self.assertEqual(cost_env.required_keys, ("PAULSHACLAW_CONFIG",))
 
 
 if __name__ == "__main__":

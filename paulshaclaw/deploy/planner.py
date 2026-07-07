@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -16,6 +15,10 @@ class TemplateAsset:
     target_path: str
     rename_rule: str
     expected_suffix: str
+    deploy: bool = True
+    deprecated: bool = False
+    env_catalog: tuple[str, ...] = ()
+    required_keys: tuple[str, ...] = ()
 
     @property
     def template_path(self) -> Path:
@@ -28,6 +31,10 @@ class TemplateAsset:
             "target_path": self.target_path,
             "rename_rule": self.rename_rule,
             "expected_suffix": self.expected_suffix,
+            "deploy": self.deploy,
+            "deprecated": self.deprecated,
+            "env_catalog": list(self.env_catalog),
+            "required_keys": list(self.required_keys),
         }
 
 
@@ -55,6 +62,7 @@ class CommandPlan:
     steps: tuple[str, ...]
     rollback_checkpoints: tuple[str, ...]
     rollback_actions: tuple[str, ...]
+    verify_units: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -65,59 +73,113 @@ class CommandPlan:
             "steps": list(self.steps),
             "rollback_checkpoints": list(self.rollback_checkpoints),
             "rollback_actions": list(self.rollback_actions),
+            "verify_units": list(self.verify_units),
         }
 
 
-_TEMPLATE_CATALOG: tuple[tuple[str, str, str], ...] = (
-    (
-        "core",
-        "core/systemd/__INSTANCE__.service.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+@dataclass(frozen=True)
+class _TemplateSpec:
+    plane: str
+    template_relpath: str
+    rename_rule: str
+    deploy: bool = True
+    deprecated: bool = False
+    env_catalog: tuple[str, ...] = ()
+    required_keys: tuple[str, ...] = ()
+
+
+_TEMPLATE_CATALOG: tuple[_TemplateSpec, ...] = (
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/systemd/__INSTANCE__.service.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
     ),
-    (
-        "core",
-        "core/systemd/__INSTANCE__-telegram.service.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/systemd/__INSTANCE__-dream.service.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        env_catalog=("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-dream.env"),
     ),
-    (
-        "core",
-        "core/runtime/__INSTANCE__.env.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/systemd/__INSTANCE__-cost.service.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        env_catalog=("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-cost.env"),
     ),
-    (
-        "core",
-        "core/runtime/__INSTANCE__-telegram.env.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/systemd/__INSTANCE__-manager.service.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        env_catalog=("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-manager.env"),
     ),
-    (
-        "core",
-        "core/systemd/__INSTANCE__-manager.service.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/systemd/__INSTANCE__-manager.timer.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        deploy=False,
+        deprecated=True,
     ),
-    (
-        "core",
-        "core/systemd/__INSTANCE__-manager.timer.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/systemd/__INSTANCE__-telegram.service.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        env_catalog=(
+            "core/runtime/__INSTANCE__.env",
+            "core/runtime/__INSTANCE__-telegram.env",
+            "secret/bootstrap/__INSTANCE__.telegram.secret.env",
+        ),
     ),
-    (
-        "core",
-        "core/runtime/__INSTANCE__-manager.env.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/runtime/__INSTANCE__.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=("PSC_INSTANCE", "PSC_PLANE"),
     ),
-    (
-        "state",
-        "state/config/__INSTANCE__.state.json.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/runtime/__INSTANCE__-dream.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=("PSC_MEMORY_ROOT", "PSC_DREAM_INTERVAL_SECONDS", "PSC_EXTRA_CORPUS_ROOT"),
     ),
-    (
-        "secret",
-        "secret/bootstrap/__INSTANCE__.secret.env.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/runtime/__INSTANCE__-cost.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=("PAULSHACLAW_CONFIG",),
     ),
-    (
-        "secret",
-        "secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
-        "以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/runtime/__INSTANCE__-manager.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=("PSC_CONTROL_ROOT",),
+    ),
+    _TemplateSpec(
+        plane="core",
+        template_relpath="core/runtime/__INSTANCE__-telegram.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=("PSC_INSTANCE", "PSC_PLANE"),
+    ),
+    _TemplateSpec(
+        plane="state",
+        template_relpath="state/config/__INSTANCE__.state.json.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+    ),
+    _TemplateSpec(
+        plane="secret",
+        template_relpath="secret/bootstrap/__INSTANCE__.secret.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=("PSC_INSTANCE", "PSC_SECRET_BOOTSTRAP"),
+    ),
+    _TemplateSpec(
+        plane="secret",
+        template_relpath="secret/bootstrap/__INSTANCE__.telegram.secret.env.tmpl",
+        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
+        required_keys=(
+            "PSC_TELEGRAM_BOT_TOKEN",
+            "PSC_TELEGRAM_EXPECTED_USERNAME",
+            "PSC_TELEGRAM_EXPECTED_BOT_ID",
+            "PSC_CLAUDE_GEMMA4_API_KEY",
+        ),
     ),
 )
 
@@ -133,7 +195,9 @@ _COMMAND_MATRIX: dict[str, dict[str, tuple[str, ...]]] = {
             "render-core-templates",
             "initialize-state-plane",
             "interactive-secret-install",
-            "enable-service-unit",
+            "daemon-reload-user-units",
+            "verify-required-env-catalog",
+            "verify-systemd-user-units",
         ),
         "rollback_checkpoints": (
             "pre-install",
@@ -154,6 +218,7 @@ _COMMAND_MATRIX: dict[str, dict[str, tuple[str, ...]]] = {
             "preserve-state-plane",
             "preserve-secret-plane",
             "restart-service-unit",
+            "verify-systemd-user-units",
         ),
         "rollback_checkpoints": (
             "pre-upgrade",
@@ -200,17 +265,23 @@ def _expected_suffix(target_path: str) -> str:
     return "." + ".".join(parts[1:])
 
 
-def list_template_assets(*, instance_name: str = "paulshaclaw") -> tuple[TemplateAsset, ...]:
+def list_template_assets(*, instance_name: str = "paulshaclaw", deployed_only: bool = False) -> tuple[TemplateAsset, ...]:
     assets: list[TemplateAsset] = []
-    for plane, template_relpath, rename_rule in _TEMPLATE_CATALOG:
-        target_path = resolve_template_target(template_relpath, instance_name=instance_name)
+    for spec in _TEMPLATE_CATALOG:
+        if deployed_only and not spec.deploy:
+            continue
+        target_path = resolve_template_target(spec.template_relpath, instance_name=instance_name)
         assets.append(
             TemplateAsset(
-                plane=plane,
-                template_relpath=template_relpath,
+                plane=spec.plane,
+                template_relpath=spec.template_relpath,
                 target_path=target_path,
-                rename_rule=rename_rule,
+                rename_rule=spec.rename_rule,
                 expected_suffix=_expected_suffix(target_path),
+                deploy=spec.deploy,
+                deprecated=spec.deprecated,
+                env_catalog=spec.env_catalog,
+                required_keys=spec.required_keys,
             )
         )
     return tuple(assets)
@@ -281,13 +352,20 @@ def build_command_plan(command: str, *, instance_name: str, root_dir: str) -> Co
     if command not in _COMMAND_MATRIX:
         raise ValueError(f"不支援的 command: {command}")
 
+    templates = list_template_assets(instance_name=instance_name, deployed_only=True)
+    verify_units = tuple(
+        Path(asset.target_path).name
+        for asset in templates
+        if asset.template_relpath.startswith("core/systemd/") and asset.target_path.endswith(".service")
+    )
     matrix = _COMMAND_MATRIX[command]
     return CommandPlan(
         command=command,
         instance_name=instance_name,
         root_dir=root_dir,
-        templates=list_template_assets(instance_name=instance_name),
+        templates=templates,
         steps=matrix["steps"],
         rollback_checkpoints=matrix["rollback_checkpoints"],
         rollback_actions=matrix["rollback_actions"],
+        verify_units=verify_units,
     )

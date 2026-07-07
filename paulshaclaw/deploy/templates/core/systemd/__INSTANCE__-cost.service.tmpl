@@ -1,0 +1,15 @@
+[Unit]
+Description=__INSTANCE__ cost refresh service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env
+EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-cost.env
+ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-cost.sh
+KillMode=control-group
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
