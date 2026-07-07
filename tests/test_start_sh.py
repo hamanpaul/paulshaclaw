@@ -105,7 +105,7 @@ FAKE_PYTHON = textwrap.dedent(
             # --once`; treat it as a cheap no-op success in the harness.
             return 0
 
-        if module == "paulshaclaw.memory.cli" and sys.argv[3:6] == ["memory", "dream", "run"]:
+        if module == "paulsha_hippo.cli" and sys.argv[3:5] == ["dream", "run"]:
             pidfile = Path(os.environ["FAKE_DREAM_PIDFILE"])
             pidfile.write_text(str(os.getpid()), encoding="utf-8")
             signal.signal(signal.SIGINT, signal.SIG_IGN)
@@ -579,6 +579,7 @@ class StartScriptLifecycleTests(unittest.TestCase):
             env["HOME"] = str(home_dir)
             env["TMUX_PANE"] = "%0"
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             runtime_dir = tmpdir_path / "runtime"
             runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -841,6 +842,7 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
             env["XDG_RUNTIME_DIR"] = str(runtime_dir)
@@ -927,6 +929,7 @@ class StartScriptSingletonGuardTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
             env["XDG_RUNTIME_DIR"] = str(runtime_dir)
@@ -1039,6 +1042,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
             runtime_dir = tmpdir_path / "runtime"
@@ -1116,6 +1120,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
             runtime_dir = tmpdir_path / "runtime"
@@ -1181,6 +1186,7 @@ class StartScriptStage8FooterTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
             runtime_dir = tmpdir_path / "runtime"
@@ -1256,6 +1262,7 @@ class StartScriptDreamLoopTests(unittest.TestCase):
             env = dict(os.environ)
             env["HOME"] = str(home_dir)
             env["PATH"] = f"{fake_bin}:{env.get('PATH', '')}"
+            env["HIPPO_BIN"] = "disabled"  # 受控 harness：走 fake python 模組路徑
             env["TMUX"] = str(tmpdir_path / "tmux.sock")
             env["TMUX_PANE"] = "%0"
             runtime_dir = tmpdir_path / "runtime"
@@ -1304,7 +1311,7 @@ class StartScriptDreamLoopTests(unittest.TestCase):
         dream_block = text[start:end]
 
         sleep_index = dream_block.index('sleep "$interval"')
-        run_index = dream_block.index('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run')
+        run_index = dream_block.index('"$PY" -m paulsha_hippo.cli dream run')
         self.assertLess(sleep_index, run_index)
 
     def test_heavy_services_are_staggered_by_two_seconds(self) -> None:

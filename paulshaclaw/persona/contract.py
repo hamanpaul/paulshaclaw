@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from typing import Mapping
 
-from paulshaclaw.lifecycle import schema as lifecycle_schema
+from paulsha_hippo.lib.lifecycle import schema as lifecycle_schema
 
 
 PHASES = lifecycle_schema.PHASES

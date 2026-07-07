@@ -129,12 +129,10 @@ class DeployInstallCliTests(unittest.TestCase):
             secret_dir = home_dir / ".config" / "paulshaclaw"
 
             for relpath in (
-                unit_dir / "demo-agent-dream.service",
                 unit_dir / "demo-agent-cost.service",
                 unit_dir / "demo-agent-manager.service",
                 unit_dir / "demo-agent-telegram.service",
                 runtime_dir / "demo-agent.env",
-                runtime_dir / "demo-agent-dream.env",
                 runtime_dir / "demo-agent-cost.env",
                 runtime_dir / "demo-agent-manager.env",
                 runtime_dir / "demo-agent-telegram.env",
@@ -156,11 +154,9 @@ class DeployInstallCliTests(unittest.TestCase):
             self.assertEqual(state_payload["coordinator"]["phase"], "build")
             self.assertIn("pane_assignments", state_payload)
 
-            dream_unit = (unit_dir / "demo-agent-dream.service").read_text(encoding="utf-8")
             manager_unit = (unit_dir / "demo-agent-manager.service").read_text(encoding="utf-8")
             telegram_unit = (unit_dir / "demo-agent-telegram.service").read_text(encoding="utf-8")
             for text, script_name in (
-                (dream_unit, "service-dream.sh"),
                 (manager_unit, "service-manager.sh"),
                 (telegram_unit, "service-bot.sh"),
             ):
@@ -189,12 +185,12 @@ class DeployInstallCliTests(unittest.TestCase):
             self.assertEqual(applied.returncode, 0, msg=applied.stderr)
 
             runtime_dir = home_dir / ".agents" / "core" / "runtime"
-            dream_env = runtime_dir / "demo-agent-dream.env"
-            dream_env.write_text(
+            core_env = runtime_dir / "demo-agent.env"
+            core_env.write_text(
                 "\n".join(
                     line
-                    for line in dream_env.read_text(encoding="utf-8").splitlines()
-                    if not line.startswith("PSC_DREAM_INTERVAL_SECONDS=")
+                    for line in core_env.read_text(encoding="utf-8").splitlines()
+                    if not line.startswith("PSC_INSTANCE=")
                 )
                 + "\n",
                 encoding="utf-8",
@@ -212,8 +208,7 @@ class DeployInstallCliTests(unittest.TestCase):
             self.assertEqual(verified.returncode, 1, msg=verified.stdout)
             combined = verified.stdout + verified.stderr
             self.assertIn("demo-agent-cost.env", combined)
-            self.assertIn("demo-agent-dream.env", combined)
-            self.assertIn("PSC_DREAM_INTERVAL_SECONDS", combined)
+            self.assertIn("PSC_INSTANCE", combined)
             self.assertNotIn("top-secret-token", combined)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -302,14 +297,14 @@ class ApplyInstallPlanCreateOnlyTests(unittest.TestCase):
 
             secret_path = home_dir / ".config" / "paulshaclaw" / "demo-agent.telegram.secret.env"
             state_path = home_dir / ".agents" / "state" / "config" / "demo-agent.state.json"
-            env_path = home_dir / ".agents" / "core" / "runtime" / "demo-agent-dream.env"
-            unit_path = home_dir / ".config" / "systemd" / "user" / "demo-agent-dream.service"
+            env_path = home_dir / ".agents" / "core" / "runtime" / "demo-agent-cost.env"
+            unit_path = home_dir / ".config" / "systemd" / "user" / "demo-agent-cost.service"
             for p in (secret_path, state_path, env_path, unit_path):
                 self.assertTrue(p.is_file(), p)
 
             secret_path.write_text("PSC_TELEGRAM_BOT_TOKEN=real-operator-token\n", encoding="utf-8")
             state_path.write_text('{"allowed_user_ids": [42]}\n', encoding="utf-8")
-            env_path.write_text("PSC_DREAM_INTERVAL_SECONDS=7200\n", encoding="utf-8")
+            env_path.write_text("PSC_COST_REFRESH_SECONDS=7200\n", encoding="utf-8")
             unit_path.write_text("[Unit]\nDescription=stale unit to be upgraded\n", encoding="utf-8")
 
             second = apply_install_plan(plan, home_dir=home_dir)

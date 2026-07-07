@@ -12,7 +12,6 @@ from unittest import mock
 from paulshaclaw.bot.telegram import TelegramCommandRouter
 from paulshaclaw.core.config import load_config
 from paulshaclaw.core.daemon import PaulShiaBroDaemon
-from paulshaclaw.memory.atomizer import config as atomizer_config
 from paulshaclaw.tui.view import render_pane_task_view
 
 
@@ -126,8 +125,10 @@ def write_config_file() -> Path:
 
 class Stage1SmokeTest(unittest.TestCase):
     def _default_agent_launch_command(self, *extra: str) -> str:
-        cfg, _ = atomizer_config.load_config(override_path=None)
-        return shlex.join([*atomizer_config.resolve_command_argv(cfg.agent_exec_command), *extra])
+        from paulshaclaw.config import paths as _paths
+
+        wrapper = str(_paths.repo_root() / "scripts" / "claude-gemma4")
+        return shlex.join([wrapper, *extra])
 
     def make_config_path(self) -> Path:
         config_path = write_config_file()
@@ -786,16 +787,15 @@ class Stage1SmokeTest(unittest.TestCase):
 
         self.assertEqual(result, ("%1", 101))
 
-    def test_agent_start_sources_launch_command_from_atomizer_config(self) -> None:
+    def test_agent_start_sources_launch_command_from_env_override(self) -> None:
+        # #125 解耦：agent argv 來源 = PSC_AGENT_COMMAND env（不再借 atomizer config）
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
-        shared_cfg, _ = atomizer_config.load_config(override_path=None)
-        custom_cfg = replace(shared_cfg, agent_exec_command=("python3", "-m", "demo.agent"))
 
         with (
             mock.patch.object(daemon, "_detect_agent_process", return_value=None),
             mock.patch.object(daemon, "_assert_pane_is_idle_shell"),
-            mock.patch("paulshaclaw.core.daemon.atomizer_config.load_config", return_value=(custom_cfg, "cfg-hash")),
+            mock.patch.dict("os.environ", {"PSC_AGENT_COMMAND": "python3 -m demo.agent"}),
             mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}) as send_mock,
         ):
             result = daemon.handle_command("/agent start %7")
@@ -807,9 +807,6 @@ class Stage1SmokeTest(unittest.TestCase):
     def test_detect_agent_process_uses_shared_command_override(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
-        shared_cfg, _ = atomizer_config.load_config(override_path=None)
-        custom_cfg = replace(shared_cfg, agent_exec_command=("python3", "-m", "demo.agent"))
-
         def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
                 return subprocess.CompletedProcess(command, 0, stdout="%1 101\n", stderr="")
@@ -818,7 +815,7 @@ class Stage1SmokeTest(unittest.TestCase):
             raise AssertionError(f"unexpected command: {command}")
 
         with (
-            mock.patch("paulshaclaw.core.daemon.atomizer_config.load_config", return_value=(custom_cfg, "cfg-hash")),
+            mock.patch.dict("os.environ", {"PSC_AGENT_COMMAND": "python3 -m demo.agent"}),
             mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
         ):
             result = daemon._detect_agent_process()
@@ -828,9 +825,6 @@ class Stage1SmokeTest(unittest.TestCase):
     def test_detect_agent_process_does_not_match_legacy_agent_when_command_is_overridden(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
-        shared_cfg, _ = atomizer_config.load_config(override_path=None)
-        custom_cfg = replace(shared_cfg, agent_exec_command=("python3", "-m", "demo.agent"))
-
         def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             if command == ["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]:
                 return subprocess.CompletedProcess(command, 0, stdout="%1 101\n", stderr="")
@@ -841,7 +835,7 @@ class Stage1SmokeTest(unittest.TestCase):
             raise AssertionError(f"unexpected command: {command}")
 
         with (
-            mock.patch("paulshaclaw.core.daemon.atomizer_config.load_config", return_value=(custom_cfg, "cfg-hash")),
+            mock.patch.dict("os.environ", {"PSC_AGENT_COMMAND": "python3 -m demo.agent"}),
             mock.patch("paulshaclaw.core.daemon.subprocess.run", side_effect=fake_run),
         ):
             result = daemon._detect_agent_process()

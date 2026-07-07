@@ -24,7 +24,12 @@ jobs:
       - name: Install test dependencies
         run: |
           python -m pip install --upgrade pip
+          # -e . 會解析 pyproject 的 paulsha-hippo SHA pin（可解析性即 CI gate）
+          python -m pip install -e .
           python -m pip install pytest -r requirements-stage9.txt -r requirements-stage11.txt
 
+      - name: Smoke import pinned hippo
+        run: python -c "import paulsha_hippo, paulsha_hippo.lib.lifecycle; print(paulsha_hippo.__version__)"
+
       - name: Run test suite
-        run: python -m pytest tests/ paulshaclaw/memory/tests/ -q
+        run: python -m pytest tests/ -q

@@ -103,6 +103,10 @@ _TEMPLATE_CATALOG: tuple[_TemplateSpec, ...] = (
         template_relpath="core/systemd/__INSTANCE__-dream.service.tmpl",
         rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
         env_catalog=("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-dream.env"),
+        # #125 Phase 1 已執行：dream 常駐移交 paulsha-hippo installer
+        # （hippo install service）；本模板退出部署面（adr-001 拆分注記）。
+        deploy=False,
+        deprecated=True,
     ),
     _TemplateSpec(
         plane="core",
@@ -144,6 +148,9 @@ _TEMPLATE_CATALOG: tuple[_TemplateSpec, ...] = (
         template_relpath="core/runtime/__INSTANCE__-dream.env.tmpl",
         rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
         required_keys=("PSC_MEMORY_ROOT", "PSC_DREAM_INTERVAL_SECONDS", "PSC_EXTRA_CORPUS_ROOT"),
+        # #125：dream 常駐（unit+env）移交 paulsha-hippo installer。
+        deploy=False,
+        deprecated=True,
     ),
     _TemplateSpec(
         plane="core",

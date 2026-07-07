@@ -54,7 +54,7 @@ class ServiceScriptTests(unittest.TestCase):
 
     def test_dream_service_runs_memory_dream_command(self) -> None:
         text = self._read("dream")
-        self.assertIn('PYTHONPATH="$REPO" "$PY" -m paulshaclaw.memory.cli memory dream run', text)
+        self.assertIn('"$PY" -m paulsha_hippo.cli dream run', text)
         self.assertIn('--memory-root "$dream_root"', text)
         self.assertIn("--require-idle", text)
         self.assertIn("--promoter llm", text)

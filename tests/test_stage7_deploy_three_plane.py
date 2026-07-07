@@ -188,9 +188,9 @@ class CommandPlanTests(unittest.TestCase):
         plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
         relpaths = {asset.template_relpath for asset in plan.templates}
 
-        self.assertIn("core/systemd/__INSTANCE__-dream.service.tmpl", relpaths)
+        # #125：dream 常駐移交 hippo installer——不得再入部署面
+        self.assertNotIn("core/systemd/__INSTANCE__-dream.service.tmpl", relpaths)
         self.assertIn("core/systemd/__INSTANCE__-cost.service.tmpl", relpaths)
-        self.assertIn("core/runtime/__INSTANCE__-dream.env.tmpl", relpaths)
         self.assertIn("core/runtime/__INSTANCE__-cost.env.tmpl", relpaths)
         self.assertNotIn("core/systemd/__INSTANCE__-manager.timer.tmpl", relpaths)
         self.assertIn("verify-systemd-user-units", plan.steps)
@@ -200,7 +200,6 @@ class CommandPlanTests(unittest.TestCase):
         self.assertEqual(
             set(plan.verify_units),
             {
-                "demo-agent-dream.service",
                 "demo-agent-cost.service",
                 "demo-agent-manager.service",
                 "demo-agent-telegram.service",
