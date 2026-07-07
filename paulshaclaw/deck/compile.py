@@ -328,6 +328,7 @@ def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) 
                 try:
                     with os.fdopen(fd, "w", encoding="utf-8") as handle:
                         handle.write(slice_doc.content)
+                    os.chmod(temp_path, 0o644)  # mkstemp 預設 0o600，與非 force 路徑一致
                     backup_path: Path | None = None
                     if final_path.exists():
                         backup_fd, backup_name = tempfile.mkstemp(
@@ -357,7 +358,7 @@ def emit(result: CompileResult, target_dir: str | Path, *, force: bool = False) 
                     final_path.unlink(missing_ok=True)
                     raise
             written.append(final_path)
-    except OSError as exc:
+    except Exception as exc:  # 任何寫入期例外（含編碼錯誤）都必須走同一套回滾，否則 finally 會刪掉備份
         if force:
             for final_path, backup_path in reversed(backups):
                 if backup_path is not None and backup_path.exists():

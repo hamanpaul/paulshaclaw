@@ -6,7 +6,9 @@ import pytest
 import yaml
 
 from paulshaclaw.deck.compile import (
+    CompileResult,
     DeckCompileError,
+    SliceDoc,
     compile_combo,
     emit,
     parse_with_spec,
@@ -510,3 +512,38 @@ def test_specs_dir_env_matrix_matches_manager(monkeypatch, tmp_path):
         for key, value in env.items():
             monkeypatch.setenv(key, value)
         assert str(specs_dir()) == default_specs_dir(), f"env={env}"
+
+
+def test_emit_force_non_oserror_rolls_back(tmp_path):
+    # GitHub review 修正：非 OSError（如編碼錯誤）也必須回滾，不得讓 finally 刪備份造成資料遺失
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    out = tmp_path / "specs"
+    emit(result, out)
+    original = (out / result.slices[0].filename).read_text(encoding="utf-8")
+
+    bad_doc = SliceDoc(
+        slice_id=result.slices[0].slice_id,
+        filename=result.slices[0].filename,
+        content="\ud800 不可編碼",
+    )
+    bad_result = CompileResult(
+        task_slug=result.task_slug,
+        slices=(bad_doc,),
+        checklist=(),
+        verify_commands=(),
+        external=(),
+    )
+    with pytest.raises(DeckCompileError, match="emit 寫入失敗"):
+        emit(bad_result, out, force=True)
+    assert (out / bad_doc.filename).read_text(encoding="utf-8") == original  # 原檔完好
+
+
+def test_emit_force_file_mode_consistent(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(combo, cards, "demo task", change="demo", allow_external=True)
+    out = tmp_path / "specs"
+    emit(result, out)
+    emit(result, out, force=True)
+    mode = (out / result.slices[0].filename).stat().st_mode & 0o777
+    assert mode == 0o644
