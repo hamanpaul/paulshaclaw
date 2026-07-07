@@ -72,11 +72,15 @@ def load_catalog(path: str | Path | None = None) -> dict[str, PersonaContract]:
 
 
 def _warn_unknown_skills(catalog: dict[str, PersonaContract]) -> None:
+    """shadow 驗證：fail-open 僅限 deck 缺席；壞目錄要警示、邏輯 bug 不吞。"""
     try:
-        from paulshaclaw.deck.schema import DEFAULT_CARDS_PATH, load_cards
-
+        from paulshaclaw.deck.schema import DeckSchemaError, DEFAULT_CARDS_PATH, load_cards
+    except ImportError:
+        return  # deck 套件缺席（如未來拆包）→ 靜默跳過
+    try:
         cards = load_cards(DEFAULT_CARDS_PATH)
-    except Exception:
+    except DeckSchemaError as exc:
+        warnings.warn(f"skills shadow 驗證跳過（deck 卡片目錄不可用）: {exc}", stacklevel=2)
         return
     for role, contract in catalog.items():
         for sid in contract.skills:

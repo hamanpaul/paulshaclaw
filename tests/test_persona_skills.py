@@ -75,7 +75,7 @@ def test_unknown_card_id_warns_but_loads(catalog_path, cards_path, monkeypatch):
     from paulshaclaw.deck import schema as deck_schema
 
     monkeypatch.setattr(deck_schema, "DEFAULT_CARDS_PATH", cards_path)
-    with pytest.warns(UserWarning, match="no-such-card"):
+    with pytest.warns(UserWarning, match=r"reviewer.*no-such-card"):
         catalog = load_catalog(catalog_path)
     assert "reviewer" in catalog
 
@@ -131,3 +131,27 @@ def test_validator_rejects_scalar_skills_on_raw_mapping():
 
     assert not result.ok
     assert "manager: skills 必須是字串清單" in result.errors
+
+
+
+def test_default_catalog_skills_all_resolve():
+    # 對抗審查修正：真實 personas.yaml × 真實 deck 卡片目錄——全部 skills 引用必須可解析（無 warning）
+    import warnings as _warnings
+
+    with _warnings.catch_warnings(record=True) as caught:
+        _warnings.simplefilter("always")
+        catalog = load_catalog()
+    unknown = [str(w.message) for w in caught if "未知 deck card" in str(w.message)]
+    assert unknown == []
+    assert all(len(c.skills) > 0 for c in catalog.values())  # 三 role 都有綁定
+
+
+def test_broken_deck_catalog_warns_skipped(tmp_path, monkeypatch):
+    # 對抗審查修正：deck 目錄壞損 → 明示「驗證跳過」warning，而非靜默 fail-open
+    import paulshaclaw.deck.schema as deck_schema
+
+    bad = tmp_path / "cards.yaml"
+    bad.write_text("cards: {broken", encoding="utf-8")
+    monkeypatch.setattr(deck_schema, "DEFAULT_CARDS_PATH", bad)
+    with pytest.warns(UserWarning, match="shadow 驗證跳過"):
+        load_catalog()
