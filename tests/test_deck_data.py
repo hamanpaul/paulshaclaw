@@ -108,3 +108,29 @@ def test_mcu_feature_real_data_compiles_to_hold_specs(tmp_path):
     assert len(metas) == len(result.slices)
     detect_cycles(metas)
     assert ready_units(metas, lambda sid: True) == []
+
+
+def test_feature_oneshot_real_data_compiles_to_hold_specs(tmp_path):
+    # W7 整合驗證：真實資料 feature-oneshot 全鏈 compile→emit→parse-level
+    from paulshaclaw.coordinator.autonomy import detect_cycles, ready_units, scan_specs
+    from paulshaclaw.deck.compile import compile_combo, emit
+
+    cards = load_cards(DEFAULT_CARDS_PATH)
+    combo = load_combo(DEFAULT_COMBOS_DIR / "feature-oneshot.yaml", cards)
+    result = compile_combo(combo, cards, "w7 closeout demo", change="deck-cards-combo-phase-a")
+    slug = result.task_slug
+    assert result.external == ()  # 全鏈 requires 覆蓋，無需 --allow-external
+    assert [s.slice_id for s in result.slices] == [
+        f"{slug}-build",
+        f"{slug}-code-review",
+        f"{slug}-verification",
+        f"{slug}-ship",
+        f"{slug}-adversarial-review",
+    ]
+    assert len(result.checklist) == 3  # 三張 interactive 前置卡
+    out = tmp_path / "specs"
+    emit(result, out)
+    metas = scan_specs(out)
+    assert len(metas) == 5
+    detect_cycles(metas)
+    assert ready_units(metas, lambda sid: True) == []  # 全 hold 不誤觸發

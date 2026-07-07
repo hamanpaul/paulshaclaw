@@ -104,6 +104,14 @@ flowchart LR
 
 現況：manager daemon 與 control plane 已接進運行路徑（[`scripts/start.sh`](./scripts/start.sh) 拉起的 resident daemon）。
 
+**[`deck/`](./paulshaclaw/deck/) — 卡片化組合技宣告層（#186 Phase A）**
+- 把 pipeline 組合技（如 `feature-delivery-pipeline` 的 11-phase 鏈）轉譯成機器可讀的**卡片**（`data/cards.yaml`）與**組合技 combo**（`data/combos/*.yaml`），manager runtime 零改動——接點是編譯產出的 spec 檔。
+- `psc deck compile <combo> --task "..." [--emit]`：一句 task + 一張 combo → 展開成 manager 可代管的 slice specs（interactive 卡編為前置 checklist、headless 卡依 `slice_group` 合併為 slices + `depends_on` DAG）。
+- 安全預設：預設 dry-run；`--emit` 一律 `dispatch: hold`（翻 `auto` 是人的動作）；同名拒絕、`--force` 才原子覆蓋。
+- `psc deck verify <card>`：卡片 produces glob 存在性驗收（翻 auto 前的人工 checklist）。
+- 使用者指定卡以 `--with card[:after=|:before=]` **加入手牌不取代骨幹**；`--only` 才排他。
+- 設計真相源：[`docs/superpowers/specs/2026-07-06-deck-cards-combo-design.md`](./docs/superpowers/specs/2026-07-06-deck-cards-combo-design.md)；Phase B/C（task_type 選牌、`/dispatch` 接線、hit 計分）見 #186。
+
 ---
 
 ## 支柱三：persona（治理契約面）
