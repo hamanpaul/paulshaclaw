@@ -120,6 +120,27 @@ class SkilloptCliTests(unittest.TestCase):
         self.assertEqual(config.min_project_sample, 5)
         self.assertEqual(config.judge_timeout, 123)
 
+    def test_load_skillopt_config_uses_agents_root_default_path(self) -> None:
+        agents_root = self.root / "custom-agents"
+        config_path = agents_root / "config" / "skillopt.yaml"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            "\n".join(
+                [
+                    "judge_command: python3 -m judge.demo",
+                    "alpha: 0.75",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        with mock.patch.dict(os.environ, {"PSC_AGENTS_ROOT": str(agents_root)}, clear=False):
+            config = skillopt_cli.load_skillopt_config(atomizer_cfg=_CFG)
+
+        self.assertEqual(config.judge_command, ("python3", "-m", "judge.demo"))
+        self.assertEqual(config.alpha, 0.75)
+
     def test_run_optimize_dry_run_skips_optimizer_factory(self) -> None:
         skill_path = self.root / "skill.md"
         skill_path.write_text(_VALID_SKILL, encoding="utf-8")
@@ -254,9 +275,9 @@ class SkilloptCliTests(unittest.TestCase):
         )
         seen: dict[str, object] = {}
 
-        def fake_agent_exec(command, timeout):
+        def fake_agent_exec(command, timeout, env=None):
             calls = seen.setdefault("agent_exec_calls", [])
-            calls.append((tuple(command), timeout))
+            calls.append((tuple(command), timeout, env))
             return f"agent<{len(calls)}>"
 
         def fake_rollout(agent, known_projects, config):
@@ -297,8 +318,12 @@ class SkilloptCliTests(unittest.TestCase):
             self.assertEqual(
                 seen["agent_exec_calls"],
                 [
-                    (tuple(resolve_command_argv(_CFG.agent_exec_command)), _CFG.agent_exec_timeout),
-                    (("python3", "-m", "judge.demo"), 123),
+                    (
+                        tuple(resolve_command_argv(_CFG.agent_exec_command)),
+                        _CFG.agent_exec_timeout,
+                        {"PSC_CLAUDE_GEMMA4_UPSTREAM_URL": _CFG.agent_exec_upstream_url},
+                    ),
+                    (("python3", "-m", "judge.demo"), 123, None),
                 ],
             )
             self.assertEqual(seen["score_args"], ("agent<2>", 0.55))

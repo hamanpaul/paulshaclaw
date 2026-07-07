@@ -1,0 +1,20 @@
+# will-migrate-to-hippo（#125 Phase 1）：拆分後本 unit 之產生與生命週期移交
+# paulsha-hippo installer（hippo install service），本模板屆時自 deploy 平面移除。
+# 見 adr-001 拆分注記。
+[Unit]
+Description=demo-agent memory dream service
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+EnvironmentFile=%h/.agents/core/runtime/demo-agent.env
+EnvironmentFile=%h/.agents/core/runtime/demo-agent-dream.env
+ExecStart=/usr/bin/env bash /srv/paulshaclaw/scripts/service-dream.sh
+KillMode=control-group
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

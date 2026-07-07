@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
+from paulshaclaw.config import paths
+
 Executor = Callable[[list[str], int], str]
 Clock = Callable[[], datetime]
 
@@ -34,11 +36,11 @@ def _default_now() -> datetime:
 
 
 def _default_socket_path() -> Path:
-    return Path.home() / ".agents" / "run" / "paulshaclaw-tmate.sock"
+    return paths.run_root() / "paulshaclaw-tmate.sock"
 
 
 def _default_state_path() -> Path:
-    return Path.home() / ".agents" / "state" / "tmate.json"
+    return paths.state_path("tmate.json")
 
 
 @dataclass

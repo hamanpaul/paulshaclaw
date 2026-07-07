@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from paulshaclaw.config import paths
+
 from .noise import DocCorpus, build_corpus
 
 _DOC_NAMES: tuple[str, ...] = ("CLAUDE.md", "AGENTS.md", "GEMINI.md")
@@ -73,21 +75,21 @@ def discover_instruction_docs(
 
 def default_roots() -> list[Path]:
     """Curated, bounded set of locations where agent-instruction docs live."""
-    home = Path.home()
+    home = paths.home_root()
     roots = [
         home / ".claude" / "CLAUDE.md",
         home / "CLAUDE.md",
         home / "AGENTS.md",
         home / "GEMINI.md",
         home / ".codex",
-        home / ".agents",
+        paths.agents_root(),
         home / ".gemini",
         home / "prj_pri",
     ]
     # 額外工作樹 corpus root 由 env 提供（去識別化：不硬編個人/雇主目錄名）。
-    extra = os.environ.get("PSC_EXTRA_CORPUS_ROOT", "").strip()
+    extra = paths.extra_corpus_root()
     if extra:
-        roots.append(Path(extra).expanduser())
+        roots.append(extra)
     return roots
 
 

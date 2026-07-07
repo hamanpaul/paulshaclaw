@@ -4,6 +4,8 @@ import subprocess
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from paulshaclaw.config import paths
+
 
 @runtime_checkable
 class PaneSender(Protocol):
@@ -52,12 +54,12 @@ class ScriptWorktreeCreator:
 
     def __init__(
         self,
-        repo: str | Path = "/home/paul_chen/prj_pri/paulshaclaw",
-        wt_root: str | Path = "/home/paul_chen/prj_pri/paulshaclaw-worktrees",
+        repo: str | Path | None = None,
+        wt_root: str | Path | None = None,
         base: str = "main",
     ) -> None:
-        self._repo = Path(repo)
-        self._wt_root = Path(wt_root)
+        self._repo = Path(paths.repo_root() if repo is None else repo)
+        self._wt_root = Path(paths.worktree_root() if wt_root is None else wt_root)
         self._base = base
 
     def create(self, branch: str) -> str:

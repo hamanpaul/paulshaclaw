@@ -6,11 +6,18 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from paulshaclaw.config import paths
 
-DEFAULT_CONFIG_PATH = Path("~/.config/paulshaclaw/paulshaclaw.yaml")
-DEFAULT_SOCKET_PATH = Path("~/.agents/run/project-monitor.sock")
 ENV_CONFIG_VAR = "PAULSHACLAW_CONFIG"
 ALLOWED_LEGACY_POLICIES = ("list-only", "hide")
+
+
+def default_config_path() -> Path:
+    return paths.config_path("paulshaclaw.yaml")
+
+
+def default_socket_path() -> Path:
+    return paths.run_root() / "project-monitor.sock"
 
 
 @dataclass(frozen=True)
@@ -26,7 +33,7 @@ class MonitorConfig:
     rescan_interval_seconds: int = 300
     watch_debounce_ms: int = 500
     legacy_policy: str = "list-only"
-    socket_path: Path = field(default_factory=lambda: DEFAULT_SOCKET_PATH.expanduser())
+    socket_path: Path = field(default_factory=default_socket_path)
     ignore_dirs: tuple[str, ...] = ()
 
 
@@ -36,7 +43,7 @@ def _resolve_config_source(config_path: Path | None) -> Path:
     env_value = os.environ.get(ENV_CONFIG_VAR)
     if env_value:
         return Path(env_value)
-    default = DEFAULT_CONFIG_PATH.expanduser()
+    default = default_config_path()
     if default.exists():
         return default
     sample = (
@@ -48,7 +55,7 @@ def _resolve_config_source(config_path: Path | None) -> Path:
     if sample.exists():
         return sample
     raise FileNotFoundError(
-        f"找不到設定檔：請設置 --config、{ENV_CONFIG_VAR} 或 {DEFAULT_CONFIG_PATH}"
+        f"找不到設定檔：請設置 --config、{ENV_CONFIG_VAR} 或 {default_config_path()}"
     )
 
 
@@ -119,7 +126,7 @@ def load_config(*, config_path: Path | None = None) -> MonitorConfig:
     socket_path = (
         Path(str(socket_raw)).expanduser()
         if socket_raw
-        else DEFAULT_SOCKET_PATH.expanduser()
+        else default_socket_path()
     )
 
     ignore_raw = monitor.get("ignore_dirs") or ()

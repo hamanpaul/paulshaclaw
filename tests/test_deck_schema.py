@@ -222,3 +222,17 @@ def test_gate_spine_non_list_rejected(tmp_path):
         bad_yaml = VALID_COMBO.split("  gate_spine:")[0] + "  " + bad_spine + "\n"
         with pytest.raises(DeckSchemaError, match="gate_spine 必須是清單"):
             load_combo(_write(tmp_path, "demo.yaml", bad_yaml), cards)
+
+
+def test_load_cards_absolute_or_escape_glob_rejected(tmp_path):
+    # W4 對抗審查回歸：produces/requires glob 拒絕絕對路徑與 .. 逃逸（載入層 fail-closed）
+    for bad_glob, expect in (
+        ("/etc/hosts", "絕對"),
+        ("~/x.md", "絕對"),
+        ("C:/x.md", "絕對"),
+        ("../pyproject.toml", "路徑段"),
+        ("docs/../secret.md", "路徑段"),
+    ):
+        bad = VALID_CARDS.replace("docs/superpowers/plans/*<task-slug>*.md", bad_glob)
+        with pytest.raises(DeckSchemaError, match=expect):
+            load_cards(_write(tmp_path, "cards.yaml", bad))

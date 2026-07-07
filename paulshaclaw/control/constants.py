@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from paulshaclaw.config import paths
+
 SCHEMA_VERSION = 1
 # Age past which a status file is treated as stale when the daemon's liveness
 # cannot be confirmed (no live pid). A live-but-busy daemon is NOT degraded.
@@ -13,10 +15,7 @@ STATUS_STALLED_AFTER_SECONDS = float(os.environ.get("PSC_CONTROL_STATUS_STALLED_
 
 
 def control_root() -> Path:
-    override = os.environ.get("PSC_CONTROL_ROOT")
-    if override:
-        return Path(override)
-    return Path.home() / ".agents" / "control"
+    return paths.control_root()
 
 
 def requests_dir() -> Path:

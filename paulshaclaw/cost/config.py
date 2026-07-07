@@ -7,11 +7,32 @@ from typing import Any
 
 import yaml
 
-DEFAULT_CONFIG_PATH = Path("~/.config/paulshaclaw/paulshaclaw.yaml")
+from paulshaclaw.config import paths
+
 ENV_CONFIG_VAR = "PAULSHACLAW_CONFIG"
 SAMPLE_CONFIG_PATH = (
     Path(__file__).resolve().parents[1] / "config" / "paulshaclaw.sample.yaml"
 )
+
+
+def default_config_path() -> Path:
+    return paths.config_path("paulshaclaw.yaml")
+
+
+def default_claude_statusline_sidecar() -> Path:
+    return paths.state_path("cost", "claude_rate_limits.json")
+
+
+def default_codex_auth_path() -> Path:
+    return paths.codex_root() / "auth.json"
+
+
+def default_cost_cache_dir() -> Path:
+    return paths.state_path("cost")
+
+
+def default_cost_log_path() -> Path:
+    return paths.log_root() / "cost.log"
 
 
 @dataclass(frozen=True)
@@ -27,7 +48,7 @@ class CopilotAccountConfig:
 @dataclass(frozen=True)
 class ClaudeProviderConfig:
     statusline_sidecar: Path = field(
-        default_factory=lambda: Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
+        default_factory=default_claude_statusline_sidecar
     )
     max_age_seconds: int = 300
     local_fallback: bool = False
@@ -36,7 +57,7 @@ class ClaudeProviderConfig:
 @dataclass(frozen=True)
 class CodexProviderConfig:
     enabled: bool = True
-    auth_path: Path = field(default_factory=lambda: Path("~/.codex/auth.json").expanduser())
+    auth_path: Path = field(default_factory=default_codex_auth_path)
     usage_url: str = "https://chatgpt.com/api/codex/usage"
     max_age_seconds: int = 300
     local_fallback: bool = False
@@ -50,8 +71,8 @@ class CostConfig:
     warning_percent: int = 70
     critical_percent: int = 90
     copilot_accounts: tuple[CopilotAccountConfig, ...] = ()
-    cache_dir: Path = field(default_factory=lambda: Path("~/.agents/state/cost").expanduser())
-    log_path: Path = field(default_factory=lambda: Path("~/.agents/log/cost.log").expanduser())
+    cache_dir: Path = field(default_factory=default_cost_cache_dir)
+    log_path: Path = field(default_factory=default_cost_log_path)
     claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
     codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
 
@@ -62,7 +83,7 @@ def _resolve_config_source(config_path: Path | None) -> Path | None:
     env_value = os.environ.get(ENV_CONFIG_VAR)
     if env_value:
         return Path(env_value)
-    default = DEFAULT_CONFIG_PATH.expanduser()
+    default = default_config_path()
     if default.exists():
         return default
     if SAMPLE_CONFIG_PATH.exists():
@@ -152,7 +173,7 @@ def _parse_claude_provider(raw: Any) -> ClaudeProviderConfig:
         statusline_sidecar=(
             Path(str(sidecar)).expanduser()
             if sidecar
-            else Path("~/.agents/state/cost/claude_rate_limits.json").expanduser()
+            else default_claude_statusline_sidecar()
         ),
         max_age_seconds=int(max_age) if max_age is not None else 300,
         local_fallback=_bool_value(item.get("local_fallback"), default=False),
@@ -169,7 +190,7 @@ def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
         auth_path=(
             Path(str(auth_path)).expanduser()
             if auth_path
-            else Path("~/.codex/auth.json").expanduser()
+            else default_codex_auth_path()
         ),
         usage_url=str(usage_url) if usage_url else "https://chatgpt.com/api/codex/usage",
         max_age_seconds=int(max_age) if max_age is not None else 300,
@@ -202,11 +223,11 @@ def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
         cache_dir=(
             Path(str(cache_dir_raw)).expanduser()
             if cache_dir_raw
-            else Path("~/.agents/state/cost").expanduser()
+            else default_cost_cache_dir()
         ),
         log_path=(
             Path(str(log_path_raw)).expanduser()
             if log_path_raw
-            else Path("~/.agents/log/cost.log").expanduser()
+            else default_cost_log_path()
         ),
     )

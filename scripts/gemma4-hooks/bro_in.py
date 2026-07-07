@@ -8,9 +8,14 @@ import re
 import sys
 from pathlib import Path
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from paulshaclaw.config import paths
+
 BRO_RE = re.compile(r"^\s*\[bro:(\d+)\]")
-DEFAULT_STATE_DIR = Path.home() / ".agents" / "state" / "bro-hook"
-LOG = Path.home() / ".agents" / "log" / "bro-hook.log"
+DEFAULT_STATE_DIR = paths.state_path("bro-hook")
+LOG = paths.log_root() / "bro-hook.log"
 
 
 def _log(stage: str, exc: Exception) -> None:
