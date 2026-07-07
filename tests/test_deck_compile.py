@@ -137,6 +137,14 @@ combo:
       exists: ["reports/review/*<task-slug>*.md"]
 """
 
+SOLO_ADV_COMBO = """\
+combo:
+  id: solo-adv
+  task_type: feature
+  cards:
+    - ref: adversarial-review
+"""
+
 
 def _write(tmp_path, name: str, text: str):
     path = tmp_path / name
@@ -147,6 +155,12 @@ def _write(tmp_path, name: str, text: str):
 def _feature_oneshot(tmp_path):
     cards = load_cards(_write(tmp_path, "cards.yaml", CARDS_YAML))
     combo = load_combo(_write(tmp_path, "feature-oneshot.yaml", FEATURE_ONESHOT_YAML), cards)
+    return cards, combo
+
+
+def _solo_adv(tmp_path):
+    cards = load_cards(_write(tmp_path, "cards.yaml", CARDS_YAML))
+    combo = load_combo(_write(tmp_path, "solo-adv.yaml", SOLO_ADV_COMBO), cards)
     return cards, combo
 
 
@@ -214,3 +228,22 @@ def test_compile_frontmatter_exact_keyset(tmp_path):
     for slice_doc in result.slices:
         block = slice_doc.content.split("---\n")[1]
         assert set(yaml.safe_load(block)) == set(EMITTED_FRONTMATTER_FIELDS)
+
+
+def test_requires_uncovered_blocks_without_allow_external(tmp_path):
+    cards, combo = _solo_adv(tmp_path)
+    with pytest.raises(DeckCompileError, match="allow-external"):
+        compile_combo(combo, cards, "demo task", change="demo", plan_ref="docs/plan.md")
+
+
+def test_requires_external_allowed_and_reported(tmp_path):
+    cards, combo = _solo_adv(tmp_path)
+    result = compile_combo(
+        combo,
+        cards,
+        "demo task",
+        change="demo",
+        allow_external=True,
+        plan_ref="docs/plan.md",
+    )
+    assert result.external

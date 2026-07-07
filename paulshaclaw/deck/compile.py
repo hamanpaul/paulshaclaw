@@ -68,12 +68,36 @@ def _resolve_hand(
     return list(combo.cards)
 
 
+def _prefix(glob: str) -> str:
+    return glob.split("*", 1)[0]
+
+
+def _covered(require: str, produce: str) -> bool:
+    """保守判斷 produce 是否覆蓋 require 的 pattern 前綴。"""
+    require_prefix = _prefix(require)
+    produce_prefix = _prefix(produce)
+    return require_prefix.startswith(produce_prefix) or produce_prefix.startswith(require_prefix)
+
+
 def _check_requires_coverage(
     entries: Sequence[ComboEntry],
     cards: Mapping[str, Card],
     allow_external: bool,
 ) -> tuple[str, ...]:
-    return ()
+    upstream: list[str] = []
+    external: list[str] = []
+    for entry in entries:
+        card = cards[entry.ref]
+        for require in card.requires:
+            if not any(_covered(require, produce) for produce in upstream):
+                external.append(f"{card.id}: {require}")
+        upstream.extend(card.produces)
+    if external and not allow_external:
+        raise DeckCompileError(
+            "requires 未被上游 produces 覆蓋（external input），"
+            "確認後以 --allow-external 放行：\n  " + "\n  ".join(external)
+        )
+    return tuple(external)
 
 
 def _group_slices(
