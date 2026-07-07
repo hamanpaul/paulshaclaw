@@ -3,7 +3,13 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from paulshaclaw.deck.compile import DeckCompileError, compile_combo, slugify_task, specs_dir
+from paulshaclaw.deck.compile import (
+    DeckCompileError,
+    compile_combo,
+    parse_with_spec,
+    slugify_task,
+    specs_dir,
+)
 from paulshaclaw.deck.schema import load_cards, load_combo
 
 CARDS_YAML = """\
@@ -247,3 +253,51 @@ def test_requires_external_allowed_and_reported(tmp_path):
         plan_ref="docs/plan.md",
     )
     assert result.external
+
+
+def test_parse_with_spec_forms():
+    assert parse_with_spec("mcu-hw-evidence") == ("mcu-hw-evidence", None, None)
+    assert parse_with_spec("x:after=code-review") == ("x", "after", "code-review")
+    assert parse_with_spec("x:before=tdd-red") == ("x", "before", "tdd-red")
+
+
+def test_with_explicit_position_inserts_without_replacing(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(
+        combo,
+        cards,
+        "demo task",
+        change="demo",
+        with_cards=("mcu-hw-evidence:after=brainstorming",),
+        allow_external=True,
+    )
+    assert len(result.checklist) == 4
+
+
+def test_with_unresolvable_position_fails_closed(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    with pytest.raises(DeckCompileError, match="after=|before="):
+        compile_combo(
+            combo,
+            cards,
+            "demo task",
+            change="demo",
+            with_cards=("mcu-hw-evidence",),
+            allow_external=True,
+        )
+
+
+def test_only_exclusive_mode(tmp_path):
+    cards, combo = _feature_oneshot(tmp_path)
+    result = compile_combo(
+        combo,
+        cards,
+        "demo task",
+        change="demo",
+        only=("code-review", "verification"),
+        allow_external=True,
+    )
+    assert [slice_doc.slice_id for slice_doc in result.slices] == [
+        f"{result.task_slug}-code-review",
+        f"{result.task_slug}-verification",
+    ]

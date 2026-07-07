@@ -57,15 +57,60 @@ def _subst(glob: str, slug: str, change: str | None) -> str:
     return out
 
 
+def parse_with_spec(spec: str) -> tuple[str, str | None, str | None]:
+    if ":" not in spec:
+        return spec, None, None
+    card_id, _, rest = spec.partition(":")
+    kind, _, anchor = rest.partition("=")
+    if not card_id or kind not in ("after", "before") or not anchor:
+        raise DeckCompileError(f"--with 定位格式錯誤: {spec!r}（card[:after=<id>|:before=<id>]）")
+    return card_id, kind, anchor
+
+
 def _resolve_hand(
     combo: Combo,
     cards: Mapping[str, Card],
     with_cards: Sequence[str],
     only: Sequence[str],
 ) -> list[ComboEntry]:
-    if with_cards or only:
-        raise DeckCompileError("additive/--only 於 Task 9 實作")
-    return list(combo.cards)
+    if only:
+        combo_refs = {entry.ref for entry in combo.cards}
+        unknown = [card_id for card_id in only if card_id not in combo_refs]
+        if unknown:
+            raise DeckCompileError(f"--only 指定了 combo 外卡片: {unknown}")
+        selected = set(only)
+        return [entry for entry in combo.cards if entry.ref in selected]
+
+    hand = list(combo.cards)
+    for spec in with_cards:
+        card_id, kind, anchor = parse_with_spec(spec)
+        if card_id not in cards:
+            raise DeckCompileError(f"--with 未知卡片: {card_id}")
+        refs = [entry.ref for entry in hand]
+        if card_id in refs:
+            raise DeckCompileError(f"--with 卡片已在骨幹中: {card_id}")
+
+        if kind is None:
+            pos: int | None = None
+            requires = cards[card_id].requires
+            if requires:
+                seen: list[str] = []
+                for index, entry in enumerate(hand):
+                    seen.extend(cards[entry.ref].produces)
+                    if all(any(_covered(require, produce) for produce in seen) for require in requires):
+                        pos = index + 1
+                        break
+            if pos is None:
+                raise DeckCompileError(
+                    f"--with {card_id} 無法推斷插入點，請明示 :after=<id> 或 :before=<id>"
+                )
+        else:
+            if anchor not in refs:
+                raise DeckCompileError(f"--with 定位錨點不在手牌中: {anchor}")
+            anchor_index = refs.index(anchor)
+            pos = anchor_index + (1 if kind == "after" else 0)
+        hand.insert(pos, ComboEntry(ref=card_id))
+    return hand
 
 
 def _prefix(glob: str) -> str:
@@ -173,6 +218,8 @@ def compile_combo(
     )
     if plan_ref is None:
         plan_ref = _default_plan_ref(entries, cards, slug, change)
+    if plan_ref is None:
+        plan_ref = _default_plan_ref(combo.cards, cards, slug, change)
     if not plan_ref:
         raise DeckCompileError("無法決定 plan 參照：無 interactive produces，請給 --plan")
 
