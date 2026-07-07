@@ -17,10 +17,14 @@
 - [ ] 1b.1 平移 `deck/**`（835 行）+ `monitor/**`（1412 行）+ 各自測試進 cortex；import 改 `paulsha_cortex.*`（兩者僅 import `config.paths`，cortex 已自帶 → 零新剪線）
 - [ ] 1b.2 CLI：`cortex deck …`、`cortex monitor …` 子命令接線；`cortex` 傘狀入口路由
 - [ ] 1b.3 persona↔deck：既有 fail-open lazy import 可改為正常 import（同包後不再需要 fail-open）；或保留亦可
-- [ ] 1b.4 monitor systemd/service 出貨（若有）併入 cortex `install`
-- [ ] 1b.5 去識別化 + 零依賴（deck/monitor 不引入新依賴）；cortex 全測試綠
-- [ ] 1b.6 #186 deck Phase B/C 續作入口隨 deck 移入 cortex repo（openspec/issue 轉址）
-- [ ] 1b.7 產出新 pin SHA（Plan 2 以此 pin，取代 §1 的 `2e67100`）
+- [ ] 1b.4 monitor merge adapter（R1.6）：讀 `project-cortex.yaml`（手寫）⊍ `project-hippo.yaml`（缺則 graceful 退 manual-only）、依路徑/身分去重；config 由 `paulshaclaw.yaml` 改名 `project-cortex.yaml`、base dir 統一（相容過渡讀舊路徑）
+- [ ] 1b.5 monitor 服務併入 `cortex install service`（一次裝 manager + monitor 兩 unit，不拆；monitor single-instance 沿用 socket 佔用檢查）
+- [ ] 1b.6 persona 重定義（R1.7）：實查無 code 把 contract 與 enforcement 混在一起，docs/命名澄清（AgentInstance/Persona/Guardrail/Manager）
+- [ ] 1b.7 去識別化 + 零依賴（deck/monitor 不引入新依賴；讀 `project-hippo.yaml` 為檔案契約非 import hippo）；cortex 全測試綠
+- [ ] 1b.8 #186 deck Phase B/C 續作入口隨 deck 移入 cortex repo（openspec/issue 轉址）
+- [ ] 1b.9 產出新 pin SHA（Plan 2 以此 pin，取代 §1 的 `2e67100`）
+
+> **閉環（R1.9）非 Plan 1b 範圍**：deck+monitor 只搬入、擺放不擋 feedback edge 接點；monitor→manager 觸發（含情境1 去重）、失敗 retry（情境2）、hold→auto 自動化（情境3/G2）皆為拆分後 feature。
 
 ## 2. 主 repo 遷移刀（R1：刪 5 包）
 
