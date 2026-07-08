@@ -31,5 +31,8 @@ jobs:
       - name: Smoke import pinned hippo
         run: python -c "import paulsha_hippo, paulsha_hippo.lib.lifecycle; print(paulsha_hippo.__version__)"
 
+      - name: Check operator-shell import surface
+        run: python scripts/check_import_surface.py
+
       - name: Run test suite
         run: python -m pytest tests/ -q

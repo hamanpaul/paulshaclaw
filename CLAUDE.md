@@ -85,7 +85,7 @@ policy_version: 1.0.12
 - Stage 1：`PaulShiaBro` daemon / TUI / Telegram bot / registry
 - Stage 2：`~/.agents/memory` 記憶基座（#125 起實作移至 [paulsha-hippo](https://github.com/hamanpaul/paulsha-hippo)，本 repo 以 pip 依賴引回）
 - Stage 3：slash-command 生命週期（artifacts + gates）
-- Stage 4：persona 契約、handoff、護欄
+- Stage 4：paulsha-cortex 治理平面（persona / manager / control / deck / monitor 契約、handoff、護欄）
 - Stage 5+：可觀測性、安全、部署加固
 
 ### 運作模型
@@ -93,16 +93,16 @@ policy_version: 1.0.12
 - **artifact-first / event-first**：prompt 文字非真相源；canonical state 落在 artifacts 與 event log；gate 決策依檔案／schema／事件記錄。
 
 ### 命名系統（勿改）
-- `paulshaclaw`：repo｜`PaulShiaBro`：daemon/bot｜`psc`：CLI / env 短名｜`PoHsiaBro`：字型 / glyph 家族
+- `paulshaclaw`：operator shell repo｜`paulsha-cortex`：治理平面 repo｜`PaulShiaBro`：daemon/bot｜`psc`：CLI / env 短名｜`PoHsiaBro`：字型 / glyph 家族
 
 ### path split
-- `paulshaclaw/`：repo code 與範本｜`~/.agents/`：私有 runtime 狀態與記憶｜`~/.config/paulshaclaw/`：secret 與機器本地 config
+- `paulshaclaw/`：repo code 與範本｜`~/.agents/`：私有 runtime 狀態與記憶（其中 `~/.agents/control` / `~/.agents/specs` 由 `paulsha-cortex` 消費）｜`~/.config/paulshaclaw/`：secret 與機器本地 config
 
 ### 生命週期 artifacts
 - `docs/spec.md`、`plan.md`、`roadmap.md`、`test.md`、`task.md`、`todo.md` 各有明確 phase 角色；新增／編輯 docs 沿用既有 zh-TW 用語與 stage 編號，勿自創標籤。
 
-### persona 契約模型（Stage 4）
-- persona = 契約｜agent instance = runtime 執行｜skill = 可復用能力
+### persona / manager 契約模型（Stage 4）
+- persona = 契約｜agent instance = runtime 執行｜skill = 可復用能力｜Stage 4 contract / manager runtime 由 `paulsha-cortex` 承接，本 repo 保留 shell shim 與整合入口
 
 ### 重要架構文件（動工前先讀）
 - `docs/research/05.paulshaclaw-overview-architecture-stages-dependencies-acceptance.md`

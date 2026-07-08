@@ -39,7 +39,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 2
         from paulsha_cortex.cli import main as cortex_main
 
-        return int(cortex_main([head, *rest]) or 0)
+        forwarded = rest if head == "coordinator" else [head, *rest]
+        return int(cortex_main(forwarded) or 0)
 
     sys.stderr.write(_USAGE)
     return 2

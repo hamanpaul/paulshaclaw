@@ -26,21 +26,26 @@ def _install_fake_cortex(monkeypatch: pytest.MonkeyPatch, *, return_value: int =
 
 
 @pytest.mark.parametrize(
-    ("subcommand", "rest"),
+    ("subcommand", "rest", "expected_argv"),
     [
-        ("coordinator", ["jobs", "--json"]),
-        ("deck", ["list"]),
-        ("monitor", ["tail", "worker-1"]),
+        ("coordinator", ["jobs", "--json"], ["jobs", "--json"]),
+        ("deck", ["list"], ["deck", "list"]),
+        ("monitor", ["tail", "worker-1"], ["monitor", "tail", "worker-1"]),
     ],
 )
-def test_cortex_subcommands_forward_argv(monkeypatch: pytest.MonkeyPatch, subcommand: str, rest: list[str]) -> None:
+def test_cortex_subcommands_forward_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    subcommand: str,
+    rest: list[str],
+    expected_argv: list[str],
+) -> None:
     calls: list[list[str]] = []
     _install_fake_cortex(monkeypatch, return_value=7, calls=calls)
 
     rc = cli.main([subcommand, *rest])
 
     assert rc == 7
-    assert calls == [[subcommand, *rest]]
+    assert calls == [expected_argv]
 
 
 @pytest.mark.parametrize("subcommand", ["coordinator", "deck", "monitor"])
