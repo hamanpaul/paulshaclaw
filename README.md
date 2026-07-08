@@ -162,7 +162,7 @@ hippo doctor          # 記憶側健檢
 主 repo 已刪除 `persona/coordinator/control/deck/monitor` 五包，舊機器不能只 `git pull`——要把舊的 manager/monitor **cutover 到 cortex 服務**。一鍵腳本（冪等、systemd-aware、含 hippo）：
 
 ```bash
-scripts/cutover-to-cortex.sh            # 預設對本 repo；或傳 <repo 路徑>
+scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路徑>
 ```
 
 它會：`git pull main` → 依 pin 用 pipx 裝 hippo+cortex → hippo init/hooks/dream service → **停用舊 `paulshaclaw-manager`/`demo-manager` 單元** → `cortex install service` + enable → 確保 monitor 設定 → F1 自停 gate 健檢。runtime 狀態（`~/.agents/control`、`~/.agents/memory`）**零遷移**沿用。
