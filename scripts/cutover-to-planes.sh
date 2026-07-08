@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# cutover-to-cortex.sh —— 把一台機器的 paulshaclaw 更新/移植到「operator shell + 外部 hippo/cortex 平面」形態。
+# cutover-to-planes.sh —— 把一台機器更新/移植到「operator shell + 外部平面」形態：
+#   一併裝設 paulsha-hippo（記憶平面）與 paulsha-cortex（治理平面）並完成服務 cutover。
 #
 # 做什麼：
 #   1. git pull 主 repo 到 main（operator shell、已刪 5 包、pin 外部平面）
