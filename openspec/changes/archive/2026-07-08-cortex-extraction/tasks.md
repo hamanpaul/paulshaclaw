@@ -30,21 +30,21 @@
 
 ## 2. 主 repo 遷移刀（R1：刪 5 包）
 
-- [ ] 2.1 pyproject 新增 `paulsha-cortex @ git+https://...@<1b 新 sha>` pin
-- [ ] 2.2 刪除 `paulshaclaw/{persona,coordinator,control,deck,monitor}/**`
-- [ ] 2.3 主 repo 消費者 import 改線：`control.client`（bot/listener、cockpit/app、core/daemon，含**相對 import** `from ..control`）、deck 消費者（cli.py、persona—已隨包移出）、monitor 消費者（cockpit 若 python import；否則 HTTP/檔案不動）→ 改 `paulsha_cortex.*`
-- [ ] 2.4 `psc coordinator|deck|monitor` thin shim：lazy import cortex CLI、未安裝時 tombstone + exit 2
-- [ ] 2.5 `deploy/planner.py` 移除 manager 單元模板引用；刪除 `__INSTANCE__-manager.{service,timer}.tmpl`
-- [ ] 2.6 移除 `scripts/coordinator/**`、`scripts/service-manager.sh`、`.github/workflows/persona-scope.yml`、deck/monitor 相關 workflow
-- [ ] 2.7 遷出測試檔移除；W7 整合測試改 import cortex
-- [ ] 2.8 grep 清零：`paulshaclaw.{persona,coordinator,control,deck,monitor}`（含相對 import 形式）無殘留（shim 除外）；import 面 CI 檢查落地
+- [x] 2.1 pyproject 新增 `paulsha-cortex @ git+https://...@<1b 新 sha>` pin
+- [x] 2.2 刪除 `paulshaclaw/{persona,coordinator,control,deck,monitor}/**`
+- [x] 2.3 主 repo 消費者 import 改線：`control.client`（bot/listener、cockpit/app、core/daemon，含**相對 import** `from ..control`）、deck 消費者（cli.py、persona—已隨包移出）、monitor 消費者（cockpit 若 python import；否則 HTTP/檔案不動）→ 改 `paulsha_cortex.*`
+- [x] 2.4 `psc coordinator|deck|monitor` thin shim：lazy import cortex CLI、未安裝時 tombstone + exit 2
+- [x] 2.5 `deploy/planner.py` 移除 manager 單元模板引用；刪除 `__INSTANCE__-manager.{service,timer}.tmpl`
+- [x] 2.6 移除 `scripts/coordinator/**`、`scripts/service-manager.sh`、`.github/workflows/persona-scope.yml`、deck/monitor 相關 workflow
+- [x] 2.7 遷出測試檔移除；W7 整合測試改 import cortex
+- [x] 2.8 grep 清零：`paulshaclaw.{persona,coordinator,control,deck,monitor}`（含相對 import 形式）無殘留（shim 除外）；import 面 CI 檢查落地
 
 ## 3. 對齊測試（主 repo 為契約交會點）
 
-- [ ] 3.1 PHASES 相等性測試：cortex 自帶常數 == `paulsha_hippo.lib.lifecycle.schema.PHASES`
-- [ ] 3.2 paths 等價測試：cortex paths 模組與 `config.paths` facade 於相同 env 覆寫組合下五個 root 全等
-- [ ] 3.3 deck↔persona 對齊：`persona_binding` 對照 cortex personas.yaml（deck 已在 cortex 內 → 改為 cortex 內部測試 + 主 repo 消費面 smoke）
-- [ ] 3.4 cortex 零 hippo 依賴斷言（依賴解析集合不含 paulsha-hippo）
+- [x] 3.1 PHASES 相等性測試：cortex 自帶常數 == `paulsha_hippo.lib.lifecycle.schema.PHASES`
+- [x] 3.2 paths 等價測試：cortex paths 模組與 `config.paths` facade 於相同 env 覆寫組合下五個 root 全等
+- [x] 3.3 deck↔persona 對齊：`persona_binding` 對照 cortex personas.yaml（deck 已在 cortex 內 → 改為 cortex 內部測試 + 主 repo 消費面 smoke）
+- [x] 3.4 cortex 零 hippo 依賴斷言（依賴解析集合不含 paulsha-hippo）
 
 ## 4. 文件與 spec 遷移
 
