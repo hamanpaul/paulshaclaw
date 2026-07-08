@@ -102,20 +102,16 @@ cleanup() {
     fi
   done
   if [[ -n "${CORTEX_MANAGER_PID:-}" ]]; then
-    if [[ "${CORTEX_MANAGER_ADOPTED:-0}" == "1" ]]; then
-      wait_for_cortex_manager_shutdown "$CORTEX_MANAGER_PID"
-    else
-      kill -TERM "$CORTEX_MANAGER_PID" 2>/dev/null || true
-      local shutdown_checks=100
-      while (( shutdown_checks > 0 )) && kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; do
-        sleep 0.05
-        shutdown_checks=$((shutdown_checks - 1))
-      done
-      if kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
-        kill -KILL "$CORTEX_MANAGER_PID" 2>/dev/null || true
-      fi
-      wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
+    kill -TERM "$CORTEX_MANAGER_PID" 2>/dev/null || true
+    local shutdown_checks=100
+    while (( shutdown_checks > 0 )) && kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; do
+      sleep 0.05
+      shutdown_checks=$((shutdown_checks - 1))
+    done
+    if kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
+      kill -KILL "$CORTEX_MANAGER_PID" 2>/dev/null || true
     fi
+    wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
   fi
 }
 
@@ -201,14 +197,6 @@ cortex_instance() {
   printf '%s\n' "${PSC_INSTANCE:-cortex}"
 }
 
-cortex_control_root() {
-  if [[ -n "${PSC_CONTROL_ROOT:-}" ]]; then
-    printf '%s\n' "$PSC_CONTROL_ROOT"
-    return 0
-  fi
-  printf '%s/control\n' "$(cortex_agents_root)"
-}
-
 cortex_specs_root() {
   if [[ -n "${PSC_MANAGER_SPECS_DIR:-}" ]]; then
     printf '%s\n' "$PSC_MANAGER_SPECS_DIR"
@@ -221,92 +209,12 @@ cortex_specs_root() {
   printf '%s/specs\n' "$(cortex_agents_root)"
 }
 
-cortex_run_root() {
-  if [[ -n "${PSC_RUN_ROOT:-}" ]]; then
-    printf '%s\n' "$PSC_RUN_ROOT"
-    return 0
+cortex_tick_interval_seconds() {
+  local interval="${PSC_MANAGER_TICK_INTERVAL_SECONDS:-300}"
+  if [[ ! "$interval" =~ ^[0-9]+$ ]] || (( interval <= 0 )); then
+    interval=300
   fi
-  printf '%s/run/%s\n' "$(cortex_agents_root)" "$(cortex_instance)"
-}
-
-cortex_monitor_socket_path() {
-  printf '%s/project-monitor.sock\n' "$(cortex_run_root)"
-}
-
-is_live_cortex_monitor() {
-  local socket_path="${1:-$(cortex_monitor_socket_path)}"
-  if [[ ! -S "$socket_path" ]]; then
-    return 1
-  fi
-  "$PY" - "$socket_path" <<'PY'
-import socket
-import sys
-
-probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-try:
-    probe.settimeout(0.2)
-    probe.connect(sys.argv[1])
-except OSError:
-    sys.exit(1)
-finally:
-    probe.close()
-sys.exit(0)
-PY
-}
-
-cortex_manager_lock_path() {
-  printf '%s/manager.lock\n' "$(cortex_control_root)"
-}
-
-is_live_cortex_manager_pid() {
-  local pid="$1"
-  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null || [[ ! -r "/proc/$pid/cmdline" ]]; then
-    return 1
-  fi
-
-  local cmdline_parts=()
-  local idx
-  mapfile -d '' -t cmdline_parts <"/proc/$pid/cmdline"
-  for ((idx = 0; idx + 1 < ${#cmdline_parts[@]}; idx++)); do
-    if [[ "${cmdline_parts[$idx]}" == "-m" && "${cmdline_parts[$((idx + 1))]}" == "paulsha_cortex.coordinator.manager_daemon" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-read_cortex_lock_owner_pid() {
-  local lock_path
-  lock_path="$(cortex_manager_lock_path)"
-  if [[ ! -f "$lock_path" ]]; then
-    return 0
-  fi
-  sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$lock_path" | head -n 1
-}
-
-read_live_cortex_manager_pid() {
-  local owner_pid
-  owner_pid="$(read_cortex_lock_owner_pid)"
-  if [[ -n "$owner_pid" ]] && is_live_cortex_manager_pid "$owner_pid"; then
-    printf '%s\n' "$owner_pid"
-  fi
-}
-
-wait_for_cortex_manager_shutdown() {
-  local pid="$1"
-  local shutdown_checks=100
-  local lock_owner_pid
-  while (( shutdown_checks > 0 )); do
-    lock_owner_pid="$(read_cortex_lock_owner_pid)"
-    if ! is_live_cortex_manager_pid "$pid" && [[ "$lock_owner_pid" != "$pid" ]]; then
-      return 0
-    fi
-    shutdown_checks=$((shutdown_checks - 1))
-    if (( shutdown_checks == 0 )); then
-      return 0
-    fi
-    sleep 0.05
-  done
+  printf '%s\n' "$interval"
 }
 
 ensure_cortex_services() {
@@ -327,50 +235,33 @@ ensure_cortex_services() {
 
   start_cortex_local_fallback() {
     mkdir -p "$HOME/.agents/log"
-    CORTEX_MONITOR_PID=""
-    CORTEX_MONITOR_ADOPTED=0
-    CORTEX_MONITOR_SOCKET="$(cortex_monitor_socket_path)"
-    if is_live_cortex_monitor "$CORTEX_MONITOR_SOCKET"; then
-      CORTEX_MONITOR_ADOPTED=1
-      echo "cortex fallback adopted existing monitor socket=$CORTEX_MONITOR_SOCKET" >&2
-    else
-      PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.monitor 200>&- >>"$monitor_log" 2>&1 &
-      CORTEX_MONITOR_PID=$!
-      if ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
-        wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
-        echo "cortex fallback monitor exited before startup" >&2
-        return 1
-      fi
+    mkdir -p "$(cortex_specs_root)"
+
+    PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.cli monitor 200>&- >>"$monitor_log" 2>&1 &
+    CORTEX_MONITOR_PID=$!
+    if ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
+      wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
+      echo "cortex fallback monitor exited before startup" >&2
+      return 1
     fi
 
-    PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.coordinator.manager_daemon \
-      --specs-dir "$(cortex_specs_root)" 200>&- >>"$manager_log" 2>&1 &
+    (
+      interval="$(cortex_tick_interval_seconds)"
+      while true; do
+        PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.cli tick \
+          --specs-dir "$(cortex_specs_root)" \
+          --require-idle >>"$manager_log" 2>&1 || true
+        sleep "$interval"
+      done
+    ) 200>&- >>"$manager_log" 2>&1 &
     CORTEX_MANAGER_PID=$!
-    CORTEX_MANAGER_ADOPTED=0
-    local manager_startup_checks=20
-    local manager_state
-    while (( manager_startup_checks > 0 )); do
-      manager_state="$(ps -o stat= -p "$CORTEX_MANAGER_PID" 2>/dev/null | tr -d '[:space:]' || true)"
-      if [[ -z "$manager_state" || "$manager_state" == *Z* ]]; then
-        local existing_manager_pid
-        existing_manager_pid="$(read_live_cortex_manager_pid)"
-        wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
-        if [[ -n "$existing_manager_pid" && "$existing_manager_pid" != "$CORTEX_MANAGER_PID" ]]; then
-          CORTEX_MANAGER_PID="$existing_manager_pid"
-          CORTEX_MANAGER_ADOPTED=1
-          echo "cortex fallback adopted existing manager pid=$CORTEX_MANAGER_PID" >&2
-          return 0
-        fi
-        echo "cortex fallback manager exited before startup" >&2
-        return 1
-      fi
-      manager_startup_checks=$((manager_startup_checks - 1))
-      if (( manager_startup_checks == 0 )); then
-        break
-      fi
-      sleep 0.05
-    done
-    echo "cortex fallback started (manager pid=$CORTEX_MANAGER_PID monitor pid=${CORTEX_MONITOR_PID:-adopted})" >&2
+    if ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
+      wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
+      echo "cortex fallback tick loop exited before startup" >&2
+      return 1
+    fi
+
+    echo "cortex fallback started (tick-loop pid=$CORTEX_MANAGER_PID monitor pid=$CORTEX_MONITOR_PID)" >&2
     return 0
   }
 
@@ -474,12 +365,7 @@ fi
 # large TUI process does not stack onto the same burst.
 sleep 2
 
-if [[ "${CORTEX_MONITOR_ADOPTED:-0}" == "1" ]]; then
-  if ! is_live_cortex_monitor "${CORTEX_MONITOR_SOCKET:-$(cortex_monitor_socket_path)}"; then
-    echo "cortex fallback monitor socket became unavailable before cockpit start" >&2
-    exit 1
-  fi
-elif [[ -n "${CORTEX_MONITOR_PID:-}" ]] && ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
+if [[ -n "${CORTEX_MONITOR_PID:-}" ]] && ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
   wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
   echo "cortex fallback monitor exited before cockpit start" >&2
   exit 1
