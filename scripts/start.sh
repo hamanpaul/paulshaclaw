@@ -81,7 +81,6 @@ TELEGRAM_STARTUP_TIMEOUT=${PSC_TELEGRAM_STARTUP_TIMEOUT:-40}
 # without running their standalone main routines.
 source "$script_dir/service-cost.sh" --source-only
 source "$script_dir/service-dream.sh" --source-only
-source "$script_dir/service-manager.sh" --source-only
 source "$script_dir/service-bot.sh" --source-only
 
 cleanup() {
@@ -91,35 +90,33 @@ cleanup() {
   CLEANED_UP=1
   trap - EXIT INT TERM
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${MANAGER_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}" "${CORTEX_MONITOR_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       kill -TERM "$pid" 2>/dev/null || true
     fi
   done
 
-  for pid in "${TELEGRAM_PID:-}" "${MONITOR_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}"; do
+  for pid in "${TELEGRAM_PID:-}" "${DREAM_PID:-}" "${COCKPIT_PID:-}" "${COST_REFRESH_PID:-}" "${CORTEX_MONITOR_PID:-}"; do
     if [[ -n "${pid}" ]]; then
       wait "$pid" 2>/dev/null || true
     fi
   done
-  if [[ -n "${MANAGER_PID:-}" ]]; then
-    if [[ "${MANAGER_PID_OWNED:-1}" == "1" ]]; then
-      # bounded graceful wait (100 x 0.05s = 5s), then SIGKILL fallback so a
-      # wedged manager cannot hang shutdown indefinitely.
+  if [[ -n "${CORTEX_MANAGER_PID:-}" ]]; then
+    if [[ "${CORTEX_MANAGER_ADOPTED:-0}" == "1" ]]; then
+      wait_for_cortex_manager_shutdown "$CORTEX_MANAGER_PID"
+    else
+      kill -TERM "$CORTEX_MANAGER_PID" 2>/dev/null || true
       local shutdown_checks=100
-      while (( shutdown_checks > 0 )) && kill -0 "$MANAGER_PID" 2>/dev/null; do
+      while (( shutdown_checks > 0 )) && kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; do
         sleep 0.05
         shutdown_checks=$((shutdown_checks - 1))
       done
-      if kill -0 "$MANAGER_PID" 2>/dev/null; then
-        kill -KILL "$MANAGER_PID" 2>/dev/null || true
+      if kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
+        kill -KILL "$CORTEX_MANAGER_PID" 2>/dev/null || true
       fi
-      wait "$MANAGER_PID" 2>/dev/null || true
-    else
-      wait_for_manager_shutdown "$MANAGER_PID"
+      wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
     fi
   fi
-  systemctl --user stop "${PSC_INSTANCE:-paulshaclaw}-manager.timer" 2>/dev/null || true
 }
 
 cleanup_term() {
@@ -196,36 +193,206 @@ if [[ -n "${TMUX:-}" ]]; then
   start_cost_refresh_loop
 fi
 
-# Phase C: persona manager tick via systemd --user timer. start.sh 不擁有 manager
-# 進程，只 toggle；systemctl --user 不可用（WSL 無 user systemd）→ graceful skip。
-# 停用：PSC_MANAGER_DISABLED=1。
-start_manager_service() {
-  if [[ "${PSC_MANAGER_DISABLED:-0}" == "1" ]]; then
-    echo "manager service disabled (PSC_MANAGER_DISABLED=1)"
+cortex_agents_root() {
+  printf '%s\n' "${PSC_AGENTS_ROOT:-$HOME/.agents}"
+}
+
+cortex_instance() {
+  printf '%s\n' "${PSC_INSTANCE:-cortex}"
+}
+
+cortex_control_root() {
+  if [[ -n "${PSC_CONTROL_ROOT:-}" ]]; then
+    printf '%s\n' "$PSC_CONTROL_ROOT"
     return 0
   fi
-  local instance="${PSC_INSTANCE:-paulshaclaw}"
-  if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "manager service skipped: systemctl --user unavailable (WSL no user systemd?)" >&2
+  printf '%s/control\n' "$(cortex_agents_root)"
+}
+
+cortex_specs_root() {
+  if [[ -n "${PSC_MANAGER_SPECS_DIR:-}" ]]; then
+    printf '%s\n' "$PSC_MANAGER_SPECS_DIR"
     return 0
   fi
-  # #155: timer unit 若未從 deploy/templates 實例化到 ~/.config/systemd/user，
-  # 直接 `systemctl start` 會 Unit-not-found。首次啟動先跑 installer
-  # （render→daemon-reload→enable --now）；已安裝則不重裝，只 toggle。
-  local installer="${PSC_MANAGER_INSTALLER:-${script_dir:-.}/coordinator/install-manager-units.sh}"
-  if [[ ! -f "$HOME/.config/systemd/user/${instance}-manager.timer" ]]; then
-    echo "manager timer unit 未安裝，執行 install-manager-units.sh ..."
-    if ! "${installer}" "${instance}"; then
-      echo "manager units install failed (non-fatal)" >&2
+  if [[ -n "${PSC_SPECS_ROOT:-}" ]]; then
+    printf '%s\n' "$PSC_SPECS_ROOT"
+    return 0
+  fi
+  printf '%s/specs\n' "$(cortex_agents_root)"
+}
+
+cortex_run_root() {
+  if [[ -n "${PSC_RUN_ROOT:-}" ]]; then
+    printf '%s\n' "$PSC_RUN_ROOT"
+    return 0
+  fi
+  printf '%s/run/%s\n' "$(cortex_agents_root)" "$(cortex_instance)"
+}
+
+cortex_monitor_socket_path() {
+  printf '%s/project-monitor.sock\n' "$(cortex_run_root)"
+}
+
+is_live_cortex_monitor() {
+  local socket_path="${1:-$(cortex_monitor_socket_path)}"
+  if [[ ! -S "$socket_path" ]]; then
+    return 1
+  fi
+  "$PY" - "$socket_path" <<'PY'
+import socket
+import sys
+
+probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+try:
+    probe.settimeout(0.2)
+    probe.connect(sys.argv[1])
+except OSError:
+    sys.exit(1)
+finally:
+    probe.close()
+sys.exit(0)
+PY
+}
+
+cortex_manager_lock_path() {
+  printf '%s/manager.lock\n' "$(cortex_control_root)"
+}
+
+is_live_cortex_manager_pid() {
+  local pid="$1"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null || [[ ! -r "/proc/$pid/cmdline" ]]; then
+    return 1
+  fi
+
+  local cmdline_parts=()
+  local idx
+  mapfile -d '' -t cmdline_parts <"/proc/$pid/cmdline"
+  for ((idx = 0; idx + 1 < ${#cmdline_parts[@]}; idx++)); do
+    if [[ "${cmdline_parts[$idx]}" == "-m" && "${cmdline_parts[$((idx + 1))]}" == "paulsha_cortex.coordinator.manager_daemon" ]]; then
       return 0
     fi
+  done
+  return 1
+}
+
+read_cortex_lock_owner_pid() {
+  local lock_path
+  lock_path="$(cortex_manager_lock_path)"
+  if [[ ! -f "$lock_path" ]]; then
+    return 0
   fi
-  if systemctl --user start "${instance}-manager.timer"; then
-    echo "manager timer started (${instance}-manager.timer)"
+  sed -n 's/.*"pid":[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$lock_path" | head -n 1
+}
+
+read_live_cortex_manager_pid() {
+  local owner_pid
+  owner_pid="$(read_cortex_lock_owner_pid)"
+  if [[ -n "$owner_pid" ]] && is_live_cortex_manager_pid "$owner_pid"; then
+    printf '%s\n' "$owner_pid"
+  fi
+}
+
+wait_for_cortex_manager_shutdown() {
+  local pid="$1"
+  local shutdown_checks=100
+  local lock_owner_pid
+  while (( shutdown_checks > 0 )); do
+    lock_owner_pid="$(read_cortex_lock_owner_pid)"
+    if ! is_live_cortex_manager_pid "$pid" && [[ "$lock_owner_pid" != "$pid" ]]; then
+      return 0
+    fi
+    shutdown_checks=$((shutdown_checks - 1))
+    if (( shutdown_checks == 0 )); then
+      return 0
+    fi
+    sleep 0.05
+  done
+}
+
+ensure_cortex_services() {
+  if [[ "${PSC_MANAGER_DISABLED:-0}" == "1" ]]; then
+    echo "cortex services disabled (PSC_MANAGER_DISABLED=1)"
+    return 0
+  fi
+
+  local instance
+  instance="$(cortex_instance)"
+  local -a install_cmd=(
+    "$PY" -m paulsha_cortex.cli install service
+    --instance "$instance"
+    --repo-root "$REPO"
+  )
+  local manager_log="$HOME/.agents/log/cortex-manager.log"
+  local monitor_log="$HOME/.agents/log/cortex-monitor.log"
+
+  start_cortex_local_fallback() {
+    mkdir -p "$HOME/.agents/log"
+    CORTEX_MONITOR_PID=""
+    CORTEX_MONITOR_ADOPTED=0
+    CORTEX_MONITOR_SOCKET="$(cortex_monitor_socket_path)"
+    if is_live_cortex_monitor "$CORTEX_MONITOR_SOCKET"; then
+      CORTEX_MONITOR_ADOPTED=1
+      echo "cortex fallback adopted existing monitor socket=$CORTEX_MONITOR_SOCKET" >&2
+    else
+      PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.monitor 200>&- >>"$monitor_log" 2>&1 &
+      CORTEX_MONITOR_PID=$!
+      if ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
+        wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
+        echo "cortex fallback monitor exited before startup" >&2
+        return 1
+      fi
+    fi
+
+    PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.coordinator.manager_daemon \
+      --specs-dir "$(cortex_specs_root)" 200>&- >>"$manager_log" 2>&1 &
+    CORTEX_MANAGER_PID=$!
+    CORTEX_MANAGER_ADOPTED=0
+    local manager_startup_checks=20
+    local manager_state
+    while (( manager_startup_checks > 0 )); do
+      manager_state="$(ps -o stat= -p "$CORTEX_MANAGER_PID" 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ -z "$manager_state" || "$manager_state" == *Z* ]]; then
+        local existing_manager_pid
+        existing_manager_pid="$(read_live_cortex_manager_pid)"
+        wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
+        if [[ -n "$existing_manager_pid" && "$existing_manager_pid" != "$CORTEX_MANAGER_PID" ]]; then
+          CORTEX_MANAGER_PID="$existing_manager_pid"
+          CORTEX_MANAGER_ADOPTED=1
+          echo "cortex fallback adopted existing manager pid=$CORTEX_MANAGER_PID" >&2
+          return 0
+        fi
+        echo "cortex fallback manager exited before startup" >&2
+        return 1
+      fi
+      manager_startup_checks=$((manager_startup_checks - 1))
+      if (( manager_startup_checks == 0 )); then
+        break
+      fi
+      sleep 0.05
+    done
+    echo "cortex fallback started (manager pid=$CORTEX_MANAGER_PID monitor pid=${CORTEX_MONITOR_PID:-adopted})" >&2
+    return 0
+  }
+
+  if ! "${install_cmd[@]}"; then
+    echo "cortex install service failed; starting local fallback" >&2
+    start_cortex_local_fallback
+    return $?
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "cortex services installed; systemctl --user unavailable, starting local fallback" >&2
+    start_cortex_local_fallback
+    return $?
+  fi
+
+  if systemctl --user enable --now "${instance}-manager.timer" "${instance}-monitor.service"; then
+    echo "cortex services enabled (${instance}-manager.timer ${instance}-monitor.service)"
   else
-    echo "manager timer start failed (non-fatal)" >&2
+    echo "cortex services enable/start failed; starting local fallback" >&2
+    start_cortex_local_fallback
+    return $?
   fi
-  return 0
 }
 
 # Telegram listener (background when config is present)
@@ -251,16 +418,7 @@ else
   exit 1
 fi
 
-# Stage 9: project-monitor (background)
-PYTHONPATH="$REPO" "$PY" -m paulshaclaw.monitor 200>&- >> ~/.agents/log/monitor.log 2>&1 &
-MONITOR_PID=$!
-echo "monitor pid=$MONITOR_PID"
-
-if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-  wait "$MONITOR_PID" 2>/dev/null || true
-  echo "monitor exited before startup" >&2
-  exit 1
-fi
+ensure_cortex_services
 
 # Stagger heavy service startups so their interpreter/import bursts do not all
 # land on the same second and recreate the boot-time memory spike.
@@ -268,7 +426,6 @@ sleep 2
 
 # Stage 2: memory dream loop (bound to this start.sh lifecycle)
 start_dream_loop
-start_manager_loop
 
 if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$telegram_config_readable" -eq 1 ]]; then
   mkdir -p "$(dirname "$TELEGRAM_READY_FILE")"
@@ -313,13 +470,25 @@ if [[ "$telegram_token_present" -eq 1 && "$telegram_config_present" -eq 1 && "$t
   echo "telegram pid=$TELEGRAM_PID"
 fi
 
-# Keep the cockpit launch off the telegram/monitor startup second as well so
-# the last large TUI process does not stack onto the same burst.
+# Keep the cockpit launch off the prior startup second as well so the last
+# large TUI process does not stack onto the same burst.
 sleep 2
 
-if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-  wait "$MONITOR_PID" 2>/dev/null || true
-  echo "monitor exited before cockpit start (continuing)" >&2
+if [[ "${CORTEX_MONITOR_ADOPTED:-0}" == "1" ]]; then
+  if ! is_live_cortex_monitor "${CORTEX_MONITOR_SOCKET:-$(cortex_monitor_socket_path)}"; then
+    echo "cortex fallback monitor socket became unavailable before cockpit start" >&2
+    exit 1
+  fi
+elif [[ -n "${CORTEX_MONITOR_PID:-}" ]] && ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
+  wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
+  echo "cortex fallback monitor exited before cockpit start" >&2
+  exit 1
+fi
+
+if [[ -n "${CORTEX_MANAGER_PID:-}" ]] && ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
+  wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
+  echo "cortex fallback manager exited before cockpit start" >&2
+  exit 1
 fi
 
 # Stage 11: cockpit TUI (background with real stdin so Textual gets a TTY)

@@ -139,6 +139,12 @@ class DeployInstallCliTests(unittest.TestCase):
                 secret_dir / "demo-agent.telegram.secret.env",
             ):
                 self.assertTrue(relpath.exists(), msg=str(relpath))
+            for relpath in (
+                unit_dir / "demo-agent-manager.service",
+                unit_dir / "demo-agent-manager.timer",
+                runtime_dir / "demo-agent-manager.env",
+            ):
+                self.assertFalse(relpath.exists(), msg=str(relpath))
 
             self.assertEqual(stat.S_IMODE(state_dir.stat().st_mode), 0o750)
             self.assertEqual(stat.S_IMODE(secret_dir.stat().st_mode), 0o700)

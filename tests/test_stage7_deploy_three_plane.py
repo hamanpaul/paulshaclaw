@@ -33,6 +33,9 @@ class TemplateMappingTests(unittest.TestCase):
 
         self.assertGreaterEqual(len(assets), 11)
         self.assertTrue({"core", "state", "secret"}.issubset(planes))
+        self.assertNotIn("core/systemd/__INSTANCE__-manager.service.tmpl", relpaths)
+        self.assertNotIn("core/systemd/__INSTANCE__-manager.timer.tmpl", relpaths)
+        self.assertNotIn("core/runtime/__INSTANCE__-manager.env.tmpl", relpaths)
         self.assertTrue(
             {
                 "core/systemd/__INSTANCE__.service.tmpl",
@@ -181,12 +184,15 @@ class CommandPlanTests(unittest.TestCase):
         self.assertIn("preserve-state", uninstall.rollback_actions)
         self.assertIn("preserve-secret", uninstall.rollback_actions)
 
-    def test_install_plan_excludes_deprecated_timer_and_wires_service_verify_targets(self) -> None:
+    def test_install_plan_excludes_legacy_manager_and_wires_service_verify_targets(self) -> None:
         plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
         relpaths = {asset.template_relpath for asset in plan.templates}
 
         # #125：dream 常駐移交 hippo installer——不得再入部署面
         self.assertNotIn("core/systemd/__INSTANCE__-dream.service.tmpl", relpaths)
+        self.assertNotIn("core/systemd/__INSTANCE__-manager.service.tmpl", relpaths)
+        self.assertNotIn("core/systemd/__INSTANCE__-manager.timer.tmpl", relpaths)
+        self.assertNotIn("core/runtime/__INSTANCE__-manager.env.tmpl", relpaths)
         self.assertIn("core/systemd/__INSTANCE__-cost.service.tmpl", relpaths)
         self.assertIn("core/runtime/__INSTANCE__-cost.env.tmpl", relpaths)
         self.assertIn("verify-systemd-user-units", plan.steps)
@@ -194,6 +200,7 @@ class CommandPlanTests(unittest.TestCase):
         # command CLI 非常駐入口），不得進 install plan 與 verify 清單。
         self.assertNotIn("core/systemd/__INSTANCE__.service.tmpl", relpaths)
         self.assertTrue({"demo-agent-cost.service", "demo-agent-telegram.service"}.issubset(plan.verify_units))
+        self.assertNotIn("demo-agent-manager.service", plan.verify_units)
 
 
 class DeployCliTests(unittest.TestCase):
