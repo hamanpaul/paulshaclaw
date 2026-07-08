@@ -12,7 +12,7 @@ description = "paulshaclaw agent workflow system"
 dependencies = [
     # v0.1.0（tag 為人讀標記；pin 為對應不可變 SHA）
     "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@30ebbbd598ec1e43c8b663c12f4ff1cffde3fc79",
-    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@c42ae7e6423d8dcca715afab1490a5973388204b",
+    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@3dfea79f8ce9b86f025ce5dded50ee54cbc13711",
 ]
 
 [project.scripts]
