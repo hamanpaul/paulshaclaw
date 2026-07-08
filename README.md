@@ -123,21 +123,51 @@ flowchart TB
 
 ## Install
 
+`paulshaclaw` 是 operator shell，記憶平面（`paulsha-hippo`）與治理平面（`paulsha-cortex`）是**外部依賴**。兩者皆已 public，`pip`/`pipx` 免認證即可安裝；版本由 `pyproject.toml` 的 git+SHA pin 鎖定。
+
+### A. 全新安裝
+
 ```bash
-# 1. 取得程式碼
+# 1. 取得 operator shell
 git clone https://github.com/hamanpaul/paulshaclaw
 cd paulshaclaw
 
-# 2. 安裝本 repo（會依 pyproject pin 拉下 shell 所需相依）
+# 2. 裝本 repo（依 pyproject pin 自動拉下 paulsha-hippo + paulsha-cortex 作為 library）
 pip install -e .
+pytest tests/ -q            # 確認 operator shell 綠
 
-# 3. 若要完整跑三平面，另裝外部 plane CLI
-pipx install git+https://github.com/hamanpaul/paulsha-hippo
-pipx install git+https://github.com/hamanpaul/paulsha-cortex
-
-# 4. 跑測試確認 operator shell
-pytest tests/ -q
+# 3. 要跑常駐服務（記憶 + 治理），用 pipx 持久安裝兩個平面 CLI（勿用暫存 venv）
+pipx install "git+https://github.com/hamanpaul/paulsha-hippo"
+pipx install "git+https://github.com/hamanpaul/paulsha-cortex"
 ```
+
+### B. 部署常駐服務
+
+```bash
+# 記憶平面：dream 蒸餾常駐 + agent host hooks（systemd 偵測 + fallback）
+hippo init && hippo install hooks && hippo install service
+
+# 治理平面：manager + monitor 一次帶（systemd --user）
+cortex install service --instance cortex --repo-root "$PWD"
+systemctl --user enable --now cortex-manager.timer cortex-monitor.service
+
+hippo doctor          # 記憶側健檢
+```
+
+- **monitor 需要 project 設定**：`~/.agents/config/paulsha/project-cortex.yaml`（`workspaces: name/path`）；缺了 monitor 會以「無 project 設定」失敗。舊 `~/.config/paulshaclaw/paulshaclaw.yaml` 會被 legacy 讀取順序自動接上（帶 deprecation 警告）。可選再併 `project-hippo.yaml`（hippo 產生的 git/path registry）取 union。
+- **服務啟動總管**：[`scripts/start.sh`](./scripts/start.sh) 委派 `cortex install service` / `enable --now`，systemd 不可用時退回前景 fallback。
+
+### C. 既有機器：移植/更新到 operator shell 形態（cutover）
+
+主 repo 已刪除 `persona/coordinator/control/deck/monitor` 五包，舊機器不能只 `git pull`——要把舊的 manager/monitor **cutover 到 cortex 服務**。一鍵腳本（冪等、systemd-aware、含 hippo）：
+
+```bash
+scripts/cutover-to-cortex.sh            # 預設對本 repo；或傳 <repo 路徑>
+```
+
+它會：`git pull main` → 依 pin 用 pipx 裝 hippo+cortex → hippo init/hooks/dream service → **停用舊 `paulshaclaw-manager`/`demo-manager` 單元** → `cortex install service` + enable → 確保 monitor 設定 → F1 自停 gate 健檢。runtime 狀態（`~/.agents/control`、`~/.agents/memory`）**零遷移**沿用。
+
+**踩坑備忘**（cutover 實戰）：服務的 python 指向要**持久（pipx）**、勿用 `/tmp` venv；monitor 反覆失敗會被 systemd 限流，需 `systemctl --user reset-failed`；cortex pin 須含 F1 修正（manager 自停，見 cortex issue #2），否則 `cortex-manager.service` 會啟動即自停。
 
 **安全 / 不入庫**：secret、token、個人狀態一律放 repo 外（`~/.config/...`、`~/.agents/...`）。請勿把任何真實密鑰、內網主機名、客戶 / 專案代號寫進 repo。
 
