@@ -245,23 +245,22 @@ ensure_cortex_services() {
       return 1
     fi
 
+    # F1（對抗審查）：fallback 起「常駐 manager daemon」而非 one-shot tick loop——
+    # daemon 才會持 manager.lock、drain ~/.agents/control/requests、寫 manager status；
+    # one-shot tick 不持鎖不 drain，cockpit t / Telegram /manager tick 的請求永不被消費。
     (
-      interval="$(cortex_tick_interval_seconds)"
-      while true; do
-        PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.cli tick \
-          --specs-dir "$(cortex_specs_root)" \
-          --require-idle >>"$manager_log" 2>&1 || true
-        sleep "$interval"
-      done
+      PSC_CONTROL_ROOT="${PSC_CONTROL_ROOT:-$HOME/.agents/control}" \
+      PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.coordinator.manager_daemon \
+        --specs-dir "$(cortex_specs_root)"
     ) 200>&- >>"$manager_log" 2>&1 &
     CORTEX_MANAGER_PID=$!
     if ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
       wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
-      echo "cortex fallback tick loop exited before startup" >&2
+      echo "cortex fallback manager daemon exited before startup" >&2
       return 1
     fi
 
-    echo "cortex fallback started (tick-loop pid=$CORTEX_MANAGER_PID monitor pid=$CORTEX_MONITOR_PID)" >&2
+    echo "cortex fallback started (manager daemon pid=$CORTEX_MANAGER_PID monitor pid=$CORTEX_MONITOR_PID)" >&2
     return 0
   }
 
@@ -276,6 +275,13 @@ ensure_cortex_services() {
     start_cortex_local_fallback
     return $?
   fi
+
+  # F2（對抗審查）：cutover 順序——啟用 cortex 前先停用舊 paulshaclaw manager 單元，
+  # 否則舊 timer 仍 enabled、指向已刪的舊 service 腳本，或與新 manager 搶同一 control root。
+  for legacy in paulshaclaw-manager.timer paulshaclaw-manager.service; do
+    systemctl --user stop "$legacy" 2>/dev/null || true
+    systemctl --user disable "$legacy" 2>/dev/null || true
+  done
 
   if systemctl --user enable --now "${instance}-manager.timer" "${instance}-monitor.service"; then
     echo "cortex services enabled (${instance}-manager.timer ${instance}-monitor.service)"

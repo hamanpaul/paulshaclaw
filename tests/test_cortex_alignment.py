@@ -82,13 +82,19 @@ def test_deck_persona_bindings_exist_in_cortex_persona_catalog():
 
     assert missing_cards == []
 
-    missing = {
+    # F3（對抗審查）：驗「所有」帶 persona_binding 的 card，不只被 persona skills 引用的子集，
+    # 否則 shipped 但未被引用的 card 綁定漂移看不見。
+    # planner 是規劃階段卡（brainstorming/openspec-propose/writing-plans 等）的邏輯角色，
+    # 尚未進 enforced catalog（personas.yaml 僅 manager/builder/reviewer = REQUIRED_ROLES）——
+    # 列為 known-pending，待 G2 enforce（cortex issue 補 planner role / #124）。
+    KNOWN_PENDING_ROLES = {"planner"}
+    allowed = roles | KNOWN_PENDING_ROLES
+    drift = {
         card_id: card.persona_binding
         for card_id, card in cards.items()
-        if card_id in referenced_cards and card.persona_binding is not None and card.persona_binding not in roles
+        if card.persona_binding is not None and card.persona_binding not in allowed
     }
-
-    assert missing == {}
+    assert drift == {}, f"deck card 綁定未知 persona role（非 catalog 亦非 known-pending）：{drift}"
 
 
 def test_cortex_package_does_not_depend_on_hippo():
