@@ -130,19 +130,22 @@ class DeployInstallCliTests(unittest.TestCase):
 
             for relpath in (
                 unit_dir / "demo-agent-cost.service",
-                unit_dir / "demo-agent-manager.service",
                 unit_dir / "demo-agent-telegram.service",
                 runtime_dir / "demo-agent.env",
                 runtime_dir / "demo-agent-cost.env",
-                runtime_dir / "demo-agent-manager.env",
                 runtime_dir / "demo-agent-telegram.env",
                 state_dir / "demo-agent.state.json",
                 secret_dir / "demo-agent.secret.env",
                 secret_dir / "demo-agent.telegram.secret.env",
             ):
                 self.assertTrue(relpath.exists(), msg=str(relpath))
+            for relpath in (
+                unit_dir / "demo-agent-manager.service",
+                unit_dir / "demo-agent-manager.timer",
+                runtime_dir / "demo-agent-manager.env",
+            ):
+                self.assertFalse(relpath.exists(), msg=str(relpath))
 
-            self.assertFalse((unit_dir / "demo-agent-manager.timer").exists())
             self.assertEqual(stat.S_IMODE(state_dir.stat().st_mode), 0o750)
             self.assertEqual(stat.S_IMODE(secret_dir.stat().st_mode), 0o700)
             self.assertEqual(stat.S_IMODE((state_dir / "demo-agent.state.json").stat().st_mode), 0o640)
@@ -154,19 +157,14 @@ class DeployInstallCliTests(unittest.TestCase):
             self.assertEqual(state_payload["coordinator"]["phase"], "build")
             self.assertIn("pane_assignments", state_payload)
 
-            manager_unit = (unit_dir / "demo-agent-manager.service").read_text(encoding="utf-8")
             telegram_unit = (unit_dir / "demo-agent-telegram.service").read_text(encoding="utf-8")
-            for text, script_name in (
-                (manager_unit, "service-manager.sh"),
-                (telegram_unit, "service-bot.sh"),
-            ):
-                self.assertIn("Restart=on-failure", text)
-                self.assertIn("RestartSec=10", text)
-                self.assertIn("StartLimitIntervalSec=300", text)
-                self.assertIn("StartLimitBurst=5", text)
-                self.assertIn("KillMode=control-group", text)
-                self.assertIn(f"ExecStart=/usr/bin/env bash /srv/paulshaclaw/scripts/{script_name}", text)
-                self.assertNotIn("/home/", text)
+            self.assertIn("Restart=on-failure", telegram_unit)
+            self.assertIn("RestartSec=10", telegram_unit)
+            self.assertIn("StartLimitIntervalSec=300", telegram_unit)
+            self.assertIn("StartLimitBurst=5", telegram_unit)
+            self.assertIn("KillMode=control-group", telegram_unit)
+            self.assertIn("ExecStart=/usr/bin/env bash /srv/paulshaclaw/scripts/service-bot.sh", telegram_unit)
+            self.assertNotIn("/home/", telegram_unit)
 
             log_text = command_log.read_text(encoding="utf-8")
             self.assertEqual(log_text.count("loginctl enable-linger stage7tester"), 1)
@@ -222,14 +220,14 @@ class DeployInstallCliTests(unittest.TestCase):
             applied = run_deploy_install(home_dir, fakebin, "--apply")
             self.assertEqual(applied.returncode, 0, msg=applied.stderr)
 
-            missing_unit = home_dir / ".config" / "systemd" / "user" / "demo-agent-manager.service"
+            missing_unit = home_dir / ".config" / "systemd" / "user" / "demo-agent-cost.service"
             missing_unit.unlink()
 
             verified = run_deploy_install(home_dir, fakebin, "--verify")
 
             self.assertEqual(verified.returncode, 1, msg=verified.stdout)
             combined = verified.stdout + verified.stderr
-            self.assertIn("demo-agent-manager.service", combined)
+            self.assertIn("demo-agent-cost.service", combined)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
 

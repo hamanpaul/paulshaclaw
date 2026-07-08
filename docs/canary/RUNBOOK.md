@@ -18,7 +18,7 @@ python -m paulshaclaw.coordinator tick --specs-dir docs/canary/codex   --executo
 python -m paulshaclaw.coordinator tick --specs-dir docs/canary/copilot --executor copilot --allow-unsafe --model claude-haiku-4.5
 ```
 
-每家：`tick` 先 fanout（建 worktree + headless 啟動，記 job pid/log），再 complete（poll）。headless agent 為背景進程，通常需再跑 `tick`/`complete` 幾趟讓 `poll_headless_done` 偵測完成：
+每家：`tick` 先 fanout（建 worktree + headless 啟動，記 job pid/log），再 complete（poll）。headless agent 為背景進程，通常需再跑 `tick`/`complete` 幾趟讓完成偵測跑到（該 headless 完成偵測邏輯已隨 coordinator 遷入 `paulsha-cortex`）：
 
 ```bash
 python -m paulshaclaw.coordinator complete --handoff-dir runtime/handoff   # 重複到 manifest 出現

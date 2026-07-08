@@ -67,28 +67,18 @@ def test_worktree_root_env_override_wins(monkeypatch, tmp_path):
 
 def test_runtime_consumers_resolve_overrides_after_import(monkeypatch, tmp_path):
     from paulshaclaw.bot import reply
-    from paulshaclaw.coordinator import registry, seams
 
     agents_root = tmp_path / "agents"
-    repo_root = tmp_path / "repo"
-    worktree_root = tmp_path / "worktrees"
     monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
     monkeypatch.setenv("PSC_CONFIG_ROOT", str(tmp_path))
-    monkeypatch.setenv("PSC_REPO_ROOT", str(repo_root))
-    monkeypatch.setenv("PSC_WORKTREE_ROOT", str(worktree_root))
 
-    assert registry.JobRegistry()._state_path == agents_root / "coordinator" / "jobs.json"
-    creator = seams.ScriptWorktreeCreator()
-    assert creator._repo == repo_root
-    assert creator._wt_root == worktree_root
     assert reply.default_config_path() == tmp_path / ".config" / "paulshaclaw" / "paulshaclaw.state.json"
     assert reply.default_secret_env_path() == tmp_path / ".config" / "paulshaclaw" / "paulshaclaw.telegram.secret.env"
     assert reply.default_bindings_path() == agents_root / "state" / "telegram-chat-bindings.json"
 
 
-def test_cost_and_monitor_helpers_follow_facade(monkeypatch, tmp_path):
+def test_cost_helpers_follow_facade(monkeypatch, tmp_path):
     from paulshaclaw.cost import config as cost_config
-    from paulshaclaw.monitor import config as monitor_config
 
     agents_root = tmp_path / "agents"
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -100,8 +90,6 @@ def test_cost_and_monitor_helpers_follow_facade(monkeypatch, tmp_path):
     assert cost_config.default_codex_auth_path() == tmp_path / ".codex" / "auth.json"
     assert cost_config.default_cost_cache_dir() == agents_root / "state" / "cost"
     assert cost_config.default_cost_log_path() == agents_root / "log" / "cost.log"
-    assert monitor_config.default_config_path() == tmp_path / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
-    assert monitor_config.default_socket_path() == agents_root / "run" / "project-monitor.sock"
 
 
 def test_extra_corpus_root(monkeypatch, tmp_path):

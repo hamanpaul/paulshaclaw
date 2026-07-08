@@ -116,19 +116,6 @@ _TEMPLATE_CATALOG: tuple[_TemplateSpec, ...] = (
     ),
     _TemplateSpec(
         plane="core",
-        template_relpath="core/systemd/__INSTANCE__-manager.service.tmpl",
-        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
-        env_catalog=("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-manager.env"),
-    ),
-    _TemplateSpec(
-        plane="core",
-        template_relpath="core/systemd/__INSTANCE__-manager.timer.tmpl",
-        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
-        deploy=False,
-        deprecated=True,
-    ),
-    _TemplateSpec(
-        plane="core",
         template_relpath="core/systemd/__INSTANCE__-telegram.service.tmpl",
         rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
         env_catalog=(
@@ -157,12 +144,6 @@ _TEMPLATE_CATALOG: tuple[_TemplateSpec, ...] = (
         template_relpath="core/runtime/__INSTANCE__-cost.env.tmpl",
         rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
         required_keys=("PAULSHACLAW_CONFIG",),
-    ),
-    _TemplateSpec(
-        plane="core",
-        template_relpath="core/runtime/__INSTANCE__-manager.env.tmpl",
-        rename_rule="以 __INSTANCE__ 取代實例名，並移除 .tmpl 後綴",
-        required_keys=("PSC_CONTROL_ROOT",),
     ),
     _TemplateSpec(
         plane="core",

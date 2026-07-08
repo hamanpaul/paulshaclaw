@@ -19,10 +19,6 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from paulshaclaw.config import paths
-from paulsha_hippo.lib.session_readers import (
-    read_codex_rollout,
-    read_copilot_history,
-)
 
 BRO_RE = re.compile(r"^\s*\[bro:(\d+)\]")
 REPLY_BRIDGE = paths.agents_path("skills", "bro", "scripts", "reply_bridge.py")
@@ -51,6 +47,58 @@ def _send_via_bridge(user_id: int, text: str) -> None:
         return
     if result.returncode != 0:
         _log("send", RuntimeError(f"reply_bridge exit {result.returncode}: {(result.stderr or '').strip()[:500]}"))
+
+
+def read_copilot_history(copilot_root: str | Path, session_id: str) -> dict[str, str | list[str]]:
+    base_dir = Path(copilot_root) / "history-session-state"
+    matches = sorted(base_dir.glob(f"session_{session_id}_*.json")) if base_dir.is_dir() else []
+    if not matches:
+        return {"user_prompts": [], "assistant_summary": ""}
+    try:
+        data = json.loads(matches[-1].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"user_prompts": [], "assistant_summary": ""}
+    prompts: list[str] = []
+    last_assistant = ""
+    for message in data.get("chatMessages", []) if isinstance(data, dict) else []:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        if message.get("role") == "user":
+            prompts.append(content)
+        elif message.get("role") == "assistant":
+            last_assistant = content
+    return {"user_prompts": prompts, "assistant_summary": last_assistant}
+
+
+def read_codex_rollout(path: str | Path) -> dict[str, list[str]]:
+    transcript = Path(path)
+    if not transcript.exists():
+        return {"user_prompts": []}
+    prompts: list[str] = []
+    for line in transcript.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        payload = record.get("payload") if isinstance(record.get("payload"), dict) else record
+        if payload.get("role") != "user":
+            continue
+        content = payload.get("content")
+        if isinstance(content, str) and content.strip():
+            prompts.append(content)
+            continue
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            text = block.get("text") if isinstance(block, dict) else None
+            if isinstance(text, str) and text.strip():
+                prompts.append(text)
+    return {"user_prompts": prompts}
 
 
 def _discover_user_id(prompts: list[str]) -> int | None:

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from paulshaclaw.control import client as control_client
+import paulsha_cortex.control.client as control_client
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_dispatcher import CommandDispatcher
 from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry

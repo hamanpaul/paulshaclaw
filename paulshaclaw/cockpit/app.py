@@ -4,7 +4,7 @@ import inspect
 import threading
 from collections.abc import Callable
 
-from ..control import client as control_client
+import paulsha_cortex.control.client as control_client
 from . import branding, sysmon
 
 try:
