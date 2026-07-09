@@ -8,7 +8,10 @@ fi
 if [[ -z "${PY:-}" ]]; then
   # Prefer PSC_PYTHON / system python3 (planes in ~/.local) over the repo .venv.
   PY="$(command -v "${PSC_PYTHON:-python3}" 2>/dev/null || true)"
-  [[ -n "$PY" ]] || PY="$REPO/.venv/bin/python"
+  if [[ -z "$PY" ]]; then
+    PY="$REPO/.venv/bin/python"
+    [[ -x "$PY" ]] || { echo "找不到可用的 python（設 PSC_PYTHON 或於 repo 執行 pip install --user -e .）" >&2; exit 1; }
+  fi
 fi
 unset _psc_service_dir
 
