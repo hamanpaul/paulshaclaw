@@ -34,3 +34,18 @@ def test_start_sh_is_bash_parseable() -> None:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_operator_python_prefers_planes_having_interpreter() -> None:
+    """start.sh 不再硬預設 repo .venv；改為挑能 import paulsha_cortex 的 python
+    （PSC_PYTHON 可覆寫），找不到時 fail-fast 給指引而非裸 ModuleNotFoundError。"""
+    src = START_SH.read_text(encoding="utf-8")
+    assert "import paulsha_cortex" in src, "start.sh 應以 import 探測選用有 planes 的 python"
+    assert "PSC_PYTHON" in src, "start.sh 應支援 PSC_PYTHON 覆寫"
+    assert "pip install --user -e ." in src, "缺 planes 時應給明確安裝指引"
+
+
+def test_service_scripts_prefer_planes_python_over_venv() -> None:
+    for name in ("dream", "cost", "bot"):
+        src = (REPO_ROOT / "scripts" / f"service-{name}.sh").read_text(encoding="utf-8")
+        assert "PSC_PYTHON" in src, f"service-{name}.sh 應優先 PSC_PYTHON / python3 而非 .venv"

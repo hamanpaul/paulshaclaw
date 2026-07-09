@@ -6,9 +6,11 @@ if [[ -z "${REPO:-}" ]]; then
   REPO="$(cd "$_psc_service_dir/.." && pwd)"
 fi
 if [[ -z "${PY:-}" ]]; then
-  PY="$REPO/.venv/bin/python"
-  if [[ ! -x "$PY" ]]; then
-    PY=$(command -v python3) || { echo "python3 not found" >&2; exit 1; }
+  # Prefer PSC_PYTHON / system python3 (planes in ~/.local) over the repo .venv.
+  PY="$(command -v "${PSC_PYTHON:-python3}" 2>/dev/null || true)"
+  if [[ -z "$PY" ]]; then
+    PY="$REPO/.venv/bin/python"
+    [[ -x "$PY" ]] || { echo "找不到可用的 python（設 PSC_PYTHON 或於 repo 執行 pip install --user -e .）" >&2; exit 1; }
   fi
 fi
 unset _psc_service_dir
