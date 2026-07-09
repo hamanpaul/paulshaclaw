@@ -51,10 +51,20 @@ flock -n 200 || { echo 已有實例在跑; exit 1; }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
-PY=$REPO/.venv/bin/python
-if [[ ! -x "$PY" ]]; then
-  PY=$(command -v python3) || { echo "python3 not found" >&2; exit 1; }
+# Operator-shell python must have the governance/memory planes (paulsha_cortex) importable.
+# Prefer PSC_PYTHON, then system python3 (planes installed into ~/.local via pip --user / pipx),
+# then the repo .venv as a last resort. Fail fast with a hint if none can import the planes,
+# rather than crashing mid-startup with a bare ModuleNotFoundError.
+PY=""
+for _psc_py in "$(command -v "${PSC_PYTHON:-}" 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" "$REPO/.venv/bin/python"; do
+  [[ -n "$_psc_py" ]] || continue
+  if "$_psc_py" -c "import paulsha_cortex" >/dev/null 2>&1; then PY="$_psc_py"; break; fi
+done
+if [[ -z "$PY" ]]; then
+  echo "找不到含 paulsha_cortex 的 python——請在 repo 執行 'pip install --user -e .'（或設 PSC_PYTHON 指向有 planes 的 python）" >&2
+  exit 1
 fi
+unset _psc_py
 
 # Load Telegram secrets and state config from well-known paths when not already
 # set. Only fill in defaults if the files actually exist, so missing-config
