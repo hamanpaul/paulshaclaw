@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+#
+# Install copilot-local-vllm by symlinking it from this repo into a bin dir,
+# so the running entrypoint always tracks the repo (avoids the "repo fixed but
+# ~/.local/bin copy is stale" drift). Mirrors scripts/install-claude-gemma4,
+# minus the proxy — Copilot BYOK is env-driven and needs no local proxy.
+#
+# Usage:
+#   scripts/install-copilot-local-vllm                       # symlink into ~/.local/bin
+#   PSC_COPILOT_LOCAL_VLLM_BIN_DIR=/path scripts/install-copilot-local-vllm
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+BIN_DIR="${PSC_COPILOT_LOCAL_VLLM_BIN_DIR:-$HOME/.local/bin}"
+
+LAUNCHER_SRC="$SCRIPT_DIR/copilot-local-vllm"
+if [ ! -f "$LAUNCHER_SRC" ]; then
+  echo "missing source script: $LAUNCHER_SRC" >&2
+  exit 1
+fi
+
+mkdir -p "$BIN_DIR"
+
+dest="$BIN_DIR/copilot-local-vllm"
+if [ -L "$dest" ] && [ "$(readlink -f "$dest")" = "$(readlink -f "$LAUNCHER_SRC")" ]; then
+  echo "unchanged: $dest -> $LAUNCHER_SRC"
+else
+  rm -f "$dest"
+  ln -s "$LAUNCHER_SRC" "$dest"
+  echo "linked:    $dest -> $LAUNCHER_SRC"
+fi
+
+# Remind (never create) the secret env; the installer must not write secrets.
+ENV_DEFAULT="$HOME/.config/paulshaclaw/copilot-local-vllm.env"
+if [ ! -r "$ENV_DEFAULT" ] && [ ! -r "$HOME/.copilot/copilot-local-vllm.env" ]; then
+  echo "note: no secret env found; create one from the template:" >&2
+  echo "      mkdir -p $HOME/.config/paulshaclaw" >&2
+  echo "      cp $SCRIPT_DIR/../config/copilot-local-vllm.env.tmpl $ENV_DEFAULT" >&2
+fi
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) echo "note: $BIN_DIR is not on PATH; add it to run 'copilot-local-vllm' directly" ;;
+esac
+
+echo "done."
