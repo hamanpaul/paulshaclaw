@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+#
+# copilot-local-vllm — run GitHub Copilot CLI against a local vLLM (BYOK).
+#
+# Loads a secret env file that sets the Copilot CLI's COPILOT_PROVIDER_* /
+# COPILOT_MODEL variables (Bring-Your-Own-Key), then execs the real `copilot`
+# so the CLI talks to a self-hosted OpenAI-compatible vLLM endpoint instead of
+# GitHub-hosted models. The env file holds the API key and stays out of the
+# repo; see config/copilot-local-vllm.env.tmpl for the shape.
+#
+# Secret env file is resolved in this order (first hit wins):
+#   $PSC_COPILOT_LOCAL_VLLM_ENV_FILE   (explicit override)
+#   $COPILOT_LOCAL_VLLM_ENV_FILE       (legacy override)
+#   $HOME/.config/paulshaclaw/copilot-local-vllm.env
+#   $HOME/.copilot/copilot-local-vllm.env   (legacy location)
+#
+set -euo pipefail
+
+resolve_path() {
+  readlink -f "$1" 2>/dev/null || printf '%s\n' "$1"
+}
+
+# Absolute path to the committed template, derived from this script's real
+# location so the error hint below stays valid even when invoked via the
+# ~/.local/bin symlink from an arbitrary working directory.
+SCRIPT_DIR="$(cd -- "$(dirname -- "$(resolve_path "$0")")" && pwd)"
+TEMPLATE="$SCRIPT_DIR/../config/copilot-local-vllm.env.tmpl"
+
+# --- locate the secret env file -------------------------------------------
+default_env="$HOME/.config/paulshaclaw/copilot-local-vllm.env"
+legacy_env="$HOME/.copilot/copilot-local-vllm.env"
+env_file="${PSC_COPILOT_LOCAL_VLLM_ENV_FILE:-${COPILOT_LOCAL_VLLM_ENV_FILE:-}}"
+if [ -z "$env_file" ]; then
+  if [ -f "$default_env" ]; then
+    env_file="$default_env"
+  elif [ -f "$legacy_env" ]; then
+    env_file="$legacy_env"
+  else
+    env_file="$default_env"
+  fi
+fi
+
+if [ ! -r "$env_file" ]; then
+  {
+    printf 'copilot-local-vllm: env file not readable: %s\n' "$env_file"
+    printf 'Copy the template and fill in your vLLM endpoint + key:\n'
+    printf '  mkdir -p %s/.config/paulshaclaw\n' "$HOME"
+    printf '  cp %s %s\n' "$TEMPLATE" "$default_env"
+  } >&2
+  exit 1
+fi
+
+# --- load it (export every var to the copilot child) ----------------------
+set -a
+# shellcheck source=/dev/null
+. "$env_file"
+set +a
+
+# No-secrets guard: fail loud when the key is missing rather than silently
+# falling through to GitHub-hosted models.
+if [ -z "${COPILOT_PROVIDER_API_KEY:-}" ]; then
+  printf 'copilot-local-vllm: COPILOT_PROVIDER_API_KEY is not set in %s\n' "$env_file" >&2
+  exit 1
+fi
+
+# --- find the real copilot binary (never this wrapper) --------------------
+# On WSL, ensure the Windows dirs the copilot node shim may need are on PATH.
+if [ -n "${WSL_INTEROP:-}" ] || [ -n "${WSL_DISTRO_NAME:-}" ]; then
+  for d in /mnt/c/Windows/System32 /mnt/c/Windows/System32/WindowsPowerShell/v1.0; do
+    case ":$PATH:" in
+      *":$d:"*) ;;
+      *) [ -d "$d" ] && PATH="$d:$PATH" ;;
+    esac
+  done
+fi
+
+self_path="$(resolve_path "$0")"
+real_copilot=""
+while IFS= read -r cand; do
+  [ -n "$cand" ] || continue
+  if [ "$(resolve_path "$cand")" != "$self_path" ]; then
+    real_copilot="$cand"
+    break
+  fi
+done < <(type -ap copilot || true)
+
+if [ -z "$real_copilot" ]; then
+  for cand in "$HOME"/.nvm/versions/node/*/bin/copilot /usr/local/bin/copilot /usr/bin/copilot; do
+    [ -x "$cand" ] || continue
+    if [ "$(resolve_path "$cand")" != "$self_path" ]; then
+      real_copilot="$cand"
+      break
+    fi
+  done
+fi
+
+if [ -z "$real_copilot" ]; then
+  printf 'copilot-local-vllm: unable to locate the upstream copilot binary.\n' >&2
+  exit 127
+fi
+
+exec "$real_copilot" "$@"
