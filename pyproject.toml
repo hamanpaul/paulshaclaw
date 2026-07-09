@@ -11,7 +11,7 @@ description = "paulshaclaw agent workflow system"
 # （tag 僅人讀標記；PyPI 上線後改 version pin + hash，見 hippo-consumer spec）
 dependencies = [
     # v0.1.0（tag 為人讀標記；pin 為對應不可變 SHA）
-    "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@30ebbbd598ec1e43c8b663c12f4ff1cffde3fc79",
+    "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@f8d1b1c54c4d95756a3295829dc6c6c9a3665add",
     "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@3dfea79f8ce9b86f025ce5dded50ee54cbc13711",
 ]
 
