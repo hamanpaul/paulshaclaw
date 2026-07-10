@@ -14,7 +14,11 @@
 #
 # 冪等：可重跑。無 user systemd（如某些 WSL）：走前景 fallback，並於報告標 N/A。
 # runtime 狀態（~/.agents/control、~/.agents/memory）零遷移沿用。
-set -uo pipefail
+set -euo pipefail
+
+systemd_ok() {
+  command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1
+}
 
 install_operator_runtime() {
   local repo="${1:?repo root is required}"
@@ -51,6 +55,53 @@ install_cortex_service_units() {
   cortex install service --instance "$instance" --repo-root "$repo"
 }
 
+initialize_hippo() {
+  command -v hippo >/dev/null 2>&1 || return 1
+  hippo init || return 1
+  hippo install hooks
+}
+
+install_hippo_service() {
+  command -v hippo >/dev/null 2>&1 || return 1
+  hippo install service
+}
+
+retire_legacy_services() {
+  local unit active_state enabled_state
+  local -a units=(
+    paulshaclaw-manager.timer
+    paulshaclaw-manager.service
+    demo-manager.timer
+    demo-manager.service
+  )
+  for unit in "${units[@]}"; do
+    systemctl --user stop "$unit" 2>/dev/null || true
+    systemctl --user disable "$unit" 2>/dev/null || true
+  done
+  systemctl --user daemon-reload >/dev/null || return 1
+  for unit in "${units[@]}"; do
+    active_state="$(systemctl --user is-active "$unit" 2>/dev/null || true)"
+    enabled_state="$(systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+    [[ "$active_state" == "inactive" || "$active_state" == "unknown" ]] || return 1
+    [[ "$enabled_state" == "disabled" || "$enabled_state" == "not-found" ]] || return 1
+  done
+}
+
+ensure_monitor_project_config() {
+  local config_root="${1:?config root is required}"
+  local legacy_config="${2:?legacy config is required}"
+  local workspace_root="${3:?workspace root is required}"
+  local project_config="$config_root/project-cortex.yaml"
+  mkdir -p "$config_root" || return 1
+  if [[ ! -f "$project_config" && ! -f "$legacy_config" ]]; then
+    cat > "$project_config" <<YAML
+workspaces:
+  - name: prj
+    path: $workspace_root
+YAML
+  fi
+}
+
 restart_monitor_service() {
   local instance="${1:?instance is required}"
   systemctl --user restart "${instance}-monitor.service" 2>/dev/null || return 1
@@ -64,6 +115,7 @@ enable_and_verify_cortex_services() {
   systemctl --user enable --now "${instance}-manager.timer" "${instance}-monitor.service" || return 1
   restart_monitor_service "$instance" || return 1
   sleep "${settle:-2}"
+  systemctl --user is-active --quiet "${instance}-monitor.service" 2>/dev/null || return 1
   systemctl --user restart "${instance}-manager.service" 2>/dev/null || return 1
   sleep "${settle:-3}"
   systemctl --user is-active --quiet "${instance}-manager.service" 2>/dev/null
@@ -77,7 +129,6 @@ REPO="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 INSTANCE="${PSC_INSTANCE:-cortex}"
 log() { printf '\033[36m[cutover]\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m[cutover]\033[0m %s\n' "$*" >&2; }
-systemd_ok() { command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; }
 
 # --- 1. 主 repo 到 main ---
 log "更新主 repo（$REPO）到 main"
@@ -105,21 +156,27 @@ if ! install_plane_clis "$REPO"; then
 fi
 
 # --- 4. hippo：init + hooks + dream service ---
-if command -v hippo >/dev/null 2>&1; then
-  log "hippo init / install hooks / install service（dream）"
-  hippo init 2>&1 | sed 's/^/  hippo: /' || warn "hippo init 非零（可能已初始化）"
-  hippo install hooks 2>&1 | sed 's/^/  hippo: /' || warn "hippo install hooks 非零"
-  hippo install service 2>&1 | sed 's/^/  hippo: /' || warn "hippo install service 非零（systemd 不可用時屬預期）"
+log "hippo init / install hooks"
+if ! initialize_hippo; then
+  warn "hippo CLI 缺失或 init/hooks 安裝失敗——停止 cutover"
+  exit 1
+fi
+if systemd_ok; then
+  log "hippo install service（dream）"
+  if ! install_hippo_service; then
+    warn "hippo service 安裝失敗——停止 cutover"
+    exit 1
+  fi
 else
-  warn "hippo CLI 未在 PATH（pipx ensurepath 後重開 shell）"
+  install_hippo_service || warn "systemd N/A：hippo service 安裝非零，交由前景 fallback"
 fi
 
 # --- 5. 停用舊 manager/monitor 單元（cutover 先停舊）---
 if systemd_ok; then
-  for u in "paulshaclaw-manager.timer" "paulshaclaw-manager.service" "demo-manager.timer" "demo-manager.service"; do
-    systemctl --user stop "$u" 2>/dev/null && systemctl --user disable "$u" 2>/dev/null && log "停用舊單元 $u" || true
-  done
-  systemctl --user daemon-reload 2>/dev/null || true
+  if ! retire_legacy_services; then
+    warn "legacy manager units 除役驗證失敗——停止 cutover"
+    exit 1
+  fi
 else
   warn "systemd 不可用：殺前景舊 manager/monitor 進程"
   pkill -f 'paulshaclaw.coordinator.manager_daemon' 2>/dev/null || true
@@ -135,17 +192,15 @@ fi
 
 # --- 7. monitor project 設定（缺則 monitor 起不來）---
 CFG_ROOT="${PSC_PROJECT_CONFIG_ROOT:-$HOME/.agents/config/paulsha}"
-mkdir -p "$CFG_ROOT"
 LEGACY_CFG="$HOME/.config/paulshaclaw/paulshaclaw.yaml"
 if [[ ! -f "$CFG_ROOT/project-cortex.yaml" && ! -f "$LEGACY_CFG" ]]; then
   warn "無 monitor project 設定——寫入樣板 $CFG_ROOT/project-cortex.yaml（請按實際 workspace 調整）"
-  cat > "$CFG_ROOT/project-cortex.yaml" <<YAML
-workspaces:
-  - name: prj
-    path: $HOME/prj_pri
-YAML
 elif [[ -f "$LEGACY_CFG" && ! -f "$CFG_ROOT/project-cortex.yaml" ]]; then
   log "沿用 legacy monitor 設定 $LEGACY_CFG（建議日後遷至 $CFG_ROOT/project-cortex.yaml）"
+fi
+if ! ensure_monitor_project_config "$CFG_ROOT" "$LEGACY_CFG" "$HOME/prj_pri"; then
+  warn "monitor project 設定建立失敗——停止 cutover"
+  exit 1
 fi
 
 # --- 8. enable + start + F1 gate 健檢 ---
