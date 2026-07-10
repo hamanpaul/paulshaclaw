@@ -5,6 +5,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 START_SH = REPO_ROOT / "scripts" / "start.sh"
@@ -15,14 +17,30 @@ PEP668_INSTALL = (
 )
 
 
-def _write_fake_python(path: Path, *, cortex: bool, textual: bool) -> None:
+def _write_fake_python(
+    path: Path,
+    *,
+    cortex: bool,
+    textual: bool,
+    cost_config: bool = True,
+    cockpit_app: bool = True,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f"""#!/usr/bin/env bash
 if [[ "${{1:-}}" != "-c" ]]; then
   exit 90
 fi
-if [[ "${{2:-}}" == *"import paulsha_cortex"* && "{int(cortex)}" != "1" ]]; then
+if [[ -n "${{EXPECTED_REPO:-}}" && "${{PYTHONPATH:-}}" != "$EXPECTED_REPO" ]]; then
+  exit 91
+fi
+if [[ "${{2:-}}" == *"import paulsha_cortex.cli"* && "{int(cortex)}" != "1" ]]; then
+  exit 1
+fi
+if [[ "${{2:-}}" == *"import paulshaclaw.cost.config"* && "{int(cost_config)}" != "1" ]]; then
+  exit 1
+fi
+if [[ "${{2:-}}" == *"import paulshaclaw.cockpit.app"* && "{int(cockpit_app)}" != "1" ]]; then
   exit 1
 fi
 if [[ "${{2:-}}" == *"import textual"* && "{int(textual)}" != "1" ]]; then
@@ -52,9 +70,60 @@ printf '%s\\n' "$*" > "${{{log_variable}:?}}"
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def _write_fake_systemctl(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${SYSTEMCTL_LOG:?}"
+case "$*" in
+  *" reset-failed "*) exit "${RESET_STATUS:-0}" ;;
+  *" enable --now "*) exit "${ENABLE_STATUS:-0}" ;;
+  *" restart demo-monitor.service"*) exit "${MONITOR_RESTART_STATUS:-0}" ;;
+  *" is-active --quiet demo-monitor.service"*) exit "${MONITOR_ACTIVE_STATUS:-0}" ;;
+  *" restart demo-manager.service"*) exit "${MANAGER_RESTART_STATUS:-0}" ;;
+  *" is-active --quiet demo-manager.service"*) exit "${MANAGER_ACTIVE_STATUS:-0}" ;;
+esac
+exit 0
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _write_fake_pipx(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${PIPX_LOG:?}"
+if [[ "$*" == *"paulsha-hippo"* ]]; then
+  exit "${HIPPO_INSTALL_STATUS:-0}"
+fi
+if [[ "$*" == *"paulsha-cortex"* ]]; then
+  exit "${CORTEX_PIPX_STATUS:-0}"
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _write_fake_cortex(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        """#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${CORTEX_LOG:?}"
+exit "${CORTEX_INSTALL_STATUS:-0}"
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 def _run_resolver(repo: Path, bin_dir: Path, *, psc_python: Path | None = None) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+    env["EXPECTED_REPO"] = str(repo)
     if psc_python is None:
         env.pop("PSC_PYTHON", None)
     else:
@@ -107,6 +176,67 @@ def _run_cutover_install(
     return completed, bootstrap_log, venv_log
 
 
+def _run_service_resolver(service: Path, repo: Path, bin_dir: Path) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "REPO": str(repo),
+            "EXPECTED_REPO": str(repo),
+        }
+    )
+    env.pop("PSC_PYTHON", None)
+    env.pop("PY", None)
+    return subprocess.run(
+        [
+            "/usr/bin/bash",
+            "-c",
+            'source "$1" --source-only; printf "%s\\n" "$PY"',
+            "bash",
+            str(service),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _run_cutover_function(
+    command: str,
+    bin_dir: Path,
+    tmp_path: Path,
+    *,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:/usr/bin:/bin",
+            "SYSTEMCTL_LOG": str(tmp_path / "systemctl.log"),
+            "PIPX_LOG": str(tmp_path / "pipx.log"),
+            "CORTEX_LOG": str(tmp_path / "cortex.log"),
+            "PSC_CUTOVER_SETTLE_SECONDS": "0",
+        }
+    )
+    env.update(extra_env or {})
+    return subprocess.run(
+        [
+            "/usr/bin/bash",
+            "-c",
+            f'source "$1" --source-only; {command}',
+            "bash",
+            str(CUTOVER_SH),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def test_start_sh_has_no_dead_manager_or_monitor_refs() -> None:
     src = START_SH.read_text(encoding="utf-8")
     prefix = "paulshaclaw"
@@ -155,14 +285,35 @@ def test_operator_python_prefers_psc_python_with_full_runtime(tmp_path: Path) ->
     assert completed.stdout.strip() == str(psc_python)
 
 
-def test_operator_python_rejects_partial_psc_and_uses_repo_venv(tmp_path: Path) -> None:
+def test_operator_python_prefers_repo_venv_over_full_system_python(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    repo_python = repo / ".venv/bin/python"
+    _write_fake_python(bin_dir / "python3", cortex=True, textual=True)
+    _write_fake_python(repo_python, cortex=True, textual=True)
+
+    completed = _run_resolver(repo, bin_dir)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == str(repo_python)
+
+
+@pytest.mark.parametrize("missing", ["cortex", "cost_config", "cockpit_app", "textual"])
+def test_operator_python_rejects_missing_runtime_module(tmp_path: Path, missing: str) -> None:
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
     psc_python = tmp_path / "psc" / "python"
     repo_python = repo / ".venv/bin/python"
-    _write_fake_python(psc_python, cortex=True, textual=False)
-    _write_fake_python(bin_dir / "python3", cortex=False, textual=True)
+    availability = {
+        "cortex": True,
+        "cost_config": True,
+        "cockpit_app": True,
+        "textual": True,
+    }
+    availability[missing] = False
+    _write_fake_python(psc_python, **availability)
     _write_fake_python(repo_python, cortex=True, textual=True)
+    _write_fake_python(bin_dir / "python3", cortex=False, textual=False)
 
     completed = _run_resolver(repo, bin_dir, psc_python=psc_python)
 
@@ -201,12 +352,29 @@ def test_operator_python_rejects_cortex_only_pipx_runtime(tmp_path: Path) -> Non
     assert completed.stderr == ""
 
 
-def test_service_scripts_prefer_planes_python_over_venv() -> None:
+def test_service_scripts_share_operator_runtime_resolver() -> None:
     for name in ("dream", "cost", "bot"):
         src = (REPO_ROOT / "scripts" / f"service-{name}.sh").read_text(encoding="utf-8")
-        assert "PSC_PYTHON" in src, f"service-{name}.sh 應優先 PSC_PYTHON / python3 而非 .venv"
+        assert 'source "$REPO/scripts/start.sh" --source-only' in src
+        assert 'resolve_operator_python "$REPO"' in src
         assert PEP668_INSTALL in src
         assert "pip install --user" not in src
+
+
+def test_standalone_service_scripts_reuse_operator_resolver(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    repo_python = repo / ".venv/bin/python"
+    scripts_dir = repo / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "start.sh").symlink_to(START_SH)
+    _write_fake_python(bin_dir / "python3", cortex=False, textual=True)
+    _write_fake_python(repo_python, cortex=True, textual=True)
+
+    for name in ("cost", "dream", "bot"):
+        completed = _run_service_resolver(REPO_ROOT / "scripts" / f"service-{name}.sh", repo, bin_dir)
+        assert completed.returncode == 0, f"service-{name}: {completed.stderr}"
+        assert completed.stdout.strip() == str(repo_python)
 
 
 def test_readme_install_uses_repo_venv_for_operator_runtime() -> None:
@@ -235,7 +403,75 @@ def test_cutover_force_refreshes_repo_venv_from_pyproject(tmp_path: Path) -> Non
     )
 
 
-def test_cutover_restarts_monitor_and_keeps_active_check() -> None:
-    src = CUTOVER_SH.read_text(encoding="utf-8")
-    assert 'systemctl --user restart "${INSTANCE}-monitor.service"' in src
-    assert 'systemctl --user is-active "${INSTANCE}-monitor.service"' in src
+@pytest.mark.parametrize(
+    ("extra_env", "expected_status"),
+    [
+        ({"ENABLE_STATUS": "1"}, 1),
+        ({"RESET_STATUS": "1"}, 1),
+        ({"MONITOR_RESTART_STATUS": "1"}, 1),
+        ({"MONITOR_ACTIVE_STATUS": "1"}, 1),
+        ({"MANAGER_RESTART_STATUS": "1"}, 1),
+        ({"MANAGER_ACTIVE_STATUS": "1"}, 1),
+        ({}, 0),
+    ],
+)
+def test_cutover_systemd_gate_is_fail_closed(
+    tmp_path: Path, extra_env: dict[str, str], expected_status: int
+) -> None:
+    bin_dir = tmp_path / "bin"
+    _write_fake_systemctl(bin_dir / "systemctl")
+
+    completed = _run_cutover_function(
+        "enable_and_verify_cortex_services demo",
+        bin_dir,
+        tmp_path,
+        extra_env=extra_env,
+    )
+
+    assert completed.returncode == expected_status, completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("extra_env", "expected_status"),
+    [
+        ({"HIPPO_INSTALL_STATUS": "1"}, 1),
+        ({"CORTEX_PIPX_STATUS": "1"}, 1),
+        ({}, 0),
+    ],
+)
+def test_cutover_pipx_installs_are_fail_closed(
+    tmp_path: Path, extra_env: dict[str, str], expected_status: int
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    repo.joinpath("pyproject.toml").write_text(
+        '"paulsha-hippo @ git+https://example.invalid/paulsha-hippo@' + "a" * 40 + '"\n'
+        '"paulsha-cortex @ git+https://example.invalid/paulsha-cortex@' + "b" * 40 + '"\n',
+        encoding="utf-8",
+    )
+    bin_dir = tmp_path / "bin"
+    _write_fake_pipx(bin_dir / "pipx")
+
+    completed = _run_cutover_function(
+        f'install_plane_clis "{repo}"',
+        bin_dir,
+        tmp_path,
+        extra_env=extra_env,
+    )
+
+    assert completed.returncode == expected_status, completed.stderr
+
+
+@pytest.mark.parametrize("install_status", [0, 1])
+def test_cutover_cortex_install_is_fail_closed(tmp_path: Path, install_status: int) -> None:
+    bin_dir = tmp_path / "bin"
+    _write_fake_cortex(bin_dir / "cortex")
+
+    completed = _run_cutover_function(
+        'install_cortex_service_units demo "/tmp/repo"',
+        bin_dir,
+        tmp_path,
+        extra_env={"CORTEX_INSTALL_STATUS": str(install_status)},
+    )
+
+    assert completed.returncode == install_status, completed.stderr

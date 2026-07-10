@@ -27,6 +27,48 @@ install_operator_runtime() {
   "$venv_python" -m pip install --upgrade --force-reinstall -e "$repo"
 }
 
+pin_of() {
+  local repo="${1:?repo root is required}"
+  local package="${2:?package is required}"
+  grep -oE "$package@[0-9a-f]{40}" "$repo/pyproject.toml" | head -1
+}
+
+install_plane_clis() {
+  local repo="${1:?repo root is required}"
+  local hippo_pin cortex_pin
+  hippo_pin="$(pin_of "$repo" paulsha-hippo)" || return 1
+  cortex_pin="$(pin_of "$repo" paulsha-cortex)" || return 1
+  [[ -n "$hippo_pin" && -n "$cortex_pin" ]] || return 1
+  command -v pipx >/dev/null 2>&1 || return 1
+  pipx install "git+https://github.com/hamanpaul/${hippo_pin}" --force || return 1
+  pipx install "git+https://github.com/hamanpaul/${cortex_pin}" --force
+}
+
+install_cortex_service_units() {
+  local instance="${1:?instance is required}"
+  local repo="${2:?repo root is required}"
+  command -v cortex >/dev/null 2>&1 || return 1
+  cortex install service --instance "$instance" --repo-root "$repo"
+}
+
+restart_monitor_service() {
+  local instance="${1:?instance is required}"
+  systemctl --user restart "${instance}-monitor.service" 2>/dev/null || return 1
+  systemctl --user is-active --quiet "${instance}-monitor.service" 2>/dev/null
+}
+
+enable_and_verify_cortex_services() {
+  local instance="${1:?instance is required}"
+  local settle="${PSC_CUTOVER_SETTLE_SECONDS:-}"
+  systemctl --user reset-failed "${instance}-manager.service" "${instance}-monitor.service" || return 1
+  systemctl --user enable --now "${instance}-manager.timer" "${instance}-monitor.service" || return 1
+  restart_monitor_service "$instance" || return 1
+  sleep "${settle:-2}"
+  systemctl --user restart "${instance}-manager.service" 2>/dev/null || return 1
+  sleep "${settle:-3}"
+  systemctl --user is-active --quiet "${instance}-manager.service" 2>/dev/null
+}
+
 if [[ "${1:-}" == "--source-only" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -39,8 +81,10 @@ systemd_ok() { command -v systemctl >/dev/null 2>&1 && systemctl --user show-env
 
 # --- 1. 主 repo 到 main ---
 log "更新主 repo（$REPO）到 main"
-git -C "$REPO" checkout main
-git -C "$REPO" pull --ff-only
+if ! git -C "$REPO" checkout main || ! git -C "$REPO" pull --ff-only; then
+  warn "主 repo 更新失敗——停止 cutover"
+  exit 1
+fi
 
 # --- 2. 建立/刷新 operator runtime（PEP 668-safe；force 對齊同版本 VCS pin）---
 log "建立/刷新 operator runtime（$REPO/.venv）"
@@ -50,17 +94,15 @@ if ! install_operator_runtime "$REPO"; then
 fi
 
 # --- 3. 依 pyproject pin 持久安裝 hippo + cortex（public，免認證）---
-pin_of() { grep -oE "$1@[0-9a-f]{40}" "$REPO/pyproject.toml" | head -1; }
-HIPPO_PIN="$(pin_of paulsha-hippo)"
-CORTEX_PIN="$(pin_of paulsha-cortex)"
 if ! command -v pipx >/dev/null 2>&1; then
   warn "pipx 未安裝——Ubuntu/Debian 請先用套件管理器安裝 'sudo apt install pipx'，再執行 pipx ensurepath"
   exit 1
 fi
-log "pipx 安裝 hippo（git+https://github.com/hamanpaul/$HIPPO_PIN）"
-pipx install "git+https://github.com/hamanpaul/${HIPPO_PIN}" --force
-log "pipx 安裝 cortex（git+https://github.com/hamanpaul/$CORTEX_PIN）"
-pipx install "git+https://github.com/hamanpaul/${CORTEX_PIN}" --force
+log "依 pyproject pins 用 pipx 安裝 hippo + cortex"
+if ! install_plane_clis "$REPO"; then
+  warn "pipx 安裝 hippo/cortex 失敗——停止 cutover"
+  exit 1
+fi
 
 # --- 4. hippo：init + hooks + dream service ---
 if command -v hippo >/dev/null 2>&1; then
@@ -85,11 +127,10 @@ else
 fi
 
 # --- 6. cortex install service + enable（manager + monitor）---
-if command -v cortex >/dev/null 2>&1; then
-  log "cortex install service --instance $INSTANCE --repo-root $REPO"
-  cortex install service --instance "$INSTANCE" --repo-root "$REPO" 2>&1 | sed 's/^/  cortex: /'
-else
-  warn "cortex CLI 未在 PATH（pipx ensurepath 後重開 shell）"; exit 1
+log "cortex install service --instance $INSTANCE --repo-root $REPO"
+if ! install_cortex_service_units "$INSTANCE" "$REPO"; then
+  warn "cortex service unit 安裝失敗——停止 cutover"
+  exit 1
 fi
 
 # --- 7. monitor project 設定（缺則 monitor 起不來）---
@@ -109,17 +150,12 @@ fi
 
 # --- 8. enable + start + F1 gate 健檢 ---
 if systemd_ok; then
-  systemctl --user reset-failed "${INSTANCE}-manager.service" "${INSTANCE}-monitor.service" 2>/dev/null || true
-  systemctl --user enable --now "${INSTANCE}-manager.timer" "${INSTANCE}-monitor.service" 2>&1 | sed 's/^/  systemd: /' || true
-  systemctl --user restart "${INSTANCE}-monitor.service" 2>/dev/null || true
-  sleep 2
-  systemctl --user restart "${INSTANCE}-manager.service" 2>/dev/null || true; sleep 3   # F1 自停 gate
-  if systemctl --user is-active --quiet "${INSTANCE}-manager.service"; then
-    log "✅ ${INSTANCE}-manager active（F1 未自停）"
-  else
-    warn "❌ ${INSTANCE}-manager 未 active——若為自停，確認 cortex pin 已含 F1 修正（issue #2）"
+  if ! enable_and_verify_cortex_services "$INSTANCE"; then
+    warn "cortex systemd enable/restart/active gate 失敗——停止 cutover"
+    exit 1
   fi
-  log "monitor: $(systemctl --user is-active "${INSTANCE}-monitor.service" 2>/dev/null)"
+  log "✅ ${INSTANCE}-manager active（F1 未自停）"
+  log "monitor: active"
   command -v hippo >/dev/null 2>&1 && hippo doctor 2>&1 | sed 's/^/  hippo doctor: /' | tail -6 || true
 else
   warn "systemd N/A：cortex 服務改前景 supervise（見 start.sh fallback）；本腳本不常駐前景"

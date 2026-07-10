@@ -82,7 +82,12 @@ class CostServiceSystemdBehaviorTests(unittest.TestCase):
     def test_cost_service_runs_without_tmux_reaches_loop_logic(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
         script = repo_root / "scripts" / "service-cost.sh"
-        env = {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "PSC_COST_REFRESH_DISABLED": "1"}
+        env = {
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/tmp",
+            "PY": "/usr/bin/python3",
+            "PSC_COST_REFRESH_DISABLED": "1",
+        }
         completed = subprocess.run(
             ["bash", str(script)],
             capture_output=True,

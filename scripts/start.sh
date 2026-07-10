@@ -43,8 +43,10 @@ start_bot_supervised() {
 
 operator_python_has_runtime() {
   local python="${1:-}"
+  local repo="${2:?repo root is required}"
+  local probe=$'import paulsha_cortex.cli\nimport paulshaclaw.cost.config\nimport paulshaclaw.cockpit.app\nimport textual'
   [[ -n "$python" && -x "$python" ]] || return 1
-  "$python" -c $'import paulsha_cortex\nimport textual' >/dev/null 2>&1
+  PYTHONPATH="$repo" "$python" -c "$probe" >/dev/null 2>&1
 }
 
 cortex_console_python() {
@@ -67,12 +69,12 @@ resolve_operator_python() {
   cortex_python="$(cortex_console_python || true)"
   candidates=(
     "$(command -v "${PSC_PYTHON:-}" 2>/dev/null || true)"
-    "$(command -v python3 2>/dev/null || true)"
     "$repo/.venv/bin/python"
+    "$(command -v python3 2>/dev/null || true)"
     "$cortex_python"
   )
   for candidate in "${candidates[@]}"; do
-    if operator_python_has_runtime "$candidate"; then
+    if operator_python_has_runtime "$candidate" "$repo"; then
       printf '%s\n' "$candidate"
       return 0
     fi
@@ -91,7 +93,7 @@ flock -n 200 || { echo 已有實例在跑; exit 1; }
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
 # The operator runtime needs both the governance client and the Textual cockpit.
-# Prefer PSC_PYTHON, then system python3, the repo .venv, and finally the Python
+# Prefer PSC_PYTHON, then the repo .venv, system python3, and finally the Python
 # from the cortex console-script shebang. A cortex-only pipx venv is rejected.
 if ! PY="$(resolve_operator_python "$REPO")"; then
   echo "找不到同時含 paulsha_cortex 與 textual 的 python——請在 repo 執行 'python3 -m venv .venv && .venv/bin/python -m pip install --upgrade --force-reinstall -e .'（或設 PSC_PYTHON 指向具備完整 operator runtime 的 python）" >&2
