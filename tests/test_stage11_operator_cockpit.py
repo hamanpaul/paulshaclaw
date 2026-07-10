@@ -11,10 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, PropertyMock, patch
 
-# textual is an optional dev/test dependency. Guard imports so the repository's
-# baseline tests (python -m unittest discover) can run under system Python
-# without textual installed. The UI tests will be skipped when textual is
-# unavailable and run when a dev venv provides textual.
+# Textual 是 direct runtime dependency；仍保留 guard，讓尚未安裝 package 的
+# source-tree 診斷可收集非 UI 測試。CI 的 editable-install smoke 會強制驗證它存在。
 try:
     from textual.pilot import Pilot
     from textual.app import App as _TextualApp
