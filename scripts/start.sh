@@ -41,6 +41,45 @@ start_bot_supervised() {
   TELEGRAM_PID=$!
 }
 
+operator_python_has_runtime() {
+  local python="${1:-}"
+  [[ -n "$python" && -x "$python" ]] || return 1
+  "$python" -c $'import paulsha_cortex\nimport textual' >/dev/null 2>&1
+}
+
+cortex_console_python() {
+  local cortex_bin shebang python
+  cortex_bin="$(command -v cortex 2>/dev/null || true)"
+  [[ -n "$cortex_bin" && -r "$cortex_bin" ]] || return 1
+  IFS= read -r shebang < "$cortex_bin" || return 1
+  [[ "$shebang" == "#!"* ]] || return 1
+  python="${shebang#\#!}"
+  [[ "$python" == /* && -x "$python" ]] || return 1
+  printf '%s\n' "$python"
+}
+
+resolve_operator_python() {
+  local repo="${1:?repo root is required}"
+  local cortex_python=""
+  local candidate
+  local -a candidates=()
+
+  cortex_python="$(cortex_console_python || true)"
+  candidates=(
+    "$(command -v "${PSC_PYTHON:-}" 2>/dev/null || true)"
+    "$(command -v python3 2>/dev/null || true)"
+    "$repo/.venv/bin/python"
+    "$cortex_python"
+  )
+  for candidate in "${candidates[@]}"; do
+    if operator_python_has_runtime "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 if [[ "${1:-}" == "--source-only" ]]; then
   return 0 2>/dev/null || exit 0
 fi
@@ -51,20 +90,13 @@ flock -n 200 || { echo 已有實例在跑; exit 1; }
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
-# Operator-shell python must have the governance/memory planes (paulsha_cortex) importable.
-# Prefer PSC_PYTHON, then system python3 (planes installed into ~/.local via pip --user / pipx),
-# then the repo .venv as a last resort. Fail fast with a hint if none can import the planes,
-# rather than crashing mid-startup with a bare ModuleNotFoundError.
-PY=""
-for _psc_py in "$(command -v "${PSC_PYTHON:-}" 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)" "$REPO/.venv/bin/python"; do
-  [[ -n "$_psc_py" ]] || continue
-  if "$_psc_py" -c "import paulsha_cortex" >/dev/null 2>&1; then PY="$_psc_py"; break; fi
-done
-if [[ -z "$PY" ]]; then
-  echo "找不到含 paulsha_cortex 的 python——請在 repo 執行 'pip install --user -e .'（或設 PSC_PYTHON 指向有 planes 的 python）" >&2
+# The operator runtime needs both the governance client and the Textual cockpit.
+# Prefer PSC_PYTHON, then system python3, the repo .venv, and finally the Python
+# from the cortex console-script shebang. A cortex-only pipx venv is rejected.
+if ! PY="$(resolve_operator_python "$REPO")"; then
+  echo "找不到同時含 paulsha_cortex 與 textual 的 python——請在 repo 執行 'python3 -m venv .venv && .venv/bin/python -m pip install --upgrade --force-reinstall -e .'（或設 PSC_PYTHON 指向具備完整 operator runtime 的 python）" >&2
   exit 1
 fi
-unset _psc_py
 
 # Load Telegram secrets and state config from well-known paths when not already
 # set. Only fill in defaults if the files actually exist, so missing-config

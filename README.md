@@ -132,14 +132,18 @@ flowchart TB
 git clone https://github.com/hamanpaul/paulshaclaw
 cd paulshaclaw
 
-# 2. 裝本 repo（依 pyproject pin 自動拉下 paulsha-hippo + paulsha-cortex 作為 library）
-pip install -e .
-pytest tests/ -q            # 確認 operator shell 綠
+# 2. 建立 repo 專用 venv，並依 pyproject 強制刷新完整 operator runtime
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade --force-reinstall -e .
+.venv/bin/python -m pip install pytest
+.venv/bin/python -m pytest tests/ -q  # 確認同一 operator runtime 綠
 
 # 3. 要跑常駐服務（記憶 + 治理），用 pipx 持久安裝兩個平面 CLI（勿用暫存 venv）
 pipx install "git+https://github.com/hamanpaul/paulsha-hippo"
 pipx install "git+https://github.com/hamanpaul/paulsha-cortex"
 ```
+
+Ubuntu 24.04 / Debian 的系統 Python 受 PEP 668 管理，請勿用 `pip install --user -e .` 繞過；上面的 repo `.venv` 流程可直接重跑以刷新 pin。pipx 的 plane CLI 位於各自的隔離 venv，只有當 `cortex` shebang 指向的 Python 同時可 import `paulsha_cortex` 與 `textual` 時，`scripts/start.sh` 才會把它當成 operator runtime；一般情況仍以 repo `.venv` 為準。
 
 ### B. 部署常駐服務
 
@@ -165,7 +169,7 @@ hippo doctor          # 記憶側健檢
 scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路徑>
 ```
 
-它會：`git pull main` → 依 pin 用 pipx 裝 hippo+cortex → hippo init/hooks/dream service → **停用舊 `paulshaclaw-manager`/`demo-manager` 單元** → `cortex install service` + enable → 確保 monitor 設定 → F1 自停 gate 健檢。runtime 狀態（`~/.agents/control`、`~/.agents/memory`）**零遷移**沿用。
+它會：`git pull main` → 建立/刷新 repo `.venv`，以 `--upgrade --force-reinstall` 對齊 pyproject pins → 依 pin 用 pipx 裝 hippo+cortex → hippo init/hooks/dream service → **停用舊 `paulshaclaw-manager`/`demo-manager` 單元** → `cortex install service` + enable → 確保 monitor 設定 → F1 自停 gate 健檢。runtime 狀態（`~/.agents/control`、`~/.agents/memory`）**零遷移**沿用。
 
 **踩坑備忘**（cutover 實戰）：服務的 python 指向要**持久（pipx）**、勿用 `/tmp` venv；monitor 反覆失敗會被 systemd 限流，需 `systemctl --user reset-failed`；cortex pin 須含 F1 修正（manager 自停，見 cortex issue #2），否則 `cortex-manager.service` 會啟動即自停。
 
