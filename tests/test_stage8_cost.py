@@ -1845,6 +1845,44 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["weekly"].used_percent, 41)
         self.assertEqual(provider.windows["weekly"].display_reset, "3d")
 
+    def test_collect_claude_parses_statusline_sidecar_iso8601_reset(self) -> None:
+        # Claude Code's statusLine payload carries `resets_at` as an ISO8601
+        # string (e.g. "2026-04-29T07:21:00Z"), not an epoch number. The
+        # collector must parse it the same as an epoch reset, otherwise the
+        # sidecar the statusline writer lands is silently dropped and `cc`
+        # stays `--`.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {
+                        "rate_limits": {
+                            "five_hour": {
+                                "used_percentage": 18,
+                                "resets_at": "2026-04-29T07:21:00Z",
+                            },
+                            "seven_day": {
+                                "used_percentage": 41,
+                                "resets_at": "2026-05-01T19:00:00Z",
+                            },
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+
+        self.assertEqual(provider.source_status, "fresh")
+        self.assertEqual(provider.windows["five_hour"].used_percent, 18)
+        self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+        self.assertEqual(provider.windows["weekly"].used_percent, 41)
+        self.assertEqual(provider.windows["weekly"].display_reset, "3d")
+
     def test_collect_claude_parses_statusline_sidecar_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             sidecar = Path(tmpdir) / "claude_rate_limits.json"
@@ -2792,3 +2830,103 @@ class Stage8CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("cpt haman:--", stdout.getvalue())
         self.assertIn("stage8 cost status degraded: chmod denied", stderr.getvalue())
+
+
+class Stage8StatuslineSidecarWriterTests(unittest.TestCase):
+    """The statusline sidecar writer lands Claude Code's live `rate_limits`
+    into the footer's trusted sidecar, so `cc` shows real 5h/weekly quota
+    instead of `--`."""
+
+    _PAYLOAD = {
+        "model": {"display_name": "Opus 4.8"},
+        "context_window": {"used_percentage": 42},
+        "rate_limits": {
+            "five_hour": {"used_percentage": 18, "resets_at": "2026-04-29T07:21:00Z"},
+            "seven_day": {"used_percentage": 41, "resets_at": "2026-05-01T19:00:00Z"},
+        },
+    }
+
+    def test_extract_rate_limits_keeps_only_footer_windows(self) -> None:
+        from paulshaclaw.cost.statusline_sidecar import extract_rate_limits
+
+        result = extract_rate_limits(self._PAYLOAD)
+
+        self.assertEqual(
+            result,
+            {
+                "five_hour": {"used_percentage": 18, "resets_at": "2026-04-29T07:21:00Z"},
+                "seven_day": {"used_percentage": 41, "resets_at": "2026-05-01T19:00:00Z"},
+            },
+        )
+
+    def test_extract_rate_limits_none_without_rate_limits(self) -> None:
+        from paulshaclaw.cost.statusline_sidecar import extract_rate_limits
+
+        self.assertIsNone(extract_rate_limits({"model": {"display_name": "Opus 4.8"}}))
+
+    def test_extract_rate_limits_skips_window_without_percentage(self) -> None:
+        from paulshaclaw.cost.statusline_sidecar import extract_rate_limits
+
+        # A window with no usable percentage is dropped; when none remain the
+        # result is None so the writer never blanks a previously-good sidecar.
+        self.assertIsNone(
+            extract_rate_limits(
+                {"rate_limits": {"five_hour": {"resets_at": "2026-04-29T07:21:00Z"}}}
+            )
+        )
+
+    def test_update_sidecar_writes_file_readable_by_collect_claude(self) -> None:
+        from paulshaclaw.cost.statusline_sidecar import update_sidecar_from_statusline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+
+            wrote = update_sidecar_from_statusline(json.dumps(self._PAYLOAD), sidecar=sidecar)
+
+            self.assertTrue(wrote)
+            provider = collect_claude(
+                statusline_sidecar=sidecar,
+                max_age_seconds=300,
+                now=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            )
+            self.assertEqual(provider.source_status, "fresh")
+            self.assertEqual(provider.windows["five_hour"].used_percent, 18)
+            self.assertEqual(provider.windows["five_hour"].display_reset, "15:21")
+            self.assertEqual(provider.windows["weekly"].used_percent, 41)
+
+    def test_update_sidecar_noop_keeps_previous_when_no_rate_limits(self) -> None:
+        from paulshaclaw.cost.statusline_sidecar import update_sidecar_from_statusline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+            sidecar.write_text(
+                json.dumps(
+                    {"rate_limits": {"five_hour": {"used_percentage": 5, "resets_at": 1777447260}}}
+                ),
+                encoding="utf-8",
+            )
+
+            wrote = update_sidecar_from_statusline(
+                json.dumps({"model": {"display_name": "Opus 4.8"}}), sidecar=sidecar
+            )
+
+            self.assertFalse(wrote)
+            kept = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertEqual(kept["rate_limits"]["five_hour"]["used_percentage"], 5)
+
+    def test_update_sidecar_returns_false_on_malformed_json(self) -> None:
+        from paulshaclaw.cost.statusline_sidecar import update_sidecar_from_statusline
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            sidecar = Path(tmpdir) / "claude_rate_limits.json"
+
+            self.assertFalse(update_sidecar_from_statusline("not json{", sidecar=sidecar))
+            self.assertFalse(sidecar.exists())
+
+    def test_main_never_raises_on_bad_stdin(self) -> None:
+        from paulshaclaw.cost import statusline_sidecar
+
+        with patch.object(sys, "stdin", StringIO("not json{")):
+            exit_code = statusline_sidecar.main([])
+
+        self.assertEqual(exit_code, 0)

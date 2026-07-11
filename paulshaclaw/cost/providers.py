@@ -78,6 +78,20 @@ def _parse_epoch(value: Any, tz: timezone | ZoneInfo) -> datetime | None:
         return None
 
 
+def _parse_reset_value(value: Any, tz: timezone | ZoneInfo) -> datetime | None:
+    # A reset timestamp arrives either as an epoch number (Codex, older sidecars)
+    # or as an ISO8601 string — Claude Code's statusLine payload uses ISO8601
+    # (e.g. "2026-04-29T07:21:00Z"). Accept both so the statusline sidecar writer
+    # can land the payload verbatim without a conversion step.
+    epoch = _parse_epoch(value, tz)
+    if epoch is not None:
+        return epoch
+    parsed = _parse_event_timestamp(value)
+    if parsed is None:
+        return None
+    return parsed.astimezone(tz)
+
+
 def _is_openai_compatible_claude_record(*records: Mapping[str, Any]) -> bool:
     excluded_markers = ("vllm", "openai-compatible", "openai_compatible")
     url_markers = ("localhost", "127.0.0.1", "0.0.0.0")
@@ -114,7 +128,7 @@ def _window_from_rate_limit(
     except (TypeError, ValueError, OverflowError):
         return None
 
-    reset_at = _parse_epoch(
+    reset_at = _parse_reset_value(
         rate_limit.get("resets_at", rate_limit.get("reset_at")),
         now.tzinfo or ZoneInfo("Asia/Taipei"),
     )
