@@ -39,11 +39,19 @@ cost:
           monthly_allowance: 300
           org: example-org
     claude:
-      # Trusted source: a local sidecar JSON written by your Claude Code
-      # statusline helper. Expected keys:
-      #   rate_limits.five_hour.used_percentage / resets_at
-      #   rate_limits.seven_day.used_percentage / resets_at
+      # Trusted source: a local sidecar JSON that you populate from Claude Code's
+      # statusLine payload (it delivers the live 5h/weekly rate limits on stdin
+      # each refresh). The footer reads exactly this shape:
+      #   { "rate_limits": {
+      #       "five_hour": { "used_percentage": <n>, "resets_at": <ISO8601|epoch> },
+      #       "seven_day": { "used_percentage": <n>, "resets_at": <ISO8601|epoch> } } }
+      # resets_at accepts ISO8601 (Claude Code's format) or an epoch number; a
+      # window without a parseable reset is dropped. Freshness is by file mtime
+      # vs max_age_seconds below, so (re)write the file on each refresh.
+      # Optional ready-made writer if you don't roll your own:
+      #   python -m paulshaclaw.cost.statusline_sidecar   # reads the stdin payload
       statusline_sidecar: ~/.agents/state/cost/claude_rate_limits.json
+      max_age_seconds: 300
       local_fallback: false
     codex:
       # Trusted source is enabled by default and uses your Codex CLI auth at
