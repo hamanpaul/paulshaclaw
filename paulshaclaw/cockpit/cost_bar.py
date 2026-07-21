@@ -86,9 +86,18 @@ def cost_split(cost_width: int, net_width: int) -> tuple[str | None, str | None]
         return (None, None)
 
     net_suffix: str | None = None
+    indent = 0
     if cdx.strip():
+        prefix = f"  {_SEP_ANSI} "
         budget = cost_width - net_width
         if budget > 0:
-            net_suffix = _ansi_clip(f"  {_SEP_ANSI} {cdx}", budget)
-    rest_line = _ansi_clip(rest, cost_width) if rest.strip() else None
+            net_suffix = _ansi_clip(prefix + cdx, budget)
+            # 下一行的 cc 對齊到 cdx 起始欄：net 可見寬 + 分隔前綴可見寬。
+            indent = net_width + len(_ANSI_RE.sub("", prefix))
+
+    rest_line: str | None = None
+    if rest.strip():
+        avail = cost_width - indent
+        if avail > 0:
+            rest_line = " " * indent + _ansi_clip(rest, avail)
     return (net_suffix, rest_line)

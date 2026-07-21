@@ -132,3 +132,41 @@ class CostSplitTests(unittest.TestCase):
 
         with patch.object(cost_bar, "read_snapshot", return_value=None):
             self.assertEqual(cost_bar.cost_split(90, 20), (None, None))
+
+
+class CostSplitAlignTests(unittest.TestCase):
+    """下一行的 cc 縮排對齊到上一行 cdx 的起始欄（= net_width + 「  | 」的可見寬 4）。"""
+
+    def test_rest_indented_to_align_under_cdx(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        with patch.object(cost_bar, "read_snapshot", return_value=_full_snapshot()):
+            _net_suffix, rest = cost_bar.cost_split(cost_width=90, net_width=20)
+
+        assert rest is not None
+        self.assertTrue(rest.startswith(" " * 24))          # 20 + 4 前導空白
+        self.assertTrue(rest.lstrip(" ").startswith("cc"))  # 內容從 cc 開始
+
+    def test_rest_not_indented_when_no_cdx(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        # 無 cdx provider → 不需對齊，cc 不縮排
+        snap = CostSnapshot(
+            generated_at=datetime(2026, 7, 21, tzinfo=ZoneInfo("UTC")),
+            timezone="UTC", cache_status="fresh",
+            providers={
+                "cc": ProviderSnapshot(
+                    source_status="ok",
+                    windows={
+                        "five_hour": UsageWindow(used_percent=3, reset_at=None, display_reset="03:20"),
+                        "weekly": UsageWindow(used_percent=57, reset_at=None, display_reset="6d"),
+                    },
+                ),
+            },
+        )
+        with patch.object(cost_bar, "read_snapshot", return_value=snap):
+            net_suffix, rest = cost_bar.cost_split(cost_width=90, net_width=20)
+
+        self.assertIsNone(net_suffix)
+        assert rest is not None
+        self.assertTrue(rest.startswith("cc"))  # 無縮排
