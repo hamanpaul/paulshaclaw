@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 import re
 import subprocess
 
@@ -19,6 +20,8 @@ LIST_PANES_FORMAT = "\t".join(
         "#{pane_height}",
         "#{pane_active}",
         "#{pane_tty}",
+        "#{pane_current_path}",
+        "#{host_short}",
     ]
 )
 
@@ -32,17 +35,13 @@ def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
         if not line.strip():
             continue
         parts = line.split("\t")
-        tty = ""
-        if len(parts) == 11:
-            (pane_id, session_name, window_index, title, command,
-             left, top, width, height, active, tty) = parts
-        elif len(parts) == 10:
-            pane_id, session_name, window_index, title, command, left, top, width, height, active = parts
-        elif len(parts) == 9:
-            pane_id, session_name, window_index, title, command, left, top, width, height = parts
-            active = "0"
-        else:
+        if len(parts) < 9:
             continue
+        pane_id, session_name, window_index, title, command, left, top, width, height = parts[:9]
+        active = parts[9] if len(parts) >= 10 else "0"
+        tty = parts[10] if len(parts) >= 11 else ""
+        pane_current_path = parts[11] if len(parts) >= 12 else ""
+        host_short = parts[12] if len(parts) >= 13 else ""
         try:
             left_value = int(left)
             top_value = int(top)
@@ -64,6 +63,8 @@ def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
                 active=active == "1",
                 preview=(),
                 pane_tty=tty,
+                pane_current_path=pane_current_path,
+                host_short=host_short,
             )
         )
     return tuple(panes)
@@ -105,10 +106,14 @@ def _minicom_summary(tty: str) -> str | None:
 
 def derive_summary(pane: PaneRecord) -> str:
     """A readable work-list label: the title when set, else a command fallback."""
-    if pane.title.strip():
-        return pane.title
+    title = pane.title.strip()
+    host_short = pane.host_short.strip()
+    if title and title != host_short:
+        return title
     if pane.command == "minicom":
         return _minicom_summary(pane.pane_tty) or "minicom"
+    if pane.pane_current_path:
+        return Path(pane.pane_current_path).name or "/"
     return f"[{pane.command}]" if pane.command else ""
 
 
@@ -154,6 +159,8 @@ class TmuxClient:
                     active=pane.active,
                     preview=preview,
                     pane_tty=pane.pane_tty,
+                    pane_current_path=pane.pane_current_path,
+                    host_short=pane.host_short,
                     summary=derive_summary(pane),
                 )
             )

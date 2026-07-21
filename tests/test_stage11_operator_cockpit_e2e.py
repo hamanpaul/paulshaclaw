@@ -39,7 +39,10 @@ def pane_record(
 
 
 class Stage11FakeMultiSessionE2ETests(unittest.TestCase):
-    def test_e2e_multi_session_pane_visible_in_candidate_list(self) -> None:
+    def test_e2e_other_session_pane_excluded_from_candidate_list(self) -> None:
+        # #249 行為變更：候選清單預設收斂到 cockpit 自身 session，不再撈全 server 的他 session pane
+        # （原 multi-session-listing 預設會被 13 個 session 淹沒、operator 自身 window 被埋）。
+        # 他 session 的 pane（%12@work）不再出現於候選；同 session 的 pane 才是候選。
         panes = (
             pane_record("%0", session_name="main", title="cockpit", command="python", left=0, top=0, width=120, height=40),
             pane_record("%4", session_name="main", title="active", command="bash", left=120, top=0, width=120, height=40),
@@ -54,7 +57,7 @@ class Stage11FakeMultiSessionE2ETests(unittest.TestCase):
             actions=LayoutActionService(),
         )
 
-        self.assertIn("%12", [pane.pane_id for pane in app.state.candidate_section])
+        self.assertNotIn("%12", [pane.pane_id for pane in app.state.candidate_section])
         self.assertNotIn("%12", [pane.pane_id for pane in app.state.active_section])
 
 

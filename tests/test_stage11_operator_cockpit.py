@@ -30,6 +30,7 @@ from paulshaclaw.cockpit.app import (
     REFRESH_INTERVAL_SECONDS,
     SYSMON_INTERVAL_SECONDS,
     CockpitApp,
+    format_work_pane_subtitle,
     pane_display_label,
 )
 from paulshaclaw.cockpit.help import HelpModal
@@ -54,6 +55,10 @@ def pane_record(
     height: int = 24,
     active: bool = False,
     preview: tuple[str, ...] = (),
+    pane_tty: str = "",
+    pane_current_path: str = "",
+    host_short: str = "",
+    summary: str = "",
 ) -> PaneRecord:
     return PaneRecord(
         pane_id=pane_id,
@@ -67,6 +72,10 @@ def pane_record(
         height=height,
         active=active,
         preview=preview,
+        pane_tty=pane_tty,
+        pane_current_path=pane_current_path,
+        host_short=host_short,
+        summary=summary,
     )
 
 
@@ -157,6 +166,14 @@ class Stage11StateTests(unittest.TestCase):
         self.assertTrue(panes[0].active)
         self.assertFalse(panes[1].active)
 
+    def test_parse_list_panes_reads_current_path_and_host_short(self) -> None:
+        raw = "%0\tmain\t0\t9900X\tbash\t0\t0\t120\t40\t1\t/dev/pts/7\t/home/paul/prj/cockpit\t9900X\n"
+        panes = parse_list_panes(raw)
+
+        self.assertEqual(panes[0].pane_tty, "/dev/pts/7")
+        self.assertEqual(panes[0].pane_current_path, "/home/paul/prj/cockpit")
+        self.assertEqual(panes[0].host_short, "9900X")
+
     def test_pane_display_label_includes_session_window(self) -> None:
         pane = pane_record("%12", session_name="work", window_index="2", title="pytest")
 
@@ -184,6 +201,29 @@ class Stage11StateTests(unittest.TestCase):
     def test_derive_summary_non_minicom_empty_title_uses_command(self) -> None:
         pane = pane_record("%9", title="", command="node")
         self.assertEqual(derive_summary(pane), "[node]")
+
+    def test_derive_summary_hostname_title_falls_back_to_cwd_name(self) -> None:
+        panes = (
+            pane_record(
+                "%9",
+                title="9900X",
+                command="bash",
+                pane_current_path="/home/paul/prj/repo-a",
+                host_short="9900X",
+            ),
+            pane_record(
+                "%10",
+                title="9900X",
+                command="bash",
+                pane_current_path="/home/paul/prj/repo-b",
+                host_short="9900X",
+            ),
+        )
+        self.assertEqual([derive_summary(pane) for pane in panes], ["repo-a", "repo-b"])
+
+    def test_derive_summary_root_path_falls_back_to_slash(self) -> None:
+        pane = pane_record("%9", title="9900X", command="bash", pane_current_path="/", host_short="9900X")
+        self.assertEqual(derive_summary(pane), "/")
 
     def test_derive_summary_prefers_pane_title(self) -> None:
         pane = pane_record("%3", title="Debug thing", command="claude")
@@ -303,6 +343,8 @@ class Stage11StateTests(unittest.TestCase):
         self.assertNotIn("-t", command)
         self.assertIn("#{session_name}", command[-1])
         self.assertIn("#{window_index}", command[-1])
+        self.assertIn("#{pane_current_path}", command[-1])
+        self.assertIn("#{host_short}", command[-1])
         self.assertEqual(panes[0].session_name, "main")
 
     def test_tmux_client_returns_empty_when_tmux_list_panes_fails(self) -> None:
@@ -349,6 +391,7 @@ class Stage11StateTests(unittest.TestCase):
 
         self.assertEqual([pane.pane_id for pane in state.active_section], ["%1"])
         self.assertEqual(state.active_pane.pane_id, "%1")
+        # 同 session 的別 window pane 仍是候選（收斂只排除「他 session」，不排除「他 window」）。
         self.assertIn("%9", [pane.pane_id for pane in state.candidate_section])
 
     def test_choose_startup_slot_none_when_cockpit_alone_in_its_window(self) -> None:
@@ -362,6 +405,7 @@ class Stage11StateTests(unittest.TestCase):
         )
         state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
         self.assertIsNone(state.active_pane)
+        # 同 session 的別 window pane 仍是候選（cockpit 獨佔自己 window → 無 active，但候選不空）。
         self.assertIn("%9", [pane.pane_id for pane in state.candidate_section])
 
     def test_refresh_recovers_active_when_slot_pane_resized(self) -> None:
@@ -468,26 +512,28 @@ class Stage11StateTests(unittest.TestCase):
         state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
         self.assertEqual([pane.pane_id for pane in state.active_section], ["%4"])
-        self.assertIn("%9", [pane.pane_id for pane in state.candidate_section])
+        self.assertNotIn("%9", [pane.pane_id for pane in state.candidate_section])
 
-    def test_candidate_section_sorted_by_session_window_pane(self) -> None:
+    def test_candidate_section_only_lists_cockpit_session_and_prioritizes_cockpit_window(self) -> None:
         panes = (
             pane_record("%0", session_name="main", window_index="0", left=0, top=0, width=120, height=40),
             pane_record("%4", session_name="main", window_index="0", left=120, top=0, width=120, height=40),
+            pane_record("%1", session_name="main", window_index="0", left=0, top=40, width=80, height=20),
+            pane_record("%6", session_name="main", window_index="2", left=0, top=0, width=80, height=20),
+            pane_record("%5", session_name="main", window_index="1", left=0, top=0, width=80, height=20),
             pane_record("%7", session_name="beta", window_index="2", left=0, top=0, width=80, height=20),
             pane_record("%3", session_name="alpha", window_index="1", left=0, top=0, width=80, height=20),
-            pane_record("%2", session_name="beta", window_index="1", left=0, top=0, width=80, height=20),
         )
         state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
-        self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%3", "%2", "%7"])
+        self.assertEqual([pane.pane_id for pane in state.candidate_section], ["%1", "%5", "%6"])
 
     def test_candidate_section_sorts_window_index_numerically(self) -> None:
         panes = (
             pane_record("%0", session_name="main", window_index="0", left=0, top=0, width=120, height=40),
             pane_record("%4", session_name="main", window_index="0", left=120, top=0, width=120, height=40),
-            pane_record("%10", session_name="alpha", window_index="10", left=0, top=0, width=80, height=20),
-            pane_record("%2", session_name="alpha", window_index="2", left=0, top=0, width=80, height=20),
+            pane_record("%10", session_name="main", window_index="10", left=0, top=0, width=80, height=20),
+            pane_record("%2", session_name="main", window_index="2", left=0, top=0, width=80, height=20),
         )
         state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
 
@@ -519,8 +565,8 @@ class Stage11StateTests(unittest.TestCase):
         panes = (
             pane_record("%0", session_name="main", title="cockpit", left=0, top=0, width=120, height=40),
             pane_record("%4", session_name="main", title="active", left=120, top=0, width=120, height=40),
-            pane_record("%1", session_name="beta", title="agent1", top=40, width=80, height=20),
-            pane_record("%2", session_name="gamma", title="agent2", left=80, top=40, width=80, height=20),
+            pane_record("%1", session_name="main", window_index="1", title="agent1", top=40, width=80, height=20),
+            pane_record("%2", session_name="main", window_index="2", title="agent2", left=80, top=40, width=80, height=20),
         )
         state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
         state = state.move_selection(1)
@@ -528,11 +574,21 @@ class Stage11StateTests(unittest.TestCase):
         refreshed = state.refresh((
             pane_record("%0", session_name="main", title="cockpit", left=0, top=0, width=120, height=40),
             pane_record("%4", session_name="main", title="active", left=120, top=0, width=120, height=40),
-            pane_record("%2", session_name="alpha", title="agent2", left=80, top=40, width=80, height=20),
-            pane_record("%1", session_name="zeta", title="agent1", top=40, width=80, height=20),
+            pane_record("%2", session_name="main", window_index="0", title="agent2", left=80, top=40, width=80, height=20),
+            pane_record("%1", session_name="main", window_index="3", title="agent1", top=40, width=80, height=20),
         ))
 
         self.assertEqual(refreshed.selected_pane.pane_id, "%2")
+
+    def test_format_work_pane_subtitle_includes_cockpit_session_window(self) -> None:
+        panes = (
+            pane_record("%0", session_name="main", window_index="0", title="cockpit", width=120, height=40),
+            pane_record("%4", session_name="main", window_index="0", title="active", left=120, width=120, height=40),
+            pane_record("%1", session_name="main", window_index="1", title="agent1", top=40, width=80, height=20),
+        )
+        state = CockpitState.from_panes(panes, cockpit_pane_id="%0", cockpit_session_name="main")
+
+        self.assertEqual(format_work_pane_subtitle(state), "main:0 · 1 panes")
 
     def test_help_modal_lists_all_bindings(self) -> None:
         help_text = HelpModal.render_help_text(CockpitApp.BINDINGS)

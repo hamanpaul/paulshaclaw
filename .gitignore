@@ -41,3 +41,6 @@ ref/
 
 # Generated artifacts (brag / demo videos, hyperframes composition output)
 brag-output/
+
+# cortex dogfood sandbox (isolated coordinator/control/specs; never committed)
+.dogfood/
