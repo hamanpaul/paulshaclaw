@@ -3036,3 +3036,61 @@ class CockpitFooterCptTests(unittest.TestCase):
         line = format_cockpit_footer(self._cpt_snapshot())
         self.assertIn("(03:20)", line)  # 5h reset 時間保留
         self.assertIn("(6d)", line)     # weekly reset 時間保留
+
+
+class CockpitFooterSplitTests(unittest.TestCase):
+    """cdx 併到 Net 行、cc+cpt 留下一行：formatter 需能分段渲染。"""
+
+    def _snapshot(self) -> "CostSnapshot":
+        from paulshaclaw.cost.models import CopilotAccountUsage
+
+        return CostSnapshot(
+            generated_at=datetime(2026, 7, 21, tzinfo=ZoneInfo("UTC")),
+            timezone="UTC",
+            cache_status="fresh",
+            providers={
+                "cdx": ProviderSnapshot(
+                    source_status="estimated",
+                    windows={
+                        "five_hour": UsageWindow(used_percent=80, reset_at=None, display_reset="6d"),
+                        "weekly": UsageWindow(used_percent=None, reset_at=None, display_reset=None),
+                    },
+                ),
+                "cc": ProviderSnapshot(
+                    source_status="ok",
+                    windows={
+                        "five_hour": UsageWindow(used_percent=3, reset_at=None, display_reset="03:20"),
+                        "weekly": UsageWindow(used_percent=57, reset_at=None, display_reset="6d"),
+                    },
+                ),
+                "cpt": ProviderSnapshot(
+                    source_status="ok",
+                    accounts=(
+                        CopilotAccountUsage(
+                            account_id="h", label="haman", kind="individual",
+                            used_requests=None, monthly_allowance=None, source="http",
+                            percent_used=92,
+                        ),
+                    ),
+                ),
+            },
+        )
+
+    def test_cdx_segment_only(self) -> None:
+        from paulshaclaw.cost.formatter import format_cockpit_cdx
+
+        seg = format_cockpit_cdx(self._snapshot())
+        self.assertIn("cdx", seg)
+        self.assertIn("80%", seg)
+        self.assertNotIn("cc ", seg)
+        self.assertNotIn("cpt", seg)
+
+    def test_rest_segment_is_cc_and_cpt_no_cdx(self) -> None:
+        from paulshaclaw.cost.formatter import format_cockpit_rest
+
+        rest = format_cockpit_rest(self._snapshot())
+        self.assertIn("cc ", rest)
+        self.assertIn("57%", rest)
+        self.assertIn("cpt: ", rest)
+        self.assertIn("92%", rest)
+        self.assertNotIn("cdx", rest)
