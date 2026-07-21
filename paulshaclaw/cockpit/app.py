@@ -328,12 +328,15 @@ class CockpitApp(App[None]):
             stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
         except Exception:
             stat_lines = []
-        # cost footer（Stage 8）接在 sysmon 之後（Net 下面）：唯讀已 cache 的 snapshot、
-        # fail-soft（無資料/出錯就不加這列，banner 照常）。
+        # cost footer（Stage 8）：cdx 併到 Net 那一行（填其空白），cc+cpt 放下一行。
+        # 唯讀已 cache 的 snapshot、fail-soft（無資料/出錯就不加，banner 照常）。
         try:
-            cost = cost_bar.cost_line(self._cost_line_width())
-            if cost:
-                stat_lines = [*stat_lines, cost]
+            net_width = len(branding.strip_ansi(stat_lines[-1])) if stat_lines else 0
+            net_suffix, cost_rest = cost_bar.cost_split(self._cost_line_width(), net_width)
+            if net_suffix and stat_lines:
+                stat_lines[-1] = stat_lines[-1] + net_suffix
+            if cost_rest:
+                stat_lines = [*stat_lines, cost_rest]
         except Exception:
             pass
         composed = self._compose_banner_stats(banner_lines, stat_lines)

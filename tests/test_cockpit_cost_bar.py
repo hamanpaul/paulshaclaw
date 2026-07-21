@@ -69,3 +69,66 @@ class CostLineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _full_snapshot() -> CostSnapshot:
+    from paulshaclaw.cost.models import CopilotAccountUsage
+
+    return CostSnapshot(
+        generated_at=datetime(2026, 7, 21, tzinfo=ZoneInfo("UTC")),
+        timezone="UTC",
+        cache_status="fresh",
+        providers={
+            "cdx": ProviderSnapshot(
+                source_status="estimated",
+                windows={
+                    "five_hour": UsageWindow(used_percent=80, reset_at=None, display_reset="6d"),
+                    "weekly": UsageWindow(used_percent=None, reset_at=None, display_reset=None),
+                },
+            ),
+            "cc": ProviderSnapshot(
+                source_status="ok",
+                windows={
+                    "five_hour": UsageWindow(used_percent=3, reset_at=None, display_reset="03:20"),
+                    "weekly": UsageWindow(used_percent=57, reset_at=None, display_reset="6d"),
+                },
+            ),
+            "cpt": ProviderSnapshot(
+                source_status="ok",
+                accounts=(
+                    CopilotAccountUsage(
+                        account_id="h", label="haman", kind="individual",
+                        used_requests=None, monthly_allowance=None, source="http",
+                        percent_used=92,
+                    ),
+                ),
+            ),
+        },
+    )
+
+
+class CostSplitTests(unittest.TestCase):
+    def test_split_returns_cdx_suffix_and_cc_cpt_rest(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        with patch.object(cost_bar, "read_snapshot", return_value=_full_snapshot()):
+            net_suffix, rest = cost_bar.cost_split(cost_width=90, net_width=20)
+
+        self.assertIsNotNone(net_suffix)
+        assert net_suffix is not None
+        self.assertIn("cdx", net_suffix)
+        self.assertIn("|", net_suffix)   # 前導分隔符
+        self.assertNotIn("cc ", net_suffix)
+
+        self.assertIsNotNone(rest)
+        assert rest is not None
+        self.assertIn("cc ", rest)
+        self.assertIn("cpt: ", rest)
+        self.assertIn("92%", rest)
+        self.assertNotIn("cdx", rest)
+
+    def test_split_none_when_no_snapshot(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        with patch.object(cost_bar, "read_snapshot", return_value=None):
+            self.assertEqual(cost_bar.cost_split(90, 20), (None, None))

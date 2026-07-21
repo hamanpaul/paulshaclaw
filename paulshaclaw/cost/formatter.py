@@ -210,22 +210,44 @@ def _format_cockpit_cpt(provider: ProviderSnapshot) -> str:
     return f"cpt: {_wrap(value, level, True)}"
 
 
-def format_cockpit_footer(snapshot: CostSnapshot) -> str:
-    """Cost footer for the cockpit banner.
+def _join_cockpit_segments(segments: list[str]) -> str:
+    """以 dim 分隔符 ` | ` 串接非空段，轉 ANSI 前景色（無背景）。全空回空字串。"""
+    separator = _wrap("|", "separator", True)
+    joined = f" {separator} ".join(seg for seg in segments if seg)
+    return tmux_to_ansi_fg(joined)
 
-    cdx/cc windows (含 reset 時間) 沿用終端 footer 的渲染；cpt 段收斂成單一
-    ``cpt: N%``（只取主帳號）。整體轉為 ANSI 前景色、無背景色。
-    """
+
+def format_cockpit_cdx(snapshot: CostSnapshot) -> str:
+    """cockpit cost 列的 cdx 段（含 reset 時間），ANSI 前景色。無 cdx 回空字串。
+
+    供 banner 把 cdx 併到 Net 那一行。"""
+    provider = snapshot.providers.get("cdx")
+    if provider is None:
+        return ""
+    return _join_cockpit_segments([_format_window_provider("cdx", provider, True)])
+
+
+def format_cockpit_rest(snapshot: CostSnapshot) -> str:
+    """cockpit cost 列的 cc + cpt 段（cdx 除外），ANSI 前景色。無資料回空字串。
+
+    供 banner 放在 Net（含 cdx）的下一行。"""
     segments: list[str] = []
-    for name in ("cdx", "cc"):
-        provider = snapshot.providers.get(name)
-        if provider is not None:
-            segments.append(_format_window_provider(name, provider, True))
+    cc = snapshot.providers.get("cc")
+    if cc is not None:
+        segments.append(_format_window_provider("cc", cc, True))
     cpt = snapshot.providers.get("cpt")
     if cpt is not None:
-        cpt_segment = _format_cockpit_cpt(cpt)
-        if cpt_segment:
-            segments.append(cpt_segment)
-    separator = _wrap("|", "separator", True)
-    joined = f" {separator} ".join(segments)
-    return tmux_to_ansi_fg(joined)
+        segments.append(_format_cockpit_cpt(cpt))
+    return _join_cockpit_segments(segments)
+
+
+def format_cockpit_footer(snapshot: CostSnapshot) -> str:
+    """整條 cockpit cost 列（cdx | cc | cpt），ANSI 前景色、無背景色。
+
+    cdx/cc windows 含 reset 時間；cpt 收斂成單一 ``cpt: N%``（只取主帳號）。
+    """
+    cdx = format_cockpit_cdx(snapshot)
+    rest = format_cockpit_rest(snapshot)
+    separator = tmux_to_ansi_fg(_wrap("|", "separator", True))
+    parts = [part for part in (cdx, rest) if part]
+    return f" {separator} ".join(parts)
