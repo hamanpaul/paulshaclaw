@@ -1190,7 +1190,7 @@ class BannerComposeExtraStatLinesTests(unittest.TestCase):
 
 
 class BannerCostFooterIntegrationTests(unittest.TestCase):
-    """cost footer：cdx 併到 Net 那一行，cc+cpt 放下一行（fail-soft：無資料 banner 照常）。"""
+    """cost footer 接在 banner 的 sysmon 之後單獨一列（fail-soft：無資料時 banner 照常）。"""
 
     def _app(self) -> CockpitApp:
         return CockpitApp.from_snapshot(
@@ -1203,25 +1203,19 @@ class BannerCostFooterIntegrationTests(unittest.TestCase):
             actions=LayoutActionService(),
         )
 
-    def test_cdx_appended_to_net_line_and_rest_on_next_line(self) -> None:
+    def test_banner_appends_cost_line_after_sysmon(self) -> None:
         from paulshaclaw.cockpit import cost_bar
 
         app = self._app()
-        with patch.object(cost_bar, "cost_split", return_value=("  | CDXMARK", "RESTMARK")):
+        with patch.object(cost_bar, "cost_line", return_value="COSTMARKER cc 5h:21%"):
             rendered = app._brand_banner_renderable()
         text = rendered.plain if hasattr(rendered, "plain") else str(rendered)
-        lines = text.split("\n")
-        net_lines = [line for line in lines if "Net" in line]
-        self.assertTrue(net_lines, "banner 應有 Net 行")
-        self.assertIn("CDXMARK", net_lines[0])         # cdx 併到 Net 行
-        self.assertTrue(any("RESTMARK" in line for line in lines))  # cc+cpt 在其他行
-        # rest 應在 Net 行的下一行（不在 Net 行本身）
-        self.assertNotIn("RESTMARK", net_lines[0])
+        self.assertIn("COSTMARKER", text)
 
-    def test_banner_ok_when_cost_split_none(self) -> None:
+    def test_banner_ok_when_cost_line_none(self) -> None:
         from paulshaclaw.cockpit import cost_bar
 
         app = self._app()
-        with patch.object(cost_bar, "cost_split", return_value=(None, None)):
+        with patch.object(cost_bar, "cost_line", return_value=None):
             rendered = app._brand_banner_renderable()  # 不應 raise
         self.assertIsNotNone(rendered)

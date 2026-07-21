@@ -12,17 +12,11 @@ import re
 
 from paulshaclaw.cost.cache import SnapshotCache
 from paulshaclaw.cost.config import load_cost_config
-from paulshaclaw.cost.formatter import (
-    format_cockpit_cdx,
-    format_cockpit_footer,
-    format_cockpit_rest,
-)
+from paulshaclaw.cost.formatter import format_cockpit_footer
 from paulshaclaw.cost.models import CostSnapshot
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 _ANSI_RESET = "\033[0m"
-# footer 的分隔符（colour238 dim grey），ANSI 前景色版本。
-_SEP_ANSI = "\033[38;5;238m|\033[0m"
 
 
 def _ansi_clip(text: str, width: int) -> str:
@@ -68,36 +62,3 @@ def cost_line(width: int) -> str | None:
     if not line.strip():
         return None
     return _ansi_clip(line, width)
-
-
-def cost_split(cost_width: int, net_width: int) -> tuple[str | None, str | None]:
-    """回 ``(net_suffix, rest_line)``：cdx 段（含前導 ` | `）併到 Net 行，cc+cpt 為下一行。
-
-    ``net_suffix`` 截到 ``cost_width - net_width``（Net 行剩餘寬）；``rest_line`` 截到
-    ``cost_width``。無資料/出錯回 ``(None, None)``（fail-soft）。
-    """
-    snapshot = read_snapshot()
-    if snapshot is None:
-        return (None, None)
-    try:
-        cdx = format_cockpit_cdx(snapshot)
-        rest = format_cockpit_rest(snapshot)
-    except Exception:  # noqa: BLE001 - fail-soft
-        return (None, None)
-
-    net_suffix: str | None = None
-    indent = 0
-    if cdx.strip():
-        prefix = f"  {_SEP_ANSI} "
-        budget = cost_width - net_width
-        if budget > 0:
-            net_suffix = _ansi_clip(prefix + cdx, budget)
-            # 下一行的 cc 對齊到 cdx 起始欄：net 可見寬 + 分隔前綴可見寬。
-            indent = net_width + len(_ANSI_RE.sub("", prefix))
-
-    rest_line: str | None = None
-    if rest.strip():
-        avail = cost_width - indent
-        if avail > 0:
-            rest_line = " " * indent + _ansi_clip(rest, avail)
-    return (net_suffix, rest_line)
