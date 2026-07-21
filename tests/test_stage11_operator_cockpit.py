@@ -32,10 +32,11 @@ from paulshaclaw.cockpit.app import (
     CockpitApp,
     format_work_pane_subtitle,
     pane_display_label,
+    slices_from_status,
 )
 from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.manager_panel import ManagerModal
-from paulshaclaw.cockpit.models import JobSummary, PaneRecord, SlotAnchor
+from paulshaclaw.cockpit.models import JobRow, JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import TmuxClient, derive_summary, parse_list_panes
 from paulsha_cortex.control import constants, contract
@@ -92,6 +93,7 @@ class Stage11CliTests(unittest.TestCase):
         self.assertIn("Stage 11 operator cockpit", completed.stdout)
         self.assertIn("--cockpit-pane", completed.stdout)
         self.assertIn("--coordinator-jobs-dir", completed.stdout)
+        self.assertIn("deprecated", completed.stdout)
 
     def test_main_exits_with_error_when_cockpit_pane_is_missing(self) -> None:
         stderr = StringIO()
@@ -109,14 +111,13 @@ class Stage11CliTests(unittest.TestCase):
         )
         with (
             patch.object(TmuxClient, "list_panes", return_value=panes),
-            patch("paulshaclaw.cockpit.__main__.ArtifactAdapter") as adapter_class,
             patch.object(CockpitApp, "from_snapshot", return_value=DummyCockpitApp()) as from_snapshot,
         ):
-            adapter_class.return_value.load_jobs_by_pane.return_value = {}
             exit_code = cockpit_main.main(["--cockpit-pane", "%0"])
 
         self.assertEqual(exit_code, 0)
         self.assertEqual(from_snapshot.call_args.kwargs["cockpit_session_name"], "main")
+        self.assertEqual(from_snapshot.call_args.kwargs["jobs_by_pane"], {})
 
     def test_main_returns_zero_on_once_flag_without_starting_ui(self) -> None:
         panes = (
@@ -125,10 +126,8 @@ class Stage11CliTests(unittest.TestCase):
         )
         with (
             patch.object(TmuxClient, "list_panes", return_value=panes),
-            patch("paulshaclaw.cockpit.__main__.ArtifactAdapter") as adapter_class,
             patch.object(CockpitApp, "from_snapshot") as from_snapshot,
         ):
-            adapter_class.return_value.load_jobs_by_pane.return_value = {}
             exit_code = cockpit_main.main(["--cockpit-pane", "%0", "--once"])
 
         self.assertEqual(exit_code, 0)
@@ -145,6 +144,32 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(panes[0].window_index, "0")
         self.assertEqual(panes[1].left, 120)
         self.assertEqual(panes[1].width, 120)
+
+    def test_slices_from_status_flattens_manager_sections(self) -> None:
+        rows = slices_from_status(
+            {
+                "in_flight": [{"slice_id": "slice-run", "state": "running"}],
+                "ready": ["slice-ready"],
+                "held": [{"slice_id": "slice-held", "reasons": ["needs-review"]}],
+                "attention": [{"slice_id": "slice-attn", "reason": "gate-failed"}],
+                "recent_done": [{"slice_id": "slice-done", "gate_status": "passed"}],
+            }
+        )
+
+        self.assertEqual(
+            rows,
+            (
+                JobRow("slice-run", "running", "in_flight"),
+                JobRow("slice-ready", "ready", "ready"),
+                JobRow("slice-held", "blocked", "held"),
+                JobRow("slice-attn", "attention", "attention"),
+                JobRow("slice-done", "passed", "recent_done"),
+            ),
+        )
+
+    def test_slices_from_status_returns_empty_on_degraded_or_missing_keys(self) -> None:
+        self.assertEqual(slices_from_status({"degraded": True, "degraded_reason": "manager-offline"}), ())
+        self.assertEqual(slices_from_status({}), ())
 
     def test_parse_list_panes_skips_malformed_numeric_fields(self) -> None:
         raw = "%0\tmain\t0\tcockpit\tpython\t0\t0\t120\t40\n%4\tmain\t1\tssh\tbash\tnan\t0\t120\t40\n"
@@ -279,6 +304,7 @@ class Stage11StateTests(unittest.TestCase):
             self.assertEqual(widgets["#work-list"].clear.call_count, 1)
             # detail keeps updating every refresh even when the list is unchanged
             self.assertGreaterEqual(widgets["#pane-detail"].update.call_count, 2)
+            self.assertGreaterEqual(widgets["#global-jobs"].update.call_count, 2)
 
             app.state = app.state.move_selection(1)  # cursor moves to a different candidate
             app._refresh_widgets()
@@ -702,11 +728,56 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_refresh_tick_updates_manager_panel_when_open(self) -> None:
         app = self._minimal_app()
-        with patch.object(app, "_reconcile_state") as reconcile, patch.object(app, "_refresh_manager_panel") as refresh:
+        with (
+            patch.object(app, "_reconcile_state") as reconcile,
+            patch.object(app, "_refresh_jobs_panel") as refresh_jobs,
+            patch.object(app, "_refresh_manager_panel") as refresh,
+        ):
             app._on_refresh_tick()
 
         reconcile.assert_called_once_with(light=True)
+        refresh_jobs.assert_called_once_with()
         refresh.assert_called_once_with()
+
+    def test_refresh_widgets_renders_manager_slices_in_jobs_panel(self) -> None:
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#pane-detail", "#global-jobs")}
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "in_flight": [{"slice_id": "slice-run", "state": "running"}],
+                "ready": ["slice-ready"],
+                "held": [{"slice_id": "slice-held"}],
+                "attention": [{"slice_id": "slice-attn"}],
+                "recent_done": [{"slice_id": "slice-done", "gate_status": "passed"}],
+                "degraded": False,
+                "degraded_reason": None,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS")
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "5 slices")
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        self.assertIn("slice-run", rendered)
+        self.assertIn("slice-done", rendered)
+
+    def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#pane-detail", "#global-jobs")}
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "degraded": True,
+                "degraded_reason": "manager-offline",
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "degraded")
+        self.assertIn("manager-offline", str(widgets["#global-jobs"].update.call_args.args[0]))
 
     def test_manager_tick_round_trip_refreshes_open_modal_from_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"PSC_CONTROL_ROOT": tmpdir}):
