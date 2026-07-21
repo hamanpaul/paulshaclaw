@@ -199,7 +199,33 @@ def tmux_to_ansi_fg(text: str) -> str:
     return _TMUX_STYLE_RE.sub(_repl, text)
 
 
+def _format_cockpit_cpt(provider: ProviderSnapshot) -> str:
+    """cockpit 版 cpt 段：只顯示第一個帳號的值（如 haman），標為 ``cpt: N%``，
+    不列帳號名、也不列其餘帳號（如 arc）。無帳號回空字串。"""
+    if not provider.accounts:
+        return ""
+    account = provider.accounts[0]
+    value = _account_value(account)
+    level = "low" if account.unlimited else _account_level(provider, account)
+    return f"cpt: {_wrap(value, level, True)}"
+
+
 def format_cockpit_footer(snapshot: CostSnapshot) -> str:
-    """Cost footer for the cockpit banner: same content/colours as the terminal
-    footer, rendered as ANSI foreground-only (no tmux codes, no background)."""
-    return tmux_to_ansi_fg(format_footer(snapshot, use_tmux_style=True))
+    """Cost footer for the cockpit banner.
+
+    cdx/cc windows (含 reset 時間) 沿用終端 footer 的渲染；cpt 段收斂成單一
+    ``cpt: N%``（只取主帳號）。整體轉為 ANSI 前景色、無背景色。
+    """
+    segments: list[str] = []
+    for name in ("cdx", "cc"):
+        provider = snapshot.providers.get(name)
+        if provider is not None:
+            segments.append(_format_window_provider(name, provider, True))
+    cpt = snapshot.providers.get("cpt")
+    if cpt is not None:
+        cpt_segment = _format_cockpit_cpt(cpt)
+        if cpt_segment:
+            segments.append(cpt_segment)
+    separator = _wrap("|", "separator", True)
+    joined = f" {separator} ".join(segments)
+    return tmux_to_ansi_fg(joined)
