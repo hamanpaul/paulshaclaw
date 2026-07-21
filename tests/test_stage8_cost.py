@@ -2982,3 +2982,57 @@ class CockpitFooterRenderTests(unittest.TestCase):
         self.assertIn("\033[", line)   # 有 ANSI fg
         self.assertIn("21%", line)
         self.assertIn("57%", line)
+
+
+class CockpitFooterCptTests(unittest.TestCase):
+    """cockpit cost 列的 cpt 段：只顯示單一 ``cpt: N%``（拔掉帳號名與 arc），
+    cdx/cc 的 reset 時間仍保留。"""
+
+    def _cpt_snapshot(self) -> "CostSnapshot":
+        from paulshaclaw.cost.models import CopilotAccountUsage
+
+        return CostSnapshot(
+            generated_at=datetime(2026, 7, 21, tzinfo=ZoneInfo("UTC")),
+            timezone="UTC",
+            cache_status="fresh",
+            providers={
+                "cc": ProviderSnapshot(
+                    source_status="ok",
+                    windows={
+                        "five_hour": UsageWindow(used_percent=2, reset_at=None, display_reset="03:20"),
+                        "weekly": UsageWindow(used_percent=57, reset_at=None, display_reset="6d"),
+                    },
+                ),
+                "cpt": ProviderSnapshot(
+                    source_status="ok",
+                    accounts=(
+                        CopilotAccountUsage(
+                            account_id="h", label="haman", kind="individual",
+                            used_requests=None, monthly_allowance=None, source="http",
+                            percent_used=92,
+                        ),
+                        CopilotAccountUsage(
+                            account_id="a", label="arc", kind="individual",
+                            used_requests=None, monthly_allowance=None, source="http",
+                            percent_used=None,
+                        ),
+                    ),
+                ),
+            },
+        )
+
+    def test_cpt_collapses_to_single_value_without_labels(self) -> None:
+        from paulshaclaw.cost.formatter import format_cockpit_footer
+
+        line = format_cockpit_footer(self._cpt_snapshot())
+        self.assertIn("cpt: ", line)
+        self.assertIn("92%", line)
+        self.assertNotIn("haman", line)
+        self.assertNotIn("arc", line)
+
+    def test_cc_reset_times_are_kept(self) -> None:
+        from paulshaclaw.cost.formatter import format_cockpit_footer
+
+        line = format_cockpit_footer(self._cpt_snapshot())
+        self.assertIn("(03:20)", line)  # 5h reset 時間保留
+        self.assertIn("(6d)", line)     # weekly reset 時間保留
