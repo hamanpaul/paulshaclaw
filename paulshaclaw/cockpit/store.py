@@ -97,13 +97,17 @@ class CockpitState:
         candidates = (
             pane
             for pane in self.panes
-            if pane.pane_id != self.cockpit_pane_id and not self._is_active_slot_pane(pane)
+            if (
+                pane.pane_id != self.cockpit_pane_id
+                and pane.session_name == self.cockpit_session_name
+                and not self._is_active_slot_pane(pane)
+            )
         )
         return tuple(
             sorted(
                 candidates,
                 key=lambda pane: (
-                    pane.session_name,
+                    pane.window_index != self.cockpit_window_index,
                     int(pane.window_index) if pane.window_index.isdigit() else 0,
                     pane.pane_id,
                 ),

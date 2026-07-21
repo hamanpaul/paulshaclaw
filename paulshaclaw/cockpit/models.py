@@ -25,6 +25,8 @@ class PaneRecord:
     active: bool
     preview: tuple[str, ...]
     pane_tty: str = ""
+    pane_current_path: str = ""
+    host_short: str = ""
     # Human label for the work list: the pane title when set, otherwise a
     # derived fallback (e.g. "minicom COM0" / "[node]"). Empty until enriched.
     summary: str = ""

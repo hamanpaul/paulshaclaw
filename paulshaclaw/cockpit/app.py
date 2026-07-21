@@ -109,6 +109,18 @@ def format_session_summary(state: CockpitState) -> str:
     return f"{state.cockpit_session_name} · {len(others)} panes · {len(sessions)} sess"
 
 
+def format_work_pane_subtitle(state: CockpitState) -> str:
+    here = state.cockpit_session_name
+    if state.cockpit_window_index is not None:
+        here = f"{here}:{state.cockpit_window_index}"
+    suffix = (
+        f"⚠ {state.degraded_reason}"
+        if state.degraded_reason
+        else f"{len(state.candidate_section)} panes"
+    )
+    return f"{here} · {suffix}"
+
+
 # How often the cockpit re-reads the tmux pane list so the work summary stays
 # live. Kept at 30s so the periodic redraw isn't a visible flicker; each tick is
 # bounded anyway (one `list-panes`, a tiny `ps` only for title-less minicom
@@ -570,12 +582,7 @@ class CockpitApp(App[None]):
                 work_list.index = self._selected_list_index()
             except Exception:
                 pass
-            subtitle = (
-                f"⚠ {self.state.degraded_reason}"
-                if self.state.degraded_reason
-                else f"{len(self.state.candidate_section)} panes"
-            )
-            self._set_border(work_list, "WORK · panes", subtitle)
+            self._set_border(work_list, "WORK · panes", format_work_pane_subtitle(self.state))
 
         selected = self.state.selected_pane
         detail_widget = self.query_one("#pane-detail", Static)
