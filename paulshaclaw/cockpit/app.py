@@ -5,7 +5,7 @@ import threading
 from collections.abc import Callable
 
 import paulsha_cortex.control.client as control_client
-from . import branding, sysmon
+from . import branding, cost_bar, sysmon
 
 try:
     from textual.app import App, ComposeResult
@@ -328,6 +328,14 @@ class CockpitApp(App[None]):
             stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
         except Exception:
             stat_lines = []
+        # cost footer（Stage 8）接在 sysmon 之後（Net 下面）：唯讀已 cache 的 snapshot、
+        # fail-soft（無資料/出錯就不加這列，banner 照常）。
+        try:
+            cost = cost_bar.cost_line(self._cost_line_width())
+            if cost:
+                stat_lines = [*stat_lines, cost]
+        except Exception:
+            pass
         composed = self._compose_banner_stats(banner_lines, stat_lines)
         try:
             from rich.text import Text
@@ -336,8 +344,8 @@ class CockpitApp(App[None]):
         except Exception:
             return composed
 
-    def _monitor_bar_width(self) -> int:
-        """依 banner pane 寬度算橫條可用寬，讓 bar 撐到 pane 右緣（htop 風）。取不到寬度退回 80。"""
+    def _banner_raw_width(self) -> int:
+        """banner pane 的可見寬（brand-banner widget → app → 退回 80）。"""
         width = 0
         try:  # 優先用 brand-banner widget 自身寬度（= pane 內容寬）
             width = int(self.query_one("#brand-banner").size.width)
@@ -350,16 +358,31 @@ class CockpitApp(App[None]):
                 width = 0
         if width <= 0:
             width = 80
+        return width
+
+    def _monitor_bar_width(self) -> int:
+        """依 banner pane 寬度算橫條可用寬，讓 bar 撐到 pane 右緣（htop 風）。取不到寬度退回 80。"""
         # 每監控列固定開銷：label(3)+space+"["+"]"+space+percent(4) = 11（百分比在 ] 右側）；
         # 再扣 banner 欄+間距。長條內仍疊 used/total（Mem/Swp）。
-        return max(4, min(200, width - self._MON_COL - self._MON_GAP - 11))
+        return max(4, min(200, self._banner_raw_width() - self._MON_COL - self._MON_GAP - 11))
+
+    def _cost_line_width(self) -> int:
+        """cost footer 可用寬 = banner 寬 - mascot 欄 - 間距（自由格式，無 sysmon 的 11 開銷）。"""
+        return max(4, min(240, self._banner_raw_width() - self._MON_COL - self._MON_GAP))
 
     def _compose_banner_stats(self, banner_lines, stat_lines):
-        """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。"""
+        """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。
+
+        stat 行數可多於破蝦哥 art 行數（如 sysmon 之後再接 cost footer）；多出來的
+        stat 行仍要輸出，左側 mascot 欄留空白對齊。"""
         out = []
-        for i, bline in enumerate(banner_lines):
-            visible = branding.strip_ansi(bline)
-            row = bline + " " * max(0, self._MON_COL - len(visible))
+        for i in range(max(len(banner_lines), len(stat_lines))):
+            if i < len(banner_lines):
+                bline = banner_lines[i]
+                visible = branding.strip_ansi(bline)
+                row = bline + " " * max(0, self._MON_COL - len(visible))
+            else:
+                row = " " * self._MON_COL
             if i < len(stat_lines):
                 row += " " * self._MON_GAP + stat_lines[i]
             out.append(row)

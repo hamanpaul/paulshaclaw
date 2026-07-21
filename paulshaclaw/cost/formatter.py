@@ -149,3 +149,57 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
     separator = _wrap("|", "separator", use_tmux_style)
     joined = f" {separator} ".join(segments)
     return f"{joined} " if joined else joined
+
+
+# --- cockpit rendering: ANSI fg-only (no background) ---------------------------
+# The cockpit banner renders via rich's ``Text.from_ansi``. The tmux footer uses
+# ``#[fg=…,bg=…]`` status-bar codes; convert them to ANSI 256-colour *foreground*
+# escapes and drop the background so the cost line inherits the panel background.
+import re as _re
+
+_TMUX_NAMED_256 = {
+    "black": 0, "red": 1, "green": 2, "yellow": 3,
+    "blue": 4, "magenta": 5, "cyan": 6, "white": 7,
+}
+_TMUX_STYLE_RE = _re.compile(r"#\[([^\]]*)\]")
+_ANSI_RESET = "\033[0m"
+
+
+def _tmux_fg_to_ansi(fg: str) -> str:
+    fg = fg.strip()
+    if fg.startswith("colour"):
+        num = fg[len("colour"):]
+    elif fg in _TMUX_NAMED_256:
+        num = str(_TMUX_NAMED_256[fg])
+    else:
+        return ""
+    return f"\033[38;5;{num}m"
+
+
+def tmux_to_ansi_fg(text: str) -> str:
+    """Convert tmux status-bar style codes to ANSI foreground escapes, dropping bg.
+
+    ``#[default]`` (and an empty ``#[]``) reset; ``#[fg=…,bg=…]`` keeps only the
+    foreground. Text with no ``#[`` markers is returned unchanged.
+    """
+
+    def _repl(match: "_re.Match[str]") -> str:
+        body = match.group(1).strip()
+        if body in ("", "default"):
+            return _ANSI_RESET
+        fg: str | None = None
+        for part in body.split(","):
+            key, _, value = part.partition("=")
+            if key.strip() == "fg":
+                fg = value
+        if fg is None:
+            return ""
+        return _tmux_fg_to_ansi(fg)
+
+    return _TMUX_STYLE_RE.sub(_repl, text)
+
+
+def format_cockpit_footer(snapshot: CostSnapshot) -> str:
+    """Cost footer for the cockpit banner: same content/colours as the terminal
+    footer, rendered as ANSI foreground-only (no tmux codes, no background)."""
+    return tmux_to_ansi_fg(format_footer(snapshot, use_tmux_style=True))
