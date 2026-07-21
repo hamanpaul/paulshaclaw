@@ -59,6 +59,13 @@ class JobSummary:
 
 
 @dataclass(frozen=True)
+class JobRow:
+    slice_id: str
+    state: str
+    source_section: str
+
+
+@dataclass(frozen=True)
 class PaneDetail:
     pane: PaneRecord
     jobs: tuple[JobSummary, ...]

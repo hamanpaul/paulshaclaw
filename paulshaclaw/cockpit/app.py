@@ -68,7 +68,7 @@ except Exception:  # pragma: no cover - fallback when textual not installed
 from .actions import LayoutActionService
 from .help import HelpModal
 from .manager_panel import ManagerModal
-from .models import JobSummary, PaneRecord
+from .models import JobRow, JobSummary, PaneRecord
 from .store import CockpitState
 
 
@@ -89,8 +89,10 @@ _STATUS_STYLE: dict[str, tuple[str, str]] = {
     "completed": ("✓", "#64748B"),
     "failed": ("✗", "#EF4444"),
     "error": ("✗", "#EF4444"),
+    "attention": ("!", "#FBBF24"),
     "blocked": ("◼", "#FBBF24"),
     "pending": ("◔", "#FBBF24"),
+    "ready": ("◔", "#94A3B8"),
     "queued": ("◔", "#94A3B8"),
     "unmapped": ("·", "#64748B"),
 }
@@ -119,6 +121,78 @@ def format_work_pane_subtitle(state: CockpitState) -> str:
         else f"{len(state.candidate_section)} panes"
     )
     return f"{here} · {suffix}"
+
+
+def _slice_id_from_item(item: object) -> str:
+    if isinstance(item, str):
+        return item
+    if isinstance(item, dict):
+        for key in ("slice_id", "id", "name", "title"):
+            value = item.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return ""
+
+
+def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
+    if not isinstance(status, dict) or status.get("degraded"):
+        return ()
+
+    rows: list[JobRow] = []
+
+    in_flight = status.get("in_flight")
+    if isinstance(in_flight, list):
+        for item in in_flight:
+            if not isinstance(item, dict):
+                continue
+            slice_id = _slice_id_from_item(item)
+            if not slice_id:
+                continue
+            state = str(item.get("state") or "running")
+            rows.append(JobRow(slice_id=slice_id, state=state, source_section="in_flight"))
+
+    ready = status.get("ready")
+    if isinstance(ready, list):
+        for item in ready:
+            slice_id = _slice_id_from_item(item)
+            if not slice_id:
+                continue
+            state = str(item.get("state")) if isinstance(item, dict) and item.get("state") else "ready"
+            rows.append(JobRow(slice_id=slice_id, state=state, source_section="ready"))
+
+    held = status.get("held")
+    if isinstance(held, list):
+        for item in held:
+            if not isinstance(item, dict):
+                continue
+            slice_id = _slice_id_from_item(item)
+            if not slice_id:
+                continue
+            rows.append(JobRow(slice_id=slice_id, state="blocked", source_section="held"))
+
+    attention = status.get("attention")
+    if isinstance(attention, list):
+        for item in attention:
+            if not isinstance(item, dict):
+                continue
+            slice_id = _slice_id_from_item(item)
+            if not slice_id:
+                continue
+            state = str(item.get("job_state") or item.get("gate_state") or "attention")
+            rows.append(JobRow(slice_id=slice_id, state=state, source_section="attention"))
+
+    recent_done = status.get("recent_done")
+    if isinstance(recent_done, list):
+        for item in recent_done:
+            if not isinstance(item, dict):
+                continue
+            slice_id = _slice_id_from_item(item)
+            if not slice_id:
+                continue
+            state = str(item.get("gate_status") or item.get("state") or "done")
+            rows.append(JobRow(slice_id=slice_id, state=state, source_section="recent_done"))
+
+    return tuple(rows)
 
 
 # How often the cockpit re-reads the tmux pane list so the work summary stays
@@ -314,6 +388,7 @@ class CockpitApp(App[None]):
 
     def _on_refresh_tick(self) -> None:
         self._reconcile_state(light=True)
+        self._refresh_jobs_panel()
         self._refresh_manager_panel()
 
     def _on_sysmon_tick(self) -> None:
@@ -622,24 +697,37 @@ class CockpitApp(App[None]):
             detail_renderable = self._text(segs)
         detail_widget.update(detail_renderable)
 
-        all_jobs = [job for jobs in self.jobs_by_pane.values() for job in jobs]
-        jobs_widget = self.query_one("#global-jobs", Static)
-        if all_jobs:
-            self._set_border(jobs_widget, "JOBS", f"{len(all_jobs)} total")
-            job_segs: list[tuple[str, str]] = []
-            for job in all_jobs[:10]:
-                glyph, color = status_style(job.status)
-                job_segs.append((f"{job.pane_id or '-':>4} ", "#94A3B8"))
-                job_segs.append((f"{glyph} {job.status:<8} ", color))
-                job_segs.append((f"{job.trace_id or '-'}\n", "#64748B"))
-            jobs_renderable = self._text(job_segs)
-        else:
-            self._set_border(jobs_widget, "JOBS", "0 total")
-            jobs_renderable = self._text([("jobs loaded: 0", "#64748B")])
-        jobs_widget.update(jobs_renderable)
+        self._refresh_jobs_panel()
 
         # 破蝦哥 banner + 系統監控：抽成 _refresh_banner，供 widget 全刷與高頻 sysmon tick 共用。
         self._refresh_banner()
+
+    def _refresh_jobs_panel(self) -> None:
+        jobs_widget = self.query_one("#global-jobs", Static)
+        status = self.manager_client.read_status()
+        if not isinstance(status, dict):
+            status = {}
+        rows = slices_from_status(status)
+
+        if status.get("degraded"):
+            reason = str(status.get("degraded_reason") or "--")
+            self._set_border(jobs_widget, "JOBS", "degraded")
+            jobs_widget.update(self._text([(f"degraded: {reason}", "#FBBF24")]))
+            return
+
+        if rows:
+            self._set_border(jobs_widget, "JOBS", f"{len(rows)} slices")
+            job_segs: list[tuple[str, str]] = []
+            for row in rows[:10]:
+                glyph, color = status_style(row.state)
+                job_segs.append((f"{row.source_section:>11} ", "#94A3B8"))
+                job_segs.append((f"{glyph} {row.state:<9} ", color))
+                job_segs.append((f"{row.slice_id}\n", "#CBD5E1"))
+            jobs_renderable = self._text(job_segs)
+        else:
+            self._set_border(jobs_widget, "JOBS", "0 slices")
+            jobs_renderable = self._text([("manager slices: 0", "#64748B")])
+        jobs_widget.update(jobs_renderable)
 
     def _state_segment(self) -> list[tuple[str, str]]:
         """DETAIL 底部 ``state:`` 行片段：ok 綠、降級琥珀。"""
