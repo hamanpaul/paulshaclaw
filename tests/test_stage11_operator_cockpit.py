@@ -1159,3 +1159,63 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("ctrl+q")
 
         exit_mock.assert_called_once_with()
+
+
+class BannerComposeExtraStatLinesTests(unittest.TestCase):
+    """banner 組排：當 stat 行數多於破蝦哥 art 行數（如加 cost footer），
+    多出來的 stat 行仍要輸出，且左側 mascot 欄留空對齊。"""
+
+    def _app(self) -> CockpitApp:
+        return CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", session_name="main", title="cockpit", left=0, top=0, width=100, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=LayoutActionService(),
+        )
+
+    def test_extra_stat_lines_beyond_mascot_are_emitted_with_blank_left(self) -> None:
+        app = self._app()
+        banner = ["MASCOT1", "MASCOT2"]      # 2 mascot 行
+        stats = ["s1", "s2", "s3"]           # 3 stat 行（多 1 行）
+        out = app._compose_banner_stats(banner, stats).rstrip("\n").split("\n")
+
+        self.assertEqual(len(out), 3)        # 3 行全出
+        self.assertIn("s1", out[0])
+        self.assertIn("MASCOT1", out[0])
+        self.assertIn("s3", out[2])
+        self.assertEqual(out[2].strip(), "s3")  # 多出的行：mascot 欄空白，只有 stat
+
+
+class BannerCostFooterIntegrationTests(unittest.TestCase):
+    """cost footer 接在 banner 的 sysmon 之後（fail-soft：無資料時 banner 照常）。"""
+
+    def _app(self) -> CockpitApp:
+        return CockpitApp.from_snapshot(
+            panes=(
+                pane_record("%0", session_name="main", title="cockpit", left=0, top=0, width=120, height=40),
+            ),
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=LayoutActionService(),
+        )
+
+    def test_banner_appends_cost_line_after_sysmon(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        app = self._app()
+        with patch.object(cost_bar, "cost_line", return_value="COSTMARKER cc 5h:21%"):
+            rendered = app._brand_banner_renderable()
+        text = rendered.plain if hasattr(rendered, "plain") else str(rendered)
+        self.assertIn("COSTMARKER", text)
+
+    def test_banner_ok_when_cost_line_none(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        app = self._app()
+        with patch.object(cost_bar, "cost_line", return_value=None):
+            rendered = app._brand_banner_renderable()  # 不應 raise
+        self.assertIsNotNone(rendered)

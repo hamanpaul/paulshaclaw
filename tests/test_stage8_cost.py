@@ -2930,3 +2930,55 @@ class Stage8StatuslineSidecarWriterTests(unittest.TestCase):
             exit_code = statusline_sidecar.main([])
 
         self.assertEqual(exit_code, 0)
+
+
+class CockpitFooterRenderTests(unittest.TestCase):
+    """cockpit 專用的 footer 渲染：ANSI fg-only（無背景色），色彩沿用終端 footer。"""
+
+    def _cc_snapshot(self) -> "CostSnapshot":
+        return CostSnapshot(
+            generated_at=datetime(2026, 7, 21, tzinfo=ZoneInfo("UTC")),
+            timezone="UTC",
+            cache_status="fresh",
+            providers={
+                "cc": ProviderSnapshot(
+                    source_status="ok",
+                    windows={
+                        "five_hour": UsageWindow(
+                            used_percent=21, reset_at=None, display_reset="22:20"
+                        ),
+                        "weekly": UsageWindow(
+                            used_percent=57, reset_at=None, display_reset="6d"
+                        ),
+                    },
+                )
+            },
+        )
+
+    def test_tmux_to_ansi_fg_converts_fg_and_drops_bg(self) -> None:
+        from paulshaclaw.cost.formatter import tmux_to_ansi_fg
+
+        src = "5h:#[fg=colour208,bg=colour22]80%#[default](6d)"
+        self.assertEqual(tmux_to_ansi_fg(src), "5h:\033[38;5;208m80%\033[0m(6d)")
+
+    def test_tmux_to_ansi_fg_maps_named_colour_red(self) -> None:
+        from paulshaclaw.cost.formatter import tmux_to_ansi_fg
+
+        self.assertEqual(
+            tmux_to_ansi_fg("#[fg=red]92%#[default]"), "\033[38;5;1m92%\033[0m"
+        )
+
+    def test_tmux_to_ansi_fg_leaves_plain_text_untouched(self) -> None:
+        from paulshaclaw.cost.formatter import tmux_to_ansi_fg
+
+        self.assertEqual(tmux_to_ansi_fg("cc wk:--"), "cc wk:--")
+
+    def test_format_cockpit_footer_is_ansi_fg_only(self) -> None:
+        from paulshaclaw.cost.formatter import format_cockpit_footer
+
+        line = format_cockpit_footer(self._cc_snapshot())
+        self.assertNotIn("#[", line)   # 無 tmux 色碼
+        self.assertNotIn("bg=", line)  # 無背景色
+        self.assertIn("\033[", line)   # 有 ANSI fg
+        self.assertIn("21%", line)
+        self.assertIn("57%", line)
