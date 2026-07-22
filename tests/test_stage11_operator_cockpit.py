@@ -1219,6 +1219,28 @@ class BannerCostFooterIntegrationTests(unittest.TestCase):
         cline.assert_called_once()
         self.assertEqual(cline.call_args.args[0], 80)
 
+    def test_wide_single_line_is_right_aligned(self) -> None:
+        from paulshaclaw.cockpit import cost_bar
+
+        app = self._app()
+        with patch.object(app, "_banner_raw_width", return_value=80), patch.object(
+            cost_bar, "cost_line", return_value="RIGHTCOST"  # 可見 9 字
+        ), patch.object(cost_bar, "cost_split"):
+            rendered = app._brand_banner_renderable()
+        text = rendered.plain if hasattr(rendered, "plain") else str(rendered)
+        cost_lines = [line for line in text.split("\n") if "RIGHTCOST" in line]
+        self.assertTrue(cost_lines)
+        line = cost_lines[0]
+        self.assertTrue(line.endswith("RIGHTCOST"))     # 靠右緣
+        self.assertEqual(len(line), 80)                  # 補滿 full width
+        self.assertTrue(line.startswith(" " * (80 - 9)))  # 前導 pad = 71
+
+    def test_on_resize_refreshes_banner_for_realign(self) -> None:
+        app = self._app()
+        with patch.object(app, "_refresh_banner") as refresh:
+            app.on_resize(None)  # resize 時立即重排（含右對齊）
+        refresh.assert_called_once()
+
     def test_narrow_banner_splits_cdx_to_net_line(self) -> None:
         from paulshaclaw.cockpit import cost_bar
 
