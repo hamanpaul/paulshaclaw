@@ -75,55 +75,122 @@ def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
     return tuple(panes)
 
 
-def _minicom_summary(tty: str) -> str | None:
-    """Derive a label like ``minicom COM0`` from the minicom process on ``tty``.
+def _bare_tty(tty: str) -> str:
+    """tmux #{pane_tty} is like ``/dev/pts/2``; ``ps`` reports the bare ``pts/2``."""
+    return tty[len("/dev/"):] if tty.startswith("/dev/") else tty
 
-    minicom doesn't set a pane title, so the only place the COM identity lives is
-    its argv (``-C .../mini_COM0_*.log`` / ``-D <device>``). Read it with a
-    bounded, short-timeout ``ps`` so this stays cheap on every refresh."""
-    if not tty:
+
+def _minicom_label_from_args(args: str) -> str | None:
+    """Map a process argv line to a ``minicom COMx`` label, or ``None``.
+
+    Match the minicom *binary* (argv0 basename == ``minicom``), NOT a bare
+    ``"minicom"`` substring — so benign lines like ``man minicom``,
+    ``vim .../serialwrap-minicom``, the ``serialwrap-minicom`` wrapper itself, or
+    ``less minicom_COM0.log`` are not mistaken for a live minicom session. The COM
+    identity lives in minicom's own argv (``-C .../mini_COM0_*.log`` / ``-D dev``)."""
+    stripped = args.strip()
+    if not stripped:
         return None
-    # tmux #{pane_tty} is like "/dev/pts/2"; `ps -t` wants the bare tty name
-    # ("pts/2"), so strip the /dev/ prefix to keep the lookup portable.
-    tty_name = tty[len("/dev/"):] if tty.startswith("/dev/") else tty
+    argv0 = stripped.split()[0].rsplit("/", 1)[-1]
+    if argv0 != "minicom":
+        return None
+    matched = _MINICOM_COM_RE.search(args)
+    if matched:
+        return f"minicom COM{matched.group(1)}"
+    device = _MINICOM_DEVICE_RE.search(args)
+    if device:
+        return f"minicom {device.group(1).rsplit('/', 1)[-1]}"
+    return "minicom"
+
+
+def _run_ps(argv: list[str]) -> str | None:
+    """Bounded, decode-safe ``ps``; ``None`` on any failure/timeout.
+
+    ``errors="replace"`` stops undecodable process arguments from raising
+    ``UnicodeDecodeError`` up through the refresh path; the 1s timeout and the
+    OSError/SubprocessError guard keep a slow/absent ``ps`` from blocking or crashing."""
     try:
         completed = subprocess.run(
-            ["ps", "-t", tty_name, "-o", "args="],
+            argv,
             check=False,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=1,
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    for line in completed.stdout.splitlines():
-        if "minicom" not in line:
+    return completed.stdout
+
+
+def _minicom_map() -> dict[str, str]:
+    """One ``ps`` for the whole refresh → ``{bare-tty: "minicom COMx"}``.
+
+    Replaces N per-pane ``ps`` calls (one per title-less shell pane) with a single
+    process scan, so a refresh can't fan out into many synchronous forks — nor block
+    the UI for seconds if several ttys are slow. First minicom per tty wins."""
+    stdout = _run_ps(["ps", "-e", "-o", "tty=", "-o", "args="])
+    if stdout is None:
+        return {}
+    result: dict[str, str] = {}
+    for line in stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2:
             continue
-        matched = _MINICOM_COM_RE.search(line)
-        if matched:
-            return f"minicom COM{matched.group(1)}"
-        device = _MINICOM_DEVICE_RE.search(line)
-        if device:
-            return f"minicom {device.group(1).rsplit('/', 1)[-1]}"
-        return "minicom"
+        tty_name, args = parts
+        if tty_name in ("?", "-"):
+            continue
+        label = _minicom_label_from_args(args)
+        if label and tty_name not in result:
+            result[tty_name] = label
+    return result
+
+
+def _minicom_summary(tty: str) -> str | None:
+    """Per-pane fallback: derive ``minicom COMx`` from the minicom process on ``tty``.
+
+    Prefer :func:`_minicom_map` (one ``ps`` for the whole refresh); this single-tty
+    probe is the fallback for direct callers that have no precomputed map. Returns
+    ``None`` for an empty tty without spawning ``ps``."""
+    if not tty:
+        return None
+    stdout = _run_ps(["ps", "-t", _bare_tty(tty), "-o", "args="])
+    if stdout is None:
+        return None
+    for line in stdout.splitlines():
+        label = _minicom_label_from_args(line)
+        if label:
+            return label
     return None
 
 
-def derive_summary(pane: PaneRecord) -> str:
-    """A readable work-list label: the title when set, else a command fallback."""
+def _lookup_minicom(tty: str, minicom_by_tty: dict[str, str] | None) -> str | None:
+    """Resolve a minicom label for ``tty``: from the batch map when given, else probe."""
+    if minicom_by_tty is not None:
+        return minicom_by_tty.get(_bare_tty(tty)) if tty else None
+    return _minicom_summary(tty)
+
+
+def derive_summary(
+    pane: PaneRecord, minicom_by_tty: dict[str, str] | None = None
+) -> str:
+    """A readable work-list label: the title when set, else a command fallback.
+
+    minicom is often launched via a wrapper (e.g. ``serialwrap-minicom``), so tmux
+    reports the pane command as a shell rather than ``minicom``; for title-less shell
+    panes we consult the minicom-by-tty map (or a per-pane probe when no map is given)
+    so the pane is still labeled by its COM port. Pass ``minicom_by_tty`` — the result
+    of :func:`_minicom_map` — to avoid a per-pane ``ps`` on every refresh."""
     title = pane.title.strip()
     host_short = pane.host_short.strip()
     if title and title != host_short:
         return title
-    if pane.command == "minicom":
-        return _minicom_summary(pane.pane_tty) or "minicom"
-    # minicom 常經 wrapper（serialwrap-minicom）啟動，tmux 只看得到外層 shell；
-    # 對 shell pane 探一次 tty，讓 wrapper 底下的 minicom 仍以 COM 埠命名。
-    # _minicom_summary 對空 tty 立即回 None，故無 tty 的 shell pane 不觸發 ps。
-    if pane.command in _SHELL_COMMANDS:
-        wrapped = _minicom_summary(pane.pane_tty)
-        if wrapped:
-            return wrapped
+    if pane.command == "minicom" or pane.command in _SHELL_COMMANDS:
+        label = _lookup_minicom(pane.pane_tty, minicom_by_tty)
+        if label:
+            return label
+        if pane.command == "minicom":
+            return "minicom"
     if pane.pane_current_path:
         return Path(pane.pane_current_path).name or "/"
     return f"[{pane.command}]" if pane.command else ""
@@ -136,9 +203,9 @@ class TmuxClient:
         """List panes with a readable summary per pane.
 
         ``capture_previews=False`` skips the per-pane ``capture-pane`` calls so a
-        periodic UI refresh stays cheap (one ``list-panes`` plus a tiny ``ps``
-        for each title-less shell pane, to catch minicom launched via a wrapper);
-        the detail view captures the selected pane's preview on demand instead."""
+        periodic UI refresh stays cheap (one ``list-panes`` plus a single ``ps``
+        scan to catch minicom launched via a wrapper); the detail view captures the
+        selected pane's preview on demand instead."""
         try:
             completed = subprocess.run(
                 ["tmux", "list-panes", "-a", "-F", LIST_PANES_FORMAT],
@@ -149,6 +216,9 @@ class TmuxClient:
         except (subprocess.CalledProcessError, FileNotFoundError):
             return ()
         panes = parse_list_panes(completed.stdout)
+        # One ``ps`` scan for the whole refresh, shared across all panes, so
+        # wrapped-minicom detection can't fan out into a per-pane fork storm.
+        minicom_by_tty = _minicom_map()
         enriched: list[PaneRecord] = []
         for pane in panes:
             preview = ()
@@ -173,7 +243,7 @@ class TmuxClient:
                     pane_tty=pane.pane_tty,
                     pane_current_path=pane.pane_current_path,
                     host_short=pane.host_short,
-                    summary=derive_summary(pane),
+                    summary=derive_summary(pane, minicom_by_tty),
                 )
             )
         return tuple(enriched)
