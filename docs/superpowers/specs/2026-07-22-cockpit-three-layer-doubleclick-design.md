@@ -7,7 +7,7 @@ depends_on: []
 
 # Cockpit 三層直排 + 雙擊 swap + 自動歸位 設計
 
-> 日期：2026-07-22 ｜ 狀態：修訂 v8（回應 codex round 7，待 round 8 重審）｜ 分支：`feature/cockpit-three-layer`
+> 日期：2026-07-22 ｜ 狀態：v8 定稿（codex 對抗審查 8 輪，round 8 PASS）｜ 分支：`feature/cockpit-three-layer`
 > 範疇：stage11-operator-cockpit spec 修訂。前置脈絡：#248/#249（JOBS 接線、WORK 收斂）、#252（cost footer）皆已 merged。
 
 ## 1. 背景與決策脈絡
