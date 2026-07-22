@@ -38,7 +38,13 @@ from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.manager_panel import ManagerModal
 from paulshaclaw.cockpit.models import JobRow, JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
-from paulshaclaw.cockpit.tmux import TmuxClient, derive_summary, parse_list_panes
+from paulshaclaw.cockpit.tmux import (
+    TmuxClient,
+    _minicom_map,
+    _minicom_summary,
+    derive_summary,
+    parse_list_panes,
+)
 from paulsha_cortex.control import constants, contract
 from paulsha_cortex.coordinator import manager_daemon
 
@@ -246,6 +252,112 @@ class Stage11StateTests(unittest.TestCase):
         )
         self.assertEqual([derive_summary(pane) for pane in panes], ["repo-a", "repo-b"])
 
+    def test_derive_summary_wrapped_minicom_reads_com_from_tty(self) -> None:
+        # serialwrap-minicom wrapper 底下：tmux 回報 command=bash，但 tty 上跑著 minicom。
+        pane = pane_record(
+            "%3",
+            title="",
+            command="bash",
+            pane_tty="/dev/pts/9",
+            pane_current_path="/home/paul_chen",
+            host_short="9900X",
+        )
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=(
+                "  bash /home/paul_chen/.local/bin/serialwrap-minicom COM0\n"
+                "  /usr/bin/minicom -D /dev/pts/8 --color=on -C /home/paul_chen/b-log/mini_COM0_x.log\n"
+            ),
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(derive_summary(pane), "minicom COM0")
+
+    def test_derive_summary_shell_pane_without_minicom_falls_back_to_cwd(self) -> None:
+        # 一般 idle bash pane：tty 上沒有 minicom，須退回 cwd basename、不誤標 minicom。
+        pane = pane_record(
+            "%1",
+            title="",
+            command="bash",
+            pane_tty="/dev/pts/3",
+            pane_current_path="/home/paul/prj/repo-a",
+            host_short="9900X",
+        )
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="  -bash\n",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(derive_summary(pane), "repo-a")
+
+    def test_derive_summary_shell_pane_empty_tty_spawns_no_ps(self) -> None:
+        # 成本邊界：無 tty 的 shell pane 不得觸發 ps（_minicom_summary 對空 tty 立即回 None）。
+        pane = pane_record(
+            "%7",
+            title="9900X",
+            command="bash",
+            pane_tty="",
+            pane_current_path="/home/paul/prj/repo-a",
+            host_short="9900X",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run:
+            self.assertEqual(derive_summary(pane), "repo-a")
+            run.assert_not_called()
+
+    def test_derive_summary_benign_minicom_substring_not_mislabeled(self) -> None:
+        # `man minicom` / `vim serialwrap-minicom` 含 "minicom" 子字串但 argv0 非
+        # minicom binary，不得被誤標成 minicom（對抗審查 Imp-2）。
+        pane = pane_record(
+            "%8",
+            title="",
+            command="bash",
+            pane_tty="/dev/pts/5",
+            pane_current_path="/home/paul/prj/repo-b",
+            host_short="9900X",
+        )
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout="  man minicom\n  vim /home/x/.local/bin/serialwrap-minicom\n",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(derive_summary(pane), "repo-b")
+
+    def test_derive_summary_uses_minicom_map_without_probing(self) -> None:
+        # 給定 batch map 時，derive_summary 只查表、不得再 fork ps（對抗審查 Imp-3）。
+        pane = pane_record(
+            "%3",
+            title="",
+            command="bash",
+            pane_tty="/dev/pts/9",
+            pane_current_path="/home/paul_chen",
+            host_short="9900X",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run:
+            self.assertEqual(
+                derive_summary(pane, {"pts/9": "minicom COM0"}), "minicom COM0"
+            )
+            run.assert_not_called()
+
+    def test_minicom_map_builds_tty_to_label_and_skips_benign(self) -> None:
+        # 單次 ps -e 掃描 → {tty: minicom COMx}；no-tty(?)、非 minicom binary 皆排除。
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=(
+                "pts/9 /usr/bin/minicom -D /dev/pts/8 -C /home/x/b-log/mini_COM0_x.log\n"
+                "pts/3 -bash\n"
+                "?     /usr/lib/systemd/systemd\n"
+                "pts/5 man minicom\n"
+            ),
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(_minicom_map(), {"pts/9": "minicom COM0"})
+
+    def test_minicom_summary_returns_none_on_ps_timeout(self) -> None:
+        # ps 逾時（TimeoutExpired ⊂ SubprocessError）須 fail-soft 回 None（Min-5）。
+        with patch(
+            "paulshaclaw.cockpit.tmux.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="ps", timeout=1),
+        ):
+            self.assertIsNone(_minicom_summary("/dev/pts/9"))
+
     def test_derive_summary_root_path_falls_back_to_slash(self) -> None:
         pane = pane_record("%9", title="9900X", command="bash", pane_current_path="/", host_short="9900X")
         self.assertEqual(derive_summary(pane), "/")
@@ -364,7 +476,9 @@ class Stage11StateTests(unittest.TestCase):
         with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed) as run_mock:
             panes = client.list_panes(cockpit_pane_id="%0")
 
-        command = run_mock.call_args.args[0]
+        # list_panes now also runs a single `ps -e` scan (minicom map); the tmux
+        # list-panes call is the first subprocess, so assert against that one.
+        command = run_mock.call_args_list[0].args[0]
         self.assertEqual(command[:3], ["tmux", "list-panes", "-a"])
         self.assertNotIn("-t", command)
         self.assertIn("#{session_name}", command[-1])
