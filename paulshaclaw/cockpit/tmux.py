@@ -137,8 +137,8 @@ class TmuxClient:
 
         ``capture_previews=False`` skips the per-pane ``capture-pane`` calls so a
         periodic UI refresh stays cheap (one ``list-panes`` plus a tiny ``ps``
-        only for title-less minicom panes); the detail view captures the selected
-        pane's preview on demand instead."""
+        for each title-less shell pane, to catch minicom launched via a wrapper);
+        the detail view captures the selected pane's preview on demand instead."""
         try:
             completed = subprocess.run(
                 ["tmux", "list-panes", "-a", "-F", LIST_PANES_FORMAT],

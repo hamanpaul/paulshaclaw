@@ -282,6 +282,20 @@ class Stage11StateTests(unittest.TestCase):
         with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
             self.assertEqual(derive_summary(pane), "repo-a")
 
+    def test_derive_summary_shell_pane_empty_tty_spawns_no_ps(self) -> None:
+        # 成本邊界：無 tty 的 shell pane 不得觸發 ps（_minicom_summary 對空 tty 立即回 None）。
+        pane = pane_record(
+            "%7",
+            title="9900X",
+            command="bash",
+            pane_tty="",
+            pane_current_path="/home/paul/prj/repo-a",
+            host_short="9900X",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run:
+            self.assertEqual(derive_summary(pane), "repo-a")
+            run.assert_not_called()
+
     def test_derive_summary_root_path_falls_back_to_slash(self) -> None:
         pane = pane_record("%9", title="9900X", command="bash", pane_current_path="/", host_short="9900X")
         self.assertEqual(derive_summary(pane), "/")
