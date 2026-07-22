@@ -13,11 +13,18 @@ The Stage 11 cockpit SHALL enumerate panes from every local tmux session visible
 - **WHEN** a periodic refresh tick runs
 - **THEN** the cockpit MUST NOT invoke `tmux capture-pane` for any pane
 
-### Requirement: Enter swaps selected pane with active slot across sessions
-The Stage 11 cockpit SHALL provide exactly two equivalent swap triggers: pressing `Enter` on a selected candidate, and double-clicking a candidate row (see the double-click requirement). Both triggers MUST route through the same activation sequence: restore-before-swap pre-step (see the restore requirement), then the existing layout action service swap with the selected pane ID and active-slot pane ID, then a rebuild of cockpit state from a fresh tmux scan. The keyboard path MUST have a single action authority: the work-list widget's own `enter` binding delegates to the app swap action, and the app MUST NOT keep a duplicate `on_key` enter special-case.
+### Requirement: Candidate section includes all non-cockpit non-active panes
+The Stage 11 cockpit SHALL list every pane in the cockpit session that is neither the cockpit pane nor the cockpit-session active slot as a candidate, sorted by `(session_name, window_index, pane_id)`. Panes in other sessions MUST still be enumerated（requirement「lists panes from all local tmux sessions」）and counted in the banner session summary, but MUST NOT appear as candidates（truth-up：#249「WORK 收斂自身 session」已出貨行為，原 spec 文字未同步）.
 
-#### Scenario: Selected pane from another session swaps into active slot
-- **WHEN** the active slot is `%4` in session `main`, the selected candidate is `%12` in session `work`, and the operator presses `Enter`
+#### Scenario: Candidate section is scoped to the cockpit session
+- **WHEN** the cockpit session `main` contains non-active candidate panes `%2` and `%3`, and session `work` contains pane `%7`
+- **THEN** the candidate section MUST include `%2` and `%3` sorted by `(session_name, window_index, pane_id)` and MUST NOT include `%7`
+
+### Requirement: Enter swaps selected pane with active slot across sessions
+The Stage 11 cockpit SHALL provide exactly two equivalent swap triggers: pressing `Enter` on a selected candidate, and double-clicking a candidate row (see the double-click requirement). Both triggers MUST route through the same activation sequence: restore-before-swap pre-step (see the restore requirement), then the existing layout action service swap with the selected pane ID and active-slot pane ID, then a rebuild of cockpit state from a fresh tmux scan. Candidates are scoped to the cockpit session（見 candidate-section requirement）；the swap mechanism itself remains session-agnostic（pane id 定址）. The keyboard path MUST have a single action authority: the work-list widget's own `enter` binding delegates to the app swap action, and the app MUST NOT keep a duplicate `on_key` enter special-case.
+
+#### Scenario: Selected candidate swaps into active slot
+- **WHEN** the active slot is `%4`, the selected candidate is `%12`（cockpit session）, and the operator presses `Enter`
 - **THEN** the cockpit MUST invoke a swap from `%12` to `%4` and MUST refresh pane state from tmux after the swap
 
 #### Scenario: Enter triggers exactly one swap
