@@ -207,6 +207,10 @@ REFRESH_INTERVAL_SECONDS = 30.0
 # 故能用 htop 的 ~1.5s 步調而幾乎不佔資源；就地 update + 固定寬橫條 → Textual 只重繪變動的 cell，不閃。
 SYSMON_INTERVAL_SECONDS = 1.5
 
+# cost footer 版面切換門檻：banner 寬 >= 此值 → 單行延伸滿 banner 寬；否則 cdx 併 Net 行、
+# cc+cpt 另成一列（單行 cost 約 61 字，故需 >= 62 才塞得下整條）。
+_COST_SINGLE_LINE_MIN_WIDTH = 62
+
 
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Cockpit"
@@ -328,15 +332,27 @@ class CockpitApp(App[None]):
             stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
         except Exception:
             stat_lines = []
-        # cost footer（Stage 8）接在 sysmon 之後（Net 下面）單獨一列：cdx | cc | cpt: N%。
-        # 唯讀已 cache 的 snapshot、fail-soft（無資料/出錯就不加，banner 照常）。
+        # cost footer（Stage 8）自適應版面（唯讀 cache、fail-soft）：
+        #   banner 寬 >= 62 → 單行延伸滿整個 banner 寬（放在 banner 底下、不縮排 stat 欄）；
+        #   < 62         → cdx 併到 Net 那行、cc+cpt 另成一列（窄版兩行解）。
+        full_width_cost: str | None = None
         try:
-            cost = cost_bar.cost_line(self._cost_line_width())
-            if cost:
-                stat_lines = [*stat_lines, cost]
+            full_w = self._banner_raw_width()
+            if full_w >= _COST_SINGLE_LINE_MIN_WIDTH:
+                full_width_cost = cost_bar.cost_line(full_w)
+            else:
+                net_width = len(branding.strip_ansi(stat_lines[-1])) if stat_lines else 0
+                net_suffix, cost_rest = cost_bar.cost_split(self._cost_line_width(), net_width)
+                if net_suffix and stat_lines:
+                    stat_lines[-1] = stat_lines[-1] + net_suffix
+                if cost_rest:
+                    stat_lines = [*stat_lines, cost_rest]
         except Exception:
-            pass
+            full_width_cost = None
         composed = self._compose_banner_stats(banner_lines, stat_lines)
+        # 單行 cost 以整個 banner 寬渲染 → 接在 composed 之後、不受 mascot 欄縮排限制。
+        if full_width_cost:
+            composed += full_width_cost + "\n"
         try:
             from rich.text import Text
 
