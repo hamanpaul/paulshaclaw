@@ -39,7 +39,6 @@ def main(argv: list[str] | None = None) -> int:
         jobs_by_pane={},
         actions=LayoutActionService(),
         pane_loader=tmux_client.list_panes,
-        preview_loader=tmux_client.capture_preview,
     )
     try:
         app.run()

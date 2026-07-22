@@ -47,19 +47,10 @@ Footer > .footer--description {
     border-subtitle-align: right;
 }
 
-#main-row {
-    height: 1fr;
-}
-#left-pane {
-    width: 2fr;
-}
-#right-pane {
-    width: 3fr;
-}
-
 /* WORK · panes 工作清單（ACTIVE pane 為首列，見 app.py） */
 #work-list {
     height: 1fr;
+    min-height: 5;
     padding: 0 1;
     background: #0F172A;
     border: round #475569;
@@ -70,19 +61,11 @@ Footer > .footer--description {
     border: round #22C55E;
 }
 
-/* DETAIL · 選中 pane */
-#pane-detail {
-    height: 1fr;
-    padding: 0 1;
-    background: #0F172A;
-    border: round #475569;
-    border-title-align: left;
-}
-
 /* JOBS · 全域工作狀態 */
 #global-jobs {
     height: auto;
-    max-height: 10;
+    max-height: 12;
+    overflow-y: auto;
     padding: 0 1;
     background: #0F172A;
     border: round #475569;

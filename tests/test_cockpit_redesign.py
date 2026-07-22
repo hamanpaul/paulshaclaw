@@ -25,7 +25,7 @@ from paulshaclaw.tui.view import render_pane_task_view
 def pane(pid, *, session="main", window="0", title="pane", command="bash",
          left=0, top=0, width=80, height=24):
     return PaneRecord(pid, session, window, title, command, left, top, width,
-                      height, False, ())
+                      height, False)
 
 
 class StatusStyleTests(unittest.TestCase):
