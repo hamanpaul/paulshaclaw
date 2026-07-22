@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import inspect
 import threading
+import time
 from collections.abc import Callable
 
 import paulsha_cortex.control.client as control_client
@@ -10,7 +10,6 @@ from . import branding, cost_bar, sysmon
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Horizontal, Vertical
     from textual.widgets import Footer, Header, ListItem, ListView, Static
 except Exception:  # pragma: no cover - fallback when textual not installed
     # Minimal stubs so module is importable without textual installed.
@@ -42,12 +41,6 @@ except Exception:  # pragma: no cover - fallback when textual not installed
             self.handler = handler
             self.description = description
 
-    class _Container:  # pragma: no cover - noop
-        def __init__(self, *a: Any, **k: Any) -> None:
-            pass
-
-    Horizontal = Vertical = _Container
-
     class _Widget:  # pragma: no cover - noop
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             pass
@@ -70,6 +63,24 @@ from .help import HelpModal
 from .manager_panel import ManagerModal
 from .models import JobRow, JobSummary, PaneRecord
 from .store import CockpitState
+
+
+class WorkItem(ListItem):
+    """工作清單列：附掛 pane_id 供雙擊偵測直讀（Selected.item.pane_id）。"""
+
+    def __init__(self, *args, pane_id: str | None = None, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.pane_id = pane_id
+
+
+class WorkListView(ListView):
+    """WORK 清單：enter 覆寫為直達 app swap action。"""
+
+    def action_select_cursor(self) -> None:
+        app = getattr(self, "app", None)
+        action = getattr(app, "action_swap_selected", None)
+        if callable(action):
+            action()
 
 
 def pane_display_label(pane: PaneRecord) -> str:
@@ -198,9 +209,10 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
 # How often the cockpit re-reads the tmux pane list so the work summary stays
 # live. Kept at 30s so the periodic redraw isn't a visible flicker; each tick is
 # bounded anyway (one `list-panes`, a tiny `ps` only for title-less minicom
-# panes, and one preview capture for the selected pane) — no large or growing
+# panes) — no large or growing
 # reads, so it can't pile up the way an unbounded scan would.
 REFRESH_INTERVAL_SECONDS = 30.0
+DOUBLE_CLICK_SECONDS = 0.4
 
 # htop 風系統監控要「即時但不吃資源」：把「高頻 /proc 監控」與「低頻 tmux pane 重載」拆成兩個 tick。
 # 這條只讀 /proc（CPU/Mem/Swp/I/O/Net）＋就地更新 banner 一個 widget——不 fork tmux、不重建清單，
@@ -225,6 +237,7 @@ class CockpitApp(App[None]):
         Binding("m", "manager_panel", "m 顯示 manager 面板"),
         Binding("q", "quit_app", "q 離開 cockpit"),
         Binding("t", "manager_tick", "t 送出 manager tick"),
+        Binding("j", "toggle_jobs", "j 收合/展開 JOBS"),
         Binding("ctrl+q", "quit_app", "Ctrl+Q 離開 cockpit"),
         Binding("question_mark", "show_help", "? 顯示說明"),
     ]
@@ -236,14 +249,17 @@ class CockpitApp(App[None]):
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
         pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
-        preview_loader: Callable[[str], tuple[str, ...]] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> None:
         super().__init__()
         self.state = state
         self.jobs_by_pane = jobs_by_pane
         self.actions = actions
         self.pane_loader = pane_loader
-        self.preview_loader = preview_loader
+        self._clock: Callable[[], float] = clock or time.monotonic
+        self._last_click: tuple[str, float] | None = None
+        self._displacement: tuple[str, str] | None = None
+        self._jobs_collapsed = False
         # 系統監控（banner 右側 htop 風）：CPU%/IO%/Net 速率需前後快照差值，故保留上次快照；
         # _last_stats 存最後有效讀數，None 時沿用以避免快速重刷閃爍。
         self._mon_prev = None
@@ -265,7 +281,7 @@ class CockpitApp(App[None]):
         jobs_by_pane: dict[str, tuple[JobSummary, ...]],
         actions: LayoutActionService,
         pane_loader: Callable[..., tuple[PaneRecord, ...]] | None = None,
-        preview_loader: Callable[[str], tuple[str, ...]] | None = None,
+        clock: Callable[[], float] | None = None,
     ) -> "CockpitApp":
         return cls(
             state=CockpitState.from_panes(
@@ -276,18 +292,14 @@ class CockpitApp(App[None]):
             jobs_by_pane=jobs_by_pane,
             actions=actions,
             pane_loader=pane_loader,
-            preview_loader=preview_loader,
+            clock=clock,
         )
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield Static("", id="brand-banner")  # 破蝦哥 🦞 banner（issue #116）；內容於 on_mount 填入
-        with Horizontal(id="main-row"):
-            with Vertical(id="left-pane"):
-                yield ListView(id="work-list")
-            with Vertical(id="right-pane"):
-                yield Static("", id="pane-detail")
-                yield Static("", id="global-jobs")
+        yield WorkListView(id="work-list")
+        yield Static("", id="global-jobs")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -431,7 +443,7 @@ class CockpitApp(App[None]):
         self._refresh_widgets()
 
     def _on_refresh_tick(self) -> None:
-        self._reconcile_state(light=True)
+        self._reconcile_state()
         self._refresh_jobs_panel()
         self._refresh_manager_panel()
 
@@ -495,18 +507,14 @@ class CockpitApp(App[None]):
         return selected_offset
 
     def action_swap_selected(self) -> None:
+        self._last_click = None
         if self._background_actions_blocked():
             return
         active_pane = self.state.active_pane
         selected_pane = self.state.selected_pane
         if active_pane is None or selected_pane is None:
             return
-        self.actions.swap_selected_with_active(
-            selected_pane_id=selected_pane.pane_id,
-            active_pane_id=active_pane.pane_id,
-        )
-        self.actions.focus_pane(selected_pane.pane_id)
-        self._reconcile_state()
+        self._activate(selected_pane.pane_id, active_pane.pane_id)
 
     def action_focus_cockpit(self) -> None:
         if self._background_actions_blocked():
@@ -514,16 +522,18 @@ class CockpitApp(App[None]):
         self.actions.return_to_cockpit(self.state.cockpit_pane_id)
 
     def _on_help_closed(self, _result: object | None = None) -> None:
-        self._reconcile_state(light=True)
+        self._reconcile_state()
 
     def action_show_help(self) -> None:
         if self._background_actions_blocked():
             return
+        self._last_click = None
         self.push_screen(HelpModal(self.BINDINGS))
 
     def action_manager_panel(self) -> None:
         if self._help_modal_open():
             return
+        self._last_click = None
         status = self.manager_client.read_status()
         if self._manager_modal_open():
             try:
@@ -561,7 +571,7 @@ class CockpitApp(App[None]):
                 except TypeError:
                     notifier(error_message)
         self._refresh_manager_panel()
-        self._reconcile_state(light=True)
+        self._reconcile_state()
 
     def _refresh_manager_panel(self) -> None:
         if not self._manager_modal_open():
@@ -579,55 +589,33 @@ class CockpitApp(App[None]):
         except AttributeError:
             pass
 
-    def on_key(self, event: object) -> None:
-        if self._background_actions_blocked():
-            return
-        try:
-            if hasattr(event, "key"):
-                key = event.key
-            elif hasattr(event, "character"):
-                key = event.character
-            else:
-                return
-        except AttributeError:
-            return
-        if key in {"enter", "\r"}:
-            self.action_swap_selected()
-
-    def _reconcile_state(self, *, light: bool = False) -> None:
+    def _reconcile_state(self) -> None:
         if self.pane_loader is None:
             return
-        # The periodic (light) reload skips per-pane preview captures (the detail
-        # view captures the selected pane's preview on demand instead). A tick is
-        # then one `list-panes` plus a tiny `ps` per title-less minicom pane — no
-        # large or per-pane preview reads. Only pass capture_previews when the
-        # loader actually accepts it, so we never mask a real TypeError from it.
-        kwargs: dict[str, object] = {"cockpit_pane_id": self.state.cockpit_pane_id}
-        if light and self._loader_accepts_capture_previews():
-            kwargs["capture_previews"] = False
-        panes = self.pane_loader(**kwargs)
+        panes = self.pane_loader(cockpit_pane_id=self.state.cockpit_pane_id)
         self.state = self.state.refresh(panes)
         try:
             self._refresh_widgets()
         except Exception:
             pass
 
-    def _loader_accepts_capture_previews(self) -> bool:
-        try:
-            params = inspect.signature(self.pane_loader).parameters
-        except (TypeError, ValueError):
-            return False
-        return "capture_previews" in params or any(
-            param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()
-        )
-
-    def _selected_preview(self, pane: PaneRecord) -> tuple[str, ...]:
-        if self.preview_loader is not None and pane.pane_id != self.state.cockpit_pane_id:
-            try:
-                return self.preview_loader(pane.pane_id)
-            except Exception:
-                return pane.preview
-        return pane.preview
+    def on_list_view_selected(self, event: object) -> None:
+        list_view = getattr(event, "list_view", None)
+        if getattr(list_view, "id", None) != "work-list":
+            return
+        pane_id = getattr(getattr(event, "item", None), "pane_id", None)
+        active = self.state.active_pane
+        if not pane_id or (active is not None and pane_id == active.pane_id):
+            self._last_click = None
+            return
+        now = self._clock()
+        last = self._last_click
+        if last is not None and last[0] == pane_id and now - last[1] < DOUBLE_CLICK_SECONDS:
+            selected = self.state.selected_pane
+            if selected is not None and selected.pane_id == pane_id:
+                self.action_swap_selected()
+                return
+        self._last_click = (pane_id, now)
 
     def _text(self, segments: list[tuple[str, str]]):
         """把 (文字, rich 樣式) 片段組成 rich Text；rich 缺席（textual stub 環境）則退回純字串。
@@ -689,6 +677,14 @@ class CockpitApp(App[None]):
     def _work_list_renderables(self, active: PaneRecord | None) -> list:
         return [self._text(segs) for segs in self._work_row_segments(active)]
 
+    def _work_row_pane_ids(self, active: PaneRecord | None) -> tuple[str, ...]:
+        """與 _work_list_renderables 同順序的 pane_id 投影（ACTIVE 首列）。"""
+        ids: list[str] = []
+        if active is not None:
+            ids.append(active.pane_id)
+        ids.extend(pane.pane_id for pane in self.state.candidate_section)
+        return tuple(ids)
+
     def _refresh_widgets(self) -> None:
         # ACTIVE pane 不再另設狀態條——它就是 WORK 清單首列（綠色 ● ACTIVE）；
         # 「無 active」的降級訊號改由 WORK 面板副標的琥珀 ⚠ 呈現，不再重複一條 bar。
@@ -696,58 +692,28 @@ class CockpitApp(App[None]):
 
         # Only rebuild the work list when its content (labels + selection marker
         # + per-pane status) actually changed, so an idle periodic refresh doesn't
-        # visibly flicker the list. The detail/preview below still updates every
-        # refresh. The plain-string key mirrors the coloured Text row-for-row.
+        # visibly flicker the list. The plain-string key mirrors the coloured Text
+        # row-for-row.
         items = self._work_list_items(active)
         if items != self._last_work_items:
             self._last_work_items = items
             work_list = self.query_one("#work-list", ListView)
             work_list.clear()
-            for renderable in self._work_list_renderables(active):
-                work_list.append(ListItem(Static(renderable)))
+            for renderable, pane_id in zip(
+                self._work_list_renderables(active), self._work_row_pane_ids(active)
+            ):
+                work_list.append(
+                    WorkItem(
+                        Static(renderable),
+                        pane_id=pane_id,
+                        id=f"row-{pane_id.lstrip('%')}",
+                    )
+                )
             try:
                 work_list.index = self._selected_list_index()
             except Exception:
                 pass
             self._set_border(work_list, "WORK · panes", format_work_pane_subtitle(self.state))
-
-        selected = self.state.selected_pane
-        detail_widget = self.query_one("#pane-detail", Static)
-        if selected is None:
-            self._set_border(detail_widget, "DETAIL", None)
-            detail_renderable = self._text(
-                [
-                    ("No candidate panes\n", "#94A3B8"),
-                    *self._state_segment(),
-                ]
-            )
-        else:
-            self._set_border(
-                detail_widget, f"DETAIL · {selected.pane_id}", selected.display_summary
-            )
-            segs: list[tuple[str, str]] = [
-                (f"{selected.pane_id} ", "bold #F8FAFC"),
-                (selected.display_summary, "#F8FAFC"),
-                (
-                    f"  {selected.command} · {selected.session_name}:"
-                    f"{selected.window_index} · {selected.width}×{selected.height}\n",
-                    "#64748B",
-                ),
-            ]
-            for line in self._selected_preview(selected):
-                segs.append((f"{line}\n", "#94A3B8"))
-            jobs = self.jobs_by_pane.get(selected.pane_id, ())
-            if jobs:
-                for job in jobs:
-                    glyph, color = status_style(job.status)
-                    segs.append(
-                        (f"{glyph} {job.source}:{job.status} {job.trace_id or '-'}\n", color)
-                    )
-            else:
-                segs.append(("· job-state: unmapped\n", "#64748B"))
-            segs.extend(self._state_segment())
-            detail_renderable = self._text(segs)
-        detail_widget.update(detail_renderable)
 
         self._refresh_jobs_panel()
 
@@ -760,6 +726,18 @@ class CockpitApp(App[None]):
         if not isinstance(status, dict):
             status = {}
         rows = slices_from_status(status)
+        if self._jobs_collapsed:
+            self._set_border(jobs_widget, f"JOBS ▸ {len(rows)} slices", None)
+            try:
+                jobs_widget.styles.max_height = 3
+            except Exception:
+                pass
+            jobs_widget.update("")
+            return
+        try:
+            jobs_widget.styles.max_height = 12
+        except Exception:
+            pass
 
         if status.get("degraded"):
             reason = str(status.get("degraded_reason") or "--")
@@ -781,10 +759,54 @@ class CockpitApp(App[None]):
             jobs_renderable = self._text([("manager slices: 0", "#64748B")])
         jobs_widget.update(jobs_renderable)
 
-    def _state_segment(self) -> list[tuple[str, str]]:
-        """DETAIL 底部 ``state:`` 行片段：ok 綠、降級琥珀。"""
-        reason = self.state.degraded_reason
-        return [(f"state: {reason or 'ok'}", "bold #FBBF24" if reason else "#22C55E")]
+    def action_toggle_jobs(self) -> None:
+        if self._background_actions_blocked():
+            return
+        self._jobs_collapsed = not self._jobs_collapsed
+        self._refresh_jobs_panel()
+
+    def _activate(self, target_pane_id: str, slot_pane_id: str) -> None:
+        proceed = True
+        record = self._displacement
+        if record is not None:
+            occupant_id, displaced_id = record
+            alive = {pane.pane_id for pane in self.state.panes}
+            if occupant_id in alive and displaced_id in alive:
+                try:
+                    self.actions.swap_selected_with_active(
+                        selected_pane_id=displaced_id,
+                        active_pane_id=occupant_id,
+                    )
+                    self._displacement = None
+                    if target_pane_id == displaced_id:
+                        proceed = False
+                    else:
+                        slot_pane_id = displaced_id
+                except Exception as exc:  # noqa: BLE001
+                    self._displacement = None
+                    self._notify_soft(f"restore swap failed: {exc}")
+                    proceed = False
+            else:
+                self._displacement = None
+        if proceed:
+            try:
+                self.actions.swap_selected_with_active(
+                    selected_pane_id=target_pane_id,
+                    active_pane_id=slot_pane_id,
+                )
+                self._displacement = (target_pane_id, slot_pane_id)
+                self.actions.focus_pane(target_pane_id)
+            except Exception as exc:  # noqa: BLE001
+                self._notify_soft(f"swap failed: {exc}")
+        self._reconcile_state()
+
+    def _notify_soft(self, message: str) -> None:
+        notifier = getattr(self, "notify", None)
+        if callable(notifier):
+            try:
+                notifier(message, severity="error")
+            except TypeError:
+                notifier(message)
 
     @staticmethod
     def _set_border(widget: object, title: str, subtitle: str | None) -> None:

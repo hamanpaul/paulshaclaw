@@ -21,7 +21,6 @@ def pane_record(
     width: int = 80,
     height: int = 24,
     active: bool = False,
-    preview: tuple[str, ...] = (),
 ) -> PaneRecord:
     return PaneRecord(
         pane_id=pane_id,
@@ -34,7 +33,6 @@ def pane_record(
         width=width,
         height=height,
         active=active,
-        preview=preview,
     )
 
 

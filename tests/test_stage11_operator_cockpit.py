@@ -61,7 +61,6 @@ def pane_record(
     width: int = 80,
     height: int = 24,
     active: bool = False,
-    preview: tuple[str, ...] = (),
     pane_tty: str = "",
     pane_current_path: str = "",
     host_short: str = "",
@@ -78,7 +77,6 @@ def pane_record(
         width=width,
         height=height,
         active=active,
-        preview=preview,
         pane_tty=pane_tty,
         pane_current_path=pane_current_path,
         host_short=host_short,
@@ -213,7 +211,7 @@ class Stage11StateTests(unittest.TestCase):
     def test_pane_display_label_falls_back_to_derived_summary(self) -> None:
         pane = PaneRecord(
             pane_id="%0", session_name="main", window_index="0", title="", command="minicom",
-            left=0, top=0, width=80, height=24, active=False, preview=(),
+            left=0, top=0, width=80, height=24, active=False,
             pane_tty="/dev/pts/2", summary="minicom COM0",
         )
 
@@ -408,31 +406,29 @@ class Stage11StateTests(unittest.TestCase):
             panes=panes, cockpit_pane_id="%0", cockpit_session_name="main",
             jobs_by_pane={}, actions=LayoutActionService(),
         )
-        widgets = {key: Mock() for key in ("#work-list", "#pane-detail", "#global-jobs")}
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
 
         with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
             app._refresh_widgets()
             app._refresh_widgets()  # identical content -> list not rebuilt again
             self.assertEqual(widgets["#work-list"].clear.call_count, 1)
-            # detail keeps updating every refresh even when the list is unchanged
-            self.assertGreaterEqual(widgets["#pane-detail"].update.call_count, 2)
             self.assertGreaterEqual(widgets["#global-jobs"].update.call_count, 2)
 
             app.state = app.state.move_selection(1)  # cursor moves to a different candidate
             app._refresh_widgets()
             self.assertEqual(widgets["#work-list"].clear.call_count, 2)
 
-    def test_light_refresh_reloads_panes_without_previews(self) -> None:
+    def test_refresh_reloads_panes_with_single_loader_call(self) -> None:
         seen: dict[str, object] = {}
 
-        def loader(*, cockpit_pane_id: str, capture_previews: bool = True):
-            seen["capture_previews"] = capture_previews
+        def loader(*, cockpit_pane_id: str):
+            seen["cockpit_pane_id"] = cockpit_pane_id
             return self._minimal_panes()
 
         app = self._minimal_app(pane_loader=loader)
         with patch.object(app, "_refresh_widgets"):
-            app._reconcile_state(light=True)
-        self.assertIs(seen["capture_previews"], False)
+            app._reconcile_state()
+        self.assertEqual(seen["cockpit_pane_id"], "%0")
 
     def _minimal_panes(self) -> tuple[PaneRecord, ...]:
         return (
@@ -740,9 +736,11 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("m: m 顯示 manager 面板", help_text)
         self.assertIn("q: q 離開 cockpit", help_text)
         self.assertIn("t: t 送出 manager tick", help_text)
+        self.assertIn("j: j 收合/展開 JOBS", help_text)
         self.assertIn("ctrl+q: Ctrl+Q 離開 cockpit", help_text)
         self.assertIn("question_mark: ? 顯示說明", help_text)
-        self.assertIn("all local tmux sessions", help_text)
+        self.assertIn("The work list shows panes of the cockpit session", help_text)
+        self.assertIn("j collapses / expands the JOBS panel.", help_text)
 
     def test_cockpit_app_imports_manager_client_without_coordinator_dependency(self) -> None:
         tree = ast.parse(inspect.getsource(sys.modules["paulshaclaw.cockpit.app"]))
@@ -838,7 +836,7 @@ class Stage11StateTests(unittest.TestCase):
         app.notify.assert_called_once()
         self.assertIn("PermissionError: control root denied", app.notify.call_args.args[0])
         refresh.assert_called_once_with()
-        reconcile.assert_called_once_with(light=True)
+        reconcile.assert_called_once_with()
 
     def test_refresh_tick_updates_manager_panel_when_open(self) -> None:
         app = self._minimal_app()
@@ -849,13 +847,13 @@ class Stage11StateTests(unittest.TestCase):
         ):
             app._on_refresh_tick()
 
-        reconcile.assert_called_once_with(light=True)
+        reconcile.assert_called_once_with()
         refresh_jobs.assert_called_once_with()
         refresh.assert_called_once_with()
 
     def test_refresh_widgets_renders_manager_slices_in_jobs_panel(self) -> None:
         app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#pane-detail", "#global-jobs")}
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
         app.manager_client = SimpleNamespace(
             read_status=lambda: {
                 "in_flight": [{"slice_id": "slice-run", "state": "running"}],
@@ -879,7 +877,7 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
         app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#pane-detail", "#global-jobs")}
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
         app.manager_client = SimpleNamespace(
             read_status=lambda: {
                 "degraded": True,
@@ -991,9 +989,9 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
     async def test_enter_swaps_selected_candidate_and_focuses_new_active_pane(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", command="python", width=120, height=40),
-            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40, preview=("active",)),
-            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20, preview=("job 1",)),
-            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20, preview=("traffic",)),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
         )
         actions = FakeLayoutActionService()
         app = CockpitApp.from_snapshot(
@@ -1067,12 +1065,12 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
             await pilot.press("escape")
             self.assertNotIsInstance(app.screen, HelpModal)
 
-    async def test_down_updates_selected_preview_target(self) -> None:
+    async def test_down_updates_selected_pane(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", command="python", width=120, height=40),
             pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
-            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20, preview=("job 1",)),
-            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20, preview=("traffic",)),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
         )
         app = CockpitApp.from_snapshot(
             panes=panes,
@@ -1238,7 +1236,7 @@ class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.press("escape")
                 self.assertNotIsInstance(app.screen, HelpModal)
 
-        reconcile.assert_called_once_with(light=True)
+        reconcile.assert_called_once_with()
 
     async def test_q_exits_app_through_binding(self) -> None:
         app = CockpitApp.from_snapshot(

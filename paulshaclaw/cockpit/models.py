@@ -23,7 +23,6 @@ class PaneRecord:
     width: int
     height: int
     active: bool
-    preview: tuple[str, ...]
     pane_tty: str = ""
     pane_current_path: str = ""
     host_short: str = ""
@@ -63,10 +62,3 @@ class JobRow:
     slice_id: str
     state: str
     source_section: str
-
-
-@dataclass(frozen=True)
-class PaneDetail:
-    pane: PaneRecord
-    jobs: tuple[JobSummary, ...]
-    degraded_reason: str | None

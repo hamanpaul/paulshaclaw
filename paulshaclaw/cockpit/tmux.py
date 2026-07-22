@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 import re
 import subprocess
@@ -66,7 +67,6 @@ def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
                 width=width_value,
                 height=height_value,
                 active=active == "1",
-                preview=(),
                 pane_tty=tty,
                 pane_current_path=pane_current_path,
                 host_short=host_short,
@@ -197,15 +197,12 @@ def derive_summary(
 
 
 class TmuxClient:
-    def list_panes(
-        self, *, cockpit_pane_id: str, capture_previews: bool = True
-    ) -> tuple[PaneRecord, ...]:
+    def list_panes(self, *, cockpit_pane_id: str) -> tuple[PaneRecord, ...]:
         """List panes with a readable summary per pane.
 
-        ``capture_previews=False`` skips the per-pane ``capture-pane`` calls so a
-        periodic UI refresh stays cheap (one ``list-panes`` plus a single ``ps``
-        scan to catch minicom launched via a wrapper); the detail view captures the
-        selected pane's preview on demand instead."""
+        三層版面後 refresh 恆為一次 ``list-panes``（外加 title 缺失 minicom pane
+        的小 ``ps``）；cockpit 不再抓任何 pane preview。``cockpit_pane_id`` 保留
+        為 loader 契約參數（呼叫端以 keyword 傳入）。"""
         try:
             completed = subprocess.run(
                 ["tmux", "list-panes", "-a", "-F", LIST_PANES_FORMAT],
@@ -219,40 +216,11 @@ class TmuxClient:
         # One ``ps`` scan for the whole refresh, shared across all panes, so
         # wrapped-minicom detection can't fan out into a per-pane fork storm.
         minicom_by_tty = _minicom_map()
-        enriched: list[PaneRecord] = []
-        for pane in panes:
-            preview = ()
-            if capture_previews and pane.pane_id != cockpit_pane_id:
-                try:
-                    preview = self.capture_preview(pane.pane_id)
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    preview = ()
-            enriched.append(
-                PaneRecord(
-                    pane_id=pane.pane_id,
-                    session_name=pane.session_name,
-                    window_index=pane.window_index,
-                    title=pane.title,
-                    command=pane.command,
-                    left=pane.left,
-                    top=pane.top,
-                    width=pane.width,
-                    height=pane.height,
-                    active=pane.active,
-                    preview=preview,
-                    pane_tty=pane.pane_tty,
-                    pane_current_path=pane.pane_current_path,
-                    host_short=pane.host_short,
-                    summary=derive_summary(pane, minicom_by_tty),
-                )
+        _ = cockpit_pane_id
+        return tuple(
+            replace(
+                pane,
+                summary=derive_summary(pane, minicom_by_tty),
             )
-        return tuple(enriched)
-
-    def capture_preview(self, pane_id: str, *, lines: int = 20) -> tuple[str, ...]:
-        completed = subprocess.run(
-            ["tmux", "capture-pane", "-p", "-t", pane_id, "-S", f"-{lines}"],
-            check=True,
-            capture_output=True,
-            text=True,
+            for pane in panes
         )
-        return tuple(line.rstrip() for line in completed.stdout.splitlines() if line.strip())

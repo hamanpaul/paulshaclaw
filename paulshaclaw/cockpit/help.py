@@ -51,9 +51,12 @@ class HelpModal(ModalScreen[None]):
                 "Keys:",
                 *rows,
                 "",
-                "Multi-session behavior:",
-                "The work list includes panes from all local tmux sessions.",
-                "Enter swaps the selected pane with the cockpit-session active slot.",
+                "Behavior:",
+                "The work list shows panes of the cockpit session; other sessions",
+                "are enumerated and counted in the banner summary only (#249).",
+                "Enter or double-click swaps the selected pane with the active slot.",
+                "A previous swap is restored automatically before the next one.",
+                "j collapses / expands the JOBS panel.",
                 "The active slot is never inferred from another session with matching geometry.",
             ]
         )

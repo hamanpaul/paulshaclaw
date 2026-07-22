@@ -7,7 +7,7 @@ depends_on: []
 
 # Cockpit 三層直排 + 雙擊 swap + 自動歸位 設計
 
-> 日期：2026-07-22 ｜ 狀態：v8.1（v8 定稿＝codex 對抗審查 8 輪 PASS；v8.1＝plan 審查揭露 #249 spec 漂移後之 §6 需求對照 truth-up，req 5 改 MODIFIED）｜ 分支：`feature/cockpit-three-layer`
+> 日期：2026-07-22 ｜ 狀態：v8 定稿（codex 對抗審查 8 輪 PASS）｜ 實作完成（本 plan 全 Task 綠燈）｜ 實作完成（cortex 派工 copilot，全 496 測試綠、tmux 實機冒煙通過）｜ 分支：`feature/cockpit-three-layer-build`
 > 範疇：stage11-operator-cockpit spec 修訂。前置脈絡：#248/#249（JOBS 接線、WORK 收斂）、#252（cost footer）皆已 merged。
 
 ## 1. 背景與決策脈絡
