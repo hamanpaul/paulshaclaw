@@ -1,0 +1,2 @@
+### Fixed
+- **cockpit WORK 清單辨識 wrapper 底下的 minicom**：`serialwrap-minicom` wrapper 啟動的 minicom 使 tmux `#{pane_current_command}` 回報 `bash`，`derive_summary` 的 minicom guard 失效、pane 標籤退回 cwd basename。改為 title 不可用的 shell pane 走 tty-based 偵測（穿透 wrapper）標為 `minicom COMx`；偵測只認 minicom binary（argv0 basename，`man minicom` 等子字串不再偽陽性）；每次 refresh 以單一 `ps -e` 掃描建 tty→label map 取代 per-pane fork（不再有多 pane 同步 `ps` 阻塞 UI 的尾風險）；`ps` 呼叫 bounded（1s timeout）且 fail-soft（timeout／decode 錯誤皆回無標籤，不冒泡 refresh 路徑）。spec `stage11-operator-cockpit` 同步新增 wrapper 偵測 requirement 與偽陽性邊界 scenario。
