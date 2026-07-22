@@ -339,7 +339,12 @@ class CockpitApp(App[None]):
         try:
             full_w = self._banner_raw_width()
             if full_w >= _COST_SINGLE_LINE_MIN_WIDTH:
-                full_width_cost = cost_bar.cost_line(full_w)
+                line = cost_bar.cost_line(full_w)
+                if line:
+                    # 向右對齊：前導補白到貼齊 banner 右緣。pad 依當下 full_w 計算，
+                    # 故每次 render（含 resize，見 on_resize）都重新靠右。
+                    pad = max(0, full_w - len(branding.strip_ansi(line)))
+                    full_width_cost = " " * pad + line
             else:
                 net_width = len(branding.strip_ansi(stat_lines[-1])) if stat_lines else 0
                 net_suffix, cost_rest = cost_bar.cost_split(self._cost_line_width(), net_width)
@@ -350,7 +355,7 @@ class CockpitApp(App[None]):
         except Exception:
             full_width_cost = None
         composed = self._compose_banner_stats(banner_lines, stat_lines)
-        # 單行 cost 以整個 banner 寬渲染 → 接在 composed 之後、不受 mascot 欄縮排限制。
+        # 單行 cost 以整個 banner 寬、向右對齊渲染 → 接在 composed 之後、不受 mascot 欄縮排。
         if full_width_cost:
             composed += full_width_cost + "\n"
         try:
@@ -442,6 +447,14 @@ class CockpitApp(App[None]):
             banner = self.query_one("#brand-banner", Static)
             self._set_border(banner, "🦞 破蝦哥 · Cockpit", format_session_summary(self.state))
             banner.update(self._brand_banner_renderable())
+        except Exception:
+            pass
+
+    def on_resize(self, event: object) -> None:
+        """終端／pane resize 時立即重排 banner——cost 單行右對齊的前導補白需依當下寬度重算，
+        不能等下一個 sysmon tick 才更新。fail-soft，不擋 resize。"""
+        try:
+            self._refresh_banner()
         except Exception:
             pass
 
