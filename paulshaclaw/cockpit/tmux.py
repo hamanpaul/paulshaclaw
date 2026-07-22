@@ -28,6 +28,11 @@ LIST_PANES_FORMAT = "\t".join(
 _MINICOM_COM_RE = re.compile(r"COM(\d+)", re.IGNORECASE)
 _MINICOM_DEVICE_RE = re.compile(r"-D\s+(\S+)")
 
+# minicom 常經 wrapper（如 serialwrap-minicom，bash script）啟動，此時 tmux
+# #{pane_current_command} 回報的是 shell 而非 minicom。這組 shell 名用來判斷
+# 「值得對該 pane 的 tty 探一次 minicom」，把成本鎖在真正可能藏 minicom 的 pane。
+_SHELL_COMMANDS = frozenset({"bash", "sh", "zsh", "dash", "ash", "fish"})
+
 
 def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
     panes: list[PaneRecord] = []
@@ -112,6 +117,13 @@ def derive_summary(pane: PaneRecord) -> str:
         return title
     if pane.command == "minicom":
         return _minicom_summary(pane.pane_tty) or "minicom"
+    # minicom 常經 wrapper（serialwrap-minicom）啟動，tmux 只看得到外層 shell；
+    # 對 shell pane 探一次 tty，讓 wrapper 底下的 minicom 仍以 COM 埠命名。
+    # _minicom_summary 對空 tty 立即回 None，故無 tty 的 shell pane 不觸發 ps。
+    if pane.command in _SHELL_COMMANDS:
+        wrapped = _minicom_summary(pane.pane_tty)
+        if wrapped:
+            return wrapped
     if pane.pane_current_path:
         return Path(pane.pane_current_path).name or "/"
     return f"[{pane.command}]" if pane.command else ""

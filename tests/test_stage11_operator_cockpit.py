@@ -246,6 +246,42 @@ class Stage11StateTests(unittest.TestCase):
         )
         self.assertEqual([derive_summary(pane) for pane in panes], ["repo-a", "repo-b"])
 
+    def test_derive_summary_wrapped_minicom_reads_com_from_tty(self) -> None:
+        # serialwrap-minicom wrapper 底下：tmux 回報 command=bash，但 tty 上跑著 minicom。
+        pane = pane_record(
+            "%3",
+            title="",
+            command="bash",
+            pane_tty="/dev/pts/9",
+            pane_current_path="/home/paul_chen",
+            host_short="9900X",
+        )
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=(
+                "  bash /home/paul_chen/.local/bin/serialwrap-minicom COM0\n"
+                "  /usr/bin/minicom -D /dev/pts/8 --color=on -C /home/paul_chen/b-log/mini_COM0_x.log\n"
+            ),
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(derive_summary(pane), "minicom COM0")
+
+    def test_derive_summary_shell_pane_without_minicom_falls_back_to_cwd(self) -> None:
+        # 一般 idle bash pane：tty 上沒有 minicom，須退回 cwd basename、不誤標 minicom。
+        pane = pane_record(
+            "%1",
+            title="",
+            command="bash",
+            pane_tty="/dev/pts/3",
+            pane_current_path="/home/paul/prj/repo-a",
+            host_short="9900X",
+        )
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="  -bash\n",
+        )
+        with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
+            self.assertEqual(derive_summary(pane), "repo-a")
+
     def test_derive_summary_root_path_falls_back_to_slash(self) -> None:
         pane = pane_record("%9", title="9900X", command="bash", pane_current_path="/", host_short="9900X")
         self.assertEqual(derive_summary(pane), "/")
