@@ -91,7 +91,7 @@ def _minicom_label_from_args(args: str) -> str | None:
     stripped = args.strip()
     if not stripped:
         return None
-    argv0 = stripped.split()[0].rsplit("/", 1)[-1]
+    argv0 = stripped.split(None, 1)[0].rsplit("/", 1)[-1]
     if argv0 != "minicom":
         return None
     matched = _MINICOM_COM_RE.search(args)
