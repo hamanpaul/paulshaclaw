@@ -6,11 +6,13 @@ if [[ -z "${REPO:-}" ]]; then
   REPO="$(cd "$_psc_service_dir/.." && pwd)"
 fi
 if [[ -z "${PY:-}" ]]; then
-  # Prefer PSC_PYTHON / system python3 (planes in ~/.local) over the repo .venv.
-  PY="$(command -v "${PSC_PYTHON:-python3}" 2>/dev/null || true)"
-  if [[ -z "$PY" ]]; then
-    PY="$REPO/.venv/bin/python"
-    [[ -x "$PY" ]] || { echo "找不到可用的 python（設 PSC_PYTHON 或於 repo 執行 pip install --user -e .）" >&2; exit 1; }
+  # Standalone units share start.sh's full operator-runtime resolver. When
+  # sourced by start.sh, PY is already set so this cannot recurse.
+  # shellcheck source=/dev/null
+  source "$REPO/scripts/start.sh" --source-only
+  if ! PY="$(resolve_operator_python "$REPO")"; then
+    echo "找不到完整 operator runtime（設 PSC_PYTHON 或於 repo 執行 'python3 -m venv .venv && .venv/bin/python -m pip install --upgrade --force-reinstall -e .'）" >&2
+    exit 1
   fi
 fi
 unset _psc_service_dir
