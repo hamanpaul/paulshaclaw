@@ -437,6 +437,25 @@ def test_cutover_uses_errexit() -> None:
     assert "set -euo pipefail" in CUTOVER_SH.read_text(encoding="utf-8")
 
 
+def test_cutover_pin_lookup_is_pipefail_safe_with_duplicate_matches(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    pin = "paulsha-hippo@" + "a" * 40
+    repo.joinpath("pyproject.toml").write_text(
+        (f'"{pin}"\n' * 10_000),
+        encoding="utf-8",
+    )
+
+    completed = _run_cutover_function(
+        f'pin_of "{repo}" paulsha-hippo',
+        tmp_path / "bin",
+        tmp_path,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == pin
+
+
 @pytest.mark.parametrize(
     ("extra_env", "expected_status"),
     [

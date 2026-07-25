@@ -34,7 +34,7 @@ install_operator_runtime() {
 pin_of() {
   local repo="${1:?repo root is required}"
   local package="${2:?package is required}"
-  grep -oE "$package@[0-9a-f]{40}" "$repo/pyproject.toml" | head -1
+  grep -m1 -oE "$package@[0-9a-f]{40}" "$repo/pyproject.toml"
 }
 
 install_plane_clis() {
