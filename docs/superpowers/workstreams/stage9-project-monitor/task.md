@@ -8,4 +8,4 @@
 - [x] 實作 service runtime 三 loop（scanner / watcher / Unix socket server）
 - [x] 實作 read API 與 subscribe 契約
 - [x] 撰寫 unit / integration / service / CLI 測試與 evidence
-- [ ] 補齊 spec / review，準備 archive
+- [x] 依 Cortex extraction 後的 ownership 封存歷史 change；不將舊 capability 套回本 repo canonical specs

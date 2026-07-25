@@ -1,5 +1,7 @@
 # stage9-project-monitor / plan
 
+> 歷史狀態（2026-07-25）：本 workstream 的 monitor 曾於本 repo 完成實作，之後由 `53088ad` 隨 Cortex extraction 遷至 `paulsha-cortex`。本文保留為歷史證據；現行 runtime、config 與 capability ownership 以 Cortex 為準。原 OpenSpec change 以 `--skip-specs` 封存，避免把已遷出的能力重新套回本 repo canonical specs。
+
 ## Scope
 
 - Stage: 9
@@ -52,15 +54,14 @@
 1. 補齊 spec、task checkbox、todo evidence 連結、review.md。
 2. 執行 `python3 -m unittest discover -s tests` 全量回歸。
 3. 自我 review，盤點 risk（scan cost / stale snapshot / drift / secret leakage 見 design §5）。
-4. 準備 archive：將 `openspec/changes/2026-04-26-stage9-project-monitor/specs/stage9-project-monitor/spec.md` 落到 `openspec/specs/stage9-project-monitor/spec.md`。
+4. 歷史收斂：原規劃是把 capability 落到本 repo canonical specs；Cortex extraction 後此步已失效，改為不套 spec 的歷史封存。
 
 ## Relevant files
 
-- `paulshaclaw/monitor/`
-- `paulshaclaw/config/paulshaclaw.sample.yaml`
-- `tests/test_stage9_project_monitor.py`
-- `openspec/changes/2026-04-26-stage9-project-monitor/`（propose 階段成果，apply 後 archive）
-- `openspec/specs/stage9-project-monitor/spec.md`（archive 後 canonical）
+- `paulshaclaw/monitor/`（歷史路徑；已由 `53088ad` 移除並遷至 Cortex）
+- `paulshaclaw/config/paulshaclaw.sample.yaml`（歷史 config；現行 config ownership 在 Cortex）
+- `tests/test_stage9_project_monitor.py`（歷史測試；已隨 implementation 遷出）
+- `openspec/changes/archive/2026-07-25-2026-04-26-stage9-project-monitor/`（歷史 change；未套入本 repo canonical specs）
 - `config/worktrees/stage-worktrees.tsv`（已加 stage9 row）
 - `docs/superpowers/workstreams/stage9-project-monitor/{plan,task,todo,review}.md`
 - `docs/superpowers/workstreams/stage9-project-monitor/evidence/`
@@ -81,3 +82,4 @@
 - watchdog 為 watcher 預設 lib，subprocess git 為 branch inspection 預設策略；兩者皆包在內部 interface 後（design §4 decision #2/#5）。
 - 此階段只負責產 monitor 與 read API；Stage 1/3 改為消費 monitor 是另一個 change，不在 scope 內。
 - Single source of truth 原則：monitor 不持久化 per-project 平行狀態，只做 in-memory snapshot。
+- 2026-07-08 起，monitor runtime / config / read API 的 implementation ownership 已遷至 `paulsha-cortex`；本 workstream 不再代表本 repo 的 active change。
