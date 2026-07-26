@@ -30,5 +30,5 @@
 
 - [x] monitor runtime / config / read API 已遷至 `paulsha-cortex`；本 repo 僅保留 shim、依賴 pin 與部署整合
 - [x] Stage 1 / Stage 3 / cockpit 的後續 monitor 整合改由 Cortex ownership 與本 repo integration boundary 管理
-- [ ] 不擴展 `.paul-project.yml` schema；任何 monitor hint 需求請走另一個 change
+- [ ] 不擴展 `.project-policy.yml` schema；任何 monitor hint 需求請走另一個 change
 - [ ] 違反 single source of truth 原則的提案（例如「monitor 自行記錄專案狀態到 sqlite」）一律拒絕，請改回讀 project artifact

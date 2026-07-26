@@ -16,7 +16,7 @@
   - `docs/superpowers/workstreams/stage9-project-monitor/`
 - Out of scope:
   - 修改 Stage 1 daemon / Stage 3 lifecycle 內部 task 選擇邏輯（消費端在另一個 change）
-  - 擴展 `.paul-project.yml` schema（design §4 decision #4：保持現狀）
+  - 擴展 `.project-policy.yml` schema（design §4 decision #4：保持現狀）
   - Stage 11 cockpit 加入 project-level pane（後續 follow-up）
   - 真實 systemd unit 或 deploy 腳本（Stage 7 範疇）
 
@@ -78,7 +78,7 @@
 
 - Stage 9 編號重用，原「既有資產匯入」mission 保持永久取消（design §4 decision #1，canonical doc 已在 propose 階段更新）。
 - Transport 限定 local Unix domain socket，不開 HTTP（design §4 decision #3）。
-- `.paul-project.yml` schema 本輪不擴展（design §4 decision #4）。
+- `.project-policy.yml` schema 本輪不擴展（design §4 decision #4）。
 - watchdog 為 watcher 預設 lib，subprocess git 為 branch inspection 預設策略；兩者皆包在內部 interface 後（design §4 decision #2/#5）。
 - 此階段只負責產 monitor 與 read API；Stage 1/3 改為消費 monitor 是另一個 change，不在 scope 內。
 - Single source of truth 原則：monitor 不持久化 per-project 平行狀態，只做 in-memory snapshot。
