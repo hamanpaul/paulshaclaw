@@ -67,7 +67,7 @@ policy_version: 1.0.14
 - **R-20（workflow policy_version 同步，FAIL gate，無豁免 label）**：workflow 內宣告的 `policy_version` / `POLICY_VERSION` semver 字面值必須與 `.project-policy.yml` 一致。
 - **Exemption 白名單新增**：`policy-exempt:ci-tests`（R-19）。
 
-## v1.0.12 新增規則（隨 paulsha-conventions 1.0.3→1.0.12 升級，2026-07-04）
+## Policy v1.0.14 對齊（沿用 1.0.3→1.0.12 新增規則，2026-07-26）
 引擎 pin 已升到 v1.0.14（見 policy-check workflow 與上游 RELEASES 及 CHANGELOG）。1.0.3~1.0.12 新增的規則對本 repo 多為 opt-in：未在專案設定檔（project-policy）宣告對應欄位即不啟用（NA）。摘要如下，日後啟用再遵循：
 
 - R-14（1.0.6 起，無豁免）：四份 agent 慣例檔（CLAUDE／AGENTS／GEMINI／copilot-instructions）在 copy 模式下須完全一致，含版本欄與首行 managed-by 版本註記——改任一份或 bump 版本都要同步四份；symlink 模式則後三者須為指向 CLAUDE 的 symlink。
