@@ -137,6 +137,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade --force-reinstall -e .
 .venv/bin/python -m pip install pytest
 .venv/bin/python -m pytest tests/ -q  # 確認同一 operator runtime 綠
+./scripts/preflight-tests.sh  # preflight 同樣使用 repo operator runtime
 
 # 3. 要跑常駐服務（記憶 + 治理），用 pipx 持久安裝兩個平面 CLI（勿用暫存 venv）
 pipx install "git+https://github.com/hamanpaul/paulsha-hippo"

@@ -11,5 +11,5 @@ preflight:
       timeout_seconds: 300
     - name: tests
       kind: tests
-      argv: ["python3", "-m", "pytest", "tests/", "-q"]
+      argv: ["./scripts/preflight-tests.sh"]
       timeout_seconds: 1800
