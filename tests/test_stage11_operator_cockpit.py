@@ -31,6 +31,11 @@ from paulshaclaw.cockpit.app import (
     format_work_pane_subtitle,
     pane_display_label,
     _JOBS_LINE_BUDGET,
+    _JOBS_WIDTH_FALLBACK,
+    _display_width,
+    _ellipsize_middle,
+    _fit_trailer,
+    _pad_display,
     group_job_rows,
     slices_from_status,
 )
@@ -432,7 +437,7 @@ class Stage11StateTests(unittest.TestCase):
 
         (group,) = group_job_rows(rows)
 
-        self.assertEqual(group.note, "上游未帶 reason")
+        self.assertEqual(group.note, "原因未知")
         self.assertEqual(group.detail_line, "")
 
     def test_rows_carry_project_attribution_when_upstream_provides_it(self) -> None:
@@ -1219,7 +1224,7 @@ class Stage11StateTests(unittest.TestCase):
         # 上游有給 repo 時，project 要出現在次要欄的最前面。
         self.assertIn("paulsha-cortex", rendered)
         # 上游沒帶 reason 時明說，而不是留一列空白狀態。
-        self.assertIn("上游未帶 reason", rendered)
+        self.assertIn("原因未知", rendered)
 
     def test_refresh_widgets_shows_needs_human_even_when_routine_rows_overflow(self) -> None:
         """回歸現場情況：ready 多到塞爆面板時，等人工的那列仍必須看得到，
@@ -1249,6 +1254,96 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("candidate-worktree-dirty", rendered)
         self.assertIn("未顯示", rendered)
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "21 slices · 1 待人工")
+
+    # --- #264：CJK 顯示寬度與面板可用寬度 ---
+
+    def test_display_width_counts_cjk_as_two_columns(self) -> None:
+        """`4 phase 全待裁決` len() 是 12 但終端佔 16 欄；用 len() 排版整欄會歪。"""
+        self.assertEqual(_display_width("needs_human"), 11)
+        self.assertEqual(_display_width("4 phase 全待裁決"), 16)
+        self.assertEqual(_display_width("待裁決"), 6)
+
+    def test_pad_display_aligns_mixed_width_columns(self) -> None:
+        padded_ascii = _pad_display("exited", 16)
+        padded_cjk = _pad_display("4 phase 全待裁決", 16)
+
+        self.assertEqual(_display_width(padded_ascii), 16)
+        self.assertEqual(_display_width(padded_cjk), 16)
+
+    def test_ellipsize_middle_measures_by_display_width(self) -> None:
+        result = _ellipsize_middle("待裁決待裁決待裁決", 10)
+
+        self.assertLessEqual(_display_width(result), 10)
+        self.assertIn("…", result)
+
+    def test_fit_trailer_drops_whole_items_from_the_tail(self) -> None:
+        """硬切字元會把 `paulsha-cortex` 砍成半個名字，比少顯示一項更難讀。"""
+        fitted = _fit_trailer(("paulsha-cortex", "wf-e13fa4daae", "原因未知", "job-99"), 32)
+
+        self.assertIn("paulsha-cortex", fitted)
+        self.assertNotIn("job-99", fitted)
+        self.assertTrue(fitted.endswith("…"))
+        self.assertLessEqual(_display_width(fitted), 32)
+
+    def test_fit_trailer_keeps_everything_when_it_fits(self) -> None:
+        fitted = _fit_trailer(("paulsha-cortex", "待裁決"), 40)
+
+        self.assertEqual(fitted, "paulsha-cortex · 待裁決")
+
+    def test_refresh_widgets_keeps_main_rows_within_the_panel_width(self) -> None:
+        """主行超過面板寬會被 Textual 折行，折出來的行不在預算內——實測部署後
+        「上游未帶 reason」就被折到下一行，讓面板顯示的群數比算的少。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "recent_done": [
+                    {
+                        "slice_id": "wf-e13fa4daae-subagent-build",
+                        "gate_status": "needs_human",
+                        "workflow_repo": "hamanpaul/paulsha-cortex",
+                    }
+                ],
+                "degraded": False,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        main_rows = [line for line in rendered.splitlines() if not line.startswith("    ↳")]
+        for line in main_rows:
+            self.assertLessEqual(_display_width(line), _JOBS_WIDTH_FALLBACK, line)
+
+    def test_refresh_widgets_never_truncates_the_copyable_command(self) -> None:
+        """細節行帶著可貼進終端執行的命令，截斷等於讓這個功能失去意義。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "attention": [
+                    {
+                        "slice_id": "add-cortex-version-flag-build",
+                        "job_state": "exited",
+                        "reason": "candidate-worktree-dirty",
+                        "next_actions": ["retry-build", "abandon", "retry-verify"],
+                    }
+                ],
+                "degraded": False,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        self.assertIn(
+            "cortex slice-action add-cortex-version-flag-build "
+            "retry-build|abandon|retry-verify --actor $USER",
+            rendered,
+        )
+        self.assertNotIn("slice-a…", rendered)
 
     def test_refresh_widgets_never_exceeds_the_jobs_line_budget(self) -> None:
         """面板高度固定：細節行不可以吃掉留給「另 N 群未顯示」的保留位，
