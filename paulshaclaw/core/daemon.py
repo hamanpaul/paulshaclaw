@@ -129,11 +129,12 @@ class PaulShiaBroDaemon:
         return bro_queue._default_capture(pane_id, lines=lines)
 
     def _send_to_pane_confirmed(self, pane_id: str, message: str) -> bool:
-        """`bro_queue.flush()` 用的 send 介面：沿用 `_send_to_pane` 既有的硬失敗語意
+        """`bro_queue.flush()` 用的 send 介面。
 
-        （tmux/pane 不存在時直接 raise ValueError，讓 route_to_agent 一如既往地
-        把環境層級的錯誤往外炸），與「pane 忙碌、驗不到送達」的軟失敗（回傳
-        False／逾時，交由 bro_queue 留在佇列）分開。
+        沿用 `_send_to_pane` 既有的硬失敗語意：tmux/pane 不存在時直接 raise
+        ValueError，讓 route_to_agent 一如既往地把環境層級的錯誤往外炸；這與
+        「pane 忙碌、驗不到送達」的軟失敗（回傳 False／逾時，交由 bro_queue
+        留在佇列重試）是兩回事，刻意分開處理。
         """
         self._send_to_pane(pane_id, message)
         return True
