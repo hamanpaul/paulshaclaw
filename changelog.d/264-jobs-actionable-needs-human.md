@@ -1,2 +1,3 @@
 ### Changed
+- cockpit JOBS 面板現在標示每筆 job 屬於哪個 project（#264）：manager 是跨 repo 派工的，同一個面板會混進別的 repo 的 workflow——現場 10 筆 `needs_human` 全屬 `paulsha-cortex`、paulshaclaw 一筆都沒有，但畫面上完全看不出來。`repo` / `workflow_repo` 以前向相容方式讀取並顯示為次要欄首位；上游未提供時留白，不猜歸屬。
 - cockpit JOBS 面板改以「要人動手的先講」排序並帶出可執行下一步（#264）：`needs_human` 排到最前面（現場 51 列 / 11 列等人工時，原本一列都露不出來）、attention 與 held 本來就有的 `reason` / `next_actions` / `job_id` / `branch` 不再被丟棄、`recent_done • needs_human` 標示為「待裁決」而 attention 標示為「阻塞中」以區分兩種語意、`wf-<hash>-` 執行環境前綴降為次要欄。有 `next_actions` 時直接給可複製執行的 `cortex slice-action … --actor $USER`；上游未帶 reason／action 時明說是契約缺口，不留無意義狀態列；被行數預算截掉的列數也會顯示出來。

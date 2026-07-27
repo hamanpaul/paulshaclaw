@@ -70,6 +70,14 @@ class JobRow:
     job_id: str = ""
     branch: str = ""
     needs_human: bool = False
+    # manager 是跨 repo 派工的，同一個 JOBS 面板會混進別的 project 的 workflow。
+    # 不標 project，operator 根本不知道該去哪個 repo 動手（#264）。
+    repo: str = ""
+
+    @property
+    def project(self) -> str:
+        """顯示用 project 名：`hamanpaul/paulsha-cortex` → `paulsha-cortex`。"""
+        return self.repo.rpartition("/")[2] if self.repo else ""
 
     @property
     def workflow_id(self) -> str:

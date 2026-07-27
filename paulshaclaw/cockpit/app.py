@@ -185,7 +185,14 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
             if not slice_id:
                 continue
             state = str(item.get("state") or "running")
-            rows.append(JobRow(slice_id=slice_id, state=state, source_section="in_flight"))
+            rows.append(
+                JobRow(
+                    slice_id=slice_id,
+                    state=state,
+                    source_section="in_flight",
+                    repo=_text_field(item, "repo", "workflow_repo"),
+                )
+            )
 
     ready = status.get("ready")
     if isinstance(ready, list):
@@ -194,7 +201,11 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
             if not slice_id:
                 continue
             state = str(item.get("state")) if isinstance(item, dict) and item.get("state") else "ready"
-            rows.append(JobRow(slice_id=slice_id, state=state, source_section="ready"))
+            # ready 目前上游送的是 list[str]，dict 形式一併支援以免日後改動漏接。
+            repo = _text_field(item, "repo", "workflow_repo") if isinstance(item, dict) else ""
+            rows.append(
+                JobRow(slice_id=slice_id, state=state, source_section="ready", repo=repo)
+            )
 
     held = status.get("held")
     if isinstance(held, list):
@@ -218,6 +229,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                     state="blocked",
                     source_section="held",
                     reason=reason,
+                    repo=_text_field(item, "repo", "workflow_repo"),
                 )
             )
 
@@ -240,6 +252,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                     next_actions=_actions_field(item),
                     job_id=_text_field(item, "builder_job_id", "reviewer_job_id", "job_id"),
                     branch=_text_field(item, "target_branch", "branch"),
+                    repo=_text_field(item, "repo", "workflow_repo"),
                     needs_human=True,
                 )
             )
@@ -265,6 +278,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                     next_actions=_actions_field(item),
                     job_id=_text_field(item, "job_id"),
                     branch=_text_field(item, "branch"),
+                    repo=_text_field(item, "repo", "workflow_repo"),
                     needs_human=state == "needs_human",
                 )
             )
@@ -854,7 +868,9 @@ class CockpitApp(App[None]):
                 job_segs.append((f"{_ellipsize_middle(row.display_name, 34):<34} ", "#E2E8F0"))
                 # 執行環境（workflow／job id）與語意標籤退成灰色次要欄。
                 trailer = " · ".join(
-                    part for part in (row.workflow_id, row.job_id, row.human_state) if part
+                    part
+                    for part in (row.project, row.workflow_id, row.job_id, row.human_state)
+                    if part
                 )
                 job_segs.append((f"{trailer}\n", "#64748B"))
                 budget -= 1

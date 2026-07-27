@@ -300,6 +300,39 @@ class Stage11StateTests(unittest.TestCase):
         # 同群組內維持原本的 section 順序，畫面不會每次刷新就跳動。
         self.assertEqual(ordered[3:], ["ready-a", "held-a", "ready-b"])
 
+    def test_rows_carry_project_attribution_when_upstream_provides_it(self) -> None:
+        """manager 是跨 repo 派工的：現場 JOBS 上 10 筆 needs_human 全屬 paulsha-cortex，
+        paulshaclaw 一筆都沒有。不標 project，operator 不知道該去哪個 repo 動手。"""
+        rows = slices_from_status(
+            {
+                "attention": [
+                    {"slice_id": "attn-a", "repo": "hamanpaul/paulsha-cortex", "reason": "x"}
+                ],
+                "recent_done": [
+                    {
+                        "slice_id": "wf-e13fa4daae-subagent-build",
+                        "gate_status": "needs_human",
+                        "workflow_repo": "hamanpaul/paulsha-cortex",
+                    }
+                ],
+                "in_flight": [{"slice_id": "run-a", "repo": "hamanpaul/paulshaclaw"}],
+            }
+        )
+
+        by_id = {row.slice_id: row for row in rows}
+        self.assertEqual(by_id["attn-a"].repo, "hamanpaul/paulsha-cortex")
+        self.assertEqual(by_id["attn-a"].project, "paulsha-cortex")
+        # recent_done 走 workflow_repo 別名，同樣要認得。
+        self.assertEqual(by_id["wf-e13fa4daae-subagent-build"].project, "paulsha-cortex")
+        self.assertEqual(by_id["run-a"].project, "paulshaclaw")
+
+    def test_project_is_empty_when_upstream_omits_repo(self) -> None:
+        """上游還沒送 repo 前不可亂猜歸屬——寧可不顯示，也不能標錯 project。"""
+        (row,) = slices_from_status({"recent_done": [{"slice_id": "wf-x-build"}]})
+
+        self.assertEqual(row.repo, "")
+        self.assertEqual(row.project, "")
+
     def test_display_name_keeps_plain_slice_ids_intact(self) -> None:
         row = JobRow("add-cortex-version-flag-build", "exited", "attention")
 
@@ -1023,7 +1056,11 @@ class Stage11StateTests(unittest.TestCase):
                     }
                 ],
                 "recent_done": [
-                    {"slice_id": "wf-e13fa4daae-subagent-build", "gate_status": "needs_human"}
+                    {
+                        "slice_id": "wf-e13fa4daae-subagent-build",
+                        "gate_status": "needs_human",
+                        "workflow_repo": "hamanpaul/paulsha-cortex",
+                    }
                 ],
                 "degraded": False,
             }
@@ -1044,6 +1081,8 @@ class Stage11StateTests(unittest.TestCase):
         # workflow hash 退成次要，主欄位是看得懂的任務名。
         self.assertIn("subagent-build", rendered)
         self.assertIn("wf-e13fa4daae", rendered)
+        # 上游有給 repo 時，project 要出現在次要欄的最前面。
+        self.assertIn("paulsha-cortex", rendered)
         # 上游沒帶 reason 時明說，而不是留一列空白狀態。
         self.assertIn("上游未帶 reason", rendered)
 
