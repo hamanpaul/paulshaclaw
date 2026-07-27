@@ -145,6 +145,31 @@ def _slice_id_from_item(item: object) -> str:
     return ""
 
 
+def _ellipsize_middle(text: str, width: int) -> str:
+    """過長的 slice 名從中間省略：頭（work 名）與尾（phase）都是辨識關鍵，不能只砍一端。"""
+    if len(text) <= width or width < 3:
+        return text
+    keep = width - 1
+    head = (keep + 1) // 2
+    return f"{text[:head]}…{text[len(text) - (keep - head):]}"
+
+
+def _text_field(item: dict[str, object], *keys: str) -> str:
+    """取第一個有值的字串欄位；上游欄位命名依 section 而異（reason / gate_reason…）。"""
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _actions_field(item: dict[str, object], key: str = "next_actions") -> tuple[str, ...]:
+    value = item.get(key)
+    if not isinstance(value, list):
+        return ()
+    return tuple(entry for entry in value if isinstance(entry, str) and entry)
+
+
 def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
     if not isinstance(status, dict) or status.get("degraded"):
         return ()
@@ -179,7 +204,22 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
             slice_id = _slice_id_from_item(item)
             if not slice_id:
                 continue
-            rows.append(JobRow(slice_id=slice_id, state="blocked", source_section="held"))
+            reasons = item.get("reasons")
+            reason = (
+                "; ".join(entry for entry in reasons if isinstance(entry, str) and entry)
+                if isinstance(reasons, list)
+                else _text_field(item, "reason")
+            )
+            # held 是依賴未滿足、會自己解開，不是等人工——不可混進 needs_human，
+            # 否則真正要人看的那幾列會被稀釋掉。
+            rows.append(
+                JobRow(
+                    slice_id=slice_id,
+                    state="blocked",
+                    source_section="held",
+                    reason=reason,
+                )
+            )
 
     attention = status.get("attention")
     if isinstance(attention, list):
@@ -190,7 +230,19 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
             if not slice_id:
                 continue
             state = str(item.get("job_state") or item.get("gate_state") or "attention")
-            rows.append(JobRow(slice_id=slice_id, state=state, source_section="attention"))
+            # manager 只把 slice_state == needs_human 的條目放進 attention。
+            rows.append(
+                JobRow(
+                    slice_id=slice_id,
+                    state=state,
+                    source_section="attention",
+                    reason=_text_field(item, "reason", "gate_reason"),
+                    next_actions=_actions_field(item),
+                    job_id=_text_field(item, "builder_job_id", "reviewer_job_id", "job_id"),
+                    branch=_text_field(item, "target_branch", "branch"),
+                    needs_human=True,
+                )
+            )
 
     recent_done = status.get("recent_done")
     if isinstance(recent_done, list):
@@ -201,9 +253,42 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
             if not slice_id:
                 continue
             state = str(item.get("gate_status") or item.get("state") or "done")
-            rows.append(JobRow(slice_id=slice_id, state=state, source_section="recent_done"))
+            # manager 的 handoff manifest 已有 gate_reason／job_id／branch，但目前的
+            # recent_done provider 只挑 slice_id／gate_status／completed_at 三欄送出。
+            # 這裡前向相容地讀：上游一補上就直接生效，不必再改 cockpit。
+            rows.append(
+                JobRow(
+                    slice_id=slice_id,
+                    state=state,
+                    source_section="recent_done",
+                    reason=_text_field(item, "gate_reason", "reason"),
+                    next_actions=_actions_field(item),
+                    job_id=_text_field(item, "job_id"),
+                    branch=_text_field(item, "branch"),
+                    needs_human=state == "needs_human",
+                )
+            )
 
     return tuple(rows)
+
+
+def prioritise_job_rows(rows: tuple[JobRow, ...]) -> tuple[JobRow, ...]:
+    """把要人動手的排到最前面。
+
+    manager status 的 section 原序是 in_flight → ready → held → attention →
+    recent_done，而 needs_human 只出現在最後兩段。現場一次有 50 筆 slice、面板
+    只放得下 10 行——照原序排，等人工的那幾列一列都露不出來，JOBS 就只是一片
+    背景噪音。同群組內用穩定排序保留原序，避免每次刷新畫面跳動。
+    """
+
+    def rank(row: JobRow) -> int:
+        if row.needs_human:
+            return 0
+        if row.source_section == "in_flight":
+            return 1
+        return 2
+
+    return tuple(sorted(rows, key=rank))
 
 
 # How often the cockpit re-reads the tmux pane list so the work summary stays
@@ -213,6 +298,9 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
 # reads, so it can't pile up the way an unbounded scan would.
 REFRESH_INTERVAL_SECONDS = 30.0
 DOUBLE_CLICK_SECONDS = 0.4
+
+# JOBS 面板可用行數（max_height 12 扣掉上下 border）。needs_human 一列佔兩行。
+_JOBS_LINE_BUDGET = 10
 
 # htop 風系統監控要「即時但不吃資源」：把「高頻 /proc 監控」與「低頻 tmux pane 重載」拆成兩個 tick。
 # 這條只讀 /proc（CPU/Mem/Swp/I/O/Net）＋就地更新 banner 一個 widget——不 fork tmux、不重建清單，
@@ -746,13 +834,37 @@ class CockpitApp(App[None]):
             return
 
         if rows:
-            self._set_border(jobs_widget, "JOBS", f"{len(rows)} slices")
+            waiting = sum(1 for row in rows if row.needs_human)
+            summary = f"{len(rows)} slices"
+            if waiting:
+                summary = f"{summary} · {waiting} 待人工"
+            self._set_border(jobs_widget, "JOBS", summary)
             job_segs: list[tuple[str, str]] = []
-            for row in rows[:10]:
+            # 面板高度固定，改以「行」為預算：needs_human 會多吃一行講原因與下一步，
+            # 所以不能再用 rows[:10] 這種以列數為單位的切法。
+            budget = _JOBS_LINE_BUDGET
+            ordered = prioritise_job_rows(rows)
+            shown = 0
+            for row in ordered:
+                # 最後一行留給「還有幾列沒顯示」，免得截斷看起來像「就這些」。
+                if budget <= (1 if shown < len(ordered) - 1 else 0):
+                    break
                 glyph, color = status_style(row.state)
-                job_segs.append((f"{row.source_section:>11} ", "#94A3B8"))
-                job_segs.append((f"{glyph} {row.state:<9} ", color))
-                job_segs.append((f"{row.slice_id}\n", "#CBD5E1"))
+                job_segs.append((f"{glyph} {row.state:<12} ", color))
+                job_segs.append((f"{_ellipsize_middle(row.display_name, 34):<34} ", "#E2E8F0"))
+                # 執行環境（workflow／job id）與語意標籤退成灰色次要欄。
+                trailer = " · ".join(
+                    part for part in (row.workflow_id, row.job_id, row.human_state) if part
+                )
+                job_segs.append((f"{trailer}\n", "#64748B"))
+                budget -= 1
+                shown += 1
+                if row.detail_line and budget > 0:
+                    job_segs.append((f"    ↳ {row.detail_line}\n", "#FBBF24"))
+                    budget -= 1
+            hidden = len(ordered) - shown
+            if hidden > 0:
+                job_segs.append((f"… 另 {hidden} 列未顯示\n", "#64748B"))
             jobs_renderable = self._text(job_segs)
         else:
             self._set_border(jobs_widget, "JOBS", "0 slices")

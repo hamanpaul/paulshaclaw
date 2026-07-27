@@ -30,6 +30,7 @@ from paulshaclaw.cockpit.app import (
     CockpitApp,
     format_work_pane_subtitle,
     pane_display_label,
+    prioritise_job_rows,
     slices_from_status,
 )
 from paulshaclaw.cockpit.help import HelpModal
@@ -163,8 +164,8 @@ class Stage11StateTests(unittest.TestCase):
             (
                 JobRow("slice-run", "running", "in_flight"),
                 JobRow("slice-ready", "ready", "ready"),
-                JobRow("slice-held", "blocked", "held"),
-                JobRow("slice-attn", "attention", "attention"),
+                JobRow("slice-held", "blocked", "held", reason="needs-review"),
+                JobRow("slice-attn", "attention", "attention", reason="gate-failed", needs_human=True),
                 JobRow("slice-done", "passed", "recent_done"),
             ),
         )
@@ -172,6 +173,138 @@ class Stage11StateTests(unittest.TestCase):
     def test_slices_from_status_returns_empty_on_degraded_or_missing_keys(self) -> None:
         self.assertEqual(slices_from_status({"degraded": True, "degraded_reason": "manager-offline"}), ())
         self.assertEqual(slices_from_status({}), ())
+
+    # --- #264：JOBS 要看得出「這是什麼 job」「為什麼卡住」「下一步做什麼」 ---
+
+    def test_attention_row_carries_reason_actions_and_job_identity(self) -> None:
+        """attention 條目本來就帶 reason/next_actions/builder_job_id，不可在攤平時丟掉。"""
+        (row,) = slices_from_status(
+            {
+                "attention": [
+                    {
+                        "slice_id": "add-cortex-version-flag-build",
+                        "job_state": "exited",
+                        "reason": "candidate-worktree-dirty",
+                        "next_actions": ["retry-build", "abandon", "retry-verify"],
+                        "builder_job_id": "add-cortex-version-flag-build-56",
+                        "target_branch": "feature/add-cortex-version-flag-build",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(row.state, "exited")
+        self.assertEqual(row.reason, "candidate-worktree-dirty")
+        self.assertEqual(row.next_actions, ("retry-build", "abandon", "retry-verify"))
+        self.assertEqual(row.job_id, "add-cortex-version-flag-build-56")
+        self.assertEqual(row.branch, "feature/add-cortex-version-flag-build")
+        self.assertTrue(row.needs_human)
+        # 卡在 attention = slice 還沒完成、被人工動作擋住。
+        self.assertEqual(row.human_state, "阻塞中")
+        self.assertIn("candidate-worktree-dirty", row.detail_line)
+        self.assertIn(
+            "cortex slice-action add-cortex-version-flag-build "
+            "retry-build|abandon|retry-verify --actor $USER",
+            row.detail_line,
+        )
+
+    def test_recent_done_needs_human_reads_as_awaiting_decision(self) -> None:
+        """#264 回歸案例：`recent_done • needs_human` 是「跑完但 gate 沒過」，不是還在跑。"""
+        (row,) = slices_from_status(
+            {"recent_done": [{"slice_id": "wf-e13fa4daae-subagent-build", "gate_status": "needs_human"}]}
+        )
+
+        self.assertTrue(row.needs_human)
+        self.assertEqual(row.human_state, "待裁決")
+        # worktree/workflow 前綴降為次要，主顯示是看得懂的任務名。
+        self.assertEqual(row.workflow_id, "wf-e13fa4daae")
+        self.assertEqual(row.display_name, "subagent-build")
+
+    def test_recent_done_row_uses_upstream_gate_reason_when_present(self) -> None:
+        """manager handoff manifest 已有 gate_reason；上游一旦帶上來就要直接用。"""
+        (row,) = slices_from_status(
+            {
+                "recent_done": [
+                    {
+                        "slice_id": "wf-e13fa4daae-subagent-build",
+                        "gate_status": "needs_human",
+                        "gate_reason": "pinned-input-mismatch",
+                        "job_id": "wf-e13fa4daae-subagent-build-7",
+                        "branch": "feature/wf-e13fa4daae",
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(row.reason, "pinned-input-mismatch")
+        self.assertEqual(row.job_id, "wf-e13fa4daae-subagent-build-7")
+        self.assertEqual(row.branch, "feature/wf-e13fa4daae")
+        self.assertIn("pinned-input-mismatch", row.detail_line)
+
+    def test_needs_human_without_reason_says_so_instead_of_rendering_a_blank_row(self) -> None:
+        """驗收條件：缺 reason／action 時要明說是上游沒給，不能產生無意義的狀態列。"""
+        row = JobRow("wf-e13fa4daae-subagent-build", "needs_human", "recent_done", needs_human=True)
+
+        self.assertEqual(row.detail_line, "上游未帶 reason／next_actions（manager status 契約缺口）")
+
+    def test_needs_human_with_reason_but_no_actions_points_at_the_manifest(self) -> None:
+        row = JobRow(
+            "wf-e13fa4daae-subagent-build",
+            "needs_human",
+            "recent_done",
+            reason="pinned-input-mismatch",
+            needs_human=True,
+        )
+
+        self.assertIn("pinned-input-mismatch", row.detail_line)
+        self.assertIn("無可執行 action", row.detail_line)
+
+    def test_non_needs_human_row_has_no_detail_line(self) -> None:
+        self.assertEqual(JobRow("slice-ready", "ready", "ready").detail_line, "")
+
+    def test_held_row_carries_dependency_reasons_but_is_not_needs_human(self) -> None:
+        """held 是依賴未滿足，會自己解開；不可混進「等人工」而稀釋真正要人看的列。"""
+        (row,) = slices_from_status(
+            {
+                "held": [
+                    {
+                        "slice_id": "fix-dispatch-98-adversarial-review",
+                        "reasons": ["dispatch-hold", "deps-unsatisfied:fix-dispatch-98-code-review"],
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(row.state, "blocked")
+        self.assertFalse(row.needs_human)
+        self.assertEqual(row.human_state, "")
+        self.assertEqual(row.detail_line, "")
+        self.assertEqual(row.reason, "dispatch-hold; deps-unsatisfied:fix-dispatch-98-code-review")
+
+    def test_prioritise_job_rows_lifts_needs_human_above_routine_work(self) -> None:
+        """現場 status 有 51 列、其中 11 列等人工；照 section 原序排，等人的全被
+        ready／held 擠出畫面——面板高度有限，要人動手的必須排最前面。"""
+        rows = (
+            JobRow("ready-a", "ready", "ready"),
+            JobRow("held-a", "blocked", "held"),
+            JobRow("attn-a", "exited", "attention", needs_human=True),
+            JobRow("run-a", "running", "in_flight"),
+            JobRow("done-a", "needs_human", "recent_done", needs_human=True),
+            JobRow("ready-b", "ready", "ready"),
+        )
+
+        ordered = [row.slice_id for row in prioritise_job_rows(rows)]
+
+        self.assertEqual(ordered[:2], ["attn-a", "done-a"])
+        self.assertEqual(ordered[2], "run-a")
+        # 同群組內維持原本的 section 順序，畫面不會每次刷新就跳動。
+        self.assertEqual(ordered[3:], ["ready-a", "held-a", "ready-b"])
+
+    def test_display_name_keeps_plain_slice_ids_intact(self) -> None:
+        row = JobRow("add-cortex-version-flag-build", "exited", "attention")
+
+        self.assertEqual(row.workflow_id, "")
+        self.assertEqual(row.display_name, "add-cortex-version-flag-build")
 
     def test_parse_list_panes_skips_malformed_numeric_fields(self) -> None:
         raw = "%0\tmain\t0\tcockpit\tpython\t0\t0\t120\t40\n%4\tmain\t1\tssh\tbash\tnan\t0\t120\t40\n"
@@ -868,10 +1001,80 @@ class Stage11StateTests(unittest.TestCase):
             app._refresh_widgets()
 
         self.assertEqual(widgets["#global-jobs"].border_title, "JOBS")
-        self.assertEqual(widgets["#global-jobs"].border_subtitle, "5 slices")
+        # slice-attn 落在 attention（= needs_human），border 直接把「幾件等人」講出來。
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "5 slices · 1 待人工")
         rendered = str(widgets["#global-jobs"].update.call_args.args[0])
         self.assertIn("slice-run", rendered)
         self.assertIn("slice-done", rendered)
+
+    def test_refresh_widgets_renders_needs_human_reason_and_next_step(self) -> None:
+        """#264：operator 不看原始 log 就要知道為什麼卡住、下一步敲什麼。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "attention": [
+                    {
+                        "slice_id": "add-cortex-version-flag-build",
+                        "job_state": "exited",
+                        "reason": "candidate-worktree-dirty",
+                        "next_actions": ["retry-build", "abandon"],
+                        "builder_job_id": "add-cortex-version-flag-build-56",
+                    }
+                ],
+                "recent_done": [
+                    {"slice_id": "wf-e13fa4daae-subagent-build", "gate_status": "needs_human"}
+                ],
+                "degraded": False,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        self.assertIn("candidate-worktree-dirty", rendered)
+        self.assertIn(
+            "cortex slice-action add-cortex-version-flag-build retry-build|abandon --actor $USER",
+            rendered,
+        )
+        # 兩種 needs_human 語意在畫面上分得開。
+        self.assertIn("阻塞中", rendered)
+        self.assertIn("待裁決", rendered)
+        # workflow hash 退成次要，主欄位是看得懂的任務名。
+        self.assertIn("subagent-build", rendered)
+        self.assertIn("wf-e13fa4daae", rendered)
+        # 上游沒帶 reason 時明說，而不是留一列空白狀態。
+        self.assertIn("上游未帶 reason", rendered)
+
+    def test_refresh_widgets_shows_needs_human_even_when_routine_rows_overflow(self) -> None:
+        """回歸現場情況：ready 多到塞爆面板時，等人工的那列仍必須看得到，
+        且被截掉的列數要講出來，不能安靜消失。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "ready": [f"routine-slice-{index}" for index in range(20)],
+                "attention": [
+                    {
+                        "slice_id": "add-cortex-version-flag-build",
+                        "job_state": "exited",
+                        "reason": "candidate-worktree-dirty",
+                        "next_actions": ["retry-build"],
+                    }
+                ],
+                "degraded": False,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        self.assertIn("add-cortex-version-flag-build", rendered)
+        self.assertIn("candidate-worktree-dirty", rendered)
+        self.assertIn("未顯示", rendered)
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "21 slices · 1 待人工")
 
     def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
         app = self._minimal_app()
