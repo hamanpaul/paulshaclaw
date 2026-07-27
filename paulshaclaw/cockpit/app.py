@@ -61,7 +61,7 @@ except Exception:  # pragma: no cover - fallback when textual not installed
 from .actions import LayoutActionService
 from .help import HelpModal
 from .manager_panel import ManagerModal
-from .models import JobRow, JobSummary, PaneRecord
+from .models import JobGroup, JobRow, JobSummary, PaneRecord
 from .store import CockpitState
 
 
@@ -101,6 +101,8 @@ _STATUS_STYLE: dict[str, tuple[str, str]] = {
     "failed": ("✗", "#EF4444"),
     "error": ("✗", "#EF4444"),
     "attention": ("!", "#FBBF24"),
+    # 最該亮起來的狀態先前沒有樣式，退回中性灰點——等人工的列看起來跟雜訊一樣。
+    "needs_human": ("!", "#FBBF24"),
     "blocked": ("◼", "#FBBF24"),
     "pending": ("◔", "#FBBF24"),
     "ready": ("◔", "#94A3B8"),
@@ -286,23 +288,50 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
     return tuple(rows)
 
 
-def prioritise_job_rows(rows: tuple[JobRow, ...]) -> tuple[JobRow, ...]:
-    """把要人動手的排到最前面。
+# manager 的 phase 命名（cortex 端定義）。只用於顯示層分組：認得就把同一個 work
+# 的各 phase 收成一群，認不得就各自成群——分錯不影響正確性，只影響好不好讀。
+_PHASE_SUFFIXES: tuple[str, ...] = (
+    "subagent-build",
+    "adversarial-review",
+    "openspec-archive",
+    "writing-plans",
+    "code-review",
+    "verification",
+    "build",
+)
 
-    manager status 的 section 原序是 in_flight → ready → held → attention →
-    recent_done，而 needs_human 只出現在最後兩段。現場一次有 50 筆 slice、面板
-    只放得下 10 行——照原序排，等人工的那幾列一列都露不出來，JOBS 就只是一片
-    背景噪音。同群組內用穩定排序保留原序，避免每次刷新畫面跳動。
-    """
 
-    def rank(row: JobRow) -> int:
-        if row.needs_human:
+def _group_key(row: JobRow) -> str:
+    """群組身分：`wf-<hash>-<phase>` 取 workflow 前綴，其餘試著剝掉已知 phase 後綴。"""
+    if row.workflow_id:
+        return row.workflow_id
+    for suffix in _PHASE_SUFFIXES:
+        trailer = f"-{suffix}"
+        if row.slice_id.endswith(trailer):
+            return row.slice_id[: -len(trailer)]
+    return row.slice_id
+
+
+def group_job_rows(rows: tuple[JobRow, ...]) -> tuple[JobGroup, ...]:
+    """把同一 workflow／work 的 slice 收成一群，並讓有人在等的群排最前面。"""
+    buckets: dict[str, list[JobRow]] = {}
+    for row in rows:
+        buckets.setdefault(_group_key(row), []).append(row)
+    groups = [JobGroup(key=key, rows=tuple(members)) for key, members in buckets.items()]
+
+    def rank(group: JobGroup) -> int:
+        if group.needs_human:
             return 0
-        if row.source_section == "in_flight":
+        if any(row.source_section == "in_flight" for row in group.rows):
             return 1
         return 2
 
-    return tuple(sorted(rows, key=rank))
+    return tuple(sorted(groups, key=rank))
+
+
+def _group_state_key(group: JobGroup) -> str:
+    """多 phase 群組的上色依據：有人在等就照 attention 上色，否則跟著領頭 slice。"""
+    return "attention" if group.needs_human else group.lead.state
 
 
 # How often the cockpit re-reads the tmux pane list so the work summary stays
@@ -857,30 +886,39 @@ class CockpitApp(App[None]):
             # 面板高度固定，改以「行」為預算：needs_human 會多吃一行講原因與下一步，
             # 所以不能再用 rows[:10] 這種以列數為單位的切法。
             budget = _JOBS_LINE_BUDGET
-            ordered = prioritise_job_rows(rows)
+            ordered = group_job_rows(rows)
             shown = 0
-            for row in ordered:
-                # 最後一行留給「還有幾列沒顯示」，免得截斷看起來像「就這些」。
+            for group in ordered:
+                # 最後一行留給「還有幾群沒顯示」，免得截斷看起來像「就這些」。
                 if budget <= (1 if shown < len(ordered) - 1 else 0):
                     break
-                glyph, color = status_style(row.state)
-                job_segs.append((f"{glyph} {row.state:<12} ", color))
-                job_segs.append((f"{_ellipsize_middle(row.display_name, 34):<34} ", "#E2E8F0"))
+                glyph, color = status_style(
+                    group.lead.state if group.is_single else _group_state_key(group)
+                )
+                job_segs.append((f"{glyph} {group.state_label:<18} ", color))
+                job_segs.append((f"{_ellipsize_middle(group.display_name, 30):<30} ", "#E2E8F0"))
                 # 執行環境（workflow／job id）與語意標籤退成灰色次要欄。
                 trailer = " · ".join(
                     part
-                    for part in (row.project, row.workflow_id, row.job_id, row.human_state)
+                    for part in (
+                        group.project,
+                        # 多 phase 群的主欄位已經是 workflow id，不再重複一次。
+                        group.workflow_id if group.is_single else "",
+                        group.job_id,
+                        group.human_state,
+                        group.note,
+                    )
                     if part
                 )
                 job_segs.append((f"{trailer}\n", "#64748B"))
                 budget -= 1
                 shown += 1
-                if row.detail_line and budget > 0:
-                    job_segs.append((f"    ↳ {row.detail_line}\n", "#FBBF24"))
+                if group.detail_line and budget > 0:
+                    job_segs.append((f"    ↳ {group.detail_line}\n", "#FBBF24"))
                     budget -= 1
             hidden = len(ordered) - shown
             if hidden > 0:
-                job_segs.append((f"… 另 {hidden} 列未顯示\n", "#64748B"))
+                job_segs.append((f"… 另 {hidden} 群未顯示\n", "#64748B"))
             jobs_renderable = self._text(job_segs)
         else:
             self._set_border(jobs_widget, "JOBS", "0 slices")

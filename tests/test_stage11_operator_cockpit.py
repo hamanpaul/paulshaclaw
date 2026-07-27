@@ -30,7 +30,7 @@ from paulshaclaw.cockpit.app import (
     CockpitApp,
     format_work_pane_subtitle,
     pane_display_label,
-    prioritise_job_rows,
+    group_job_rows,
     slices_from_status,
 )
 from paulshaclaw.cockpit.help import HelpModal
@@ -281,7 +281,7 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(row.detail_line, "")
         self.assertEqual(row.reason, "dispatch-hold; deps-unsatisfied:fix-dispatch-98-code-review")
 
-    def test_prioritise_job_rows_lifts_needs_human_above_routine_work(self) -> None:
+    def test_group_job_rows_lifts_needs_human_above_routine_work(self) -> None:
         """現場 status 有 51 列、其中 11 列等人工；照 section 原序排，等人的全被
         ready／held 擠出畫面——面板高度有限，要人動手的必須排最前面。"""
         rows = (
@@ -293,12 +293,146 @@ class Stage11StateTests(unittest.TestCase):
             JobRow("ready-b", "ready", "ready"),
         )
 
-        ordered = [row.slice_id for row in prioritise_job_rows(rows)]
+        ordered = [group.key for group in group_job_rows(rows)]
 
         self.assertEqual(ordered[:2], ["attn-a", "done-a"])
         self.assertEqual(ordered[2], "run-a")
         # 同群組內維持原本的 section 順序，畫面不會每次刷新就跳動。
         self.assertEqual(ordered[3:], ["ready-a", "held-a", "ready-b"])
+
+    # --- #264：同一 workflow 的多個 phase 收成一群 ---
+
+    def test_group_job_rows_folds_workflow_phases_into_one_group(self) -> None:
+        """現場一個 workflow 常有 3~4 個 phase 同時 needs_human，各佔一列會把
+        面板吃光：實測 51 列其實只有 22 群、11 筆 needs_human 只代表 6 件事。"""
+        rows = slices_from_status(
+            {
+                "recent_done": [
+                    {"slice_id": "wf-e13fa4daae-subagent-build", "gate_status": "needs_human"},
+                    {"slice_id": "wf-e13fa4daae-code-review", "gate_status": "needs_human"},
+                    {"slice_id": "wf-e13fa4daae-verification", "gate_status": "needs_human"},
+                    {"slice_id": "wf-2fa3d22552-subagent-build", "gate_status": "needs_human"},
+                ]
+            }
+        )
+
+        groups = group_job_rows(rows)
+
+        self.assertEqual([g.key for g in groups], ["wf-e13fa4daae", "wf-2fa3d22552"])
+        big = groups[0]
+        self.assertEqual(len(big.rows), 3)
+        self.assertEqual(big.state_label, "3 phase 全待裁決")
+        self.assertEqual(big.display_name, "wf-e13fa4daae")
+        self.assertTrue(groups[1].is_single)
+        self.assertEqual(groups[1].state_label, "needs_human")
+
+    def test_group_job_rows_folds_plain_work_phases_by_known_suffix(self) -> None:
+        """非 wf-* 的 work 也是同一組 phase（build / code-review / …），一樣要收攏。"""
+        rows = slices_from_status(
+            {
+                "ready": ["fix-dispatch-98-build"],
+                "held": [
+                    {"slice_id": "fix-dispatch-98-code-review", "reasons": ["deps-unsatisfied"]},
+                    {"slice_id": "fix-dispatch-98-verification", "reasons": ["deps-unsatisfied"]},
+                ],
+            }
+        )
+
+        (group,) = group_job_rows(rows)
+
+        self.assertEqual(group.key, "fix-dispatch-98")
+        self.assertEqual(len(group.rows), 3)
+        # state 不一致（ready + blocked）時不謊稱單一狀態。
+        self.assertEqual(group.state_label, "3 phase")
+
+    def test_group_state_label_names_the_state_when_all_phases_agree(self) -> None:
+        rows = slices_from_status(
+            {
+                "held": [
+                    {"slice_id": "fix-dispatch-98-code-review", "reasons": ["x"]},
+                    {"slice_id": "fix-dispatch-98-verification", "reasons": ["x"]},
+                ]
+            }
+        )
+
+        (group,) = group_job_rows(rows)
+
+        self.assertEqual(group.state_label, "2 phase blocked")
+
+    def test_group_keeps_unrecognised_slices_separate(self) -> None:
+        """認不得的命名各自成群——寧可多幾列，也不要把不相干的東西併在一起。"""
+        rows = (JobRow("alpha", "ready", "ready"), JobRow("beta", "ready", "ready"))
+
+        self.assertEqual([g.key for g in group_job_rows(rows)], ["alpha", "beta"])
+
+    def test_group_detail_line_is_reserved_for_work_that_needs_a_human(self) -> None:
+        """held 的 reasons 攤開實測可長到 500+ 字，會把真正等人的群擠掉；
+        第二行只留給要人動手的。"""
+        rows = slices_from_status(
+            {
+                "held": [
+                    {
+                        "slice_id": "fix-dispatch-98-code-review",
+                        "reasons": ["dispatch-hold", "deps-unsatisfied:fix-dispatch-98-build"],
+                    },
+                    {"slice_id": "fix-dispatch-98-verification", "reasons": ["dispatch-hold"]},
+                ]
+            }
+        )
+
+        (group,) = group_job_rows(rows)
+
+        self.assertFalse(group.needs_human)
+        self.assertEqual(group.detail_line, "")
+        self.assertEqual(group.note, "")
+
+    def test_group_detail_line_shares_a_common_reason_and_shortens_phase_names(self) -> None:
+        rows = slices_from_status(
+            {
+                "attention": [
+                    {"slice_id": "fix-dispatch-98-code-review", "reason": "candidate-dirty"},
+                    {"slice_id": "fix-dispatch-98-verification", "reason": "candidate-dirty"},
+                ]
+            }
+        )
+
+        (group,) = group_job_rows(rows)
+
+        # 共用前綴剝掉，只留辨識用的 phase 尾段。
+        self.assertEqual(group.detail_line, "candidate-dirty · code-review / verification")
+
+    def test_group_detail_line_lists_per_phase_when_reasons_differ(self) -> None:
+        rows = slices_from_status(
+            {
+                "attention": [
+                    {"slice_id": "fix-dispatch-98-code-review", "reason": "candidate-dirty"},
+                    {"slice_id": "fix-dispatch-98-verification", "reason": "pinned-input-mismatch"},
+                ]
+            }
+        )
+
+        (group,) = group_job_rows(rows)
+
+        self.assertEqual(
+            group.detail_line,
+            "code-review: candidate-dirty / verification: pinned-input-mismatch",
+        )
+
+    def test_group_note_flags_missing_reason_without_spending_a_line(self) -> None:
+        """缺 reason 仍要講，但不值得佔第二行——那一行要留給真的有下一步可做的群。"""
+        rows = slices_from_status(
+            {
+                "recent_done": [
+                    {"slice_id": "wf-e13fa4daae-subagent-build", "gate_status": "needs_human"},
+                    {"slice_id": "wf-e13fa4daae-code-review", "gate_status": "needs_human"},
+                ]
+            }
+        )
+
+        (group,) = group_job_rows(rows)
+
+        self.assertEqual(group.note, "上游未帶 reason")
+        self.assertEqual(group.detail_line, "")
 
     def test_rows_carry_project_attribution_when_upstream_provides_it(self) -> None:
         """manager 是跨 repo 派工的：現場 JOBS 上 10 筆 needs_human 全屬 paulsha-cortex，
@@ -1114,6 +1248,55 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("candidate-worktree-dirty", rendered)
         self.assertIn("未顯示", rendered)
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "21 slices · 1 待人工")
+
+    def test_refresh_widgets_fits_every_waiting_group_after_folding_phases(self) -> None:
+        """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine，
+        收攏後 10 行預算必須裝得下全部 6 群，一個都不能被截掉。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        waiting = []
+        for run, phases in (
+            ("wf-e13fa4daae", ("subagent-build", "code-review", "verification", "adversarial-review")),
+            ("wf-7f4e4a8f1b", ("subagent-build", "code-review", "verification")),
+            ("wf-2fa3d22552", ("subagent-build",)),
+            ("wf-6f0a583d0d", ("subagent-build",)),
+            ("wf-e6ad935ef9", ("adversarial-review",)),
+        ):
+            for phase in phases:
+                waiting.append(
+                    {
+                        "slice_id": f"{run}-{phase}",
+                        "gate_status": "needs_human",
+                        "workflow_repo": "hamanpaul/paulsha-cortex",
+                    }
+                )
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "ready": [f"routine-slice-{index}" for index in range(20)],
+                "attention": [
+                    {
+                        "slice_id": "add-cortex-version-flag-build",
+                        "job_state": "exited",
+                        "reason": "candidate-worktree-dirty",
+                        "next_actions": ["retry-build"],
+                    }
+                ],
+                "recent_done": waiting,
+                "degraded": False,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        for run in ("wf-e13fa4daae", "wf-7f4e4a8f1b", "wf-2fa3d22552", "wf-6f0a583d0d", "wf-e6ad935ef9"):
+            self.assertIn(run, rendered, f"{run} 被截掉了")
+        self.assertIn("add-cortex-version-flag-build", rendered)
+        self.assertIn("4 phase 全待裁決", rendered)
+        self.assertIn("3 phase 全待裁決", rendered)
+        # 11 個 slice 收成 6 群等人工；border 仍以 slice 為單位報總量。
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "31 slices · 11 待人工")
 
     def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
         app = self._minimal_app()
