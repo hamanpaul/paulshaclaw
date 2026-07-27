@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+import unicodedata
 from collections.abc import Callable
 
 import paulsha_cortex.control.client as control_client
@@ -147,13 +148,57 @@ def _slice_id_from_item(item: object) -> str:
     return ""
 
 
+def _display_width(text: str) -> int:
+    """終端顯示寬度：CJK 全形字佔兩欄，用 len() 排版會整欄歪掉。"""
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
+
+
+def _pad_display(text: str, width: int) -> str:
+    """依顯示寬度補到定寬（`f"{s:<18}"` 會把全形字當一欄，中文欄位對不齊）。"""
+    return text + " " * max(0, width - _display_width(text))
+
+
 def _ellipsize_middle(text: str, width: int) -> str:
     """過長的 slice 名從中間省略：頭（work 名）與尾（phase）都是辨識關鍵，不能只砍一端。"""
-    if len(text) <= width or width < 3:
+    if _display_width(text) <= width or width < 3:
         return text
-    keep = width - 1
-    head = (keep + 1) // 2
-    return f"{text[:head]}…{text[len(text) - (keep - head):]}"
+    head: list[str] = []
+    tail: list[str] = []
+    used = 1  # 省略號本身
+    chars = list(text)
+    while chars:
+        ch = chars.pop(0) if len(head) <= len(tail) else chars.pop()
+        cost = _display_width(ch)
+        if used + cost > width:
+            break
+        used += cost
+        (head if len(head) <= len(tail) else tail).append(ch)
+    return "".join(head) + "…" + "".join(reversed(tail))
+
+
+def _widget_line_width(widget: object) -> int:
+    """widget 目前可寫入的顯示寬度；量不到（測試 stub／尚未 layout）時退回保守值。"""
+    try:
+        width = int(getattr(getattr(widget, "size", None), "width", 0)) - 2
+    except (TypeError, ValueError):
+        return _JOBS_WIDTH_FALLBACK
+    return width if width > 40 else _JOBS_WIDTH_FALLBACK
+
+
+def _fit_trailer(parts: tuple[str, ...], width: int) -> str:
+    """次要欄依重要性由高到低排；塞不下時從尾端整項丟棄並標示有省略。
+
+    硬切字元會把 `paulsha-cortex` 砍成半個名字，比少顯示一項更難讀。
+    """
+    kept = [part for part in parts if part]
+    dropped = False
+    while kept and _display_width(" · ".join(kept)) > width:
+        kept.pop()
+        dropped = True
+    text = " · ".join(kept)
+    if dropped and kept:
+        text = f"{text} …"
+    return text
 
 
 def _text_field(item: dict[str, object], *keys: str) -> str:
@@ -344,6 +389,12 @@ DOUBLE_CLICK_SECONDS = 0.4
 
 # JOBS 面板可用行數（max_height 12 扣掉上下 border）。needs_human 一列佔兩行。
 _JOBS_LINE_BUDGET = 10
+
+# JOBS 主行欄寬（顯示寬，非字元數）與量不到 widget 寬度時的保守後備值。
+# 超出可用寬度會被 Textual 折行，折出來的那行不在行預算內，實際顯示會比算的少。
+_JOBS_STATE_COL = 16
+_JOBS_NAME_COL = 26
+_JOBS_WIDTH_FALLBACK = 88
 
 # htop 風系統監控要「即時但不吃資源」：把「高頻 /proc 監控」與「低頻 tmux pane 重載」拆成兩個 tick。
 # 這條只讀 /proc（CPU/Mem/Swp/I/O/Net）＋就地更新 banner 一個 widget——不 fork tmux、不重建清單，
@@ -886,6 +937,7 @@ class CockpitApp(App[None]):
             # 面板高度固定，改以「行」為預算：needs_human 會多吃一行講原因與下一步，
             # 所以不能再用 rows[:10] 這種以列數為單位的切法。
             budget = _JOBS_LINE_BUDGET
+            line_width = _widget_line_width(jobs_widget)
             ordered = group_job_rows(rows)
             shown = 0
             for group in ordered:
@@ -897,27 +949,40 @@ class CockpitApp(App[None]):
                 glyph, color = status_style(
                     group.lead.state if group.is_single else _group_state_key(group)
                 )
-                job_segs.append((f"{glyph} {group.state_label:<18} ", color))
-                job_segs.append((f"{_ellipsize_middle(group.display_name, 30):<30} ", "#E2E8F0"))
-                # 執行環境（workflow／job id）與語意標籤退成灰色次要欄。
-                trailer = " · ".join(
-                    part
-                    for part in (
+                job_segs.append(
+                    (f"{glyph} {_pad_display(group.headline_state, _JOBS_STATE_COL)} ", color)
+                )
+                job_segs.append(
+                    (
+                        f"{_pad_display(_ellipsize_middle(group.display_name, _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
+                        "#E2E8F0",
+                    )
+                )
+                # 執行環境（workflow／job id）與語意標籤退成灰色次要欄，依重要性排序，
+                # 塞不下時從尾端整項丟掉——折行會吃掉不在預算內的一行。
+                trailer = _fit_trailer(
+                    (
                         group.project,
                         # 多 phase 群的主欄位已經是 workflow id，不再重複一次。
                         group.workflow_id if group.is_single else "",
-                        group.job_id,
-                        group.human_state,
                         group.note,
-                    )
-                    if part
+                        group.raw_state,
+                        group.job_id,
+                    ),
+                    line_width - _JOBS_STATE_COL - _JOBS_NAME_COL - 4,
                 )
                 job_segs.append((f"{trailer}\n", "#64748B"))
                 budget -= 1
                 shown += 1
-                if group.detail_line and budget - 1 >= (1 if len(ordered) - shown else 0):
-                    job_segs.append((f"    ↳ {group.detail_line}\n", "#FBBF24"))
-                    budget -= 1
+                if group.detail_line:
+                    # 細節行帶著可複製執行的命令，**不能截斷**——截了就不能貼進終端跑。
+                    # 讓它自然折行，但把折出來的行數算進預算，否則面板會溢出。
+                    detail_cost = max(
+                        1, -(-(_display_width(group.detail_line) + 6) // line_width)
+                    )
+                    if budget - detail_cost >= (1 if len(ordered) - shown else 0):
+                        job_segs.append((f"    ↳ {group.detail_line}\n", "#FBBF24"))
+                        budget -= detail_cost
             hidden = len(ordered) - shown
             if hidden > 0:
                 job_segs.append((f"… 另 {hidden} 群未顯示\n", "#64748B"))

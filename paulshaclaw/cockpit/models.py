@@ -78,6 +78,7 @@ class JobRow:
     def project(self) -> str:
         """顯示用 project 名：`hamanpaul/paulsha-cortex` → `paulsha-cortex`。"""
         return self.repo.rpartition("/")[2] if self.repo else ""
+
     @property
     def workflow_id(self) -> str:
         """``wf-<hash>-<phase>`` 形式的 slice 拆出 workflow 前綴，其餘回空字串。"""
@@ -184,6 +185,25 @@ class JobGroup:
         return f"{len(self.rows)} phase"
 
     @property
+    def headline_state(self) -> str:
+        """狀態欄要講的那一件事。
+
+        單筆 needs_human 時 `needs_human` 與「待裁決」同義，兩個都印只是把
+        次要欄的空間吃掉，讓 workflow id 這種真正要用來識別的東西被擠掉。
+        """
+        if self.is_single:
+            return self.human_state or self.lead.state
+        return self.state_label
+
+    @property
+    def raw_state(self) -> str:
+        """原始 job state；與 headline 同義時不重複顯示。"""
+        if not self.is_single:
+            return ""
+        state = self.lead.state
+        return "" if state == self.headline_state or self.human_state == "待裁決" else state
+
+    @property
     def display_name(self) -> str:
         """多筆時主欄位放群組身分（workflow id 或 work 名），phase 移到細節行。"""
         if self.is_single:
@@ -198,7 +218,7 @@ class JobGroup:
             return ""
         if any(row.reason or row.next_actions for row in self.rows):
             return ""
-        return "上游未帶 reason"
+        return "原因未知"
 
     @property
     def detail_line(self) -> str:
