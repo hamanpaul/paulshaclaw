@@ -889,8 +889,10 @@ class CockpitApp(App[None]):
             ordered = group_job_rows(rows)
             shown = 0
             for group in ordered:
-                # 最後一行留給「還有幾群沒顯示」，免得截斷看起來像「就這些」。
-                if budget <= (1 if shown < len(ordered) - 1 else 0):
+                # 還有沒顯示的群時，永遠留一行給「… 另 N 群未顯示」，免得截斷
+                # 看起來像「就這些」。主行與細節行都要讓出這個保留位，否則
+                # 細節行會把它吃掉，最後總行數超出面板高度。
+                if budget - 1 < (1 if len(ordered) - shown > 1 else 0):
                     break
                 glyph, color = status_style(
                     group.lead.state if group.is_single else _group_state_key(group)
@@ -913,12 +915,13 @@ class CockpitApp(App[None]):
                 job_segs.append((f"{trailer}\n", "#64748B"))
                 budget -= 1
                 shown += 1
-                if group.detail_line and budget > 0:
+                if group.detail_line and budget - 1 >= (1 if len(ordered) - shown else 0):
                     job_segs.append((f"    ↳ {group.detail_line}\n", "#FBBF24"))
                     budget -= 1
             hidden = len(ordered) - shown
             if hidden > 0:
                 job_segs.append((f"… 另 {hidden} 群未顯示\n", "#64748B"))
+                budget -= 1
             jobs_renderable = self._text(job_segs)
         else:
             self._set_border(jobs_widget, "JOBS", "0 slices")

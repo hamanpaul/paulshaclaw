@@ -30,6 +30,7 @@ from paulshaclaw.cockpit.app import (
     CockpitApp,
     format_work_pane_subtitle,
     pane_display_label,
+    _JOBS_LINE_BUDGET,
     group_job_rows,
     slices_from_status,
 )
@@ -1248,6 +1249,36 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("candidate-worktree-dirty", rendered)
         self.assertIn("未顯示", rendered)
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "21 slices · 1 待人工")
+
+    def test_refresh_widgets_never_exceeds_the_jobs_line_budget(self) -> None:
+        """面板高度固定：細節行不可以吃掉留給「另 N 群未顯示」的保留位，
+        否則總行數會超出 max_height，最後那行提示反而被面板裁掉。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        # 每一群都有 reason + next_actions，也就是每群都想多佔一行細節。
+        app.manager_client = SimpleNamespace(
+            read_status=lambda: {
+                "attention": [
+                    {
+                        "slice_id": f"slice-{index}",
+                        "job_state": "exited",
+                        "reason": "candidate-worktree-dirty",
+                        "next_actions": ["retry-build"],
+                    }
+                    for index in range(20)
+                ],
+                "degraded": False,
+            }
+        )
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        line_count = len(rendered.rstrip("\n").splitlines())
+        self.assertLessEqual(line_count, _JOBS_LINE_BUDGET)
+        # 保留位真的有被用上：截斷提示必須還在。
+        self.assertIn("群未顯示", rendered)
 
     def test_refresh_widgets_fits_every_waiting_group_after_folding_phases(self) -> None:
         """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine，
