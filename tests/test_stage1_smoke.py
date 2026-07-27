@@ -251,13 +251,25 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertIn("job-1", result["message"])
         self.assertEqual(result["result"]["scope"], "stage1-smoke")
 
+    def _isolate_bro_queue_root(self) -> None:
+        """#88：route_to_agent 現在會落地 bro-queue 檔案，測試不能碰真的
+        `~/.agents/state/bro-queue/`（尤其開發機本來就跑在 tmux 裡，
+        TMUX_PANE 隨時可能對到一個真實 pane）。"""
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        patcher = mock.patch.dict(os.environ, {"PSC_AGENTS_ROOT": tmp_dir.name})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_daemon_route_to_agent_sends_message_when_agent_running(self) -> None:
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        self._isolate_bro_queue_root()
 
         with (
             mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
             mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True, "pane_id": "%9", "sent": "ignored"}) as send_mock,
+            mock.patch.object(daemon, "_pane_tail_text", return_value="[bro:1001] 請幫我整理狀態"),
         ):
             result = daemon.route_to_agent(user_id=1001, text="請幫我整理狀態")
 
@@ -279,6 +291,103 @@ class Stage1SmokeTest(unittest.TestCase):
         self.assertEqual(result, "agent 未啟用，請使用 /agent start")
         self.assertIsNone(daemon._agent_pane_id)
         send_mock.assert_not_called()
+
+    def test_daemon_route_to_agent_explicit_pane_id_bypasses_autodetect(self) -> None:
+        """#88 對 #34 留的介面：pane_id 顯式指定時信任呼叫端、不再自動偵測。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process") as detect_mock,
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}) as send_mock,
+            mock.patch.object(daemon, "_pane_tail_text", return_value="[bro:1001] 指定 pane"),
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="指定 pane", pane_id="%7")
+
+        detect_mock.assert_not_called()
+        send_mock.assert_called_once_with("%7", "[bro:1001] 指定 pane")
+        self.assertEqual(daemon._agent_pane_id, "%7")
+        self.assertEqual(result, "…")
+
+    def test_daemon_route_to_agent_pane_id_none_keeps_autodetect_default(self) -> None:
+        """回歸：不給 pane_id 時，行為與升級前完全一致（自動偵測）。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)) as detect_mock,
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}) as send_mock,
+            mock.patch.object(daemon, "_pane_tail_text", return_value="[bro:1001] hi"),
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="hi")
+
+        detect_mock.assert_called_once()
+        send_mock.assert_called_once_with("%9", "[bro:1001] hi")
+        self.assertEqual(result, "…")
+
+    def test_daemon_route_to_agent_reports_queued_and_keeps_message_when_pane_busy(self) -> None:
+        """#88 核心修復：pane 忙碌／無回應（capture 驗不到訊息）時，不能再回一句
+        看起來成功的「…」——訊息也必須還留在佇列上，不是無聲蒸發。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}),
+            mock.patch.object(daemon, "_pane_tail_text", return_value=""),
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="hello")
+
+        self.assertIn("已排入佇列", result)
+        self.assertNotEqual(result, "…")
+
+        from paulshaclaw.core import bro_queue
+
+        queued = bro_queue._read_entries(bro_queue.queue_file("%9"))
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["message"], "[bro:1001] hello")
+
+    def test_daemon_route_to_agent_queued_message_is_delivered_by_a_later_flush(self) -> None:
+        """佇列消化後真的送達：pane 從忙碌恢復 idle 後，之前排隊的訊息要能補送。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}),
+            mock.patch.object(daemon, "_pane_tail_text", return_value=""),
+        ):
+            daemon.route_to_agent(user_id=1001, text="hello")
+
+        from paulshaclaw.core import bro_queue
+
+        # pane 恢復 idle：capture 現在驗得到訊息了。
+        result = bro_queue.flush(
+            "%9",
+            send=lambda pane_id, message: True,
+            capture=lambda pane_id: "[bro:1001] hello",
+        )
+
+        self.assertEqual(result.delivered, 1)
+        self.assertEqual(result.remaining, 0)
+        self.assertEqual(bro_queue._read_entries(bro_queue.queue_file("%9")), [])
+
+    def test_daemon_route_to_agent_still_raises_on_hard_tmux_failure(self) -> None:
+        """tmux 本身壞掉（非 pane 忙碌）維持既有硬失敗語意，不吞成「已排入佇列」。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_detect_agent_process", return_value=("%9", 4242)),
+            mock.patch.object(daemon, "_send_to_pane", side_effect=ValueError("tmux not found")),
+        ):
+            with self.assertRaisesRegex(ValueError, "tmux not found"):
+                daemon.route_to_agent(user_id=1001, text="hi")
 
     def test_telegram_router_routes_authorized_non_slash_text_to_agent(self) -> None:
         config_path = self.make_config_path()

@@ -15,6 +15,7 @@ import paulsha_cortex.control.client as control_client
 from paulshaclaw.core.config import AppConfig, load_config
 from paulshaclaw.core.command_dispatcher import CommandDispatcher
 from paulshaclaw.core.command_registry import CommandRegistry, CommandSpec, load_default_command_registry
+from paulshaclaw.core import bro_queue
 from paulshaclaw.core.tmate import TmateManager
 
 
@@ -115,6 +116,27 @@ class PaulShiaBroDaemon:
         except FileNotFoundError as exc:
             raise ValueError("tmux not found") from exc
         return {"ok": True, "pane_id": pane_id, "sent": message}
+
+    def _pane_tail_text(self, pane_id: str, *, lines: int = 200) -> str:
+        """讀 pane 最近畫面內容，僅供 `bro_queue.flush()` 驗證送達用。
+
+        刻意不在這裡判斷 idle/busy（實測 claude/gemma4 這類 TUI 畫面尾行恆是
+        自己的 footer，非 `$`/`>`，無法可靠分辨）——這裡只回傳原始文字，交給
+        `bro_queue` 做「訊息文字有沒有出現」的機械式比對。獨立成 daemon 自己的
+        方法（而非直接把 `bro_queue._default_capture` 傳出去）是為了跟
+        `_pane_current_command` 等既有 tmux 包裝方法保持同一種可測試的形狀。
+        """
+        return bro_queue._default_capture(pane_id, lines=lines)
+
+    def _send_to_pane_confirmed(self, pane_id: str, message: str) -> bool:
+        """`bro_queue.flush()` 用的 send 介面：沿用 `_send_to_pane` 既有的硬失敗語意
+
+        （tmux/pane 不存在時直接 raise ValueError，讓 route_to_agent 一如既往地
+        把環境層級的錯誤往外炸），與「pane 忙碌、驗不到送達」的軟失敗（回傳
+        False／逾時，交由 bro_queue 留在佇列）分開。
+        """
+        self._send_to_pane(pane_id, message)
+        return True
 
     def _pane_current_command(self, pane_id: str) -> str | None:
         try:
@@ -294,18 +316,32 @@ class PaulShiaBroDaemon:
             payload["pid"] = pid
         return payload
 
-    def route_to_agent(self, *, user_id: int, text: str) -> str:
-        detected = self._detect_agent_process()
-        if detected is None:
-            self._agent_pane_id = None
-            return "agent 未啟用，請使用 /agent start"
+    def route_to_agent(self, *, user_id: int, text: str, pane_id: str | None = None) -> str:
+        # pane_id 顯式指定時信任呼叫端、略過自動偵測（#34 多 pane 路由的落點）；
+        # 未給時維持今天的自動偵測行為，行為不變。
+        if pane_id is None:
+            detected = self._detect_agent_process()
+            if detected is None:
+                self._agent_pane_id = None
+                return "agent 未啟用，請使用 /agent start"
+            pane_id, _pid = detected
 
-        pane_id, _pid = detected
         self._agent_pane_id = pane_id
         # Lean tag only; the gemma4 bro hooks (UserPromptSubmit/Stop) handle the
         # Telegram reply deterministically, so no in-prompt directive is needed.
-        self._send_to_pane(pane_id, f"[bro:{user_id}] {text}")
-        return "…"
+        message = f"[bro:{user_id}] {text}"
+        bro_queue.enqueue(pane_id, message)
+        result = bro_queue.flush(
+            pane_id,
+            send=self._send_to_pane_confirmed,
+            capture=self._pane_tail_text,
+        )
+        if result.remaining == 0:
+            return "…"
+        # #88：pane 忙碌或無回應時老實回報排隊中，不再讓使用者誤以為已送達；
+        # agent 下一次 Stop（結束目前回合）與下一則訊息都會再嘗試消化佇列。
+        waited = int(result.pending_seconds or 0)
+        return f"已排入佇列，pane 忙碌或尚未確認送達（已等待 {waited} 秒），agent 有空時會自動送出"
     def status_snapshot(self) -> dict[str, object]:
         return {
             "ok": True,

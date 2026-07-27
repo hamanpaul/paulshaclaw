@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
@@ -114,6 +115,123 @@ class BroOutTests(unittest.TestCase):
         (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
         self.bro_out.handle({"session_id": "s1"}, self.state, sender=self._sender)
         self.assertEqual(self.sent, [(7, "（已完成，無文字輸出）")])
+
+    def test_handle_flushes_pane_queue_before_reply(self):
+        """#88：agent 這個 turn 結束時，Stop hook 要順手消化自己 pane 的 bro-queue，
+        不能只做 Telegram 回覆這一半。"""
+        (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
+        t = self._transcript([
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}},
+        ])
+        calls = []
+        self.bro_out.handle(
+            {"session_id": "s1", "transcript_path": str(t)},
+            self.state,
+            sender=self._sender,
+            queue_flush=lambda: calls.append(1),
+        )
+        self.assertEqual(calls, [1])
+
+    def test_stop_hook_active_does_not_flush_queue(self):
+        """既有的遞迴防呆（stop_hook_active）比消化佇列還早短路，維持原行為。"""
+        calls = []
+        self.bro_out.handle(
+            {"session_id": "s1", "stop_hook_active": True},
+            self.state,
+            sender=self._sender,
+            queue_flush=lambda: calls.append(1),
+        )
+        self.assertEqual(calls, [])
+
+    def test_queue_flush_failure_is_logged_and_does_not_block_reply(self):
+        """hook 規範：消化佇列失敗只能記 log，絕不能讓 Telegram 回覆跟著斷掉。"""
+        (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
+        t = self._transcript([
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "ok"}]}},
+        ])
+        logged = []
+        orig_log = self.bro_out._log
+        self.bro_out._log = lambda stage, exc: logged.append((stage, exc))
+        try:
+            sent = self.bro_out.handle(
+                {"session_id": "s1", "transcript_path": str(t)},
+                self.state,
+                sender=self._sender,
+                queue_flush=lambda: (_ for _ in ()).throw(RuntimeError("queue kaboom")),
+            )
+        finally:
+            self.bro_out._log = orig_log
+        self.assertTrue(sent)
+        self.assertEqual(self.sent, [(7, "ok")])
+        self.assertEqual(len(logged), 1)
+        self.assertEqual(logged[0][0], "queue_flush")
+
+    def test_flush_pane_queue_noop_without_tmux_pane_env(self):
+        calls = []
+        orig_flush, orig_env = self.bro_out.bro_queue.flush, os.environ.pop("TMUX_PANE", None)
+        self.bro_out.bro_queue.flush = lambda *a, **k: calls.append((a, k))
+        try:
+            self.bro_out._flush_pane_queue()
+        finally:
+            self.bro_out.bro_queue.flush = orig_flush
+            if orig_env is not None:
+                os.environ["TMUX_PANE"] = orig_env
+        self.assertEqual(calls, [])
+
+    def test_flush_pane_queue_uses_tmux_pane_env_as_target(self):
+        calls = []
+        orig_flush, orig_env = self.bro_out.bro_queue.flush, os.environ.get("TMUX_PANE")
+        self.bro_out.bro_queue.flush = lambda pane_id, **k: calls.append((pane_id, k))
+        os.environ["TMUX_PANE"] = "%42"
+        try:
+            self.bro_out._flush_pane_queue()
+        finally:
+            self.bro_out.bro_queue.flush = orig_flush
+            if orig_env is None:
+                os.environ.pop("TMUX_PANE", None)
+            else:
+                os.environ["TMUX_PANE"] = orig_env
+        self.assertEqual(len(calls), 1)
+        pane_id, kwargs = calls[0]
+        self.assertEqual(pane_id, "%42")
+        self.assertEqual(kwargs.get("max_attempts"), self.bro_out.QUEUE_FLUSH_MAX_ATTEMPTS)
+
+    def test_stop_hook_end_to_end_delivers_message_queued_while_busy(self):
+        """整合情境：agent 忙碌時排進佇列的訊息，在這個 turn 的 Stop hook 觸發後
+        真的被消化掉（佇列清空）——對應 issue 要求的「queue 消化後真的送達」。"""
+        from paulshaclaw.core import bro_queue
+
+        with tempfile.TemporaryDirectory() as agents_root:
+            old_root = os.environ.get("PSC_AGENTS_ROOT")
+            os.environ["PSC_AGENTS_ROOT"] = agents_root
+            try:
+                bro_queue.enqueue("%9", "[bro:7] queued while busy")
+
+                def fake_queue_flush():
+                    bro_queue.flush(
+                        "%9",
+                        max_attempts=5,
+                        send=lambda pane_id, message: True,
+                        capture=lambda pane_id: "[bro:7] queued while busy",
+                    )
+
+                (self.state / "s1.json").write_text('{"user_id": 7}', encoding="utf-8")
+                t = self._transcript([
+                    {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}},
+                ])
+                self.bro_out.handle(
+                    {"session_id": "s1", "transcript_path": str(t)},
+                    self.state,
+                    sender=self._sender,
+                    queue_flush=fake_queue_flush,
+                )
+
+                self.assertEqual(bro_queue._read_entries(bro_queue.queue_file("%9")), [])
+            finally:
+                if old_root is None:
+                    os.environ.pop("PSC_AGENTS_ROOT", None)
+                else:
+                    os.environ["PSC_AGENTS_ROOT"] = old_root
 
     def test_bridge_nonzero_exit_is_logged(self):
         import types
