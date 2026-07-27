@@ -95,6 +95,12 @@ class TelegramReplyBridge:
         return targets
 
 
+# 這三個函式是 config/secret-env/bindings 預設路徑的單一事實來源。
+# custom-skills/bro/scripts/reply_bridge.py（standalone 工具，不可 import
+# paulshaclaw.*）鏡射了這三個路徑為字面常數 DEFAULT_CONFIG_PATH /
+# DEFAULT_SECRET_ENV_PATH / DEFAULT_BINDINGS_PATH；改這裡的路徑時務必同步
+# 更新該檔，兩邊是否一致由 custom-skills/bro/tests/test_reply_bridge.py 的
+# test_default_paths_match_facade 把關（issue #90）。
 def default_config_path() -> Path:
     return paths.config_path("paulshaclaw.state.json")
 
