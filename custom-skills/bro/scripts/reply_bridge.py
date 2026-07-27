@@ -11,6 +11,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+# 本檔是刻意設計的 standalone 工具（安裝到 ~/.agents/skills/bro/scripts/ 後
+# 由 hook 以絕對路徑呼叫，執行時不在 repo 裡、沒有 repo venv，故不可
+# `import paulshaclaw.*`），因此下列三個預設值無法直接引用
+# paulshaclaw/config/paths.py 這個 facade，只能維持字面常數。
+# 對應的單一事實來源是 paulshaclaw/bot/reply.py 的
+# default_config_path() / default_secret_env_path() / default_bindings_path()
+# （皆透過 facade 組出相同路徑）；兩邊是否仍一致由
+# custom-skills/bro/tests/test_reply_bridge.py 的
+# test_default_paths_match_facade 於 CI 把關（issue #90：先前無此把關，
+# 路徑漂移只能肉眼發現）。改這裡的字面路徑時務必同步確認該測試仍綠燈。
 DEFAULT_CONFIG_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.state.json"
 DEFAULT_SECRET_ENV_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.telegram.secret.env"
 DEFAULT_BINDINGS_PATH = Path.home() / ".agents/state/telegram-chat-bindings.json"

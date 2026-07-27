@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,6 +21,12 @@ if SPEC is None or SPEC.loader is None:
 reply_bridge = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = reply_bridge
 SPEC.loader.exec_module(reply_bridge)
+
+# reply_bridge.py 本身不可 import paulshaclaw.*（見檔內註解），但「這個測試檔」
+# 只在 repo venv 裡跑，可以合法 import facade 來比對兩邊是否仍一致——這就是
+# issue #90 要補的「工具提醒」：facade 改了預設路徑而 reply_bridge.py 沒跟著改時，
+# 這裡會紅燈，而不是等到人肉發現漂移。
+from paulshaclaw.bot import reply as bot_reply
 
 
 class FakeResponse:
@@ -130,3 +138,83 @@ class ReplyBridgeTests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("錯誤: Bad Request", stderr.getvalue())
+
+    def test_default_paths_match_facade(self) -> None:
+        """issue #90：reply_bridge.py 的三個字面預設常數必須與
+        paulshaclaw.bot.reply 的 default_*_path() facade 一致——兩邊本是
+        同一組慣例路徑的獨立副本（standalone 工具不可 import facade），
+        漂移只能靠這個測試攔，不會有其他工具提醒。"""
+        self.assertEqual(reply_bridge.DEFAULT_CONFIG_PATH, bot_reply.default_config_path())
+        self.assertEqual(reply_bridge.DEFAULT_SECRET_ENV_PATH, bot_reply.default_secret_env_path())
+        self.assertEqual(reply_bridge.DEFAULT_BINDINGS_PATH, bot_reply.default_bindings_path())
+
+    def test_default_config_path_priority_arg_beats_env_beats_default(self) -> None:
+        """優先序回歸（issue #90 約束4）：--config 參數 > PSC_STAGE1_CONFIG
+        env > 內建預設，順序不可變——因為正式環境（如 systemd 多實例部署）
+        會靠 PSC_STAGE1_CONFIG 覆寫成 per-instance 路徑。"""
+        explicit = Path("/tmp/explicit-config.json")
+        env_with_override = {"PSC_STAGE1_CONFIG": "/tmp/env-config.json"}
+
+        self.assertEqual(
+            reply_bridge._default_config_path(config_path=explicit, env=env_with_override),
+            explicit,
+        )
+        self.assertEqual(
+            reply_bridge._default_config_path(config_path=None, env=env_with_override),
+            Path("/tmp/env-config.json"),
+        )
+        self.assertEqual(
+            reply_bridge._default_config_path(config_path=None, env={}),
+            reply_bridge.DEFAULT_CONFIG_PATH,
+        )
+
+    def test_default_secret_env_path_priority_env_beats_default(self) -> None:
+        """同上，secret-env 版本：PSC_TELEGRAM_SECRET_ENV 設了就不看
+        DEFAULT_SECRET_ENV_PATH 是否存在；都沒有時，預設檔不存在則回傳
+        None（讓呼叫端可改用已注入的 PSC_TELEGRAM_BOT_TOKEN，不強制報錯）。"""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / "env-secret.env"
+            env_path.write_text("PSC_TELEGRAM_BOT_TOKEN=x\n", encoding="utf-8")
+
+            self.assertEqual(
+                reply_bridge._default_secret_env_path({"PSC_TELEGRAM_SECRET_ENV": str(env_path)}),
+                env_path,
+            )
+
+        with mock.patch.object(reply_bridge, "DEFAULT_SECRET_ENV_PATH", Path(tempfile.gettempdir()) / "psc-90-nonexistent.env"):
+            self.assertIsNone(reply_bridge._default_secret_env_path({}))
+
+    def test_send_reply_resolves_defaults_without_explicit_paths(self) -> None:
+        """回歸測試（issue #90 約束2 的實際生產情境）：
+        scripts/gemma4-hooks/bro_out.py 與 psc-bro-return.py 呼叫
+        reply_bridge.py 時目前只傳 --source-user-id / --text，不傳任何路徑
+        參數。此測試把整支 script 當 subprocess 跑、只覆寫 HOME，證明在
+        「呼叫端不傳路徑」的情境下，reply_bridge 仍能從 DEFAULT_*_PATH
+        指向的慣例位置（$HOME 底下）正確解析設定——而不是必須靠呼叫端
+        傳路徑才能動。"""
+        with tempfile.TemporaryDirectory() as home_dir:
+            home = Path(home_dir)
+            config_path = home / ".config" / "paulshaclaw" / "paulshaclaw.state.json"
+            secret_env_path = home / ".config" / "paulshaclaw" / "paulshaclaw.telegram.secret.env"
+            bindings_path = home / ".agents" / "state" / "telegram-chat-bindings.json"
+            for path in (config_path, secret_env_path, bindings_path):
+                path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(json.dumps({"allowed_user_ids": [7]}), encoding="utf-8")
+            secret_env_path.write_text("PSC_TELEGRAM_BOT_TOKEN=fake-token\n", encoding="utf-8")
+            bindings_path.write_text(json.dumps({"7": 1001}), encoding="utf-8")
+
+            env = dict(os.environ)
+            env["HOME"] = str(home)
+            for key in ("PSC_STAGE1_CONFIG", "PSC_TELEGRAM_SECRET_ENV", "PSC_TELEGRAM_BINDINGS_PATH"):
+                env.pop(key, None)
+
+            result = subprocess.run(
+                [sys.executable, str(SCRIPT_PATH), "--source-user-id", "7", "--text", "hi", "--dry-run"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("user=7 chat=1001", result.stdout)
