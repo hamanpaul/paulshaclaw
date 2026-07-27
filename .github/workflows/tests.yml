@@ -46,4 +46,6 @@ jobs:
         run: python scripts/check_import_surface.py
 
       - name: Run test suite
-        run: python -m pytest tests/ -q
+        # custom-skills 的測試不在 tests/ 底下，得明確列出。漏掉它等於讓
+        # reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
+        run: python -m pytest tests/ custom-skills/bro/tests/ -q

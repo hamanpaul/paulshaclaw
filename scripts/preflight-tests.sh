@@ -16,4 +16,6 @@ if [[ "${LC_ALL:-}" == "C" && "${LANG:-C}" != "C" ]]; then
   export LC_ALL="$LANG"
 fi
 
-exec "$python_bin" -m pytest "$repo_root/tests/" -q
+# custom-skills 的測試不在 tests/ 底下，得明確列出。漏掉它等於讓
+# reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
+exec "$python_bin" -m pytest "$repo_root/tests/" "$repo_root/custom-skills/bro/tests/" -q
