@@ -1,3 +1,5 @@
+> **Fact:** `paulshaclaw` 是整套系統的人類操作與產品入口；它整合 operator-facing surfaces，但不擁有 workflow lifecycle、domain verdict 或 long-term experience authority。
+
 # paulshaclaw
 
 > **一句話**：`paulshaclaw` 現在是個人 agent 作業系統的 **operator shell**——保留 shell / integration / operator-facing surface；**記憶平面**已遷至 [paulsha-hippo](https://github.com/hamanpaul/paulsha-hippo)，**manager / persona / control / deck / monitor 治理平面**已遷至 [paulsha-cortex](https://github.com/hamanpaul/paulsha-cortex)。（對外品牌 PaulShiaBro，吉祥物破蝦哥 🦞。）
