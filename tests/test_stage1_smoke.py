@@ -860,7 +860,7 @@ class Stage1SmokeTest(unittest.TestCase):
                     0,
                     stdout=(
                         "111 python /repo/scripts/claude-gemma4-proxy\n"
-                        "112 /opt/claude/bin/claude.exe --settings /home/paul_chen/.claude-gemma4/settings.json\n"
+                        "112 /opt/claude/bin/claude.exe --settings /opt/paul_chen/.claude-gemma4/settings.json\n"
                     ),
                     stderr="",
                 )
@@ -870,7 +870,7 @@ class Stage1SmokeTest(unittest.TestCase):
                 return subprocess.CompletedProcess(
                     command,
                     0,
-                    stdout="/opt/claude/bin/claude.exe --settings /home/paul_chen/.claude-gemma4/settings.json\n",
+                    stdout="/opt/claude/bin/claude.exe --settings /opt/paul_chen/.claude-gemma4/settings.json\n",
                     stderr="",
                 )
             raise AssertionError(f"unexpected command: {command}")

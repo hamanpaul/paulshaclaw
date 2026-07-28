@@ -91,9 +91,9 @@ class ClaudeGemma4PackagingTests(unittest.TestCase):
         self.assertIn('OPENAI_API_KEY', script_text)
         self.assertNotIn('cat > "$GEMMA_SETTINGS" <<'"'"'"'"'"'JSON'"'"'"'"'"'', script_text)
         self.assertIn('cp "$GEMMA_SETTINGS_TEMPLATE" "$GEMMA_SETTINGS"', script_text)
-        self.assertNotIn('/home/paul_chen/.nvm/versions/node', script_text)
-        self.assertNotIn('/home/paul_chen/.config/paulshaclaw', script_text)
-        self.assertNotIn('/home/paul_chen/.claude-gemma4', script_text)
+        self.assertNotIn('/opt/paul_chen/.nvm/versions/node', script_text)
+        self.assertNotIn('/opt/paul_chen/.config/paulshaclaw', script_text)
+        self.assertNotIn('/opt/paul_chen/.claude-gemma4', script_text)
         self.assertNotIn('"effortLevel": "max"', script_text)
 
     def test_launcher_mirrors_custom_skills_into_config_dir(self) -> None:

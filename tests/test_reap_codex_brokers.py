@@ -13,8 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "reap-codex-brokers.sh"
 
 _BROKER = (
-    "/home/x/.nvm/versions/node/v22.20.0/bin/node "
-    "/home/x/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/app-server-broker.mjs serve "
+    "/opt/x/.nvm/versions/node/v22.20.0/bin/node "
+    "/opt/x/.claude/plugins/cache/openai-codex/codex/1.0.4/scripts/app-server-broker.mjs serve "
     "--endpoint unix:/tmp/{sock}/broker.sock --cwd {cwd} --pid-file /tmp/{sock}/broker.pid"
 )
 
@@ -24,15 +24,15 @@ SNAPSHOT_LINES = [
     "2 1 /init",
     "1177 2 /init",  # WSL 子收割鏈
     "300 1 /usr/lib/systemd/systemd --user",                    # systemd --user 子收割（pid != 1）
-    "400 4999 node /home/x/systemd-notify-helper.js",           # args 含 "systemd" 但 exe=node → 非 reaper
+    "400 4999 node /opt/x/systemd-notify-helper.js",           # args 含 "systemd" 但 exe=node → 非 reaper
     "4999 4000 -bash",
-    "5000 4999 /home/x/.nvm/versions/node/v22.20.0/bin/claude",  # 活 session
-    f"8001 1177 {_BROKER.format(sock='cxc-AAA', cwd='/home/x/prj/.worktrees/feat-a')}",  # 孤兒(WSL /init)
-    f"8002 1 {_BROKER.format(sock='cxc-BBB', cwd='/home/x/prj/.worktrees/feat-b')}",     # 孤兒(PID 1)
-    f"8003 5000 {_BROKER.format(sock='cxc-CCC', cwd='/home/x/prj/main')}",               # 活：parent=活 claude
-    f"8004 300 {_BROKER.format(sock='cxc-DDD', cwd='/home/x/prj/.worktrees/feat-d')}",   # 孤兒(systemd --user 子收割)
-    f"8005 400 {_BROKER.format(sock='cxc-EEE', cwd='/home/x/prj/.worktrees/feat-e')}",   # 不殺：parent exe=node，非 reaper
-    "9000 8001 node /home/x/.npm/_npx/abc/node_modules/.bin/mcp-server-memory",          # 雜訊
+    "5000 4999 /opt/x/.nvm/versions/node/v22.20.0/bin/claude",  # 活 session
+    f"8001 1177 {_BROKER.format(sock='cxc-AAA', cwd='/opt/x/prj/.worktrees/feat-a')}",  # 孤兒(WSL /init)
+    f"8002 1 {_BROKER.format(sock='cxc-BBB', cwd='/opt/x/prj/.worktrees/feat-b')}",     # 孤兒(PID 1)
+    f"8003 5000 {_BROKER.format(sock='cxc-CCC', cwd='/opt/x/prj/main')}",               # 活：parent=活 claude
+    f"8004 300 {_BROKER.format(sock='cxc-DDD', cwd='/opt/x/prj/.worktrees/feat-d')}",   # 孤兒(systemd --user 子收割)
+    f"8005 400 {_BROKER.format(sock='cxc-EEE', cwd='/opt/x/prj/.worktrees/feat-e')}",   # 不殺：parent exe=node，非 reaper
+    "9000 8001 node /opt/x/.npm/_npx/abc/node_modules/.bin/mcp-server-memory",          # 雜訊
 ]
 
 
@@ -61,8 +61,8 @@ def test_dry_run_lists_orphans_excludes_live(tmp_path):
     assert "8004" in out                              # systemd --user 子收割的孤兒也列出
     assert "8003" not in out                          # 活 session 的 broker 不能被列
     assert "8005" not in out                          # parent exe=node（非 reaper）→ 不可誤判為孤兒
-    assert "/home/x/prj/.worktrees/feat-a" in out     # cwd 解析正確
-    assert "/home/x/prj/.worktrees/feat-b" in out
+    assert "/opt/x/prj/.worktrees/feat-a" in out     # cwd 解析正確
+    assert "/opt/x/prj/.worktrees/feat-b" in out
     assert "dry-run" in out
 
 
@@ -93,7 +93,7 @@ def test_apply_sigterms_only_orphans(tmp_path):
 
 def test_no_orphans_is_clean_exit(tmp_path):
     snap = tmp_path / "snap.txt"
-    snap.write_text("1 0 /sbin/init\n5000 1 /home/x/bin/claude\n", encoding="utf-8")
+    snap.write_text("1 0 /sbin/init\n5000 1 /opt/x/bin/claude\n", encoding="utf-8")
     res = _run(snap)
     assert res.returncode == 0, res.stderr
     assert "無孤兒" in res.stdout

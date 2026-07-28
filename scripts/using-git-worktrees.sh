@@ -3,7 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MAP_FILE="${1:-$REPO_ROOT/config/worktrees/stage-worktrees.tsv}"
-WT_ROOT="${2:-/home/paul_chen/prj_pri/paulshaclaw-worktrees}"
+WT_ROOT="${2:-$HOME/prj_pri/paulshaclaw-worktrees}"
 BASE_REF="${3:-main}"
 
 if [[ ! -f "$MAP_FILE" ]]; then
