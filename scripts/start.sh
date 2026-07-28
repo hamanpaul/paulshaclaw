@@ -82,9 +82,187 @@ resolve_operator_python() {
   return 1
 }
 
+ensure_xdg_runtime_dir() {
+  # WSL 的非 login shell 常常沒有 XDG_RUNTIME_DIR，`systemctl --user` 因而
+  # 「Failed to connect to bus」而被誤判成 systemd 不可用，於是重起一份已在
+  # systemd 下常駐的 manager。目錄真的在就把預設值補回來。
+  local candidate="${1:-/run/user/$(id -u)}"
+  if [[ -n "${XDG_RUNTIME_DIR:-}" ]]; then
+    return 0
+  fi
+  if [[ -d "$candidate" && -w "$candidate" ]]; then
+    export XDG_RUNTIME_DIR="$candidate"
+  fi
+}
+
+cortex_agents_root() {
+  printf '%s\n' "${PSC_AGENTS_ROOT:-$HOME/.agents}"
+}
+
+cortex_instance() {
+  printf '%s\n' "${PSC_INSTANCE:-cortex}"
+}
+
+cortex_specs_root() {
+  if [[ -n "${PSC_MANAGER_SPECS_DIR:-}" ]]; then
+    printf '%s\n' "$PSC_MANAGER_SPECS_DIR"
+    return 0
+  fi
+  if [[ -n "${PSC_SPECS_ROOT:-}" ]]; then
+    printf '%s\n' "$PSC_SPECS_ROOT"
+    return 0
+  fi
+  printf '%s/specs\n' "$(cortex_agents_root)"
+}
+
+cortex_control_root() {
+  if [[ -n "${PSC_CONTROL_ROOT:-}" ]]; then
+    printf '%s\n' "$PSC_CONTROL_ROOT"
+    return 0
+  fi
+  printf '%s/control\n' "$(cortex_agents_root)"
+}
+
+cortex_tick_interval_seconds() {
+  local interval="${PSC_MANAGER_TICK_INTERVAL_SECONDS:-300}"
+  if [[ ! "$interval" =~ ^[0-9]+$ ]] || (( interval <= 0 )); then
+    interval=300
+  fi
+  printf '%s\n' "$interval"
+}
+
+# manager daemon 以 flock 做 single-instance，所以鎖被持有就代表已有活著的
+# manager（systemd 單元或前一輪 fallback）。用 flock 探測而非讀 lock 檔的 pid：
+# kernel 的鎖狀態才是真相，crash 留下的陳舊 lock 檔會正確地判為 free。
+# `-E 100` 把「拿不到鎖」和其他錯誤分開——只有 100 才算已被持有，開檔失敗等
+# 情況維持原本行為（照常嘗試起 daemon，起不來再 fail-closed）。
+cortex_manager_lock_is_held() {
+  local lock status=0
+  lock="$(cortex_control_root)/manager.lock"
+  [[ -f "$lock" ]] || return 1
+  flock -n -E 100 "$lock" true || status=$?
+  if (( status == 100 )); then
+    return 0
+  fi
+  return 1
+}
+
+# monitor 沒有 single-instance 保護，第二份會與既有 monitor 搶同一份 state。
+cortex_monitor_is_running() {
+  local pattern="${PSC_MONITOR_PROC_PATTERN:--m paulsha_cortex.monitor}"
+  pgrep -f -- "$pattern" >/dev/null 2>&1
+}
+
+# cockpit 啟動前的最後把關：只檢查「本輪 fallback 自己起的」進程。PID 未設代表
+# 該角色由 systemd 或既有 daemon 承擔（fallback 刻意跳過），不是啟動失敗。
+verify_cortex_fallback_alive() {
+  if [[ -n "${CORTEX_MONITOR_PID:-}" ]] && ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
+    wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
+    echo "cortex fallback monitor exited before cockpit start" >&2
+    return 1
+  fi
+
+  if [[ -n "${CORTEX_MANAGER_PID:-}" ]] && ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
+    wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
+    echo "cortex fallback manager exited before cockpit start" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+ensure_cortex_services() {
+  if [[ "${PSC_MANAGER_DISABLED:-0}" == "1" ]]; then
+    echo "cortex services disabled (PSC_MANAGER_DISABLED=1)"
+    return 0
+  fi
+
+  local instance
+  instance="$(cortex_instance)"
+  local -a install_cmd=(
+    "$PY" -m paulsha_cortex.cli install service
+    --instance "$instance"
+    --repo-root "$REPO"
+  )
+  local manager_log="$HOME/.agents/log/cortex-manager.log"
+  local monitor_log="$HOME/.agents/log/cortex-monitor.log"
+
+  start_cortex_local_fallback() {
+    mkdir -p "$HOME/.agents/log"
+    mkdir -p "$(cortex_specs_root)"
+
+    if cortex_monitor_is_running; then
+      echo "cortex monitor 已在運行，fallback 不重起 monitor" >&2
+    else
+      PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.cli monitor 200>&- >>"$monitor_log" 2>&1 &
+      CORTEX_MONITOR_PID=$!
+      if ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
+        wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
+        echo "cortex fallback monitor exited before startup" >&2
+        return 1
+      fi
+    fi
+
+    # F1（對抗審查）：fallback 起「常駐 manager daemon」而非 one-shot tick loop——
+    # daemon 才會持 manager.lock、drain ~/.agents/control/requests、寫 manager status；
+    # one-shot tick 不持鎖不 drain，cockpit t / Telegram /manager tick 的請求永不被消費。
+    # F3：鎖已被持有代表 manager 正常運作中，不是啟動失敗——再起一份只會搶不到鎖
+    # 而靜默退出，被下方 gate 判成 startup 失敗並拖垮整個 start.sh。
+    if cortex_manager_lock_is_held; then
+      echo "cortex manager 已在運行（manager.lock 被持有），fallback 不重起 manager daemon" >&2
+    else
+      (
+        PSC_CONTROL_ROOT="${PSC_CONTROL_ROOT:-$HOME/.agents/control}" \
+        PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.coordinator.manager_daemon \
+          --specs-dir "$(cortex_specs_root)"
+      ) 200>&- >>"$manager_log" 2>&1 &
+      CORTEX_MANAGER_PID=$!
+      if ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
+        wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
+        echo "cortex fallback manager daemon exited before startup" >&2
+        return 1
+      fi
+    fi
+
+    echo "cortex fallback started (manager daemon pid=${CORTEX_MANAGER_PID:-skipped} monitor pid=${CORTEX_MONITOR_PID:-skipped})" >&2
+    return 0
+  }
+
+  if ! "${install_cmd[@]}"; then
+    echo "cortex install service failed; starting local fallback" >&2
+    start_cortex_local_fallback
+    return $?
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "cortex services installed; systemctl --user unavailable, starting local fallback" >&2
+    start_cortex_local_fallback
+    return $?
+  fi
+
+  # F2（對抗審查）：cutover 順序——啟用 cortex 前先停用舊 paulshaclaw manager 單元，
+  # 否則舊 timer 仍 enabled、指向已刪的舊 service 腳本，或與新 manager 搶同一 control root。
+  for legacy in paulshaclaw-manager.timer paulshaclaw-manager.service; do
+    systemctl --user stop "$legacy" 2>/dev/null || true
+    systemctl --user disable "$legacy" 2>/dev/null || true
+  done
+
+  if systemctl --user enable --now "${instance}-manager.timer" "${instance}-monitor.service"; then
+    echo "cortex services enabled (${instance}-manager.timer ${instance}-monitor.service)"
+  else
+    echo "cortex services enable/start failed; starting local fallback" >&2
+    start_cortex_local_fallback
+    return $?
+  fi
+}
+
 if [[ "${1:-}" == "--source-only" ]]; then
   return 0 2>/dev/null || exit 0
 fi
+
+# 必須早於 start_lock：它也吃 XDG_RUNTIME_DIR，晚補會讓同一台機器出現
+# /tmp 與 /run/user/<uid> 兩個 lock 路徑，single-instance 保護就破了。
+ensure_xdg_runtime_dir
 
 start_lock="${XDG_RUNTIME_DIR:-/tmp}/paulshaclaw-start.lock"
 exec 200>"$start_lock"
@@ -233,109 +411,6 @@ if [[ -n "${TMUX:-}" ]]; then
   start_cost_refresh_loop
 fi
 
-cortex_agents_root() {
-  printf '%s\n' "${PSC_AGENTS_ROOT:-$HOME/.agents}"
-}
-
-cortex_instance() {
-  printf '%s\n' "${PSC_INSTANCE:-cortex}"
-}
-
-cortex_specs_root() {
-  if [[ -n "${PSC_MANAGER_SPECS_DIR:-}" ]]; then
-    printf '%s\n' "$PSC_MANAGER_SPECS_DIR"
-    return 0
-  fi
-  if [[ -n "${PSC_SPECS_ROOT:-}" ]]; then
-    printf '%s\n' "$PSC_SPECS_ROOT"
-    return 0
-  fi
-  printf '%s/specs\n' "$(cortex_agents_root)"
-}
-
-cortex_tick_interval_seconds() {
-  local interval="${PSC_MANAGER_TICK_INTERVAL_SECONDS:-300}"
-  if [[ ! "$interval" =~ ^[0-9]+$ ]] || (( interval <= 0 )); then
-    interval=300
-  fi
-  printf '%s\n' "$interval"
-}
-
-ensure_cortex_services() {
-  if [[ "${PSC_MANAGER_DISABLED:-0}" == "1" ]]; then
-    echo "cortex services disabled (PSC_MANAGER_DISABLED=1)"
-    return 0
-  fi
-
-  local instance
-  instance="$(cortex_instance)"
-  local -a install_cmd=(
-    "$PY" -m paulsha_cortex.cli install service
-    --instance "$instance"
-    --repo-root "$REPO"
-  )
-  local manager_log="$HOME/.agents/log/cortex-manager.log"
-  local monitor_log="$HOME/.agents/log/cortex-monitor.log"
-
-  start_cortex_local_fallback() {
-    mkdir -p "$HOME/.agents/log"
-    mkdir -p "$(cortex_specs_root)"
-
-    PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.cli monitor 200>&- >>"$monitor_log" 2>&1 &
-    CORTEX_MONITOR_PID=$!
-    if ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
-      wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
-      echo "cortex fallback monitor exited before startup" >&2
-      return 1
-    fi
-
-    # F1（對抗審查）：fallback 起「常駐 manager daemon」而非 one-shot tick loop——
-    # daemon 才會持 manager.lock、drain ~/.agents/control/requests、寫 manager status；
-    # one-shot tick 不持鎖不 drain，cockpit t / Telegram /manager tick 的請求永不被消費。
-    (
-      PSC_CONTROL_ROOT="${PSC_CONTROL_ROOT:-$HOME/.agents/control}" \
-      PYTHONPATH="$REPO" "$PY" -m paulsha_cortex.coordinator.manager_daemon \
-        --specs-dir "$(cortex_specs_root)"
-    ) 200>&- >>"$manager_log" 2>&1 &
-    CORTEX_MANAGER_PID=$!
-    if ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
-      wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
-      echo "cortex fallback manager daemon exited before startup" >&2
-      return 1
-    fi
-
-    echo "cortex fallback started (manager daemon pid=$CORTEX_MANAGER_PID monitor pid=$CORTEX_MONITOR_PID)" >&2
-    return 0
-  }
-
-  if ! "${install_cmd[@]}"; then
-    echo "cortex install service failed; starting local fallback" >&2
-    start_cortex_local_fallback
-    return $?
-  fi
-
-  if ! command -v systemctl >/dev/null 2>&1 || ! systemctl --user show-environment >/dev/null 2>&1; then
-    echo "cortex services installed; systemctl --user unavailable, starting local fallback" >&2
-    start_cortex_local_fallback
-    return $?
-  fi
-
-  # F2（對抗審查）：cutover 順序——啟用 cortex 前先停用舊 paulshaclaw manager 單元，
-  # 否則舊 timer 仍 enabled、指向已刪的舊 service 腳本，或與新 manager 搶同一 control root。
-  for legacy in paulshaclaw-manager.timer paulshaclaw-manager.service; do
-    systemctl --user stop "$legacy" 2>/dev/null || true
-    systemctl --user disable "$legacy" 2>/dev/null || true
-  done
-
-  if systemctl --user enable --now "${instance}-manager.timer" "${instance}-monitor.service"; then
-    echo "cortex services enabled (${instance}-manager.timer ${instance}-monitor.service)"
-  else
-    echo "cortex services enable/start failed; starting local fallback" >&2
-    start_cortex_local_fallback
-    return $?
-  fi
-}
-
 # Telegram listener (background when config is present)
 telegram_token_present=0
 telegram_config_present=0
@@ -415,17 +490,7 @@ fi
 # large TUI process does not stack onto the same burst.
 sleep 2
 
-if [[ -n "${CORTEX_MONITOR_PID:-}" ]] && ! kill -0 "$CORTEX_MONITOR_PID" 2>/dev/null; then
-  wait "$CORTEX_MONITOR_PID" 2>/dev/null || true
-  echo "cortex fallback monitor exited before cockpit start" >&2
-  exit 1
-fi
-
-if [[ -n "${CORTEX_MANAGER_PID:-}" ]] && ! kill -0 "$CORTEX_MANAGER_PID" 2>/dev/null; then
-  wait "$CORTEX_MANAGER_PID" 2>/dev/null || true
-  echo "cortex fallback manager exited before cockpit start" >&2
-  exit 1
-fi
+verify_cortex_fallback_alive || exit 1
 
 # Stage 11: cockpit TUI (background with real stdin so Textual gets a TTY)
 # Background processes default to /dev/null stdin; Textual raises
