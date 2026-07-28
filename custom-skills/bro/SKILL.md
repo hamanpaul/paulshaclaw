@@ -18,7 +18,7 @@ This skill now carries its own skill-local tool, so it does **not** depend on th
 ## Workflow
 
 1. Draft the final reply text first.
-2. Use the skill-local tool at `/home/paul_chen/.agents/skills/bro/scripts/reply_bridge.py`.
+2. Use the skill-local tool at `~/.agents/skills/bro/scripts/reply_bridge.py`.
 3. If the current context provides a source Telegram user id, pass `--source-user-id <id>`.
 4. If no source Telegram user id is available, omit that flag so the bridge fans out to all allowed users with known chat bindings.
 5. Send the reply through the bridge.
@@ -37,14 +37,14 @@ It can be run from **any** working directory.
 ## Preferred command
 
 ```bash
-python3 /home/paul_chen/.agents/skills/bro/scripts/reply_bridge.py \
+python3 ~/.agents/skills/bro/scripts/reply_bridge.py \
   --text '最終回覆內容放這裡'
 ```
 
 With a source user id:
 
 ```bash
-python3 /home/paul_chen/.agents/skills/bro/scripts/reply_bridge.py \
+python3 ~/.agents/skills/bro/scripts/reply_bridge.py \
   --text '最終回覆內容放這裡' \
   --source-user-id 8313353234
 ```
@@ -52,7 +52,7 @@ python3 /home/paul_chen/.agents/skills/bro/scripts/reply_bridge.py \
 Dry-run without sending:
 
 ```bash
-python3 /home/paul_chen/.agents/skills/bro/scripts/reply_bridge.py \
+python3 ~/.agents/skills/bro/scripts/reply_bridge.py \
   --text '最終回覆內容放這裡' \
   --dry-run
 ```
@@ -63,11 +63,12 @@ If the reply contains quotes or multiple lines, invoke the bundled tool through 
 
 ```bash
 python3 - <<'PY'
+import os
 import subprocess
 import sys
 
 text = """把最終 multiline 回覆完整放在這裡。"""
-tool = "/home/paul_chen/.agents/skills/bro/scripts/reply_bridge.py"
+tool = os.path.expanduser("~/.agents/skills/bro/scripts/reply_bridge.py")
 raise SystemExit(subprocess.run([sys.executable, tool, "--text", text], check=False).returncode)
 PY
 ```

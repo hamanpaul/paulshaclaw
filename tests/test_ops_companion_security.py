@@ -61,14 +61,14 @@ class RedactionRuleTests(unittest.TestCase):
         payload = (
             "Authorization: Bearer sk-prod-secret-token\n"
             "password=hunter2\n"
-            "github=ghp_1234567890abcdefghijklmnopqrstuv"
+            "github=github_pat_test1234X"
         )
 
         result = mod.RedactionEngine().redact(payload)
 
         self.assertNotIn("sk-prod-secret-token", result.text)
         self.assertNotIn("hunter2", result.text)
-        self.assertNotIn("ghp_1234567890abcdefghijklmnopqrstuv", result.text)
+        self.assertNotIn("github_pat_test1234X", result.text)
         self.assertIn("credential", result.classifications)
         self.assertIn("token", result.classifications)
         self.assertIn("bearer-token", result.rule_hits)

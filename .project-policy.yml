@@ -1,7 +1,12 @@
 policy_profile: stage-driven
-policy_version: 1.0.14
+policy_version: 1.0.15
 conventions_engine:
   repo: hamanpaul/paulsha-conventions
+secret_scan:
+  allow:
+    - "docs/superpowers/**"
+    - "docs/research/**"
+    - "openspec/changes/archive/**"
 preflight:
   steps:
     - name: openspec

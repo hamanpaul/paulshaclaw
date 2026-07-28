@@ -33,7 +33,7 @@ Stage 0 MUST pin every external reference repo used for reading/comparison at `o
 
 ### Requirement: Worktree helper script
 
-Stage 0 MUST provide `scripts/using-git-worktrees.sh` that manages per-stage worktrees under `/home/paul_chen/prj_pri/paulshaclaw-worktrees/<workstream>/` and the matching `wt/<workstream>` branch. The helper MUST cover four branching paths — (a) remote-tracking branch missing, (b) stale remote ref auto-pruned, (c) local branch already exists, (d) fresh branch creation — and MUST use distinct non-zero exit codes for the recoverable failure cases so that callers can distinguish them.
+Stage 0 MUST provide `scripts/using-git-worktrees.sh` that manages per-stage worktrees under `$HOME/prj_pri/paulshaclaw-worktrees/<workstream>/` (default, overridable via the second positional argument) and the matching `wt/<workstream>` branch. The helper MUST cover four branching paths — (a) remote-tracking branch missing, (b) stale remote ref auto-pruned, (c) local branch already exists, (d) fresh branch creation — and MUST use distinct non-zero exit codes for the recoverable failure cases so that callers can distinguish them.
 
 #### Scenario: Stale remote ref is auto-pruned
 

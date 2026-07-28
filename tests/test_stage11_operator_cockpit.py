@@ -500,11 +500,11 @@ class Stage11StateTests(unittest.TestCase):
         self.assertFalse(panes[1].active)
 
     def test_parse_list_panes_reads_current_path_and_host_short(self) -> None:
-        raw = "%0\tmain\t0\t9900X\tbash\t0\t0\t120\t40\t1\t/dev/pts/7\t/home/paul/prj/cockpit\t9900X\n"
+        raw = "%0\tmain\t0\t9900X\tbash\t0\t0\t120\t40\t1\t/dev/pts/7\t/opt/paul/prj/cockpit\t9900X\n"
         panes = parse_list_panes(raw)
 
         self.assertEqual(panes[0].pane_tty, "/dev/pts/7")
-        self.assertEqual(panes[0].pane_current_path, "/home/paul/prj/cockpit")
+        self.assertEqual(panes[0].pane_current_path, "/opt/paul/prj/cockpit")
         self.assertEqual(panes[0].host_short, "9900X")
 
     def test_pane_display_label_includes_session_window(self) -> None:
@@ -526,7 +526,7 @@ class Stage11StateTests(unittest.TestCase):
         pane = PaneRecord(**{**pane.__dict__, "pane_tty": "/dev/pts/2"})
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
-            stdout="  minicom -D /dev/pts/17 --color=on -C /home/x/b-log/mini_COM0_260610.log\n",
+            stdout="  minicom -D /dev/pts/17 --color=on -C /opt/x/b-log/mini_COM0_260610.log\n",
         )
         with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
             self.assertEqual(derive_summary(pane), "minicom COM0")
@@ -541,14 +541,14 @@ class Stage11StateTests(unittest.TestCase):
                 "%9",
                 title="9900X",
                 command="bash",
-                pane_current_path="/home/paul/prj/repo-a",
+                pane_current_path="/opt/paul/prj/repo-a",
                 host_short="9900X",
             ),
             pane_record(
                 "%10",
                 title="9900X",
                 command="bash",
-                pane_current_path="/home/paul/prj/repo-b",
+                pane_current_path="/opt/paul/prj/repo-b",
                 host_short="9900X",
             ),
         )
@@ -561,14 +561,14 @@ class Stage11StateTests(unittest.TestCase):
             title="",
             command="bash",
             pane_tty="/dev/pts/9",
-            pane_current_path="/home/paul_chen",
+            pane_current_path="/opt/paul_chen",
             host_short="9900X",
         )
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
             stdout=(
-                "  bash /home/paul_chen/.local/bin/serialwrap-minicom COM0\n"
-                "  /usr/bin/minicom -D /dev/pts/8 --color=on -C /home/paul_chen/b-log/mini_COM0_x.log\n"
+                "  bash /opt/paul_chen/.local/bin/serialwrap-minicom COM0\n"
+                "  /usr/bin/minicom -D /dev/pts/8 --color=on -C /opt/paul_chen/b-log/mini_COM0_x.log\n"
             ),
         )
         with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
@@ -581,7 +581,7 @@ class Stage11StateTests(unittest.TestCase):
             title="",
             command="bash",
             pane_tty="/dev/pts/3",
-            pane_current_path="/home/paul/prj/repo-a",
+            pane_current_path="/opt/paul/prj/repo-a",
             host_short="9900X",
         )
         completed = subprocess.CompletedProcess(
@@ -597,7 +597,7 @@ class Stage11StateTests(unittest.TestCase):
             title="9900X",
             command="bash",
             pane_tty="",
-            pane_current_path="/home/paul/prj/repo-a",
+            pane_current_path="/opt/paul/prj/repo-a",
             host_short="9900X",
         )
         with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run:
@@ -612,12 +612,12 @@ class Stage11StateTests(unittest.TestCase):
             title="",
             command="bash",
             pane_tty="/dev/pts/5",
-            pane_current_path="/home/paul/prj/repo-b",
+            pane_current_path="/opt/paul/prj/repo-b",
             host_short="9900X",
         )
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
-            stdout="  man minicom\n  vim /home/x/.local/bin/serialwrap-minicom\n",
+            stdout="  man minicom\n  vim /opt/x/.local/bin/serialwrap-minicom\n",
         )
         with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
             self.assertEqual(derive_summary(pane), "repo-b")
@@ -629,7 +629,7 @@ class Stage11StateTests(unittest.TestCase):
             title="",
             command="bash",
             pane_tty="/dev/pts/9",
-            pane_current_path="/home/paul_chen",
+            pane_current_path="/opt/paul_chen",
             host_short="9900X",
         )
         with patch("paulshaclaw.cockpit.tmux.subprocess.run") as run:
@@ -643,7 +643,7 @@ class Stage11StateTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
             stdout=(
-                "pts/9 /usr/bin/minicom -D /dev/pts/8 -C /home/x/b-log/mini_COM0_x.log\n"
+                "pts/9 /usr/bin/minicom -D /dev/pts/8 -C /opt/x/b-log/mini_COM0_x.log\n"
                 "pts/3 -bash\n"
                 "?     /usr/lib/systemd/systemd\n"
                 "pts/5 man minicom\n"
