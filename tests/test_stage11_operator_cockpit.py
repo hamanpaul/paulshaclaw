@@ -30,7 +30,6 @@ from paulshaclaw.cockpit.app import (
     CockpitApp,
     format_work_pane_subtitle,
     pane_display_label,
-    _JOBS_LINE_BUDGET,
     _JOBS_WIDTH_FALLBACK,
     _display_width,
     _ellipsize_middle,
@@ -39,6 +38,21 @@ from paulshaclaw.cockpit.app import (
     group_job_rows,
     slices_from_status,
 )
+# jobs_panel 是 JOBS 面板的 Tree 化實作（純函式鏈 + widget），本檔的 JOBS 斷言
+# 直接對它取值，不再繞經 app.py 的行預算渲染（那套機制已被捲動取代，見 #264 UX 改版）。
+from paulshaclaw.cockpit.jobs_panel import build_jobs_nodes
+
+
+def _flatten_node_text(node) -> str:
+    """把單一節點（含子節點）攤成純文字，供內容斷言用——不綁死排版細節。"""
+    text = "".join(segment_text for segment_text, _ in node.segments)
+    for child in node.children:
+        text += "\n" + _flatten_node_text(child)
+    return text
+
+
+def _flatten_nodes(nodes) -> str:
+    return "\n".join(_flatten_node_text(node) for node in nodes)
 from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.manager_panel import ManagerModal
 from paulshaclaw.cockpit.models import JobRow, JobSummary, PaneRecord, SlotAnchor
@@ -716,7 +730,13 @@ class Stage11StateTests(unittest.TestCase):
             app._refresh_widgets()
             app._refresh_widgets()  # identical content -> list not rebuilt again
             self.assertEqual(widgets["#work-list"].clear.call_count, 1)
-            self.assertGreaterEqual(widgets["#global-jobs"].update.call_count, 2)
+            # JOBS 每個 tick 都經 set_groups 或 set_message 之一餵資料（見 jobs_panel 契約），
+            # 不再是直接 update() 一個 renderable。
+            jobs_refresh_calls = (
+                widgets["#global-jobs"].set_groups.call_count
+                + widgets["#global-jobs"].set_message.call_count
+            )
+            self.assertGreaterEqual(jobs_refresh_calls, 2)
 
             app.state = app.state.move_selection(1)  # cursor moves to a different candidate
             app._refresh_widgets()
@@ -1031,20 +1051,22 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(format_work_pane_subtitle(state), "main:0 · 1 panes")
 
     def test_help_modal_lists_all_bindings(self) -> None:
+        """up/down/enter 不再是 App 層 BINDINGS（WORK／JOBS 各自的 focused widget 原生
+        處理，見 #264 Tree 化），help 改講 tab 切換 focus 與兩個面板各自的鍵位。"""
         help_text = HelpModal.render_help_text(CockpitApp.BINDINGS)
 
-        self.assertIn("up: ↑/↓ 選擇", help_text)
-        self.assertIn("down: ↑/↓ 選擇", help_text)
-        self.assertIn("enter: Enter 把選中的 pane 換到我面前", help_text)
-        self.assertIn("c: c 回 cockpit", help_text)
-        self.assertIn("m: m 顯示 manager 面板", help_text)
-        self.assertIn("q: q 離開 cockpit", help_text)
-        self.assertIn("t: t 送出 manager tick", help_text)
-        self.assertIn("j: j 收合/展開 JOBS", help_text)
-        self.assertIn("ctrl+q: Ctrl+Q 離開 cockpit", help_text)
-        self.assertIn("question_mark: ? 顯示說明", help_text)
-        self.assertIn("The work list shows panes of the cockpit session", help_text)
-        self.assertIn("j collapses / expands the JOBS panel.", help_text)
+        self.assertIn("tab: 切換面板", help_text)
+        self.assertIn("c: 回 cockpit", help_text)
+        self.assertIn("m: manager", help_text)
+        self.assertIn("q: 離開", help_text)
+        self.assertIn("t: tick", help_text)
+        self.assertIn("j: JOBS 收合", help_text)
+        self.assertIn("question_mark: 說明", help_text)
+        # tab 切換 focus，WORK／JOBS 各自的上下鍵/enter 語意要交代清楚。
+        self.assertIn("tab 切換 WORK／JOBS focus", help_text)
+        self.assertIn("WORK：↑↓ 選 pane，enter 或雙擊把選中的 pane 換到我面前", help_text)
+        self.assertIn("JOBS：↑↓ 移動節點，enter/space 展開或收合該群", help_text)
+        self.assertIn("JOBS 是可捲動的樹", help_text)
 
     def test_cockpit_app_imports_manager_client_without_coordinator_dependency(self) -> None:
         tree = ast.parse(inspect.getsource(sys.modules["paulshaclaw.cockpit.app"]))
@@ -1158,17 +1180,16 @@ class Stage11StateTests(unittest.TestCase):
     def test_refresh_widgets_renders_manager_slices_in_jobs_panel(self) -> None:
         app = self._minimal_app()
         widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "in_flight": [{"slice_id": "slice-run", "state": "running"}],
-                "ready": ["slice-ready"],
-                "held": [{"slice_id": "slice-held"}],
-                "attention": [{"slice_id": "slice-attn"}],
-                "recent_done": [{"slice_id": "slice-done", "gate_status": "passed"}],
-                "degraded": False,
-                "degraded_reason": None,
-            }
-        )
+        status = {
+            "in_flight": [{"slice_id": "slice-run", "state": "running"}],
+            "ready": ["slice-ready"],
+            "held": [{"slice_id": "slice-held"}],
+            "attention": [{"slice_id": "slice-attn"}],
+            "recent_done": [{"slice_id": "slice-done", "gate_status": "passed"}],
+            "degraded": False,
+            "degraded_reason": None,
+        }
+        app.manager_client = SimpleNamespace(read_status=lambda: status)
 
         with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
             app._refresh_widgets()
@@ -1176,40 +1197,37 @@ class Stage11StateTests(unittest.TestCase):
         self.assertEqual(widgets["#global-jobs"].border_title, "JOBS")
         # slice-attn 落在 attention（= needs_human），border 直接把「幾件等人」講出來。
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "5 slices · 1 待人工")
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        # 有 rows 時 app 把分好群的 JobGroup 直接餵給 widget（渲染成 node 是 widget 自己的事）。
+        (groups,), _ = widgets["#global-jobs"].set_groups.call_args
+        self.assertEqual(groups, group_job_rows(slices_from_status(status)))
+        rendered = _flatten_nodes(build_jobs_nodes(groups))
         self.assertIn("slice-run", rendered)
         self.assertIn("slice-done", rendered)
 
-    def test_refresh_widgets_renders_needs_human_reason_and_next_step(self) -> None:
+    def test_build_jobs_nodes_carries_needs_human_reason_and_next_step(self) -> None:
         """#264：operator 不看原始 log 就要知道為什麼卡住、下一步敲什麼。"""
-        app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "attention": [
-                    {
-                        "slice_id": "add-cortex-version-flag-build",
-                        "job_state": "exited",
-                        "reason": "candidate-worktree-dirty",
-                        "next_actions": ["retry-build", "abandon"],
-                        "builder_job_id": "add-cortex-version-flag-build-56",
-                    }
-                ],
-                "recent_done": [
-                    {
-                        "slice_id": "wf-e13fa4daae-subagent-build",
-                        "gate_status": "needs_human",
-                        "workflow_repo": "hamanpaul/paulsha-cortex",
-                    }
-                ],
-                "degraded": False,
-            }
-        )
+        status = {
+            "attention": [
+                {
+                    "slice_id": "add-cortex-version-flag-build",
+                    "job_state": "exited",
+                    "reason": "candidate-worktree-dirty",
+                    "next_actions": ["retry-build", "abandon"],
+                    "builder_job_id": "add-cortex-version-flag-build-56",
+                }
+            ],
+            "recent_done": [
+                {
+                    "slice_id": "wf-e13fa4daae-subagent-build",
+                    "gate_status": "needs_human",
+                    "workflow_repo": "hamanpaul/paulsha-cortex",
+                }
+            ],
+            "degraded": False,
+        }
+        groups = group_job_rows(slices_from_status(status))
+        rendered = _flatten_nodes(build_jobs_nodes(groups))
 
-        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
-            app._refresh_widgets()
-
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
         self.assertIn("candidate-worktree-dirty", rendered)
         self.assertIn(
             "cortex slice-action add-cortex-version-flag-build retry-build|abandon --actor $USER",
@@ -1225,35 +1243,39 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("paulsha-cortex", rendered)
         # 上游沒帶 reason 時明說，而不是留一列空白狀態。
         self.assertIn("原因未知", rendered)
+        # needs_human 群必須排最前面、預設展開，operator 一進面板就看得到。
+        # （group key 會剝掉已知 phase 後綴 `-build`，見 _group_key；display_name
+        # 保留完整 slice_id，上面的 rendered 斷言已經驗過看得懂的名字還在。）
+        self.assertEqual(groups[0].key, "add-cortex-version-flag")
+        nodes = build_jobs_nodes(groups)
+        self.assertEqual(nodes[0].key, "add-cortex-version-flag")
+        self.assertTrue(nodes[0].expand)
 
-    def test_refresh_widgets_shows_needs_human_even_when_routine_rows_overflow(self) -> None:
-        """回歸現場情況：ready 多到塞爆面板時，等人工的那列仍必須看得到，
-        且被截掉的列數要講出來，不能安靜消失。"""
-        app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "ready": [f"routine-slice-{index}" for index in range(20)],
-                "attention": [
-                    {
-                        "slice_id": "add-cortex-version-flag-build",
-                        "job_state": "exited",
-                        "reason": "candidate-worktree-dirty",
-                        "next_actions": ["retry-build"],
-                    }
-                ],
-                "degraded": False,
-            }
-        )
+    def test_build_jobs_nodes_keeps_needs_human_group_first_when_routine_rows_are_plentiful(
+        self,
+    ) -> None:
+        """回歸現場情況：ready 多到面板單頁裝不下時，等人工的群仍要排最前面、
+        整棵樹裡一個都不會不見——捲動取代了先前的行預算截斷。"""
+        status = {
+            "ready": [f"routine-slice-{index}" for index in range(20)],
+            "attention": [
+                {
+                    "slice_id": "add-cortex-version-flag-build",
+                    "job_state": "exited",
+                    "reason": "candidate-worktree-dirty",
+                    "next_actions": ["retry-build"],
+                }
+            ],
+            "degraded": False,
+        }
+        groups = group_job_rows(slices_from_status(status))
+        nodes = build_jobs_nodes(groups)
 
-        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
-            app._refresh_widgets()
-
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
-        self.assertIn("add-cortex-version-flag-build", rendered)
+        self.assertEqual(len(nodes), len(groups))
+        self.assertEqual(nodes[0].key, "add-cortex-version-flag")
+        self.assertTrue(nodes[0].expand)
+        rendered = _flatten_nodes(nodes)
         self.assertIn("candidate-worktree-dirty", rendered)
-        self.assertIn("未顯示", rendered)
-        self.assertEqual(widgets["#global-jobs"].border_subtitle, "21 slices · 1 待人工")
 
     # --- #264：CJK 顯示寬度與面板可用寬度 ---
 
@@ -1290,54 +1312,52 @@ class Stage11StateTests(unittest.TestCase):
 
         self.assertEqual(fitted, "paulsha-cortex · 待裁決")
 
-    def test_refresh_widgets_keeps_main_rows_within_the_panel_width(self) -> None:
-        """主行超過面板寬會被 Textual 折行，折出來的行不在預算內——實測部署後
-        「上游未帶 reason」就被折到下一行，讓面板顯示的群數比算的少。"""
-        app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "recent_done": [
-                    {
-                        "slice_id": "wf-e13fa4daae-subagent-build",
-                        "gate_status": "needs_human",
-                        "workflow_repo": "hamanpaul/paulsha-cortex",
-                    }
-                ],
-                "degraded": False,
-            }
+    def test_build_jobs_nodes_keeps_main_row_within_the_given_width(self) -> None:
+        """主行超過寬度時次要欄要整項丟棄（見 _fit_trailer），不能指望 Tree 幫忙折成
+        看得懂的樣子——這件事現在由 build_jobs_nodes 的 width 參數負責，不再是面板
+        渲染期折行。細節行（可複製命令）不受此限，見下一個測試。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "needs_human",
+                            "workflow_repo": "hamanpaul/paulsha-cortex",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
         )
 
-        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
-            app._refresh_widgets()
+        nodes = build_jobs_nodes(groups, width=_JOBS_WIDTH_FALLBACK)
 
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
-        main_rows = [line for line in rendered.splitlines() if not line.startswith("    ↳")]
-        for line in main_rows:
-            self.assertLessEqual(_display_width(line), _JOBS_WIDTH_FALLBACK, line)
+        for node in nodes:
+            main_text = "".join(segment_text for segment_text, _ in node.segments)
+            self.assertLessEqual(_display_width(main_text), _JOBS_WIDTH_FALLBACK, main_text)
 
-    def test_refresh_widgets_never_truncates_the_copyable_command(self) -> None:
-        """細節行帶著可貼進終端執行的命令，截斷等於讓這個功能失去意義。"""
-        app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "attention": [
-                    {
-                        "slice_id": "add-cortex-version-flag-build",
-                        "job_state": "exited",
-                        "reason": "candidate-worktree-dirty",
-                        "next_actions": ["retry-build", "abandon", "retry-verify"],
-                    }
-                ],
-                "degraded": False,
-            }
+    def test_build_jobs_nodes_never_truncates_the_copyable_command(self) -> None:
+        """細節行帶著可貼進終端執行的命令，截斷等於讓這個功能失去意義——
+        即使給一個刻意窄的寬度，detail 也不能被砍；超寬交給 Tree 的橫向捲動。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "attention": [
+                        {
+                            "slice_id": "add-cortex-version-flag-build",
+                            "job_state": "exited",
+                            "reason": "candidate-worktree-dirty",
+                            "next_actions": ["retry-build", "abandon", "retry-verify"],
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
         )
 
-        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
-            app._refresh_widgets()
+        rendered = _flatten_nodes(build_jobs_nodes(groups, width=20))
 
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
         self.assertIn(
             "cortex slice-action add-cortex-version-flag-build "
             "retry-build|abandon|retry-verify --actor $USER",
@@ -1345,39 +1365,9 @@ class Stage11StateTests(unittest.TestCase):
         )
         self.assertNotIn("slice-a…", rendered)
 
-    def test_refresh_widgets_never_exceeds_the_jobs_line_budget(self) -> None:
-        """面板高度固定：細節行不可以吃掉留給「另 N 群未顯示」的保留位，
-        否則總行數會超出 max_height，最後那行提示反而被面板裁掉。"""
-        app = self._minimal_app()
-        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
-        # 每一群都有 reason + next_actions，也就是每群都想多佔一行細節。
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "attention": [
-                    {
-                        "slice_id": f"slice-{index}",
-                        "job_state": "exited",
-                        "reason": "candidate-worktree-dirty",
-                        "next_actions": ["retry-build"],
-                    }
-                    for index in range(20)
-                ],
-                "degraded": False,
-            }
-        )
-
-        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
-            app._refresh_widgets()
-
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
-        line_count = len(rendered.rstrip("\n").splitlines())
-        self.assertLessEqual(line_count, _JOBS_LINE_BUDGET)
-        # 保留位真的有被用上：截斷提示必須還在。
-        self.assertIn("群未顯示", rendered)
-
-    def test_refresh_widgets_fits_every_waiting_group_after_folding_phases(self) -> None:
-        """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine，
-        收攏後 10 行預算必須裝得下全部 6 群，一個都不能被截掉。"""
+    def test_refresh_widgets_reports_full_waiting_count_after_folding_phases(self) -> None:
+        """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine；
+        捲動取代行預算後，border 仍以 slice 為單位報總量，且整棵樹一個群都不會被丟掉。"""
         app = self._minimal_app()
         widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
         waiting = []
@@ -1396,33 +1386,34 @@ class Stage11StateTests(unittest.TestCase):
                         "workflow_repo": "hamanpaul/paulsha-cortex",
                     }
                 )
-        app.manager_client = SimpleNamespace(
-            read_status=lambda: {
-                "ready": [f"routine-slice-{index}" for index in range(20)],
-                "attention": [
-                    {
-                        "slice_id": "add-cortex-version-flag-build",
-                        "job_state": "exited",
-                        "reason": "candidate-worktree-dirty",
-                        "next_actions": ["retry-build"],
-                    }
-                ],
-                "recent_done": waiting,
-                "degraded": False,
-            }
-        )
+        status = {
+            "ready": [f"routine-slice-{index}" for index in range(20)],
+            "attention": [
+                {
+                    "slice_id": "add-cortex-version-flag-build",
+                    "job_state": "exited",
+                    "reason": "candidate-worktree-dirty",
+                    "next_actions": ["retry-build"],
+                }
+            ],
+            "recent_done": waiting,
+            "degraded": False,
+        }
+        app.manager_client = SimpleNamespace(read_status=lambda: status)
 
         with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
             app._refresh_widgets()
 
-        rendered = str(widgets["#global-jobs"].update.call_args.args[0])
+        # 11 個 slice 收成 6 群等人工；border 仍以 slice 為單位報總量。
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "31 slices · 11 待人工")
+
+        (groups,), _ = widgets["#global-jobs"].set_groups.call_args
+        rendered = _flatten_nodes(build_jobs_nodes(groups))
         for run in ("wf-e13fa4daae", "wf-7f4e4a8f1b", "wf-2fa3d22552", "wf-6f0a583d0d", "wf-e6ad935ef9"):
-            self.assertIn(run, rendered, f"{run} 被截掉了")
+            self.assertIn(run, rendered, f"{run} 被丟掉了")
         self.assertIn("add-cortex-version-flag-build", rendered)
         self.assertIn("4 phase 全待裁決", rendered)
         self.assertIn("3 phase 全待裁決", rendered)
-        # 11 個 slice 收成 6 群等人工；border 仍以 slice 為單位報總量。
-        self.assertEqual(widgets["#global-jobs"].border_subtitle, "31 slices · 11 待人工")
 
     def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
         app = self._minimal_app()
@@ -1438,7 +1429,25 @@ class Stage11StateTests(unittest.TestCase):
             app._refresh_widgets()
 
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "degraded")
-        self.assertIn("manager-offline", str(widgets["#global-jobs"].update.call_args.args[0]))
+        widgets["#global-jobs"].set_message.assert_called_once()
+        message_call = widgets["#global-jobs"].set_message.call_args
+        self.assertIn("manager-offline", message_call.args[0])
+        # degraded 訊息用琥珀色標出來，跟一般灰色說明區分開。
+        style = message_call.args[1] if len(message_call.args) > 1 else message_call.kwargs.get("style")
+        self.assertEqual(style, "#FBBF24")
+
+    def test_refresh_widgets_renders_zero_slices_message(self) -> None:
+        """manager 回報空 slice 清單時，JOBS 顯示單一提示列而非空白面板。"""
+        app = self._minimal_app()
+        widgets = {key: Mock() for key in ("#work-list", "#global-jobs")}
+        app.manager_client = SimpleNamespace(read_status=lambda: {"degraded": False})
+
+        with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
+            app._refresh_widgets()
+
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "0 slices")
+        widgets["#global-jobs"].set_message.assert_called_once()
+        self.assertEqual(widgets["#global-jobs"].set_message.call_args.args[0], "manager slices: 0")
 
     def test_manager_tick_round_trip_refreshes_open_modal_from_status(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir, patch.dict(os.environ, {"PSC_CONTROL_ROOT": tmpdir}):

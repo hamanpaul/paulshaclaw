@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 import time
-import unicodedata
 from collections.abc import Callable
 
 import paulsha_cortex.control.client as control_client
@@ -37,7 +36,9 @@ except Exception:  # pragma: no cover - fallback when textual not installed
     ComposeResult = Iterable[Any]
 
     class Binding:  # pragma: no cover - noop
-        def __init__(self, key: str, handler: str, description: str) -> None:
+        # 簽名要收 **kwargs：BINDINGS 有用 show= 等 textual 參數，stub 太窄會讓
+        # 無 textual 環境在 class body 評估 BINDINGS 時直接 TypeError。
+        def __init__(self, key: str, handler: str, description: str, **kwargs: Any) -> None:
             self.key = key
             self.handler = handler
             self.description = description
@@ -61,6 +62,19 @@ except Exception:  # pragma: no cover - fallback when textual not installed
 
 from .actions import LayoutActionService
 from .help import HelpModal
+from .jobs_panel import (
+    JobsPanel,
+    _display_width,
+    _ellipsize_middle,
+    _fit_trailer,
+    _JOBS_NAME_COL,
+    _JOBS_STATE_COL,
+    _JOBS_WIDTH_FALLBACK,
+    _pad_display,
+    _STATUS_DEFAULT,
+    _STATUS_STYLE,
+    status_style,
+)
 from .manager_panel import ManagerModal
 from .models import JobGroup, JobRow, JobSummary, PaneRecord
 from .store import CockpitState
@@ -86,36 +100,6 @@ class WorkListView(ListView):
 
 def pane_display_label(pane: PaneRecord) -> str:
     return f"{pane.session_name}:{pane.window_index} {pane.pane_id} {pane.display_summary}"
-
-
-# 語意狀態樣式（ui-ux-pro-max design-system 色盤）：狀態 → (glyph, rich 顏色)。
-# running/success 綠、failed/error 紅、blocked/pending 琥珀、done 收斂為淡灰（去強調），
-# 未知狀態退回中性點。純函式，供工作清單／DETAIL／JOBS 上色與單測共用。
-_STATUS_STYLE: dict[str, tuple[str, str]] = {
-    "running": ("●", "#22C55E"),
-    "active": ("●", "#22C55E"),
-    "success": ("✓", "#22C55E"),
-    "passed": ("✓", "#22C55E"),
-    "ok": ("✓", "#22C55E"),
-    "done": ("✓", "#64748B"),
-    "completed": ("✓", "#64748B"),
-    "failed": ("✗", "#EF4444"),
-    "error": ("✗", "#EF4444"),
-    "attention": ("!", "#FBBF24"),
-    # 最該亮起來的狀態先前沒有樣式，退回中性灰點——等人工的列看起來跟雜訊一樣。
-    "needs_human": ("!", "#FBBF24"),
-    "blocked": ("◼", "#FBBF24"),
-    "pending": ("◔", "#FBBF24"),
-    "ready": ("◔", "#94A3B8"),
-    "queued": ("◔", "#94A3B8"),
-    "unmapped": ("·", "#64748B"),
-}
-_STATUS_DEFAULT: tuple[str, str] = ("•", "#94A3B8")
-
-
-def status_style(status: str) -> tuple[str, str]:
-    """狀態字串 → (glyph, rich 顏色)。大小寫不敏感；未知狀態退回中性點。"""
-    return _STATUS_STYLE.get((status or "").strip().lower(), _STATUS_DEFAULT)
 
 
 def format_session_summary(state: CockpitState) -> str:
@@ -146,59 +130,6 @@ def _slice_id_from_item(item: object) -> str:
             if isinstance(value, str) and value:
                 return value
     return ""
-
-
-def _display_width(text: str) -> int:
-    """終端顯示寬度：CJK 全形字佔兩欄，用 len() 排版會整欄歪掉。"""
-    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in text)
-
-
-def _pad_display(text: str, width: int) -> str:
-    """依顯示寬度補到定寬（`f"{s:<18}"` 會把全形字當一欄，中文欄位對不齊）。"""
-    return text + " " * max(0, width - _display_width(text))
-
-
-def _ellipsize_middle(text: str, width: int) -> str:
-    """過長的 slice 名從中間省略：頭（work 名）與尾（phase）都是辨識關鍵，不能只砍一端。"""
-    if _display_width(text) <= width or width < 3:
-        return text
-    head: list[str] = []
-    tail: list[str] = []
-    used = 1  # 省略號本身
-    chars = list(text)
-    while chars:
-        ch = chars.pop(0) if len(head) <= len(tail) else chars.pop()
-        cost = _display_width(ch)
-        if used + cost > width:
-            break
-        used += cost
-        (head if len(head) <= len(tail) else tail).append(ch)
-    return "".join(head) + "…" + "".join(reversed(tail))
-
-
-def _widget_line_width(widget: object) -> int:
-    """widget 目前可寫入的顯示寬度；量不到（測試 stub／尚未 layout）時退回保守值。"""
-    try:
-        width = int(getattr(getattr(widget, "size", None), "width", 0)) - 2
-    except (TypeError, ValueError):
-        return _JOBS_WIDTH_FALLBACK
-    return width if width > 40 else _JOBS_WIDTH_FALLBACK
-
-
-def _fit_trailer(parts: tuple[str, ...], width: int) -> str:
-    """次要欄依重要性由高到低排；塞不下時從尾端整項丟棄並標示有省略。
-
-    硬切字元會把 `paulsha-cortex` 砍成半個名字，比少顯示一項更難讀。
-    """
-    kept = [part for part in parts if part]
-    dropped = False
-    while kept and _display_width(" · ".join(kept)) > width:
-        kept.pop()
-        dropped = True
-    text = " · ".join(kept)
-    if dropped and kept:
-        text = f"{text} …"
-    return text
 
 
 def _text_field(item: dict[str, object], *keys: str) -> str:
@@ -374,11 +305,6 @@ def group_job_rows(rows: tuple[JobRow, ...]) -> tuple[JobGroup, ...]:
     return tuple(sorted(groups, key=rank))
 
 
-def _group_state_key(group: JobGroup) -> str:
-    """多 phase 群組的上色依據：有人在等就照 attention 上色，否則跟著領頭 slice。"""
-    return "attention" if group.needs_human else group.lead.state
-
-
 # How often the cockpit re-reads the tmux pane list so the work summary stays
 # live. Kept at 30s so the periodic redraw isn't a visible flicker; each tick is
 # bounded anyway (one `list-panes`, a tiny `ps` only for title-less minicom
@@ -386,15 +312,6 @@ def _group_state_key(group: JobGroup) -> str:
 # reads, so it can't pile up the way an unbounded scan would.
 REFRESH_INTERVAL_SECONDS = 30.0
 DOUBLE_CLICK_SECONDS = 0.4
-
-# JOBS 面板可用行數（max_height 12 扣掉上下 border）。needs_human 一列佔兩行。
-_JOBS_LINE_BUDGET = 10
-
-# JOBS 主行欄寬（顯示寬，非字元數）與量不到 widget 寬度時的保守後備值。
-# 超出可用寬度會被 Textual 折行，折出來的那行不在行預算內，實際顯示會比算的少。
-_JOBS_STATE_COL = 16
-_JOBS_NAME_COL = 26
-_JOBS_WIDTH_FALLBACK = 88
 
 # htop 風系統監控要「即時但不吃資源」：把「高頻 /proc 監控」與「低頻 tmux pane 重載」拆成兩個 tick。
 # 這條只讀 /proc（CPU/Mem/Swp/I/O/Net）＋就地更新 banner 一個 widget——不 fork tmux、不重建清單，
@@ -411,17 +328,18 @@ class CockpitApp(App[None]):
     # 視覺設計系統（OLED slate + run-green）：與模組同層的 cockpit.tcss。
     # textual 未安裝時只是個字串類別屬性，不影響 import；安裝時才載入套用。
     CSS_PATH = "cockpit.tcss"
+    # up/down/enter 不再綁在 App 層：focused widget 原生處理（WORK=ListView 游標＋
+    # WorkListView enter→swap；JOBS=Tree 游標/展開），交由 textual 的
+    # focused-widget-first 按鍵順序接手（見模組頂註記）。
     BINDINGS = [
-        Binding("up", "move_up", "↑/↓ 選擇"),
-        Binding("down", "move_down", "↑/↓ 選擇"),
-        Binding("enter", "swap_selected", "Enter 把選中的 pane 換到我面前"),
-        Binding("c", "focus_cockpit", "c 回 cockpit"),
-        Binding("m", "manager_panel", "m 顯示 manager 面板"),
-        Binding("q", "quit_app", "q 離開 cockpit"),
-        Binding("t", "manager_tick", "t 送出 manager tick"),
-        Binding("j", "toggle_jobs", "j 收合/展開 JOBS"),
-        Binding("ctrl+q", "quit_app", "Ctrl+Q 離開 cockpit"),
-        Binding("question_mark", "show_help", "? 顯示說明"),
+        Binding("tab", "focus_next", "切換面板"),
+        Binding("j", "toggle_jobs", "JOBS 收合"),
+        Binding("m", "manager_panel", "manager"),
+        Binding("t", "manager_tick", "tick"),
+        Binding("c", "focus_cockpit", "回 cockpit"),
+        Binding("question_mark", "show_help", "說明"),
+        Binding("q", "quit_app", "離開"),
+        Binding("ctrl+q", "quit_app", "離開", show=False),
     ]
 
     def __init__(
@@ -481,7 +399,7 @@ class CockpitApp(App[None]):
         yield Header()
         yield Static("", id="brand-banner")  # 破蝦哥 🦞 banner（issue #116）；內容於 on_mount 填入
         yield WorkListView(id="work-list")
-        yield Static("", id="global-jobs")
+        yield JobsPanel(id="global-jobs")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -903,7 +821,10 @@ class CockpitApp(App[None]):
         self._refresh_banner()
 
     def _refresh_jobs_panel(self) -> None:
-        jobs_widget = self.query_one("#global-jobs", Static)
+        # JOBS 面板本身是可捲動的 Tree（jobs_panel.JobsPanel）：不再用「行預算」硬
+        # 截斷內容，這裡只決定 border 摘要與收合高度，實際節點建構/去閃爍/展開狀態
+        # 保存全交給 set_groups（#264 樹狀化）。
+        jobs_widget = self.query_one("#global-jobs", JobsPanel)
         status = self.manager_client.read_status()
         if not isinstance(status, dict):
             status = {}
@@ -914,7 +835,7 @@ class CockpitApp(App[None]):
                 jobs_widget.styles.max_height = 3
             except Exception:
                 pass
-            jobs_widget.update("")
+            jobs_widget.clear()
             return
         try:
             jobs_widget.styles.max_height = 12
@@ -924,7 +845,7 @@ class CockpitApp(App[None]):
         if status.get("degraded"):
             reason = str(status.get("degraded_reason") or "--")
             self._set_border(jobs_widget, "JOBS", "degraded")
-            jobs_widget.update(self._text([(f"degraded: {reason}", "#FBBF24")]))
+            jobs_widget.set_message(f"degraded: {reason}", "#FBBF24")
             return
 
         if rows:
@@ -933,65 +854,10 @@ class CockpitApp(App[None]):
             if waiting:
                 summary = f"{summary} · {waiting} 待人工"
             self._set_border(jobs_widget, "JOBS", summary)
-            job_segs: list[tuple[str, str]] = []
-            # 面板高度固定，改以「行」為預算：needs_human 會多吃一行講原因與下一步，
-            # 所以不能再用 rows[:10] 這種以列數為單位的切法。
-            budget = _JOBS_LINE_BUDGET
-            line_width = _widget_line_width(jobs_widget)
-            ordered = group_job_rows(rows)
-            shown = 0
-            for group in ordered:
-                # 還有沒顯示的群時，永遠留一行給「… 另 N 群未顯示」，免得截斷
-                # 看起來像「就這些」。主行與細節行都要讓出這個保留位，否則
-                # 細節行會把它吃掉，最後總行數超出面板高度。
-                if budget - 1 < (1 if len(ordered) - shown > 1 else 0):
-                    break
-                glyph, color = status_style(
-                    group.lead.state if group.is_single else _group_state_key(group)
-                )
-                job_segs.append(
-                    (f"{glyph} {_pad_display(group.headline_state, _JOBS_STATE_COL)} ", color)
-                )
-                job_segs.append(
-                    (
-                        f"{_pad_display(_ellipsize_middle(group.display_name, _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
-                        "#E2E8F0",
-                    )
-                )
-                # 執行環境（workflow／job id）與語意標籤退成灰色次要欄，依重要性排序，
-                # 塞不下時從尾端整項丟掉——折行會吃掉不在預算內的一行。
-                trailer = _fit_trailer(
-                    (
-                        group.project,
-                        # 多 phase 群的主欄位已經是 workflow id，不再重複一次。
-                        group.workflow_id if group.is_single else "",
-                        group.note,
-                        group.raw_state,
-                        group.job_id,
-                    ),
-                    line_width - _JOBS_STATE_COL - _JOBS_NAME_COL - 4,
-                )
-                job_segs.append((f"{trailer}\n", "#64748B"))
-                budget -= 1
-                shown += 1
-                if group.detail_line:
-                    # 細節行帶著可複製執行的命令，**不能截斷**——截了就不能貼進終端跑。
-                    # 讓它自然折行，但把折出來的行數算進預算，否則面板會溢出。
-                    detail_cost = max(
-                        1, -(-(_display_width(group.detail_line) + 6) // line_width)
-                    )
-                    if budget - detail_cost >= (1 if len(ordered) - shown else 0):
-                        job_segs.append((f"    ↳ {group.detail_line}\n", "#FBBF24"))
-                        budget -= detail_cost
-            hidden = len(ordered) - shown
-            if hidden > 0:
-                job_segs.append((f"… 另 {hidden} 群未顯示\n", "#64748B"))
-                budget -= 1
-            jobs_renderable = self._text(job_segs)
+            jobs_widget.set_groups(group_job_rows(rows))
         else:
             self._set_border(jobs_widget, "JOBS", "0 slices")
-            jobs_renderable = self._text([("manager slices: 0", "#64748B")])
-        jobs_widget.update(jobs_renderable)
+            jobs_widget.set_message("manager slices: 0")
 
     def action_toggle_jobs(self) -> None:
         if self._background_actions_blocked():
