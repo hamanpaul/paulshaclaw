@@ -61,7 +61,7 @@ Footer > .footer--description {
     border: round #22C55E;
 }
 
-/* JOBS · 全域工作狀態 */
+/* JOBS · 全域工作狀態（可 focus／捲動的 Tree，見 jobs_panel.py） */
 #global-jobs {
     height: auto;
     max-height: 12;
@@ -71,6 +71,33 @@ Footer > .footer--description {
     border: round #475569;
     border-title-align: left;
     border-subtitle-align: right;
+}
+#global-jobs:focus {
+    border: round #22C55E;
+}
+/* Tree 元件配色貼齊 OLED slate 色盤，蓋掉 Textual 預設主題藍。
+ * 屬性經 `Tree.COMPONENT_CLASSES` / `Tree.DEFAULT_CSS` 查證，限 0.61 支援者。 */
+#global-jobs > .tree--guides {
+    color: #475569;
+}
+#global-jobs > .tree--guides-hover {
+    color: #22C55E;
+    text-style: bold;
+}
+#global-jobs > .tree--guides-selected {
+    color: #FBBF24;
+    text-style: bold;
+}
+#global-jobs > .tree--cursor {
+    background: #1E293B;
+    color: #F8FAFC;
+    text-style: bold;
+}
+#global-jobs:focus > .tree--cursor {
+    background: #1E293B;
+}
+#global-jobs > .tree--highlight-line {
+    background: #1E293B;
 }
 
 /* ? 說明 modal：置中、品牌橘框卡片 */
