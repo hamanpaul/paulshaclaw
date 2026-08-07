@@ -56,8 +56,18 @@ rm -rf "$outdir"
 mkdir -p "$outdir"
 "$python_bin" -m build --outdir "$outdir" "$repo_root"
 
-wheel="$(ls "$outdir"/*.whl)"
-sdist="$(ls "$outdir"/*.tar.gz)"
+# 用 glob 陣列而非 `ls`：多於一個 artifact 時 `ls` 會回傳多行，後續會把
+# 含換行的字串當成單一路徑餵給 zipfile / sha256sum 而以難解的錯誤爆掉。
+shopt -s nullglob
+wheels=("$outdir"/*.whl)
+sdists=("$outdir"/*.tar.gz)
+shopt -u nullglob
+if [[ ${#wheels[@]} -ne 1 || ${#sdists[@]} -ne 1 ]]; then
+  echo "FAIL: 預期恰好 1 個 wheel 與 1 個 sdist，實際 ${#wheels[@]} wheel / ${#sdists[@]} sdist" >&2
+  exit 1
+fi
+wheel="${wheels[0]}"
+sdist="${sdists[0]}"
 echo "    wheel: $wheel"
 echo "    sdist: $sdist"
 
@@ -70,11 +80,12 @@ if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit
 fi
 echo "    cockpit.tcss 已包含於 wheel"
 # 3b. METADATA version 必須等於 VERSION。
-# 先清空解壓目錄：殘留的舊版 dist-info 會讓下面的 glob 命中多個 METADATA。
-rm -rf /tmp/psc-rel-extract
-meta_version="$("$python_bin" -m zipfile -e "$wheel" /tmp/psc-rel-extract >/dev/null 2>&1; \
-  grep -m1 '^Version:' /tmp/psc-rel-extract/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
-rm -rf /tmp/psc-rel-extract
+# 每次解壓到獨立的暫存目錄：固定路徑會讓併發執行互相干擾，殘留的舊版
+# dist-info 也會讓下面的 glob 命中多個 METADATA。
+extract_dir="$(mktemp -d)"
+meta_version="$("$python_bin" -m zipfile -e "$wheel" "$extract_dir" >/dev/null 2>&1; \
+  grep -m1 '^Version:' "$extract_dir"/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
+rm -rf "$extract_dir"
 file_version="$(cat "$repo_root/VERSION")"
 if [[ "$meta_version" != "$file_version" ]]; then
   echo "FAIL: wheel METADATA version($meta_version) != VERSION($file_version)" >&2

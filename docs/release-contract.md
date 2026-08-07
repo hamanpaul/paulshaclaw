@@ -11,7 +11,7 @@
 - 本 repo `paulshaclaw`（operator shell）。
 - 記憶平面 `paulsha-hippo` 與治理平面 `paulsha-cortex` 是**外部依賴**，由各自 repo 的 release
   lifecycle 管理；本 repo 的 release artifact 透過 `pyproject.toml` 的 `git+<SHA>` pin 引回，
-> 不在本文定義的發布邊界內。
+  不在本文定義的發布邊界內。
 
 ## 2. 版本來源與一致性契約（A）
 

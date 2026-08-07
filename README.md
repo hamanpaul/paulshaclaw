@@ -142,7 +142,7 @@ flowchart TB
 ```bash
 # 1. 建立 end-user venv（不要用系統 Python，PEP 668）
 python3 -m venv ~/.venv-paulshaclaw
-.venv-paulshaclaw/bin/python -m pip install --upgrade pip
+~/.venv-paulshaclaw/bin/python -m pip install --upgrade pip
 
 # 2. 從 vX.Y.Z Release 下載 wheel 與 checksums
 #    https://github.com/hamanpaul/paulshaclaw/releases
@@ -152,11 +152,11 @@ python3 -m venv ~/.venv-paulshaclaw
 sha256sum -c checksums-sha256.txt --ignore-missing
 
 # 4. 從 wheel 安裝（會依 pyproject 的 git+SHA pin 自動拉 hippo/cortex）
-.venv-paulshaclaw/bin/python -m pip install paulshaclaw-X.Y.Z-py3-none-any.whl
+~/.venv-paulshaclaw/bin/python -m pip install paulshaclaw-X.Y.Z-py3-none-any.whl
 
-# 5. 確認
-.venv-paulshaclaw/bin/psc --help
-.venv-paulshaclaw/bin/python -m pip show paulshaclaw   # 顯示版本與來源
+# 5. 確認（psc 是 dispatcher，無參數會印 usage 並以 exit 2 結束，這是正常行為）
+~/.venv-paulshaclaw/bin/psc
+~/.venv-paulshaclaw/bin/python -m pip show paulshaclaw   # 顯示版本與來源
 ```
 
 > **為何不是 PyPI**：`paulsha-hippo` / `paulsha-cortex` 是 `git+<url>@<SHA>` direct reference，PyPI 上傳政策不接受 direct URL 參照，故第一階段僅以 GitHub Release 分發。詳見 release-contract §5 的實測依據。

@@ -60,8 +60,10 @@ def extract_changelog_section(repo_root: Path, version: str) -> str:
 
 def tag_points_at_head(repo_root: Path, tag: str) -> bool:
     """tag 指向的 commit 是否等於 HEAD。"""
+    # `^{commit}` 是必要的：annotated / signed tag 的 `refs/tags/<tag>` 解析出來
+    # 是 tag object 的 SHA 而非 commit，直接比對會把正確的 release tag 判成不一致。
     tag_sha = subprocess.run(
-        ["git", "rev-parse", f"refs/tags/{tag}"],
+        ["git", "rev-parse", f"refs/tags/{tag}^{{commit}}"],
         capture_output=True,
         cwd=repo_root,
         text=True,

@@ -7,8 +7,8 @@
 """
 from __future__ import annotations
 
-import re
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -21,7 +21,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 
 def _run_checker(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["python3", str(CHECKER), "--repo-root", str(repo_root), *args],
+        [sys.executable, str(CHECKER), "--repo-root", str(repo_root), *args],
         capture_output=True,
         text=True,
         check=False,
@@ -152,6 +152,29 @@ def test_release_all_consistent_passes() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_release_annotated_tag_at_head_passes() -> None:
+    """annotated / signed tag 也必須被視為指向 HEAD。
+
+    `git rev-parse refs/tags/<tag>` 對 annotated tag 解析出的是 tag object SHA
+    而非 commit，少了 `^{commit}` 會把正確的 release tag 誤判成 source revision
+    不一致——正式 release 慣例上就是打 annotated（甚至 signed）tag。
+    """
+    import shutil
+    import tempfile
+
+    tmp = Path(tempfile.mkdtemp())
+    try:
+        repo = _make_repo(tmp, "0.1.0", ["## [0.1.0] - 2026-01-01"])
+        subprocess.run(
+            ["git", "-C", str(repo), "tag", "-a", "v0.1.0", "-m", "release 0.1.0"],
+            check=True,
+        )
+        result = _run_checker(repo, "--tag", "v0.1.0")
+        assert result.returncode == 0, result.stderr
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_extract_notes_outputs_section_body() -> None:
     import tempfile
     import shutil
@@ -167,7 +190,7 @@ def test_extract_notes_outputs_section_body() -> None:
         body = "# Changelog\n\n## [Unreleased]\n\n- unreleased item\n\n## [0.1.0] - 2026-01-01\n\n- released item\n\n## [0.0.1]\n\n- old\n"
         (repo / "CHANGELOG.md").write_text(body, encoding="utf-8")
         result = subprocess.run(
-            ["python3", str(CHECKER), "--repo-root", str(repo), "--extract-notes", "0.1.0"],
+            [sys.executable, str(CHECKER), "--repo-root", str(repo), "--extract-notes", "0.1.0"],
             capture_output=True,
             text=True,
             check=False,
@@ -188,7 +211,7 @@ def test_extract_notes_missing_section_fails() -> None:
     try:
         repo = _make_repo(tmp, "0.1.0", ["## [Unreleased]"])
         result = subprocess.run(
-            ["python3", str(CHECKER), "--repo-root", str(repo), "--extract-notes", "9.9.9"],
+            [sys.executable, str(CHECKER), "--repo-root", str(repo), "--extract-notes", "9.9.9"],
             capture_output=True,
             text=True,
             check=False,
@@ -243,4 +266,4 @@ def test_release_workflow_runs_version_consistency_gate() -> None:
     assert "python -m build" in text, "workflow 未使用 python -m build"
     assert "gh release create" in text, "workflow 未建立 GitHub Release"
     # fail-closed：不得以 --force 覆寫既有 release
-    assert "release create --force" not in text.replace("c", "c"), text
+    assert "release create --force" not in text, text

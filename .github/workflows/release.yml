@@ -70,8 +70,17 @@ jobs:
       - name: Artifact metadata / package-content 檢查
         run: |
           set -e
-          wheel="$(ls dist/*.whl)"
-          sdist="$(ls dist/*.tar.gz)"
+          # 用 glob 陣列而非 `ls`：多於一個 artifact 時 `ls` 會回傳多行，
+          # 後續會把含換行的字串當成單一路徑餵給 zipfile / sha256sum。
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          shopt -u nullglob
+          if [[ ${#wheels[@]} -ne 1 || ${#sdists[@]} -ne 1 ]]; then
+            echo "FAIL: 預期恰好 1 個 wheel 與 1 個 sdist，實際 ${#wheels[@]}/${#sdists[@]}"; exit 1
+          fi
+          wheel="${wheels[0]}"
+          sdist="${sdists[0]}"
           # wheel 必須含 cockpit.tcss package data
           python -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit.tcss" \
             || { echo "FAIL: wheel 未含 cockpit.tcss"; exit 1; }
@@ -87,7 +96,12 @@ jobs:
 
       - name: 乾淨 venv 安裝 smoke test
         run: |
-          wheel="$(ls dist/*.whl)"
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          shopt -u nullglob
+          wheel="${wheels[0]}"
+          # 先清掉可能殘留的目錄：venv 建在既有目錄上會失敗。
+          rm -rf /tmp/clean-venv
           python -m venv /tmp/clean-venv
           /tmp/clean-venv/bin/python -m pip install --upgrade pip
           /tmp/clean-venv/bin/python -m pip install "$wheel"
