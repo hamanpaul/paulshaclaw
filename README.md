@@ -262,6 +262,56 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
   供稽核，再停止推薦安裝；刪除 Release 與 tag 為最後手段且需 owner 裁決。完整撤回流程見
   [`docs/release-contract.md`](./docs/release-contract.md) §4.3。
 
+### 部署操作 runbook（upgrade / rollback / uninstall）
+
+> 以下命令把 immutable release artifact 套用到 host，完整契約見
+> [`docs/release-contract.md`](./docs/release-contract.md) §8。所有命令的 `--apply` 才會
+> 實際執行；不加 `--apply` 只印 command plan。state / secret 一律預設保留。
+
+#### 查詢目前安裝版本
+
+```bash
+python -m paulshaclaw.deploy status --instance <name> --root-dir <dir>
+# 回傳 {version, artifact_source, artifact_sha256, applied_at, command}；無紀錄印 {}
+```
+
+#### 升級（指定版本 / artifact）
+
+```bash
+python -m paulshaclaw.deploy upgrade --apply --verify \
+  --instance <name> --root-dir <dir> \
+  --version 0.2.0 --artifact paulshaclaw-0.2.0-py3-none-any.whl \
+  --artifact-sha256 <hex>
+```
+
+- 只覆寫 `core/systemd/**`；core runtime env、state、secret 已存在即跳過（create-only）。
+- 執行途中失敗會自動從 checkpoint 還原 core，report 標記 `rollback_triggered: true`。
+- `--artifact` 指本地路徑會計算 SHA-256 並（若給 `--artifact-sha256`）比對，不符即 fail-closed。
+
+#### 回滾 core plane
+
+```bash
+python -m paulshaclaw.deploy rollback --instance <name> --root-dir <dir> \
+  --from-command upgrade
+```
+
+從最新一次 upgrade / uninstall 的 checkpoint 還原 core plane（systemd unit + runtime env）；
+state / secret 不受影響。
+
+#### 解除安裝
+
+```bash
+# 預設保留 state 與 secret
+python -m paulshaclaw.deploy uninstall --apply --instance <name> --root-dir <dir>
+
+# 明確連 state / secret 一起清
+python -m paulshaclaw.deploy uninstall --apply --purge-state --purge-secret \
+  --instance <name> --root-dir <dir>
+```
+
+disable / stop service unit → 移除 core plane → 預設保留 state/secret；只有加上
+`--purge-state` / `--purge-secret` 才清除。
+
 ---
 
 ## License

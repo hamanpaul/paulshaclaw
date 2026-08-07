@@ -5,6 +5,8 @@
 > 與 D（distribution strategy）。
 >
 > E（artifact-driven deployment）依序須在 artifact 交付邊界建立後再做，不在本文範圍。
+>
+> **補充（#280 E 節完成後）**：E 節實作見 §8「Artifact-driven deployment」。
 
 ## 1. 適用範圍
 
@@ -140,6 +142,9 @@ hippo/cortex 的 package publication，不在本 umbrella 內隱性擴張。
 4. runtime 狀態（`~/.agents/`）**不隨 artifact 變動**，回滾 operator shell 不會動到 state/secret。
 
 > 完整的 artifact-driven `install --version` / `upgrade` / `rollback` 屬於 E 節，本次不實作。
+>
+> **E 節已完成**：`install` / `upgrade` / `uninstall` / `rollback` / `status` 實作於
+> `paulshaclaw/deploy/`，詳見 §8。
 
 ## 7. 相關檔案
 
@@ -151,3 +156,107 @@ hippo/cortex 的 package publication，不在本 umbrella 內隱性擴張。
 | 一致性測試 | `tests/test_release_consistency.py` |
 | 既有版本測試 | `tests/test_version_consistency.py` |
 | 版本來源 | `VERSION`、`pyproject.toml`、`CHANGELOG.md` |
+
+## 8. Artifact-driven deployment（E）
+
+> 實作：`paulshaclaw/deploy/`（`installer.py` / `__main__.py`）。
+> 把 immutable artifact 套用到 host 的那一半；release artifact 的交付邊界由 §1~§5 定義。
+
+### 8.1 安裝來源記錄（E1）
+
+`install` / `upgrade` 可指定版本與 artifact 來源：
+
+```
+python -m paulshaclaw.deploy install --apply --verify \
+  --instance <name> --root-dir <dir> \
+  --version 0.1.0 --artifact <path-or-url> --artifact-sha256 <hex>
+```
+
+- `--version`：記錄套用的正式版本（SemVer）。
+- `--artifact`：本地路徑或 URL。本地檔案會計算 SHA-256 並記錄；URL 僅記錄來源字串
+  （本階段不下載驗證，屬非目標）。
+- `--artifact-sha256`：期望 checksum；指定後與實際計算不符即 **fail-closed**（exit 2）。
+- 指定本地 artifact 但檔案不存在亦 fail-closed。
+
+安裝紀錄寫入 `~/.agents/state/config/<instance>.install-record.json`（state plane，
+不寫進 repo、不寫進 secret plane），內容含 `version`、`artifact_source`、
+`artifact_sha256`、`applied_at`、`command`。
+
+查詢入口：
+
+```
+python -m paulshaclaw.deploy status --instance <name> --root-dir <dir>
+```
+
+回傳目前安裝的正式版本、來源與 checksum；無紀錄時印 `{}`。
+
+### 8.2 machine-readable verification report（E2）
+
+`install` / `upgrade` / `uninstall` / `rollback` 的實際執行路徑（`--apply`）皆輸出
+結構化 JSON report，沿用 `run_install()` 既有形狀擴充，至少含：
+
+- `command`、`instance_name`、`root_dir`、`status`。
+- 套用 / 跳過的檔案（`applied_files` / `skipped_existing` / `removed_core_files`）。
+- `artifact`（來源與 checksum）、`verification`（env catalog + systemd unit 驗證結果）。
+- `rollback_triggered`（upgrade 失敗自動 rollback 時為 `true`）與 `rollback` 還原摘要。
+- `checkpoint`（snapshot 位置）、`snapshot`（備份清單）。
+
+### 8.3 upgrade 實際執行（E3）
+
+```
+python -m paulshaclaw.deploy upgrade --apply --verify \
+  --instance <name> --root-dir <dir> [--version X.Y.Z] [--artifact ...]
+```
+
+依 planner 已宣告的 steps 落實：
+
+1. `snapshot-existing-core`：將現有 core plane（systemd unit + runtime env）複製到
+   `~/.agents/deploy-checkpoints/<instance>/upgrade-<timestamp>/`。
+2. `render-core-templates`：以 `apply_install_plan()` 重新套用模板——
+   **沿用 `_asset_is_overwritable()` 的 create-only 規則**：只有 `core/systemd/**`
+   被覆寫，core runtime env / state / secret 存在即跳過。
+3. `preserve-state-plane` / `preserve-secret-plane`：由 create-only 規則保證，不另刪改。
+4. `restart-service-unit`：對每個 `verify_units` 跑 `systemctl --user restart`（systemd
+   不可用時 skip）。
+5. `verify-systemd-user-units`：沿用 `verify_install_plan()`。
+
+### 8.4 rollback（E4）
+
+- checkpoint 存放於 `~/.agents/deploy-checkpoints/<instance>/<command>-<timestamp>/`，
+  含 `manifest.json` 與鏡射的 core 檔案；可清理、不污染 repo。
+- `restore-core-from-checkpoint` 把 core 檔案逐檔還原到升級前內容。
+- **upgrade 執行途中失敗自動 rollback**：`run_upgrade()` 在套用階段拋例外時，
+  自動從當次 checkpoint 還原 core，report 標記 `rollback_triggered: true` 並回 exit 1。
+- 明確 rollback 入口：
+
+  ```
+  python -m paulshaclaw.deploy rollback --instance <name> --root-dir <dir> \
+    [--from-command upgrade]
+  ```
+
+  從最新（或指定 command）的 checkpoint 還原 core plane。
+
+### 8.5 uninstall 實際執行（E5）
+
+```
+python -m paulshaclaw.deploy uninstall --apply \
+  --instance <name> --root-dir <dir> [--purge-state] [--purge-secret]
+```
+
+依 planner steps 落實：
+
+1. `snapshot-existing-core`：同 upgrade，先建立 checkpoint 供 rollback。
+2. `disable-service-unit` / `stop`：對 `verify_units` 跑 `systemctl --user disable/stop`。
+3. `remove-core-plane`：移除 systemd unit 與 runtime env。
+4. `preserve-state-plane` / `preserve-secret-plane`：**預設保留** state 與 secret。
+   只有 operator 明確 `--purge-state` / `--purge-secret` 才清除，且預設值為保留。
+
+### 8.6 三平面邊界與非目標
+
+- operator shell **不**重新擁有 Hippo / Cortex 的 service lifecycle authority：
+  `deploy` 只操作本 repo 的 core/systemd unit 與 runtime env，不 enable/disable/restart
+  hippo 或 cortex 的 unit，不碰 `scripts/start.sh`、`scripts/cutover-to-planes.sh`。
+- create-only 規則不因升級放寬（#219 對抗審查結論）。
+- 不實作自動部署到遠端主機、不在部署流程裡管理或遷移使用者 secret 內容。
+- 所有 `systemctl` / `systemd-analyze` 呼叫走既有 `_run_command()`；測試以 fake bin
+  + PATH 注入 + 假 HOME 隔離，不碰真實 systemd。
