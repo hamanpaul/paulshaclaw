@@ -1,10 +1,12 @@
 """#285 反例測試：守住「未顯式隔離時 deploy 不寫進真實家目錄」。
 
-兩道斷言：
+三道斷言：
 1. `home_root()` 尊重 `PSC_HOME_ROOT` 環境變數覆寫（整條隔離的根）。
 2. CLI 帶 `--home-dir` 時，所有落點都在該目錄下、不在真實 `Path.home()`。
+3. conftest 第二道防線的檔名前綴確實涵蓋所有會寫家目錄的 deploy 測試模組。
 
-即使有人拿掉 conftest 的 session 防線，這些測試的形狀仍能抓到逃逸。
+即使有人拿掉 conftest 的防線，前兩項的形狀仍能抓到逃逸；第三項則守住防線
+本身不會因為新增測試檔而靜默失效。
 """
 
 from __future__ import annotations
@@ -125,6 +127,53 @@ class CliHomeDirIsolationTests(unittest.TestCase):
             self.assertNotEqual(Path(env["HOME"]), Path.home())
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
+
+
+class ConftestCoverageTests(unittest.TestCase):
+    """守住 conftest 第二道防線的涵蓋範圍（#285）。
+
+    `tests/conftest.py` 的 `isolate_home_root_for_deploy` 以**檔名前綴**篩選要
+    保護的測試模組（session 全域覆寫會讓 11 個做 facade↔常數漂移比對的既有測試
+    誤判，見該檔 docstring）。代價是新增一個碰 deploy 寫入路徑、但檔名不符前綴
+    的測試檔時，防線會靜默失效——而「靠人記得」正是 #285 的根因。
+
+    這條測試把它變成 fail-closed：凡是會觸及 deploy 實際寫入路徑的測試模組，
+    檔名都必須落在 `_DEPLOY_TEST_PREFIXES` 內。
+    """
+
+    # 會實際寫檔的入口（planner 的 build_command_plan 是純函式，不在此列）。
+    _WRITE_PATH_MARKERS = (
+        "deploy.installer",
+        "apply_install_plan",
+        "run_install",
+        "run_upgrade",
+        "run_uninstall",
+        "run_rollback",
+        '"paulshaclaw.deploy"',
+    )
+
+    def test_every_deploy_writing_test_module_is_covered_by_conftest(self) -> None:
+        import tests.conftest as conftest_module
+
+        prefixes = conftest_module._DEPLOY_TEST_PREFIXES
+        uncovered: list[str] = []
+        for path in sorted((REPO_ROOT / "tests").glob("test_*.py")):
+            text = path.read_text(encoding="utf-8")
+            if not any(marker in text for marker in self._WRITE_PATH_MARKERS):
+                continue
+            if not path.name.startswith(prefixes):
+                uncovered.append(path.name)
+
+        self.assertEqual(
+            uncovered,
+            [],
+            msg=(
+                "下列測試模組會觸及 deploy 的實際寫入路徑，但檔名不符 "
+                f"tests/conftest.py 的 {prefixes}，家目錄隔離的第二道防線對它們無效。"
+                "請改名或擴充該前綴清單："
+                f"{uncovered}"
+            ),
+        )
 
 
 if __name__ == "__main__":
