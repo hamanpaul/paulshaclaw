@@ -103,6 +103,18 @@ cortex_instance() {
   printf '%s\n' "${PSC_INSTANCE:-cortex}"
 }
 
+# 把 repo 路徑正規化成可比較的形式（#285）：去掉 trailing slash，存在的目錄再
+# 解開 symlink 與 `..`。不存在的路徑保持原樣（只去 trailing slash）——比對的
+# 目的是判斷「是不是同一個 repo」，路徑不存在時無從解析，維持字面比較即可。
+normalize_repo_path() {
+  local candidate="${1%/}"
+  [[ -z "$candidate" ]] && return 0
+  if [[ -d "$candidate" ]]; then
+    (cd "$candidate" 2>/dev/null && pwd -P) && return 0
+  fi
+  printf '%s\n' "$candidate"
+}
+
 cortex_specs_root() {
   if [[ -n "${PSC_MANAGER_SPECS_DIR:-}" ]]; then
     printf '%s\n' "$PSC_MANAGER_SPECS_DIR"
@@ -240,7 +252,10 @@ ensure_cortex_services() {
     existing_repo_root="$(grep -E '^PSC_REPO_ROOT=' "$manager_env" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
     existing_repo_root="${existing_repo_root%\"}"
     existing_repo_root="${existing_repo_root#\"}"
-    if [[ -n "$existing_repo_root" ]] && [[ "$existing_repo_root" != "$REPO" ]]; then
+    # 正規化後再比：symlink checkout、trailing slash、`/a/../a` 這類等價寫法
+    # 直接字串比對會把「同一個 repo」誤判成別人的，於是錯誤跳過 install service。
+    if [[ -n "$existing_repo_root" ]] \
+      && [[ "$(normalize_repo_path "$existing_repo_root")" != "$(normalize_repo_path "$REPO")" ]]; then
       echo "警告：${instance}-manager.env 的 PSC_REPO_ROOT 指向 ${existing_repo_root}（非本 repo ${REPO}）；跳過 cortex install service，沿用既有設定不覆寫（#285）" >&2
       start_cortex_local_fallback
       return $?

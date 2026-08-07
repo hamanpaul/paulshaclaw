@@ -37,21 +37,20 @@ def _is_deploy_test(request: pytest.FixtureRequest) -> bool:
     return name.startswith(_DEPLOY_TEST_PREFIXES)
 
 
-@pytest.fixture(scope="session")
-def _psc_home_root_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return tmp_path_factory.mktemp("psc-home-root")
-
-
 @pytest.fixture(autouse=True)
 def isolate_home_root_for_deploy(
     request: pytest.FixtureRequest,
-    _psc_home_root_dir: Path,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[None]:
     if not _is_deploy_test(request):
         yield
         return
+    # 每個測試各自一個目錄：共用 session 目錄的話，任何漏帶隔離而落到這裡的
+    # 檔案會殘留給後續測試看見，製造出順序相依的偶發失敗——而這條防線正是為了
+    # 接住「漏帶隔離」的情況，不該讓接住的動作本身變成汙染源。
+    home_root_dir = tmp_path_factory.mktemp("psc-home-root")
     previous = os.environ.get("PSC_HOME_ROOT")
-    os.environ["PSC_HOME_ROOT"] = str(_psc_home_root_dir)
+    os.environ["PSC_HOME_ROOT"] = str(home_root_dir)
     try:
         yield
     finally:

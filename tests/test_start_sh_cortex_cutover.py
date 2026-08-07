@@ -627,7 +627,7 @@ def _run_ensure_cortex_services(tmp_path: Path, *, existing_repo_root: str | Non
 
     fake_py = tmp_path / "fake-python"
     fake_py.write_text(
-        f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{call_log}"\nsleep 5\n',
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{call_log}"\n',
         encoding="utf-8",
     )
     fake_py.chmod(fake_py.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -696,3 +696,24 @@ def test_ensure_cortex_services_installs_when_no_manager_env(tmp_path: Path) -> 
 
     calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
     assert "install service" in calls, f"應照舊呼叫 install service，實際呼叫：{calls}"
+
+
+def test_ensure_cortex_services_installs_when_manager_env_path_is_symlinked_equivalent(
+    tmp_path: Path,
+) -> None:
+    """#285 follow-up：等價路徑不得被誤判成別人的 repo。
+
+    symlink checkout、trailing slash、`/a/../a` 都指向同一個 repo；直接字串
+    比對會誤判成「別的 repo」而錯誤跳過 install service。
+    """
+    link = tmp_path / "repo-symlink"
+    link.symlink_to(REPO_ROOT)
+
+    for variant in (f"{REPO_ROOT}/", str(link), f"{REPO_ROOT}/./"):
+        completed, call_log = _run_ensure_cortex_services(
+            tmp_path / f"case-{abs(hash(variant))}", existing_repo_root=variant
+        )
+        calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+        assert "install service" in calls, (
+            f"{variant} 與本 repo 等價，不該被判成別的 repo；stderr={completed.stderr}"
+        )
