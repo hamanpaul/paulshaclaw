@@ -384,6 +384,18 @@ class MessagePaneMapTests(unittest.TestCase):
             self.assertEqual(m.lookup_pane_id(42), "%5")
             self.assertEqual(m.lookup_pane_id(99), "%7")
 
+    def test_write_is_atomic_and_leaves_no_temp_file(self) -> None:
+        # 半截 JSON 會被 _load() 當成空表而靜默丟掉整份對應，故寫入走
+        # 暫存檔 + os.replace；寫完不得有 .tmp 殘留。
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            m = MessagePaneMap(path)
+            m.remember(message_id=42, pane_id="%5")
+            # map.lock 是跨程序鎖，本來就會留下；不得留下的是暫存檔。
+            leftovers = [p.name for p in Path(tmpdir).iterdir() if p.name.endswith(".tmp")]
+            self.assertEqual(leftovers, [])
+            self.assertEqual(m.lookup_pane_id(42), "%5")
+
     def test_lookup_miss_returns_none(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             m = MessagePaneMap(Path(tmpdir) / "map.json")

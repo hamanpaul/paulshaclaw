@@ -191,10 +191,14 @@ class MessagePaneMap:
             self.path.unlink(missing_ok=True)
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
+        # 原子寫入：同目錄暫存檔 + os.replace。直接 write_text 若中途中斷會留下
+        # 半截 JSON，而 `_load()` 把 decode 失敗當空表——那等於靜默丟掉整份對應。
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        os.replace(tmp_path, self.path)
 
     def _evict_expired(self, payload: dict[str, dict[str, object]]) -> None:
         cutoff = time.time() - self.TTL_SECONDS

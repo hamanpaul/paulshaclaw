@@ -177,7 +177,8 @@ class MessagePaneMap:
     """message_id → pane_id 對應表（#34），standalone 副本。
 
     與 paulshaclaw/bot/reply.py 的 MessagePaneMap 邏輯一致——刻意不 import
-    repo 套件（見檔頭註解），兩邊由 test_message_pane_map_path_match_facade 把關。
+    repo 套件（見檔頭註解）；兩邊的預設路徑是否一致由
+    custom-skills/bro/tests/test_reply_bridge.py 的 test_default_paths_match_facade 把關。
     """
 
     MAX_ENTRIES = 500
@@ -235,10 +236,14 @@ class MessagePaneMap:
             self.path.unlink(missing_ok=True)
             return
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
+        # 原子寫入：同目錄暫存檔 + os.replace。直接 write_text 若中途中斷會留下
+        # 半截 JSON，而 `_load()` 把 decode 失敗當空表——那等於靜默丟掉整份對應。
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        os.replace(tmp_path, self.path)
 
     def _evict_expired(self, payload: dict[str, dict[str, object]]) -> None:
         cutoff = time.time() - self.TTL_SECONDS
