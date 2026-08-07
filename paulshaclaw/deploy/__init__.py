@@ -1,9 +1,18 @@
 from .installer import (
+    ArtifactVerificationError,
     DeploymentVerificationError,
     apply_install_plan,
+    detect_installed_version,
+    latest_checkpoint,
+    read_install_record,
     render_template,
     resolve_install_path,
+    restore_core_from_checkpoint,
     run_install,
+    run_rollback,
+    run_uninstall,
+    run_upgrade,
+    snapshot_core_plane,
     verify_install_plan,
 )
 from .planner import (
@@ -20,6 +29,7 @@ from .planner import (
 )
 
 __all__ = [
+    "ArtifactVerificationError",
     "CommandPlan",
     "DeploymentVerificationError",
     "PermissionCheck",
@@ -29,11 +39,19 @@ __all__ = [
     "build_command_plan",
     "build_secret_install_steps",
     "complete_secret_install_flow",
+    "detect_installed_version",
+    "latest_checkpoint",
     "list_template_assets",
+    "read_install_record",
     "render_template",
     "resolve_install_path",
     "resolve_template_target",
+    "restore_core_from_checkpoint",
     "run_install",
+    "run_rollback",
+    "run_uninstall",
+    "run_upgrade",
+    "snapshot_core_plane",
     "validate_plane_permissions",
     "verify_install_plan",
 ]

@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
+
+try:
+    from importlib.metadata import version as _pkg_version
+except Exception:  # pragma: no cover - 純防護
+    _pkg_version = None
 
 from paulshaclaw.config import paths
 from paulshaclaw.core.config import load_config
@@ -15,6 +23,25 @@ class DeploymentVerificationError(RuntimeError):
     def __init__(self, errors: list[str]) -> None:
         self.errors = errors
         super().__init__("\n".join(errors))
+
+
+class ArtifactVerificationError(RuntimeError):
+    """artifact 來源驗證失敗（checksum 不符或檔案不存在），必須 fail-closed。"""
+
+
+def detect_installed_version() -> str | None:
+    """偵測目前安裝的 paulshaclaw 版本；不可得時回 None。"""
+    if _pkg_version is not None:
+        try:
+            return _pkg_version("paulshaclaw")
+        except Exception:
+            pass
+    version_file = paths.repo_root() / "VERSION"
+    if version_file.is_file():
+        text = version_file.read_text(encoding="utf-8").strip()
+        if text:
+            return text
+    return None
 
 
 def render_template(asset: TemplateAsset, *, instance_name: str, root_dir: str) -> str:
@@ -192,7 +219,7 @@ def verify_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, objec
     }
 
 
-def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool, home_dir: str | Path | None = None) -> tuple[dict[str, object], int]:
+def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool, home_dir: str | Path | None = None, version: str | None = None, artifact: str | None = None, artifact_sha256: str | None = None) -> tuple[dict[str, object], int]:
     plan = build_command_plan("install", instance_name=instance_name, root_dir=root_dir)
     resolved_home = Path(home_dir).expanduser() if home_dir is not None else paths.home_root()
     report: dict[str, object] = {
@@ -203,11 +230,25 @@ def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool,
     }
 
     if apply:
+        # E1：artifact 來源驗證（fail-closed）。
+        artifact_record = _verify_and_record_artifact(
+            artifact=artifact,
+            artifact_sha256=artifact_sha256,
+        )
+        report["artifact"] = artifact_record
         applied = apply_install_plan(plan, home_dir=resolved_home)
         report["applied_files"] = applied["written"]
         report["skipped_existing"] = applied["skipped_existing"]
         report["linger"] = _ensure_linger_enabled()
         report["daemon_reload"] = _run_daemon_reload()
+        _write_install_record(
+            resolved_home,
+            instance_name=instance_name,
+            command="install",
+            version=version,
+            artifact=artifact,
+            artifact_sha256=artifact_record["sha256"],
+        )
 
     if verify:
         verification = verify_install_plan(plan, home_dir=resolved_home)
@@ -216,4 +257,382 @@ def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool,
             report["status"] = "failed"
             return report, 1
 
+    return report, 0
+
+
+# ---------------------------------------------------------------------------
+# E1：安裝來源記錄與查詢入口
+# ---------------------------------------------------------------------------
+
+INSTALL_RECORD_FILENAME = "{instance}.install-record.json"
+
+
+def _install_record_path(home_dir: Path, *, instance_name: str) -> Path:
+    return home_dir / ".agents" / "state" / "config" / INSTALL_RECORD_FILENAME.format(instance=instance_name)
+
+
+def _verify_and_record_artifact(*, artifact: str | None, artifact_sha256: str | None) -> dict[str, object]:
+    """驗證 artifact 來源並回傳可記錄的摘要。
+
+    fail-closed：指定本地 artifact 但檔案不存在、或指定 sha256 但不符，皆拋
+    `ArtifactVerificationError`。URL artifact 不下載驗證（不在本階段範圍），
+    僅記錄來源字串與 operator 提供的 checksum（若有）。
+    """
+    record: dict[str, object] = {"source": artifact, "sha256": artifact_sha256}
+    if artifact is None:
+        return record
+    # URL 來源：本階段不下載驗證，只記錄。
+    if "://" in artifact:
+        return record
+    artifact_path = Path(artifact).expanduser()
+    if not artifact_path.is_file():
+        raise ArtifactVerificationError(f"artifact 檔案不存在：{artifact}")
+    computed = _sha256(artifact_path)
+    record["sha256"] = computed
+    if artifact_sha256 is not None and computed.lower() != artifact_sha256.lower():
+        raise ArtifactVerificationError(
+            f"artifact SHA-256 不符：期望 {artifact_sha256}，實際 {computed}"
+        )
+    return record
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_install_record(
+    home_dir: Path,
+    *,
+    instance_name: str,
+    command: str,
+    version: str | None,
+    artifact: str | None,
+    artifact_sha256: str | None,
+) -> Path:
+    record_path = _install_record_path(home_dir, instance_name=instance_name)
+    record_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "instance": instance_name,
+        "command": command,
+        "version": version or detect_installed_version(),
+        "artifact_source": artifact,
+        "artifact_sha256": artifact_sha256,
+        "applied_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    record_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        record_path.chmod(0o640)
+    except OSError:
+        pass
+    return record_path
+
+
+def read_install_record(home_dir: str | Path | None = None, *, instance_name: str = "paulshaclaw") -> dict[str, object] | None:
+    resolved_home = Path(home_dir).expanduser() if home_dir is not None else paths.home_root()
+    record_path = _install_record_path(resolved_home, instance_name=instance_name)
+    if not record_path.is_file():
+        return None
+    return json.loads(record_path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# E3/E4：core plane snapshot 與 restore（rollback checkpoint）
+# ---------------------------------------------------------------------------
+
+CHECKPOINT_RELPATH = ".agents/deploy-checkpoints"
+
+
+def _checkpoint_root(home_dir: Path, *, instance_name: str) -> Path:
+    return home_dir / CHECKPOINT_RELPATH / instance_name
+
+
+def _new_checkpoint_dir(home_dir: Path, *, instance_name: str, command: str) -> Path:
+    base = _checkpoint_root(home_dir, instance_name=instance_name)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    checkpoint = base / f"{command}-{stamp}"
+    checkpoint.mkdir(parents=True, exist_ok=True)
+    return checkpoint
+
+
+def _core_asset_paths(plan: CommandPlan, *, home_dir: Path) -> list[tuple[TemplateAsset, Path]]:
+    pairs: list[tuple[TemplateAsset, Path]] = []
+    for asset in plan.templates:
+        if asset.plane != "core":
+            continue
+        pairs.append((asset, resolve_install_path(asset, home_dir=home_dir)))
+    return pairs
+
+
+def snapshot_core_plane(plan: CommandPlan, *, home_dir: Path, checkpoint_dir: Path) -> dict[str, list[str]]:
+    """將現有 core plane 檔案複製到 checkpoint 目錄，供 rollback 還原。
+
+    只備份實際存在的檔案；checkpoint 以相對路徑鏡射 core/systemd 與 core/runtime。
+    """
+    saved: list[str] = []
+    missing: list[str] = []
+    for asset, target in _core_asset_paths(plan, home_dir=home_dir):
+        if not target.exists():
+            missing.append(str(target))
+            continue
+        relative = Path(asset.target_path)  # e.g. core/systemd/x.service
+        dest = checkpoint_dir / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target, dest)
+        saved.append(str(target))
+    manifest = {
+        "command": plan.command,
+        "instance_name": plan.instance_name,
+        "saved": sorted(saved),
+        "missing": sorted(missing),
+        "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+    }
+    (checkpoint_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return {"saved": sorted(saved), "missing": sorted(missing)}
+
+
+def restore_core_from_checkpoint(checkpoint_dir: Path, *, home_dir: Path) -> dict[str, list[str]]:
+    """從 checkpoint 還原 core plane 檔案。"""
+    manifest_path = checkpoint_dir / "manifest.json"
+    if not manifest_path.is_file():
+        raise RuntimeError(f"checkpoint 缺少 manifest：{checkpoint_dir}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    restored: list[str] = []
+    for asset, target in _core_asset_paths_from_manifest(checkpoint_dir, home_dir=home_dir):
+        if not asset.exists():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(asset, target)
+        restored.append(str(target))
+    return {"restored": sorted(restored)}
+
+
+def _core_asset_paths_from_manifest(checkpoint_dir: Path, *, home_dir: Path) -> list[tuple[Path, Path]]:
+    """列舉 checkpoint 內的 core 檔案與其還原目標路徑。"""
+    pairs: list[tuple[Path, Path]] = []
+    for core_sub in ("core/systemd", "core/runtime"):
+        sub = checkpoint_dir / core_sub
+        if not sub.is_dir():
+            continue
+        for path in sub.rglob("*"):
+            if not path.is_file():
+                continue
+            relative = path.relative_to(checkpoint_dir)
+            target = _checkpoint_relative_to_install_path(relative, home_dir=home_dir)
+            if target is not None:
+                pairs.append((path, target))
+    return pairs
+
+
+def _checkpoint_relative_to_install_path(relative: Path, *, home_dir: Path) -> Path | None:
+    parts = relative.parts
+    if parts[:2] == ("core", "systemd"):
+        return home_dir / ".config" / "systemd" / "user" / relative.name
+    if parts[:2] == ("core", "runtime"):
+        return home_dir / ".agents" / "core" / "runtime" / relative.name
+    return None
+
+
+def latest_checkpoint(home_dir: Path, *, instance_name: str, command: str | None = None) -> Path | None:
+    base = _checkpoint_root(home_dir, instance_name=instance_name)
+    if not base.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in base.iterdir() if p.is_dir() and (command is None or p.name.startswith(f"{command}-"))),
+        key=lambda p: p.name,
+    )
+    return candidates[-1] if candidates else None
+
+
+# ---------------------------------------------------------------------------
+# 共用：systemd unit 操作
+# ---------------------------------------------------------------------------
+
+
+def _restart_service_units(plan: CommandPlan) -> list[str]:
+    actions: list[str] = []
+    if not _user_systemd_available():
+        return actions
+    for unit in plan.verify_units:
+        completed = _run_command(["systemctl", "--user", "restart", unit])
+        actions.append(f"systemctl --user restart {unit} -> rc={completed.returncode}")
+    return actions
+
+
+def _stop_service_units(plan: CommandPlan) -> list[str]:
+    actions: list[str] = []
+    if not _user_systemd_available():
+        return actions
+    for unit in plan.verify_units:
+        completed = _run_command(["systemctl", "--user", "stop", unit])
+        actions.append(f"systemctl --user stop {unit} -> rc={completed.returncode}")
+    return actions
+
+
+def _disable_service_units(plan: CommandPlan) -> list[str]:
+    actions: list[str] = []
+    if not _user_systemd_available():
+        return actions
+    for unit in plan.verify_units:
+        completed = _run_command(["systemctl", "--user", "disable", unit])
+        actions.append(f"systemctl --user disable {unit} -> rc={completed.returncode}")
+    return actions
+
+
+def _remove_core_plane(plan: CommandPlan, *, home_dir: Path) -> list[str]:
+    removed: list[str] = []
+    for asset, target in _core_asset_paths(plan, home_dir=home_dir):
+        if target.is_file():
+            target.unlink()
+            removed.append(str(target))
+    return sorted(removed)
+
+
+# ---------------------------------------------------------------------------
+# E3：upgrade 實際執行
+# ---------------------------------------------------------------------------
+
+
+def run_upgrade(*, instance_name: str, root_dir: str, apply: bool, verify: bool, home_dir: str | Path | None = None, version: str | None = None, artifact: str | None = None, artifact_sha256: str | None = None) -> tuple[dict[str, object], int]:
+    plan = build_command_plan("upgrade", instance_name=instance_name, root_dir=root_dir)
+    resolved_home = Path(home_dir).expanduser() if home_dir is not None else paths.home_root()
+    report: dict[str, object] = {
+        "command": "upgrade",
+        "instance_name": instance_name,
+        "root_dir": root_dir,
+        "status": "ok",
+    }
+
+    if apply:
+        artifact_record = _verify_and_record_artifact(artifact=artifact, artifact_sha256=artifact_sha256)
+        report["artifact"] = artifact_record
+
+        checkpoint = _new_checkpoint_dir(resolved_home, instance_name=instance_name, command="upgrade")
+        snapshot = snapshot_core_plane(plan, home_dir=resolved_home, checkpoint_dir=checkpoint)
+        report["checkpoint"] = str(checkpoint)
+        report["snapshot"] = snapshot
+
+        try:
+            applied = apply_install_plan(plan, home_dir=resolved_home)
+            report["applied_files"] = applied["written"]
+            report["skipped_existing"] = applied["skipped_existing"]
+            report["daemon_reload"] = _run_daemon_reload()
+            report["restart"] = _restart_service_units(plan)
+            _write_install_record(
+                resolved_home,
+                instance_name=instance_name,
+                command="upgrade",
+                version=version,
+                artifact=artifact,
+                artifact_sha256=artifact_record["sha256"],
+            )
+        except Exception as exc:
+            # E4：升級途中失敗自動 rollback 並標記。
+            restore = restore_core_from_checkpoint(checkpoint, home_dir=resolved_home)
+            report["status"] = "failed"
+            report["error"] = str(exc)
+            report["rollback_triggered"] = True
+            report["rollback"] = restore
+            return report, 1
+
+    if verify:
+        verification = verify_install_plan(plan, home_dir=resolved_home)
+        report["verification"] = verification
+        if verification["status"] != "passed":
+            report["status"] = "failed"
+            return report, 1
+
+    return report, 0
+
+
+# ---------------------------------------------------------------------------
+# E5：uninstall 實際執行
+# ---------------------------------------------------------------------------
+
+
+def run_uninstall(*, instance_name: str, root_dir: str, apply: bool, home_dir: str | Path | None = None, purge_state: bool = False, purge_secret: bool = False) -> tuple[dict[str, object], int]:
+    plan = build_command_plan("uninstall", instance_name=instance_name, root_dir=root_dir)
+    resolved_home = Path(home_dir).expanduser() if home_dir is not None else paths.home_root()
+    report: dict[str, object] = {
+        "command": "uninstall",
+        "instance_name": instance_name,
+        "root_dir": root_dir,
+        "status": "ok",
+        "purge_state": purge_state,
+        "purge_secret": purge_secret,
+    }
+
+    if apply:
+        checkpoint = _new_checkpoint_dir(resolved_home, instance_name=instance_name, command="uninstall")
+        snapshot = snapshot_core_plane(plan, home_dir=resolved_home, checkpoint_dir=checkpoint)
+        report["checkpoint"] = str(checkpoint)
+        report["snapshot"] = snapshot
+
+        report["disable"] = _disable_service_units(plan)
+        report["stop"] = _stop_service_units(plan)
+        report["removed_core_files"] = _remove_core_plane(plan, home_dir=resolved_home)
+        report["daemon_reload"] = _run_daemon_reload()
+
+        purged: list[str] = []
+        if purge_state:
+            purged.extend(_purge_state_plane(plan, home_dir=resolved_home))
+        if purge_secret:
+            purged.extend(_purge_secret_plane(plan, home_dir=resolved_home))
+        report["purged"] = sorted(purged)
+        report["preserved_state"] = not purge_state
+        report["preserved_secret"] = not purge_secret
+
+    return report, 0
+
+
+def _purge_state_plane(plan: CommandPlan, *, home_dir: Path) -> list[str]:
+    purged: list[str] = []
+    for asset in plan.templates:
+        if asset.plane != "state":
+            continue
+        target = resolve_install_path(asset, home_dir=home_dir)
+        if target.is_file():
+            target.unlink()
+            purged.append(str(target))
+    return purged
+
+
+def _purge_secret_plane(plan: CommandPlan, *, home_dir: Path) -> list[str]:
+    purged: list[str] = []
+    for asset in plan.templates:
+        if asset.plane != "secret":
+            continue
+        target = resolve_install_path(asset, home_dir=home_dir)
+        if target.is_file():
+            target.unlink()
+            purged.append(str(target))
+    return purged
+
+
+# ---------------------------------------------------------------------------
+# E4：rollback 入口
+# ---------------------------------------------------------------------------
+
+
+def run_rollback(*, instance_name: str, root_dir: str, home_dir: str | Path | None = None, command: str | None = None) -> tuple[dict[str, object], int]:
+    resolved_home = Path(home_dir).expanduser() if home_dir is not None else paths.home_root()
+    report: dict[str, object] = {
+        "command": "rollback",
+        "instance_name": instance_name,
+        "root_dir": root_dir,
+        "status": "ok",
+    }
+    checkpoint = latest_checkpoint(resolved_home, instance_name=instance_name, command=command)
+    if checkpoint is None:
+        report["status"] = "failed"
+        report["error"] = "找不到可還原的 checkpoint"
+        return report, 1
+    report["checkpoint"] = str(checkpoint)
+    restore = restore_core_from_checkpoint(checkpoint, home_dir=resolved_home)
+    report["restore"] = restore
     return report, 0
