@@ -1,5 +1,0 @@
----
-type: feat
-issue: 280
----
-實作 issue #280 的 E 節 artifact-driven deployment：`install` / `upgrade` 加上 `--version` / `--artifact` / `--artifact-sha256` 並將安裝來源（版本、來源、SHA-256、套用時間）寫入 `~/.agents/state/config/<instance>.install-record.json`，新增 `status` 查詢入口；artifact 不存在或 checksum 不符一律 fail-closed（exit 2）。`upgrade` 加 `--apply` / `--verify`，依 planner 既有 steps 落實 snapshot core → render（沿用 `_asset_is_overwritable()` 的 create-only 規則，只有 systemd unit 被覆寫）→ 保留 state/secret → restart unit → verify，途中失敗自動從 `~/.agents/deploy-checkpoints/<instance>/` 的 checkpoint 還原 core。`uninstall` 加 `--apply`：disable/stop unit → 移除 core plane，預設保留 state 與 secret，只有 `--purge-state` / `--purge-secret` 才清除。新增 `rollback` 命令從最新 checkpoint 還原 core。三命令皆輸出沿用 `run_install()` 形狀擴充的 machine-readable JSON report。新增 `tests/test_stage7_deploy_artifact.py` 覆蓋來源記錄、fail-closed、state/secret 逐字保留、snapshot/restore roundtrip、uninstall purge 預設值。`docs/release-contract.md` 補 §8，README 補 upgrade / rollback / uninstall runbook。
