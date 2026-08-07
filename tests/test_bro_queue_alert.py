@@ -77,7 +77,7 @@ def test_list_backlogs_does_not_mutate_queue_files():
     assert len(after) == 1
 
 
-def test_list_backlogs_skips_empty_queue_files(tmp_path):
+def test_list_backlogs_skips_empty_queue_files():
     # flush 送達後佇列檔會被清空／刪除；殘留空檔不應列入積壓。
     bro_queue.enqueue("%7", "[bro:1] hello")
     bro_queue.flush(
@@ -316,3 +316,39 @@ def test_alert_threshold_seconds_falls_back_on_invalid(monkeypatch):
 def test_alert_threshold_seconds_falls_back_on_nonpositive(monkeypatch):
     monkeypatch.setenv("PSC_BRO_QUEUE_ALERT_THRESHOLD_SECONDS", "0")
     assert alert_threshold_seconds() == 600.0
+
+# ---------------------------------------------------------------------------
+# format_duration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (0, "0 秒"),
+        (30, "30 秒"),
+        (59, "59 秒"),
+        (60, "1 分鐘"),
+        (90, "1 分 30 秒"),
+        (600, "10 分鐘"),
+        (-5, "0 秒"),
+    ],
+)
+def test_format_duration_avoids_zero_minute_labels(seconds, expected):
+    # 門檻可由 env 設成任意正值；直接 // 60 會讓 30 秒顯示成「0 分鐘」而誤導。
+    assert bro_queue_alert.format_duration(seconds) == expected
+
+
+def test_format_alert_uses_second_granularity_for_short_threshold():
+    backlogs = [
+        bro_queue.PaneBacklog(
+            pane_id="%7",
+            remaining=1,
+            head_queued_at=1000.0,
+            head_message="[bro:1] hi",
+            pending_seconds=45.0,
+        )
+    ]
+    text = format_alert(backlogs, threshold_seconds=30.0)
+    assert "門檻 30 秒未消化" in text
+    assert "已等待 45 秒" in text

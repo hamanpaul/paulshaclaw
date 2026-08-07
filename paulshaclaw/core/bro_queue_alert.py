@@ -92,7 +92,6 @@ class BroQueueAlerter:
             logger.error("BRO_QUEUE_ALERT_READ_ERROR error=%s", error)
             return
 
-        now = self.now()
         stale = [
             b
             for b in backlogs
@@ -139,17 +138,32 @@ class BroQueueAlerter:
         return chat_ids
 
 
+def format_duration(seconds: float) -> str:
+    """把秒數轉成告警文字用的中文時間標示。
+
+    門檻可由 env 設成任意正值，直接取 `// 60` 會讓 30 秒顯示成「0 分鐘」、
+    90 秒顯示成「1 分鐘」而誤導。未滿一分鐘以秒表示，超過則補上餘秒。
+    """
+    total = int(max(0.0, seconds))
+    minutes, rest = divmod(total, 60)
+    if minutes == 0:
+        return f"{rest} 秒"
+    if rest == 0:
+        return f"{minutes} 分鐘"
+    return f"{minutes} 分 {rest} 秒"
+
+
 def format_alert(
     backlogs: Sequence[bro_queue.PaneBacklog], *, threshold_seconds: float
 ) -> str:
-    """組 zh-tw 告警文字：列出各超時 pane 與等待分鐘數。"""
+    """組 zh-tw 告警文字：列出各超時 pane 與等待時間。"""
     lines = [
-        f"⚠️ bro-queue 積壓超時（門檻 {int(threshold_seconds // 60)} 分鐘未消化）",
+        f"⚠️ bro-queue 積壓超時（門檻 {format_duration(threshold_seconds)}未消化）",
     ]
     for b in backlogs:
-        minutes = int((b.pending_seconds or 0) // 60)
         lines.append(
-            f"• pane {b.pane_id}：尚有 {b.remaining} 筆待送，最前筆已等待 {minutes} 分鐘"
+            f"• pane {b.pane_id}：尚有 {b.remaining} 筆待送，"
+            f"最前筆已等待 {format_duration(b.pending_seconds or 0)}"
         )
     lines.append("agent 可能卡住或無回應，請確認 pane 狀態")
     return "\n".join(lines)

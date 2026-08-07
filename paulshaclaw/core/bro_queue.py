@@ -220,6 +220,8 @@ def list_backlogs(*, now: Callable[[], float] = time.time) -> list[PaneBacklog]:
     root = paths.state_path("bro-queue")
     if not root.exists():
         return []
+    # 只取一次時間：逐 pane 各自呼叫 now() 會讓同一輪的 pending_seconds 互相漂移。
+    now_value = now()
     results: list[PaneBacklog] = []
     for entry in sorted(root.iterdir()):
         if not entry.is_file() or entry.suffix != ".jsonl":
@@ -235,7 +237,7 @@ def list_backlogs(*, now: Callable[[], float] = time.time) -> list[PaneBacklog]:
         head_message = str(head.get("message", "")) if "message" in head else None
         pending_seconds = None
         if head_queued_at is not None:
-            pending_seconds = max(0.0, now() - head_queued_at)
+            pending_seconds = max(0.0, now_value - head_queued_at)
         results.append(
             PaneBacklog(
                 pane_id=pane_id,
