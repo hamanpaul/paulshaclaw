@@ -177,6 +177,10 @@ python -m paulshaclaw.deploy install --apply --verify \
   （本階段不下載驗證，屬非目標）。
 - `--artifact-sha256`：期望 checksum；指定後與實際計算不符即 **fail-closed**（exit 2）。
 - 指定本地 artifact 但檔案不存在亦 fail-closed。
+- **只給 `--artifact-sha256` 而不給 `--artifact` 同樣 fail-closed**：沒有 artifact 可算，
+  記下來的 checksum 會讓 operator 誤以為驗證過。
+- report / record 的 `verified` 欄位誠實標示該 sha256 是否真的算過：只有本地檔案實算
+  才是 `true`；URL 來源（本階段不下載）與未指定 artifact 皆為 `false`。
 
 安裝紀錄寫入 `~/.agents/state/config/<instance>.install-record.json`（state plane，
 不寫進 repo、不寫進 secret plane），內容含 `version`、`artifact_source`、
@@ -225,7 +229,9 @@ python -m paulshaclaw.deploy upgrade --apply --verify \
 ### 8.4 rollback（E4）
 
 - checkpoint 存放於 `~/.agents/deploy-checkpoints/<instance>/<command>-<timestamp>/`，
-  含 `manifest.json` 與鏡射的 core 檔案；可清理、不污染 repo。
+  含 `manifest.json` 與鏡射的 core 檔案；可清理、不污染 repo。timestamp 到微秒且
+  撞名時補遞增序號——秒級目錄會讓同一秒內的兩次 upgrade 共用 checkpoint，
+  後者的 snapshot 覆寫前者，rollback 就會還原到已被改過的內容。
 - `restore-core-from-checkpoint` 把 core 檔案逐檔還原到升級前內容。
 - **upgrade 執行途中失敗自動 rollback**：`run_upgrade()` 在套用階段拋例外時（含
   unit 重啟失敗），自動從當次 checkpoint 還原 core，report 標記

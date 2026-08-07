@@ -565,9 +565,59 @@ class ArtifactVerificationUnitTests(unittest.TestCase):
         with self.assertRaises(ArtifactVerificationError):
             _verify_and_record_artifact(artifact="/nonexistent/path.whl", artifact_sha256=None)
 
+    def test_verify_and_record_artifact_sha256_without_artifact_fails_closed(self) -> None:
+        # 只給 sha256 沒給 artifact：沒有任何東西可算，記下來的 checksum 會讓
+        # operator 誤以為驗證過，必須 fail-closed。
+        from paulshaclaw.deploy.installer import _verify_and_record_artifact
+
+        with self.assertRaises(ArtifactVerificationError):
+            _verify_and_record_artifact(artifact=None, artifact_sha256="deadbeef")
+
+    def test_verify_flag_true_only_for_locally_computed_sha256(self) -> None:
+        from paulshaclaw.deploy.installer import _verify_and_record_artifact
+
+        scratch = make_test_dir("stage7-e1-verified-flag")
+        try:
+            artifact = scratch / "paulshaclaw-0.1.0-py3-none-any.whl"
+            artifact.write_bytes(b"fake wheel")
+
+            local = _verify_and_record_artifact(artifact=str(artifact), artifact_sha256=None)
+            self.assertTrue(local["verified"])
+
+            # URL 不下載，checksum 未經驗證；無 artifact 亦然。
+            url = _verify_and_record_artifact(
+                artifact="https://example.com/paulshaclaw.whl", artifact_sha256=None
+            )
+            self.assertFalse(url["verified"])
+            none_record = _verify_and_record_artifact(artifact=None, artifact_sha256=None)
+            self.assertFalse(none_record["verified"])
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
     def test_install_record_path_under_state_config(self) -> None:
         path = _install_record_path(Path("/tmp/fake-home"), instance_name="demo")
         self.assertEqual(path, Path("/tmp/fake-home/.agents/state/config/demo.install-record.json"))
+
+
+class CheckpointUniquenessTests(unittest.TestCase):
+    def test_consecutive_checkpoints_never_share_a_directory(self) -> None:
+        # 秒級 timestamp + exist_ok=True 會讓同一秒內的兩次 upgrade 共用目錄，
+        # 後者的 snapshot 覆寫前者 → rollback 還原到已被改過的內容。
+        from paulshaclaw.deploy.installer import _new_checkpoint_dir
+
+        scratch = make_test_dir("stage7-e4-unique")
+        home_dir = scratch / "home"
+        home_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            created = [
+                _new_checkpoint_dir(home_dir, instance_name="demo-agent", command="upgrade")
+                for _ in range(20)
+            ]
+            self.assertEqual(len(set(created)), len(created))
+            # 名稱排序即時間排序，latest_checkpoint() 才會拿到最後建立的那個。
+            self.assertEqual([str(p) for p in created], sorted(str(p) for p in created))
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 if __name__ == "__main__":

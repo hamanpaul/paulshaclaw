@@ -275,11 +275,20 @@ def _verify_and_record_artifact(*, artifact: str | None, artifact_sha256: str | 
     """驗證 artifact 來源並回傳可記錄的摘要。
 
     fail-closed：指定本地 artifact 但檔案不存在、或指定 sha256 但不符，皆拋
-    `ArtifactVerificationError`。URL artifact 不下載驗證（不在本階段範圍），
-    僅記錄來源字串與 operator 提供的 checksum（若有）。
+    `ArtifactVerificationError`；只給 `--artifact-sha256` 而沒給 `--artifact`
+    同樣 fail-closed——沒有 artifact 可算，記下來的 checksum 會讓 operator
+    誤以為驗證過。
+
+    `verified` 欄位誠實標示這個 sha256 是否真的算過：只有本地檔案實算才是
+    `True`。URL artifact 不下載驗證（不在本階段範圍），僅記錄來源字串與
+    operator 提供的 checksum。
     """
-    record: dict[str, object] = {"source": artifact, "sha256": artifact_sha256}
+    record: dict[str, object] = {"source": artifact, "sha256": artifact_sha256, "verified": False}
     if artifact is None:
+        if artifact_sha256 is not None:
+            raise ArtifactVerificationError(
+                "指定 --artifact-sha256 時必須同時指定 --artifact，否則沒有任何 artifact 可驗證"
+            )
         return record
     # URL 來源：本階段不下載驗證，只記錄。
     if "://" in artifact:
@@ -293,6 +302,7 @@ def _verify_and_record_artifact(*, artifact: str | None, artifact_sha256: str | 
         raise ArtifactVerificationError(
             f"artifact SHA-256 不符：期望 {artifact_sha256}，實際 {computed}"
         )
+    record["verified"] = True
     return record
 
 
@@ -351,11 +361,25 @@ def _checkpoint_root(home_dir: Path, *, instance_name: str) -> Path:
 
 
 def _new_checkpoint_dir(home_dir: Path, *, instance_name: str, command: str) -> Path:
+    """建立一個必定唯一的 checkpoint 目錄。
+
+    秒級 timestamp + `exist_ok=True` 會讓同一秒內的兩次 upgrade 共用同一個
+    目錄：後者的 snapshot 覆寫前者，而 `latest_checkpoint()` 依名稱排序仍只看到
+    一個——rollback 會還原到「已經被改過」的內容而非升級前。故改用微秒精度，
+    並以 `exist_ok=False` + 遞增序號確保每次都是新目錄。
+    """
     base = _checkpoint_root(home_dir, instance_name=instance_name)
-    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-    checkpoint = base / f"{command}-{stamp}"
-    checkpoint.mkdir(parents=True, exist_ok=True)
-    return checkpoint
+    base.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S.%f")
+    candidate = base / f"{command}-{stamp}"
+    suffix = 0
+    while True:
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
+            suffix += 1
+            candidate = base / f"{command}-{stamp}-{suffix}"
 
 
 def _core_asset_paths(plan: CommandPlan, *, home_dir: Path) -> list[tuple[TemplateAsset, Path]]:
