@@ -17,6 +17,10 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# Build / release artifacts（python -m build 輸出）
+build/
+dist/
+
 
 # Virtual environments
 .venv/
