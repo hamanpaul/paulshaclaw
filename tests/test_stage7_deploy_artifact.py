@@ -113,6 +113,10 @@ def deploy_env(home_dir: Path, fakebin: Path) -> dict[str, str]:
             "PATH": str(fakebin),
             "USER": "stage7tester",
             "LOGNAME": "stage7tester",
+            # conftest 的 session autouse fixture 把 PSC_HOME_ROOT 指向 pytest tmp；
+            # subprocess 會繼承到該值，導致 deploy 寫到 conftest 的 tmp 而非本測試的
+            # 假 HOME（#285 陷阱）。這裡顯式覆寫回本測試的 home_dir。
+            "PSC_HOME_ROOT": str(home_dir),
         }
     )
     return env
@@ -457,6 +461,38 @@ class RollbackTests(unittest.TestCase):
             self.assertEqual(completed.returncode, 1)
             payload = json.loads(completed.stdout)
             self.assertEqual(payload["status"], "failed")
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    def test_rollback_restores_runtime_env_from_checkpoint(self) -> None:
+        """rollback 刻意繞過 create-only，還原使用者自己持有的 runtime env（#285）。
+
+        確立 rollback 會把 core/runtime env 蓋回 checkpoint 當下的內容——這是刻意
+        行為，日後若有人在此路徑加 `_asset_is_overwritable()` 判準應被本測試擋下。
+        """
+        scratch = make_test_dir("stage7-e4-rollback-runtime-env")
+        home_dir = scratch / "home"
+        home_dir.mkdir(parents=True, exist_ok=True)
+        fakebin, _ = make_fake_tools(scratch)
+        try:
+            seed_install(home_dir, fakebin)
+            cost_env = home_dir / ".agents" / "core" / "runtime" / "demo-agent-cost.env"
+            # 模擬使用者持有真實設定值（非模板 placeholder）。
+            real_content = "PAULSHACLAW_CONFIG=/srv/real-operator\n"
+            cost_env.write_text(real_content, encoding="utf-8")
+
+            plan = build_command_plan("upgrade", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
+            checkpoint = scratch / "checkpoint"
+            checkpoint.mkdir()
+            snapshot_core_plane(plan, home_dir=home_dir, checkpoint_dir=checkpoint)
+
+            # 模擬升級以模板覆寫 runtime env（實際 apply_install_plan 對既有 env 是
+            # create-only 跳過；這裡直接寫入假內容代表「被改過」的狀態）。
+            cost_env.write_text("PAULSHACLAW_CONFIG=/srv/overwritten\n", encoding="utf-8")
+
+            restore = restore_core_from_checkpoint(checkpoint, home_dir=home_dir)
+            self.assertIn(str(cost_env), restore["restored"])
+            self.assertEqual(cost_env.read_text(encoding="utf-8"), real_content)
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
 

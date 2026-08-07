@@ -608,3 +608,91 @@ def test_cutover_monitor_config_failure_is_nonzero(tmp_path: Path, failure: str)
         tmp_path,
     )
     assert completed.returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# #285：start.sh 不得覆寫他人的 <instance>-manager.env
+# ---------------------------------------------------------------------------
+
+
+def _run_ensure_cortex_services(tmp_path: Path, *, existing_repo_root: str | None) -> tuple[subprocess.CompletedProcess[str], Path]:
+    """在假 HOME 下呼叫 ensure_cortex_services，回傳結果與 fake PY 的呼叫 log。
+
+    fake PY 會把每次呼叫的參數寫進 log；install service 是否被執行由該 log 判定。
+    """
+    home = tmp_path / "home"
+    (home / ".agents" / "core" / "runtime").mkdir(parents=True, exist_ok=True)
+    (home / ".agents" / "log").mkdir(parents=True, exist_ok=True)
+    call_log = tmp_path / "py-calls.log"
+
+    fake_py = tmp_path / "fake-python"
+    fake_py.write_text(
+        f'#!/usr/bin/env bash\nprintf "%s\\n" "$*" >> "{call_log}"\nsleep 5\n',
+        encoding="utf-8",
+    )
+    fake_py.chmod(fake_py.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    if existing_repo_root is not None:
+        (home / ".agents" / "core" / "runtime" / "psc-test-manager.env").write_text(
+            f"PSC_INSTANCE=psc-test\nPSC_REPO_ROOT={existing_repo_root}\n",
+            encoding="utf-8",
+        )
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "PSC_INSTANCE": "psc-test",
+            "PSC_AGENTS_ROOT": str(home / ".agents"),
+            "PSC_MANAGER_SPECS_DIR": str(tmp_path / "specs"),
+        }
+    )
+    completed = subprocess.run(
+        [
+            "/usr/bin/bash",
+            "-c",
+            f'source "$1" --source-only; PY="{fake_py}"; REPO="{REPO_ROOT}"; ensure_cortex_services',
+            "bash",
+            str(START_SH),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return completed, call_log
+
+
+def test_ensure_cortex_services_skips_install_when_manager_env_belongs_to_other_repo(tmp_path: Path) -> None:
+    """#285 問題 B：既有 manager.env 指向別的 repo 時不得覆寫。
+
+    cortex 的 `install service` 會就地覆寫 managed keys（含 PSC_REPO_ROOT / PY），
+    在同時裝了 paulshaclaw 與 paulsha-cortex 的機器上會劫持對方的 instance，
+    症狀是 cortex 所有 work-action 掛住、且潛伏到下次重啟才爆。
+    """
+    completed, call_log = _run_ensure_cortex_services(
+        tmp_path, existing_repo_root="/home/other/prj/paulsha-cortex"
+    )
+
+    calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    assert "install service" not in calls, f"不該呼叫 install service，實際呼叫：{calls}"
+    assert "PSC_REPO_ROOT" in completed.stderr, completed.stderr
+    assert "不覆寫" in completed.stderr, completed.stderr
+
+
+def test_ensure_cortex_services_installs_when_manager_env_is_ours(tmp_path: Path) -> None:
+    """對照組：manager.env 指向本 repo（或不存在）時維持既有行為。"""
+    completed, call_log = _run_ensure_cortex_services(
+        tmp_path, existing_repo_root=str(REPO_ROOT)
+    )
+
+    calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    assert "install service" in calls, f"應照舊呼叫 install service，實際呼叫：{calls}"
+
+
+def test_ensure_cortex_services_installs_when_no_manager_env(tmp_path: Path) -> None:
+    completed, call_log = _run_ensure_cortex_services(tmp_path, existing_repo_root=None)
+
+    calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
+    assert "install service" in calls, f"應照舊呼叫 install service，實際呼叫：{calls}"

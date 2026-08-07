@@ -267,6 +267,8 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 > 以下命令把 immutable release artifact 套用到 host，完整契約見
 > [`docs/release-contract.md`](./docs/release-contract.md) §8。所有命令的 `--apply` 才會
 > 實際執行；不加 `--apply` 只印 command plan。state / secret 一律預設保留。
+> 所有命令皆可加 `--home-dir <dir>` 顯式隔離落點（預設走 `PSC_HOME_ROOT` / `$HOME`）；
+> 詳見 §8.7 的家目錄隔離防線。
 
 #### 查詢目前安裝版本
 

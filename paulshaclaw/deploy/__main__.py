@@ -26,6 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--instance", default="paulshaclaw")
         subparser.add_argument("--root-dir", required=True)
+        subparser.add_argument(
+            "--home-dir",
+            default=None,
+            help="家目錄根（預設走 PSC_HOME_ROOT / $HOME）；顯式指定可隔離部署落點",
+        )
         subparser.add_argument("--apply", action="store_true")
         if command != "uninstall":
             subparser.add_argument("--verify", action="store_true")
@@ -52,10 +57,20 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser = subparsers.add_parser("status")
     status_parser.add_argument("--instance", default="paulshaclaw")
     status_parser.add_argument("--root-dir", required=True)
+    status_parser.add_argument(
+        "--home-dir",
+        default=None,
+        help="家目錄根（預設走 PSC_HOME_ROOT / $HOME）",
+    )
 
     rollback_parser = subparsers.add_parser("rollback")
     rollback_parser.add_argument("--instance", default="paulshaclaw")
     rollback_parser.add_argument("--root-dir", required=True)
+    rollback_parser.add_argument(
+        "--home-dir",
+        default=None,
+        help="家目錄根（預設走 PSC_HOME_ROOT / $HOME）",
+    )
     rollback_parser.add_argument(
         "--from-command",
         default=None,
@@ -76,6 +91,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 root_dir=args.root_dir,
                 apply=args.apply,
                 verify=args.verify,
+                home_dir=args.home_dir,
                 version=args.version,
                 artifact=args.artifact,
                 artifact_sha256=args.artifact_sha256,
@@ -93,6 +109,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 root_dir=args.root_dir,
                 apply=args.apply,
                 verify=args.verify,
+                home_dir=args.home_dir,
                 version=args.version,
                 artifact=args.artifact,
                 artifact_sha256=args.artifact_sha256,
@@ -108,6 +125,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             instance_name=args.instance,
             root_dir=args.root_dir,
             apply=args.apply,
+            home_dir=args.home_dir,
             purge_state=args.purge_state,
             purge_secret=args.purge_secret,
         )
@@ -115,7 +133,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return exit_code
 
     if args.command == "status":
-        record = read_install_record(instance_name=args.instance)
+        record = read_install_record(home_dir=args.home_dir, instance_name=args.instance)
         print(json.dumps(record, ensure_ascii=False, indent=2) if record else "{}")
         return 0
 
@@ -123,6 +141,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report, exit_code = run_rollback(
             instance_name=args.instance,
             root_dir=args.root_dir,
+            home_dir=args.home_dir,
             command=args.from_command,
         )
         print(json.dumps(report, ensure_ascii=False, indent=2))

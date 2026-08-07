@@ -233,6 +233,17 @@ python -m paulshaclaw.deploy upgrade --apply --verify \
   撞名時補遞增序號——秒級目錄會讓同一秒內的兩次 upgrade 共用 checkpoint，
   後者的 snapshot 覆寫前者，rollback 就會還原到已被改過的內容。
 - `restore-core-from-checkpoint` 把 core 檔案逐檔還原到升級前內容。
+- **rollback 刻意繞過 `_asset_is_overwritable()` 的 create-only 判準**（#285）：
+  create-only 防的是「用模板 placeholder 覆寫使用者的真實設定值」；而 rollback
+  寫回的是**使用者自己在 checkpoint 當下的真實內容**，還原 runtime env 正是
+  rollback 的目的。故 `restore_core_from_checkpoint()` 對 `core/systemd` 與
+  `core/runtime` 一律 `shutil.copy2()` 覆寫，不經 create-only 判準。此刻意例外
+  由 `test_rollback_restores_runtime_env_from_checkpoint` 測試守住——日後在此路徑
+  加判準會被測試擋下。
+- **`rollback` 命令可指定較舊的 checkpoint**：`--from-command` 選最新或指定
+  command 的 checkpoint，可能早於當前狀態。那會把當前 runtime env 蓋回舊內容——
+  這是 operator 明確要求的行為（明確 rollback 即明確接受還原到該時間點），
+  但請留意還原後的內容可能比當前版本舊。
 - **upgrade 執行途中失敗自動 rollback**：`run_upgrade()` 在套用階段拋例外時（含
   unit 重啟失敗），自動從當次 checkpoint 還原 core，report 標記
   `rollback_triggered: true` 並回 exit 1。
@@ -272,3 +283,51 @@ python -m paulshaclaw.deploy uninstall --apply \
 - 不實作自動部署到遠端主機、不在部署流程裡管理或遷移使用者 secret 內容。
 - 所有 `systemctl` / `systemd-analyze` 呼叫走既有 `_run_command()`；測試以 fake bin
   + PATH 注入 + 假 HOME 隔離，不碰真實 systemd。
+
+### 8.7 家目錄隔離防線（#285）
+
+deploy 的家目錄根 `paths.home_root()` 預設回 `Path.home()`，但優先吃
+`PSC_HOME_ROOT` 環境變數覆寫（仿 `repo_root()` 的 `PSC_REPO_ROOT` 慣例）。
+CLI 的 `install` / `upgrade` / `uninstall` / `status` / `rollback` 皆接受
+`--home-dir`，顯式指定時落點全部在該目錄下、不命中真實家目錄。
+
+測試層具備**第二道防線**：`tests/conftest.py` 的 session autouse fixture 把
+`PSC_HOME_ROOT` 指向 pytest 的暫存目錄，任一呼叫點漏帶隔離時 deploy 也只會寫進
+tmp 而非真實 host。各 stage7 測試的 `deploy_env()` 仍顯式把 `PSC_HOME_ROOT` 設成
+該測試的假 `HOME`，避免 conftest 的 tmp 與測試自己假 HOME 不一致導致斷言找不到檔案。
+
+反例測試 `tests/test_home_isolation.py` 守住：
+- `home_root()` 在 `PSC_HOME_ROOT` 設定時回傳該值；
+- CLI 帶 `--home-dir` 時所有落點都在該目錄下、不在真實 `Path.home()`。
+
+### 8.8 現場殘留產物清理（#285，僅說明、不自動執行）
+
+若曾因隔離失效讓測試 fixture 寫進真實家目錄（例如 issue #285 現場觀察到的
+`demo-agent` 部署產物），可手動清理下列路徑。**本 repo 不會自動刪除使用者的
+任何檔案**——清理由 operator 決定後執行。
+
+```
+# core/runtime（每個逃逸 instance 一份 env）
+rm -f ~/.agents/core/runtime/demo-agent.env \
+      ~/.agents/core/runtime/demo-agent-cost.env \
+      ~/.agents/core/runtime/demo-agent-telegram.env
+
+# core/systemd user units
+rm -f ~/.config/systemd/user/demo-agent-cost.service \
+      ~/.config/systemd/user/demo-agent-telegram.service
+systemctl --user daemon-reload
+
+# state plane
+rm -f ~/.agents/state/config/demo-agent.install-record.json \
+      ~/.agents/state/config/demo-agent.state.json
+
+# secret plane
+rm -f ~/.config/paulshaclaw/demo-agent.secret.env \
+      ~/.config/paulshaclaw/demo-agent.telegram.secret.env
+```
+
+清理前請先確認該 instance 確非你實際使用的部署；若有意保留的 state/secret 內容，
+先備份再刪。`~/.agents/core/runtime/cortex-manager.env` 若被 `scripts/start.sh`
+改寫成錯誤的 `PSC_REPO_ROOT`，以 paulsha-cortex checkout 下重新跑
+`python -m paulsha_cortex.cli install service` 導正（#285 問題 B 的 start.sh 側已加
+fail-closed 檢查，不會再覆寫指向別 repo 的 env）。
