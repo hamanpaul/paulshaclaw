@@ -35,7 +35,14 @@ def _legacy_config_base_root() -> Path | None:
 
 
 def home_root() -> Path:
-    return Path.home()
+    """家目錄根——整條 deploy 隔離的錨點。
+
+    預設回 `Path.home()`；但優先吃 `PSC_HOME_ROOT` 環境變數覆寫（仿 `repo_root()`
+    的 `PSC_REPO_ROOT` 慣例）。這讓 CLI `--home-dir` 與測試層 fixture 都能顯式把
+    家目錄導向 tmp，而不必換掉整個 `HOME`（#285：單靠換 HOME 的呼叫點自律已證明
+    擋不住逃逸）。
+    """
+    return _resolve_root("PSC_HOME_ROOT", Path.home())
 
 
 def home_path(*parts: PathPart) -> Path:

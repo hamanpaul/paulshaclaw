@@ -103,6 +103,18 @@ cortex_instance() {
   printf '%s\n' "${PSC_INSTANCE:-cortex}"
 }
 
+# 把 repo 路徑正規化成可比較的形式（#285）：去掉 trailing slash，存在的目錄再
+# 解開 symlink 與 `..`。不存在的路徑保持原樣（只去 trailing slash）——比對的
+# 目的是判斷「是不是同一個 repo」，路徑不存在時無從解析，維持字面比較即可。
+normalize_repo_path() {
+  local candidate="${1%/}"
+  [[ -z "$candidate" ]] && return 0
+  if [[ -d "$candidate" ]]; then
+    (cd "$candidate" 2>/dev/null && pwd -P) && return 0
+  fi
+  printf '%s\n' "$candidate"
+}
+
 cortex_specs_root() {
   if [[ -n "${PSC_MANAGER_SPECS_DIR:-}" ]]; then
     printf '%s\n' "$PSC_MANAGER_SPECS_DIR"
@@ -227,6 +239,28 @@ ensure_cortex_services() {
     echo "cortex fallback started (manager daemon pid=${CORTEX_MANAGER_PID:-skipped} monitor pid=${CORTEX_MONITOR_PID:-skipped})" >&2
     return 0
   }
+
+  # #285：install service 會就地覆寫 <instance>-manager.env 的 managed keys
+  # （含 PSC_REPO_ROOT、PY）。若該 env 已存在且指向別的 repo，覆寫會劫持他人的
+  # cortex instance——cortex 端的症狀是所有 work-action 掛住，且因現役 daemon 持
+  # 有舊值而潛伏到下次重啟才爆。fail-closed：跳過 install service，沿用既有設定，
+  # 改走 local fallback 並繼續啟動（不中止——commit 9773578 的精神）。
+  # 必須放在 start_cortex_local_fallback 定義之後：bash 呼叫未定義的函式會直接失敗。
+  local manager_env existing_repo_root
+  manager_env="$(cortex_agents_root)/core/runtime/${instance}-manager.env"
+  if [[ -f "$manager_env" ]]; then
+    existing_repo_root="$(grep -E '^PSC_REPO_ROOT=' "$manager_env" 2>/dev/null | head -n1 | cut -d= -f2- || true)"
+    existing_repo_root="${existing_repo_root%\"}"
+    existing_repo_root="${existing_repo_root#\"}"
+    # 正規化後再比：symlink checkout、trailing slash、`/a/../a` 這類等價寫法
+    # 直接字串比對會把「同一個 repo」誤判成別人的，於是錯誤跳過 install service。
+    if [[ -n "$existing_repo_root" ]] \
+      && [[ "$(normalize_repo_path "$existing_repo_root")" != "$(normalize_repo_path "$REPO")" ]]; then
+      echo "警告：${instance}-manager.env 的 PSC_REPO_ROOT 指向 ${existing_repo_root}（非本 repo ${REPO}）；跳過 cortex install service，沿用既有設定不覆寫（#285）" >&2
+      start_cortex_local_fallback
+      return $?
+    fi
+  fi
 
   if ! "${install_cmd[@]}"; then
     echo "cortex install service failed; starting local fallback" >&2

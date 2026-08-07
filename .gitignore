@@ -17,6 +17,10 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 
+# 測試產物：stage7 deploy 測試會在此建假 HOME 後清掉（#285）。
+# 這批檔案曾於 #125 隨遷移刀誤入版控，導致每次跑測試 git status 都髒。
+.test-artifacts/
+
 # Build / release artifacts（python -m build 輸出）
 build/
 dist/

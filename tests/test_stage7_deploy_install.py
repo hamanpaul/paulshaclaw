@@ -79,6 +79,10 @@ def deploy_env(home_dir: Path, fakebin: Path) -> dict[str, str]:
             "PATH": str(fakebin),
             "USER": "stage7tester",
             "LOGNAME": "stage7tester",
+            # conftest 的 session autouse fixture 把 PSC_HOME_ROOT 指向 pytest tmp；
+            # subprocess 會繼承到該值，導致 deploy 寫到 conftest 的 tmp 而非本測試的
+            # 假 HOME（#285 陷阱）。這裡顯式覆寫回本測試的 home_dir。
+            "PSC_HOME_ROOT": str(home_dir),
         }
     )
     return env
@@ -285,7 +289,7 @@ class ApplyInstallPlanCreateOnlyTests(unittest.TestCase):
         from paulshaclaw.deploy.planner import build_command_plan
 
         scratch = make_test_dir("stage7-install-create-only")
-        if True:
+        try:
             home_dir = scratch / "home"
             home_dir.mkdir(parents=True, exist_ok=True)
             plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
@@ -315,3 +319,5 @@ class ApplyInstallPlanCreateOnlyTests(unittest.TestCase):
             self.assertIn(str(state_path), second["skipped_existing"])
             self.assertIn(str(env_path), second["skipped_existing"])
             self.assertIn(str(unit_path), second["written"])
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)

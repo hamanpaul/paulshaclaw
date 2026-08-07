@@ -421,7 +421,14 @@ def snapshot_core_plane(plan: CommandPlan, *, home_dir: Path, checkpoint_dir: Pa
 
 
 def restore_core_from_checkpoint(checkpoint_dir: Path, *, home_dir: Path) -> dict[str, list[str]]:
-    """從 checkpoint 還原 core plane 檔案。"""
+    """從 checkpoint 還原 core plane 檔案。
+
+    **刻意繞過 `_asset_is_overwritable()` 的 create-only 判準**（#285）：
+    rollback 還原的是使用者在 checkpoint 當下自己持有的真實內容，不是模板
+    placeholder——這正是 rollback 的目的。對 `core/systemd` 與 `core/runtime`
+    一律 `shutil.copy2()` 覆寫。日後若有人在此加 create-only 判準，應被
+    `test_rollback_restores_runtime_env_from_checkpoint` 測試擋下。
+    """
     manifest_path = checkpoint_dir / "manifest.json"
     if not manifest_path.is_file():
         raise RuntimeError(f"checkpoint 缺少 manifest：{checkpoint_dir}")
