@@ -1490,7 +1490,11 @@ class Stage11StateTests(unittest.TestCase):
                 now_fn=lambda: refreshed_at,
                 monotonic_fn=lambda: 0.0,
                 sleep_fn=lambda _: None,
-                pid=4321,
+                # cortex v0.1.3 起，status 帶了 daemon pid 但該 pid 不存活時一律判
+                # degraded="dead"（舊版會退回看 updated_at 的新鮮度而誤判為健康）。
+                # 本測試要驗的是「tick 後 modal 會吃到刷新的 status」，故改用活著的
+                # pid，讓 liveness 檢查通過，斷言focus 留在 refresh 行為本身。
+                pid=os.getpid(),
                 max_rounds=1,
             )
 
