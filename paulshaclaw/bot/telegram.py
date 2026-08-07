@@ -56,7 +56,7 @@ class TelegramCommandRouter:
     def __init__(self, daemon: PaulShiaBroDaemon) -> None:
         self.daemon = daemon
 
-    def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+    def handle_message(self, *, user_id: int, text: str, pane_id: str | None = None) -> dict[str, object]:
         if user_id not in self.daemon.config.allowed_user_ids:
             return {
                 "ok": False,
@@ -67,7 +67,7 @@ class TelegramCommandRouter:
             try:
                 return {
                     "ok": True,
-                    "message": self.daemon.route_to_agent(user_id=user_id, text=text),
+                    "message": self.daemon.route_to_agent(user_id=user_id, text=text, pane_id=pane_id),
                 }
             except ValueError as error:
                 return {

@@ -399,7 +399,7 @@ class Stage1SmokeTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["message"], "…")
-        route_mock.assert_called_once_with(user_id=1001, text="請幫我整理狀態")
+        route_mock.assert_called_once_with(user_id=1001, text="請幫我整理狀態", pane_id=None)
 
     def test_telegram_router_surfaces_non_slash_agent_routing_error(self) -> None:
         config_path = self.make_config_path()

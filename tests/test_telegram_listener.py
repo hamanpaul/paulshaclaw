@@ -60,7 +60,7 @@ class FakeRouter:
         self.response = response
         self.calls: list[dict[str, object]] = []
 
-    def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+    def handle_message(self, *, user_id: int, text: str, pane_id: str | None = None) -> dict[str, object]:
         self.calls.append({"user_id": user_id, "text": text})
         return self.response
 
@@ -270,7 +270,7 @@ class TelegramListenerTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.calls: list[dict[str, object]] = []
 
-            def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+            def handle_message(self, *, user_id: int, text: str, pane_id: str | None = None) -> dict[str, object]:
                 self.calls.append({"user_id": user_id, "text": text})
                 if len(self.calls) == 1:
                     raise ValueError("simulated handler crash")
@@ -322,7 +322,7 @@ class TelegramListenerTests(unittest.TestCase):
 
     def test_keyboard_interrupt_propagates(self) -> None:
         class InterruptingRouter:
-            def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+            def handle_message(self, *, user_id: int, text: str, pane_id: str | None = None) -> dict[str, object]:
                 raise KeyboardInterrupt
 
         listener = TelegramListener(client=RecordingClient([]), router=InterruptingRouter())
@@ -640,7 +640,7 @@ class TelegramListenerTests(unittest.TestCase):
 
     def test_run_once_advances_offset_after_handler_exception_isolated(self) -> None:
         class RaisingRouter:
-            def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
+            def handle_message(self, *, user_id: int, text: str, pane_id: str | None = None) -> dict[str, object]:
                 raise ValueError("boom")
 
         client = RecordingClient(
@@ -891,7 +891,7 @@ class ListenerBuildTests(unittest.TestCase):
 
             self.assertTrue(chat_response["ok"])
             self.assertEqual(chat_response["message"], "…")
-            route_mock.assert_called_once_with(user_id=7, text="請說明目前進度")
+            route_mock.assert_called_once_with(user_id=7, text="請說明目前進度", pane_id=None)
             self.assertFalse(dispatch_response["ok"])
             self.assertIn("coordinator backend 未設定", dispatch_response["message"])
 
