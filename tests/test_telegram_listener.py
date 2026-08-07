@@ -531,6 +531,57 @@ class TelegramListenerTests(unittest.TestCase):
         self.assertEqual(cleanup_calls, ["cleanup"])
         self.assertEqual(client.get_updates_calls, [{"offset": None, "timeout": 30}])
 
+    def test_run_once_invokes_queue_alert_callback(self) -> None:
+        alert_calls: list[str] = []
+        listener = TelegramListener(
+            client=RecordingClient([]),
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            queue_alert=lambda: alert_calls.append("checked"),
+        )
+
+        listener.run_once()
+
+        self.assertEqual(alert_calls, ["checked"])
+
+    def test_run_once_swallows_queue_alert_failure(self) -> None:
+        def boom() -> None:
+            raise RuntimeError("alert module crashed")
+
+        client = RecordingClient(
+            [
+                {
+                    "update_id": 11,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/status",
+                    },
+                }
+            ]
+        )
+        listener = TelegramListener(
+            client=client,
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            queue_alert=boom,
+        )
+
+        with self.assertLogs(listener_module.logger, level="ERROR"):
+            listener.run_once()
+
+        # 既有訊息路由不受影響
+        self.assertEqual(client.sent_messages, [{"chat_id": 1001, "text": "ok"}])
+        self.assertEqual(listener.offset, 12)
+
+    def test_run_once_skips_queue_alert_when_not_configured(self) -> None:
+        alert_calls: list[str] = []
+        listener = TelegramListener(
+            client=RecordingClient([]),
+            router=FakeRouter({"ok": True, "message": "ok"}),
+        )
+        # 沒設 queue_alert 就不該出錯
+        listener.run_once()
+        self.assertEqual(alert_calls, [])
+
     def test_run_once_resyncs_missing_telegram_commands_before_polling(self) -> None:
         client = CommandSyncClient([], remote_commands=[])
         command_menu = [{"command": "status", "description": "顯示 runtime 狀態"}]

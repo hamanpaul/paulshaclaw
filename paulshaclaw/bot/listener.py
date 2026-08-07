@@ -250,6 +250,7 @@ class TelegramListener:
         poll_timeout: int = 30,
         sleep: Callable[[float], None] = time.sleep,
         cleanup: Callable[[], None] | None = None,
+        queue_alert: Callable[[], None] | None = None,
     ) -> None:
         self.client = client
         self.router = router
@@ -259,6 +260,7 @@ class TelegramListener:
         self.poll_timeout = poll_timeout
         self.sleep = sleep
         self.cleanup = cleanup or (lambda: None)
+        self.queue_alert: Callable[[], None] | None = queue_alert
         self.offset: int | None = None
         self.max_backoff = 30.0
 
@@ -278,6 +280,19 @@ class TelegramListener:
             self.process_update(update)
             if next_offset is not None:
                 self.offset = next_offset
+        self._check_queue_backlog()
+
+    def _check_queue_backlog(self) -> None:
+        # #275：每輪 polling 結束後檢查佇列積壓；告警模組自身已吞例外，這裡再
+        # 加一層保護，確保告警失效絕不影響既有訊息路由與 agent 執行。
+        if self.queue_alert is None:
+            return
+        try:
+            self.queue_alert()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as error:  # noqa: BLE001
+            logger.error("QUEUE_ALERT_CHECK_ERROR error=%s", error)
 
     def run_forever(self) -> None:
         backoff = 1.0
@@ -461,14 +476,25 @@ def build_listener(
     daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
     router = TelegramCommandRouter(daemon=daemon)
     bindings_path = os.environ.get("PSC_TELEGRAM_BINDINGS_PATH", "").strip() or str(default_bindings_path())
+    bindings_store = TelegramChatBindingStore(bindings_path)
+    resolved_client = client or TelegramApiClient(settings.token)
+    from paulshaclaw.core.bro_queue_alert import BroQueueAlerter, alert_threshold_seconds
+
+    alerter = BroQueueAlerter(
+        sender=resolved_client,
+        bindings=bindings_store,
+        allowed_user_ids=config.allowed_user_ids,
+        threshold_seconds=alert_threshold_seconds(),
+    )
     return TelegramListener(
-        client=client or TelegramApiClient(settings.token),
+        client=resolved_client,
         router=router,
-        bindings=TelegramChatBindingStore(bindings_path),
+        bindings=bindings_store,
         command_menu=resolved_registry.telegram_commands(),
         private_chat_ids=config.allowed_user_ids,
         poll_timeout=poll_timeout,
         cleanup=daemon.cleanup_idle_resources,
+        queue_alert=alerter.check_and_alert,
     )
 
 
