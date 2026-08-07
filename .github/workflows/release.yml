@@ -1,0 +1,144 @@
+name: Release
+
+# 僅由 vX.Y.Z tag 觸發正式發布；一般 main push 不會執行本 workflow。
+# workflow_dispatch 提供 dry-run 入口（dry_run=true 時只 build/verify，不建 Release）。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "dry-run：只 build/verify，不建立 GitHub Release"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+# 權限最小化：建立 Release 只需 contents:write。
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # tag push 才正式發布；workflow_dispatch 預設 dry-run。
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run != 'false' }}
+    steps:
+      - name: Checkout（含完整 history 以解析 tag/HEAD）
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 取得 release tag
+        id: tag
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            # workflow_dispatch：以 VERSION 推導預期 tag，僅供 dry-run 驗證。
+            echo "tag=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build
+
+      - name: Release 一致性 gate（VERSION / pyproject / CHANGELOG / tag / source revision）
+        run: |
+          python scripts/check-release-consistency.py --tag "${{ steps.tag.outputs.tag }}"
+          # dry-run（workflow_dispatch）時 tag 可能未指向 HEAD，只做版本一致性檢查。
+          if [[ "${DRY_RUN}" == "true" ]]; then
+            python scripts/check-release-consistency.py
+          fi
+
+      - name: Build wheel + sdist
+        run: |
+          python -m build --outdir dist .
+
+      - name: Artifact metadata / package-content 檢查
+        run: |
+          set -e
+          wheel="$(ls dist/*.whl)"
+          sdist="$(ls dist/*.tar.gz)"
+          # wheel 必須含 cockpit.tcss package data
+          python -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit.tcss" \
+            || { echo "FAIL: wheel 未含 cockpit.tcss"; exit 1; }
+          # METADATA version 必須等於 VERSION
+          rm -rf /tmp/wheel-meta && python -m zipfile -e "$wheel" /tmp/wheel-meta
+          meta_ver="$(grep -m1 '^Version:' /tmp/wheel-meta/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
+          file_ver="$(cat VERSION)"
+          [[ "$meta_ver" == "$file_ver" ]] || { echo "FAIL: METADATA($meta_ver) != VERSION($file_ver)"; exit 1; }
+          # entry point psc 必須存在
+          python -m zipfile -l "$wheel" | grep -q "entry_points.txt" \
+            || { echo "FAIL: wheel 缺 entry_points.txt"; exit 1; }
+          echo "artifact content 檢查通過"
+
+      - name: 乾淨 venv 安裝 smoke test
+        run: |
+          wheel="$(ls dist/*.whl)"
+          python -m venv /tmp/clean-venv
+          /tmp/clean-venv/bin/python -m pip install --upgrade pip
+          /tmp/clean-venv/bin/python -m pip install "$wheel"
+          # 必須在非 repo root 執行，避免 cwd 污染 sys.path 載到 checkout source。
+          ( cd /tmp && /tmp/clean-venv/bin/python -c "
+          import paulshaclaw
+          import paulsha_cortex, paulsha_hippo, paulsha_hippo.lib.lifecycle
+          import paulshaclaw.cost.config, paulshaclaw.cockpit, textual
+          from pathlib import Path
+          import paulshaclaw.cockpit as c
+          assert (Path(c.__file__).parent / 'cockpit.tcss').exists(), 'cockpit.tcss 未隨安裝'
+          print('import closure + tcss OK')
+          " )
+          ( cd /tmp && /tmp/clean-venv/bin/psc --help >/dev/null && echo "psc --help OK" )
+
+      - name: SHA-256 checksums
+        id: checksums
+        run: |
+          ( cd dist && sha256sum *.whl *.tar.gz > checksums-sha256.txt )
+          echo "## SHA-256 checksums" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat dist/checksums-sha256.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 擷取 release notes（CHANGELOG section）
+        id: notes
+        run: |
+          ver="${GITHUB_REF#refs/tags/v}"
+          ver="${ver:-$(cat VERSION)}"
+          python scripts/check-release-consistency.py --extract-notes "$ver" > /tmp/release-notes.md
+          echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
+
+      - name: 建立 GitHub Release（附 wheel / sdist / checksums）
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          tag="${{ steps.tag.outputs.tag }}"
+          # fail-closed：既有 release 不得靜默覆寫（不使用 --force）。
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "FAIL: release $tag 已存在，拒絕覆寫（移除既有 release 需 owner 明確裁決）" >&2
+            exit 1
+          fi
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file /tmp/release-notes.md \
+            dist/*.whl dist/*.tar.gz dist/checksums-sha256.txt
+          echo "已建立 GitHub Release $tag" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Dry-run 完成（未建立 Release）
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: |
+          echo "dry-run 模式：artifact 已 build 並通過驗證，未建立 GitHub Release。" >> "$GITHUB_STEP_SUMMARY"
+          echo "artifacts:" >> "$GITHUB_STEP_SUMMARY"
+          ls -1 dist/ >> "$GITHUB_STEP_SUMMARY"
