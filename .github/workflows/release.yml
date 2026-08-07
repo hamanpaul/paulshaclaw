@@ -55,10 +55,12 @@ jobs:
 
       - name: Release 一致性 gate（VERSION / pyproject / CHANGELOG / tag / source revision）
         run: |
-          python scripts/check-release-consistency.py --tag "${{ steps.tag.outputs.tag }}"
-          # dry-run（workflow_dispatch）時 tag 可能未指向 HEAD，只做版本一致性檢查。
           if [[ "${DRY_RUN}" == "true" ]]; then
+            # dry-run（workflow_dispatch）時 tag 通常尚未建立、CHANGELOG 也還沒有
+            # 該版 section，只做 VERSION/pyproject 一致性檢查。
             python scripts/check-release-consistency.py
+          else
+            python scripts/check-release-consistency.py --tag "${{ steps.tag.outputs.tag }}"
           fi
 
       - name: Build wheel + sdist
@@ -112,9 +114,12 @@ jobs:
 
       - name: 擷取 release notes（CHANGELOG section）
         id: notes
+        if: ${{ env.DRY_RUN != 'true' }}
         run: |
-          ver="${GITHUB_REF#refs/tags/v}"
-          ver="${ver:-$(cat VERSION)}"
+          # 版本一律由 tag step 的輸出推導；GITHUB_REF 在 workflow_dispatch 時
+          # 是 refs/heads/*，前綴剝除會失敗而拿到假版本。
+          ver="${{ steps.tag.outputs.tag }}"
+          ver="${ver#v}"
           python scripts/check-release-consistency.py --extract-notes "$ver" > /tmp/release-notes.md
           echo "notes_file=/tmp/release-notes.md" >> "$GITHUB_OUTPUT"
 

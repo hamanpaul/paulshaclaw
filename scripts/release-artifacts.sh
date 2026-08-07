@@ -70,6 +70,8 @@ if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit
 fi
 echo "    cockpit.tcss 已包含於 wheel"
 # 3b. METADATA version 必須等於 VERSION。
+# 先清空解壓目錄：殘留的舊版 dist-info 會讓下面的 glob 命中多個 METADATA。
+rm -rf /tmp/psc-rel-extract
 meta_version="$("$python_bin" -m zipfile -e "$wheel" /tmp/psc-rel-extract >/dev/null 2>&1; \
   grep -m1 '^Version:' /tmp/psc-rel-extract/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
 rm -rf /tmp/psc-rel-extract
