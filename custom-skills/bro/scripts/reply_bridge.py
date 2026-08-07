@@ -2,28 +2,32 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 # 本檔是刻意設計的 standalone 工具（安裝到 ~/.agents/skills/bro/scripts/ 後
 # 由 hook 以絕對路徑呼叫，執行時不在 repo 裡、沒有 repo venv，故不可
-# `import paulshaclaw.*`），因此下列三個預設值無法直接引用
+# `import paulshaclaw.*`），因此下列四個預設值無法直接引用
 # paulshaclaw/config/paths.py 這個 facade，只能維持字面常數。
 # 對應的單一事實來源是 paulshaclaw/bot/reply.py 的
 # default_config_path() / default_secret_env_path() / default_bindings_path()
-# （皆透過 facade 組出相同路徑）；兩邊是否仍一致由
-# custom-skills/bro/tests/test_reply_bridge.py 的
+# / default_message_pane_map_path()（皆透過 facade 組出相同路徑）；兩邊是否
+# 仍一致由 custom-skills/bro/tests/test_reply_bridge.py 的
 # test_default_paths_match_facade 於 CI 把關（issue #90：先前無此把關，
 # 路徑漂移只能肉眼發現）。改這裡的字面路徑時務必同步確認該測試仍綠燈。
 DEFAULT_CONFIG_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.state.json"
 DEFAULT_SECRET_ENV_PATH = Path.home() / ".config/paulshaclaw/paulshaclaw.telegram.secret.env"
 DEFAULT_BINDINGS_PATH = Path.home() / ".agents/state/telegram-chat-bindings.json"
+DEFAULT_MESSAGE_PANE_MAP_PATH = Path.home() / ".agents/state/telegram-message-pane-map.json"
 
 TELEGRAM_TEXT_LIMIT = 4000
 
@@ -76,8 +80,13 @@ class TelegramApiClient:
         self.api_base = api_base.rstrip("/")
         self.timeout = timeout
 
-    def send_message(self, *, chat_id: int, text: str) -> None:
-        self._post("sendMessage", {"chat_id": chat_id, "text": text})
+    def send_message(self, *, chat_id: int, text: str) -> int | None:
+        result = self._post("sendMessage", {"chat_id": chat_id, "text": text})
+        if isinstance(result, dict):
+            message_id = result.get("message_id")
+            if isinstance(message_id, int):
+                return message_id
+        return None
 
     def _post(self, method: str, payload: Mapping[str, object], *, timeout: float | None = None) -> object:
         body = json.dumps(dict(payload)).encode("utf-8")
@@ -158,9 +167,105 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", help="Stage 1 JSON config path")
     parser.add_argument("--secret-env", help="Telegram secret env path")
     parser.add_argument("--bindings-path", help="Telegram chat bindings JSON path")
+    parser.add_argument("--message-pane-map-path", help="message_id→pane_id map JSON path")
     parser.add_argument("--api-base", default="https://api.telegram.org", help="Telegram API base URL")
     parser.add_argument("--dry-run", action="store_true", help="Resolve targets and echo the text without sending to Telegram")
     return parser
+
+
+class MessagePaneMap:
+    """message_id → pane_id 對應表（#34），standalone 副本。
+
+    與 paulshaclaw/bot/reply.py 的 MessagePaneMap 邏輯一致——刻意不 import
+    repo 套件（見檔頭註解）；兩邊的預設路徑是否一致由
+    custom-skills/bro/tests/test_reply_bridge.py 的 test_default_paths_match_facade 把關。
+    """
+
+    MAX_ENTRIES = 500
+    TTL_SECONDS = 7 * 24 * 3600
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def remember(self, *, message_id: int, pane_id: str) -> None:
+        if not pane_id:
+            return
+        with self._locked():
+            payload = self._load()
+            payload[str(int(message_id))] = {"pane_id": pane_id, "ts": time.time()}
+            self._evict_expired(payload)
+            self._enforce_cap(payload)
+            self._write(payload)
+
+    def lookup_pane_id(self, message_id: int) -> str | None:
+        with self._locked():
+            payload = self._load()
+            entry = payload.get(str(int(message_id)))
+            if not isinstance(entry, dict):
+                return None
+            pane_id = entry.get("pane_id")
+            if isinstance(pane_id, str) and pane_id:
+                return pane_id
+            return None
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        lock_path = self.path.with_suffix(".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    def _load(self) -> dict[str, dict[str, object]]:
+        if not self.path.exists():
+            return {}
+        try:
+            with self.path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (json.JSONDecodeError, OSError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return payload
+
+    def _write(self, payload: dict[str, dict[str, object]]) -> None:
+        if not payload:
+            self.path.unlink(missing_ok=True)
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # 原子寫入：同目錄暫存檔 + os.replace。直接 write_text 若中途中斷會留下
+        # 半截 JSON，而 `_load()` 把 decode 失敗當空表——那等於靜默丟掉整份對應。
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp_path, self.path)
+
+    def _evict_expired(self, payload: dict[str, dict[str, object]]) -> None:
+        cutoff = time.time() - self.TTL_SECONDS
+        expired = [
+            key
+            for key, entry in payload.items()
+            if isinstance(entry, dict)
+            and isinstance(entry.get("ts"), (int, float))
+            and entry["ts"] < cutoff
+        ]
+        for key in expired:
+            del payload[key]
+
+    def _enforce_cap(self, payload: dict[str, dict[str, object]]) -> None:
+        if len(payload) <= self.MAX_ENTRIES:
+            return
+        sorted_items = sorted(
+            payload.items(),
+            key=lambda item: item[1].get("ts", 0) if isinstance(item[1], dict) else 0,
+        )
+        for key, _ in sorted_items[: len(payload) - self.MAX_ENTRIES]:
+            del payload[key]
 
 
 def load_reply_env(
@@ -223,6 +328,8 @@ def send_reply(
     config_path: str | Path | None = None,
     secret_env_path: str | Path | None = None,
     bindings_path: str | Path | None = None,
+    message_pane_map_path: str | Path | None = None,
+    pane_id: str | None = None,
     api_base: str = "https://api.telegram.org",
     env: Mapping[str, str] | None = None,
     opener: OpenUrl | None = None,
@@ -240,13 +347,22 @@ def send_reply(
     if dry_run:
         return targets
 
+    resolved_pane_id = pane_id if pane_id is not None else (reply_env.get("TMUX_PANE", "") or "").strip() or None
+    resolved_map_path = message_pane_map_path or reply_env.get("PSC_MESSAGE_PANE_MAP_PATH") or DEFAULT_MESSAGE_PANE_MAP_PATH
+    message_pane_map = MessagePaneMap(resolved_map_path) if resolved_pane_id else None
+
     token = reply_env.get("PSC_TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         raise ValueError("PSC_TELEGRAM_BOT_TOKEN 未設定")
     client = TelegramApiClient(token, opener=opener, api_base=api_base)
     for target in targets:
         for chunk in _chunk_text(text):
-            client.send_message(chat_id=target.chat_id, text=chunk)
+            message_id = client.send_message(chat_id=target.chat_id, text=chunk)
+            if message_pane_map is not None and message_id is not None:
+                try:
+                    message_pane_map.remember(message_id=message_id, pane_id=resolved_pane_id)
+                except (OSError, ValueError):
+                    pass
     return targets
 
 
@@ -260,6 +376,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             config_path=args.config,
             secret_env_path=args.secret_env,
             bindings_path=args.bindings_path,
+            message_pane_map_path=args.message_pane_map_path,
             api_base=args.api_base,
             dry_run=args.dry_run,
         )

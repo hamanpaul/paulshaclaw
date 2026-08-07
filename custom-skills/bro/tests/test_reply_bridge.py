@@ -140,13 +140,14 @@ class ReplyBridgeTests(unittest.TestCase):
         self.assertIn("錯誤: Bad Request", stderr.getvalue())
 
     def test_default_paths_match_facade(self) -> None:
-        """issue #90：reply_bridge.py 的三個字面預設常數必須與
+        """issue #90：reply_bridge.py 的四個字面預設常數必須與
         paulshaclaw.bot.reply 的 default_*_path() facade 一致——兩邊本是
         同一組慣例路徑的獨立副本（standalone 工具不可 import facade），
         漂移只能靠這個測試攔，不會有其他工具提醒。"""
         self.assertEqual(reply_bridge.DEFAULT_CONFIG_PATH, bot_reply.default_config_path())
         self.assertEqual(reply_bridge.DEFAULT_SECRET_ENV_PATH, bot_reply.default_secret_env_path())
         self.assertEqual(reply_bridge.DEFAULT_BINDINGS_PATH, bot_reply.default_bindings_path())
+        self.assertEqual(reply_bridge.DEFAULT_MESSAGE_PANE_MAP_PATH, bot_reply.default_message_pane_map_path())
 
     def test_default_config_path_priority_arg_beats_env_beats_default(self) -> None:
         """優先序回歸（issue #90 約束4）：--config 參數 > PSC_STAGE1_CONFIG

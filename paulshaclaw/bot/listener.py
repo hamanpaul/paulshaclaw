@@ -90,8 +90,13 @@ class TelegramApiClient:
                 updates.append(item)
         return updates
 
-    def send_message(self, *, chat_id: int, text: str) -> None:
-        self._post("sendMessage", {"chat_id": chat_id, "text": text})
+    def send_message(self, *, chat_id: int, text: str) -> int | None:
+        result = self._post("sendMessage", {"chat_id": chat_id, "text": text})
+        if isinstance(result, dict):
+            message_id = result.get("message_id")
+            if isinstance(message_id, int):
+                return message_id
+        return None
 
     def set_my_commands(
         self,
@@ -251,10 +256,12 @@ class TelegramListener:
         sleep: Callable[[float], None] = time.sleep,
         cleanup: Callable[[], None] | None = None,
         queue_alert: Callable[[], None] | None = None,
+        message_pane_map: MessagePaneMap | None = None,
     ) -> None:
         self.client = client
         self.router = router
         self.bindings = bindings
+        self.message_pane_map = message_pane_map
         self.command_menu = tuple(_normalize_command_menu_entry(item) for item in (command_menu or ()))
         self.private_chat_ids = tuple(int(chat_id) for chat_id in (private_chat_ids or ()))
         self.poll_timeout = poll_timeout
@@ -336,9 +343,11 @@ class TelegramListener:
         if not isinstance(text, str):
             return
 
-        logger.info("IN  user=%d chat=%d text=%r", user_id, chat_id, text)
+        pane_id = self._resolve_reply_pane(message)
+
+        logger.info("IN  user=%d chat=%d text=%r pane=%s", user_id, chat_id, text, pane_id or "auto")
         try:
-            result = self.router.handle_message(user_id=user_id, text=text)
+            result = self.router.handle_message(user_id=user_id, text=text, pane_id=pane_id)
         except (KeyboardInterrupt, SystemExit):
             raise
         except Exception as error:
@@ -354,6 +363,26 @@ class TelegramListener:
             self.client.send_message(chat_id=chat_id, text=text)
         except TelegramApiError as error:
             logger.error("SEND_ERROR chat=%d error=%s", chat_id, error)
+
+    def _resolve_reply_pane(self, message: Mapping[str, object]) -> str | None:
+        """從 reply_to_message 查 message_id → pane_id 對應表（#34）。
+
+        查無對應、對應表未設定、或訊息非 reply 時回傳 None，
+        由 route_to_agent fallback 自動偵測，既有流程不變。
+        """
+        if self.message_pane_map is None:
+            return None
+        reply_to = message.get("reply_to_message")
+        if not isinstance(reply_to, Mapping):
+            return None
+        replied_message_id = reply_to.get("message_id")
+        if not isinstance(replied_message_id, int):
+            return None
+        try:
+            return self.message_pane_map.lookup_pane_id(replied_message_id)
+        except (OSError, ValueError) as error:
+            logger.error("MESSAGE_PANE_LOOKUP_ERROR message_id=%d error=%s", replied_message_id, error)
+            return None
 
     def _next_offset(self, update: Mapping[str, object]) -> int | None:
         update_id = update.get("update_id")
@@ -469,13 +498,19 @@ def build_listener(
     poll_timeout: int = 30,
     command_registry: CommandRegistry | None = None,
 ) -> TelegramListener:
-    from paulshaclaw.bot.reply import TelegramChatBindingStore, default_bindings_path
+    from paulshaclaw.bot.reply import (
+        MessagePaneMap,
+        TelegramChatBindingStore,
+        default_bindings_path,
+        default_message_pane_map_path,
+    )
 
     config = load_config(config_path=config_path)
     resolved_registry = command_registry or load_default_command_registry()
     daemon = build_dispatch_guard_daemon(config, command_registry=resolved_registry)
     router = TelegramCommandRouter(daemon=daemon)
     bindings_path = os.environ.get("PSC_TELEGRAM_BINDINGS_PATH", "").strip() or str(default_bindings_path())
+    map_path = os.environ.get("PSC_MESSAGE_PANE_MAP_PATH", "").strip() or str(default_message_pane_map_path())
     bindings_store = TelegramChatBindingStore(bindings_path)
     resolved_client = client or TelegramApiClient(settings.token)
     from paulshaclaw.core.bro_queue_alert import BroQueueAlerter, alert_threshold_seconds
@@ -495,6 +530,7 @@ def build_listener(
         poll_timeout=poll_timeout,
         cleanup=daemon.cleanup_idle_resources,
         queue_alert=alerter.check_and_alert,
+        message_pane_map=MessagePaneMap(map_path),
     )
 
 

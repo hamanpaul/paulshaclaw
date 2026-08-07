@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Iterator, Mapping, Sequence
 
 from paulshaclaw.bot.listener import TelegramApiClient, TelegramApiError, load_bot_settings
 from paulshaclaw.config import paths
@@ -78,12 +81,14 @@ class TelegramReplyBridge:
         client: TelegramApiClient,
         bindings: TelegramChatBindingStore,
         allowed_user_ids: Sequence[int],
+        message_pane_map: MessagePaneMap | None = None,
     ) -> None:
         self.client = client
         self.bindings = bindings
         self.allowed_user_ids = tuple(int(value) for value in allowed_user_ids)
+        self.message_pane_map = message_pane_map
 
-    def reply(self, *, text: str, source_user_id: int | None) -> list[ReplyTarget]:
+    def reply(self, *, text: str, source_user_id: int | None, pane_id: str | None = None) -> list[ReplyTarget]:
         if not text.strip():
             raise ValueError("reply text 不可為空")
         targets = self.bindings.resolve_targets(
@@ -91,16 +96,22 @@ class TelegramReplyBridge:
             source_user_id=source_user_id,
         )
         for target in targets:
-            self.client.send_message(chat_id=target.chat_id, text=text)
+            message_id = self.client.send_message(chat_id=target.chat_id, text=text)
+            if self.message_pane_map is not None and message_id is not None and pane_id:
+                try:
+                    self.message_pane_map.remember(message_id=message_id, pane_id=pane_id)
+                except (OSError, ValueError):
+                    pass
         return targets
 
 
-# 這三個函式是 config/secret-env/bindings 預設路徑的單一事實來源。
+# 這四個函式是 config/secret-env/bindings/message-pane-map 預設路徑的單一事實來源。
 # custom-skills/bro/scripts/reply_bridge.py（standalone 工具，不可 import
-# paulshaclaw.*）鏡射了這三個路徑為字面常數 DEFAULT_CONFIG_PATH /
-# DEFAULT_SECRET_ENV_PATH / DEFAULT_BINDINGS_PATH；改這裡的路徑時務必同步
-# 更新該檔，兩邊是否一致由 custom-skills/bro/tests/test_reply_bridge.py 的
-# test_default_paths_match_facade 把關（issue #90）。
+# paulshaclaw.*）鏡射了這四個路徑為字面常數 DEFAULT_CONFIG_PATH /
+# DEFAULT_SECRET_ENV_PATH / DEFAULT_BINDINGS_PATH /
+# DEFAULT_MESSAGE_PANE_MAP_PATH；改這裡的路徑時務必同步更新該檔，兩邊是否一致
+# 由 custom-skills/bro/tests/test_reply_bridge.py 的 test_default_paths_match_facade
+# 把關（issue #90）。
 def default_config_path() -> Path:
     return paths.config_path("paulshaclaw.state.json")
 
@@ -111,6 +122,105 @@ def default_secret_env_path() -> Path:
 
 def default_bindings_path() -> Path:
     return paths.state_path("telegram-chat-bindings.json")
+
+
+def default_message_pane_map_path() -> Path:
+    return paths.state_path("telegram-message-pane-map.json")
+
+
+class MessagePaneMap:
+    """message_id → pane_id 對應表（#34），檔案型 state，flock 序列化。
+
+    reply_bridge.py（standalone）送出 agent 回覆時寫入 Telegram message_id 與來源
+    pane_id；listener.py 收到 reply 引用時讀取，路由回該 pane。有 TTL 與筆數上限，
+    避免無限成長。格式為 JSON dict，與 standalone reply_bridge.py 的副本一致。
+    """
+
+    MAX_ENTRIES = 500
+    TTL_SECONDS = 7 * 24 * 3600  # 7 天
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def remember(self, *, message_id: int, pane_id: str) -> None:
+        if not pane_id:
+            return
+        with self._locked():
+            payload = self._load()
+            payload[str(int(message_id))] = {"pane_id": pane_id, "ts": time.time()}
+            self._evict_expired(payload)
+            self._enforce_cap(payload)
+            self._write(payload)
+
+    def lookup_pane_id(self, message_id: int) -> str | None:
+        with self._locked():
+            payload = self._load()
+            entry = payload.get(str(int(message_id)))
+            if not isinstance(entry, dict):
+                return None
+            pane_id = entry.get("pane_id")
+            if isinstance(pane_id, str) and pane_id:
+                return pane_id
+            return None
+
+    @contextlib.contextmanager
+    def _locked(self) -> Iterator[None]:
+        lock_path = self.path.with_suffix(".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+    def _load(self) -> dict[str, dict[str, object]]:
+        if not self.path.exists():
+            return {}
+        try:
+            with self.path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (json.JSONDecodeError, OSError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return payload
+
+    def _write(self, payload: dict[str, dict[str, object]]) -> None:
+        if not payload:
+            self.path.unlink(missing_ok=True)
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        # 原子寫入：同目錄暫存檔 + os.replace。直接 write_text 若中途中斷會留下
+        # 半截 JSON，而 `_load()` 把 decode 失敗當空表——那等於靜默丟掉整份對應。
+        tmp_path = self.path.with_name(self.path.name + ".tmp")
+        tmp_path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp_path, self.path)
+
+    def _evict_expired(self, payload: dict[str, dict[str, object]]) -> None:
+        cutoff = time.time() - self.TTL_SECONDS
+        expired = [
+            key
+            for key, entry in payload.items()
+            if isinstance(entry, dict)
+            and isinstance(entry.get("ts"), (int, float))
+            and entry["ts"] < cutoff
+        ]
+        for key in expired:
+            del payload[key]
+
+    def _enforce_cap(self, payload: dict[str, dict[str, object]]) -> None:
+        if len(payload) <= self.MAX_ENTRIES:
+            return
+        sorted_items = sorted(
+            payload.items(),
+            key=lambda item: item[1].get("ts", 0) if isinstance(item[1], dict) else 0,
+        )
+        for key, _ in sorted_items[: len(payload) - self.MAX_ENTRIES]:
+            del payload[key]
 
 
 def load_reply_env(
@@ -151,10 +261,12 @@ def build_reply_bridge(
     bindings = TelegramChatBindingStore(
         bindings_path or reply_env.get("PSC_TELEGRAM_BINDINGS_PATH") or default_bindings_path()
     )
+    map_path = reply_env.get("PSC_MESSAGE_PANE_MAP_PATH") or default_message_pane_map_path()
     return TelegramReplyBridge(
         client=TelegramApiClient(settings.token, opener=opener),
         bindings=bindings,
         allowed_user_ids=config.allowed_user_ids,
+        message_pane_map=MessagePaneMap(map_path),
     )
 
 
@@ -177,7 +289,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             secret_env_path=args.secret_env,
             bindings_path=args.bindings_path,
         )
-        targets = bridge.reply(text=args.text, source_user_id=args.source_user_id)
+        targets = bridge.reply(text=args.text, source_user_id=args.source_user_id, pane_id=os.environ.get("TMUX_PANE", "").strip() or None)
         print(_format_delivery_summary(targets), flush=True)
         print(args.text, flush=True)
     except (FileNotFoundError, ValueError, TelegramApiError) as error:

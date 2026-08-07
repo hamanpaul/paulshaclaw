@@ -15,9 +15,11 @@ from unittest import mock
 from paulshaclaw.bot.listener import BotSettings, TelegramApiClient, TelegramApiError, TelegramListener, build_listener
 from paulshaclaw.bot.reply import main as reply_main
 from paulshaclaw.bot.reply import (
+    MessagePaneMap,
     TelegramChatBindingStore,
     TelegramReplyBridge,
     ReplyTarget,
+    default_message_pane_map_path,
 )
 
 REPLY_BRIDGE = Path(__file__).resolve().parents[1] / "custom-skills" / "bro" / "scripts" / "reply_bridge.py"
@@ -69,8 +71,8 @@ class FakeRouter:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
 
-    def handle_message(self, *, user_id: int, text: str) -> dict[str, object]:
-        self.calls.append({"user_id": user_id, "text": text})
+    def handle_message(self, *, user_id: int, text: str, pane_id: str | None = None) -> dict[str, object]:
+        self.calls.append({"user_id": user_id, "text": text, "pane_id": pane_id})
         return {"ok": True, "message": "ok"}
 
 
@@ -270,7 +272,11 @@ class TelegramReplyCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("已送出到 user=7 chat=1001", stdout.getvalue())
         self.assertIn("PaulShiaBro 會透過 Telegram 回覆這段", stdout.getvalue())
-        bridge.reply.assert_called_once_with(text="PaulShiaBro 會透過 Telegram 回覆這段", source_user_id=7)
+        bridge.reply.assert_called_once_with(
+            text="PaulShiaBro 會透過 Telegram 回覆這段",
+            source_user_id=7,
+            pane_id=mock.ANY,
+        )
 
     def test_reply_main_returns_clean_error(self) -> None:
         stdout = io.StringIO()
@@ -367,3 +373,281 @@ class TelegramReplyRuntimeWiringTests(unittest.TestCase):
                 )
 
             self.assertFalse(bindings_path.exists())
+
+
+class MessagePaneMapTests(unittest.TestCase):
+    def test_remember_and_lookup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            m = MessagePaneMap(Path(tmpdir) / "map.json")
+            m.remember(message_id=42, pane_id="%5")
+            m.remember(message_id=99, pane_id="%7")
+            self.assertEqual(m.lookup_pane_id(42), "%5")
+            self.assertEqual(m.lookup_pane_id(99), "%7")
+
+    def test_write_is_atomic_and_leaves_no_temp_file(self) -> None:
+        # 半截 JSON 會被 _load() 當成空表而靜默丟掉整份對應，故寫入走
+        # 暫存檔 + os.replace；寫完不得有 .tmp 殘留。
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            m = MessagePaneMap(path)
+            m.remember(message_id=42, pane_id="%5")
+            # map.lock 是跨程序鎖，本來就會留下；不得留下的是暫存檔。
+            leftovers = [p.name for p in Path(tmpdir).iterdir() if p.name.endswith(".tmp")]
+            self.assertEqual(leftovers, [])
+            self.assertEqual(m.lookup_pane_id(42), "%5")
+
+    def test_lookup_miss_returns_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            m = MessagePaneMap(Path(tmpdir) / "map.json")
+            m.remember(message_id=42, pane_id="%5")
+            self.assertIsNone(m.lookup_pane_id(100))
+
+    def test_remember_empty_pane_id_skips(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            m = MessagePaneMap(path)
+            m.remember(message_id=42, pane_id="")
+            self.assertIsNone(m.lookup_pane_id(42))
+            self.assertFalse(path.exists())
+
+    def test_remember_persists_across_instances(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            MessagePaneMap(path).remember(message_id=42, pane_id="%5")
+            reloaded = MessagePaneMap(path)
+            self.assertEqual(reloaded.lookup_pane_id(42), "%5")
+
+    def test_corrupted_file_returns_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            path.write_text("{not-json", encoding="utf-8")
+            m = MessagePaneMap(path)
+            self.assertIsNone(m.lookup_pane_id(42))
+
+    def test_enforce_cap_evicts_oldest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            m = MessagePaneMap(path)
+            m.MAX_ENTRIES = 3
+            m.remember(message_id=1, pane_id="%1")
+            m.remember(message_id=2, pane_id="%2")
+            m.remember(message_id=3, pane_id="%3")
+            m.remember(message_id=4, pane_id="%4")
+            self.assertIsNone(m.lookup_pane_id(1))
+            self.assertEqual(m.lookup_pane_id(2), "%2")
+            self.assertEqual(m.lookup_pane_id(4), "%4")
+
+    def test_evict_expired_drops_old_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "map.json"
+            m = MessagePaneMap(path)
+            m.TTL_SECONDS = 0.01
+            m.remember(message_id=1, pane_id="%1")
+            import time as _time
+            _time.sleep(0.05)
+            m.remember(message_id=2, pane_id="%2")
+            self.assertIsNone(m.lookup_pane_id(1))
+            self.assertEqual(m.lookup_pane_id(2), "%2")
+
+
+class TelegramReplyRoutingTests(unittest.TestCase):
+    def test_process_update_reply_routes_to_mapped_pane(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            m = MessagePaneMap(Path(tmpdir) / "map.json")
+            m.remember(message_id=500, pane_id="%15")
+            router = FakeRouter()
+            listener = TelegramListener(
+                client=mock.Mock(),
+                router=router,
+                message_pane_map=m,
+            )
+            listener.client.send_message = mock.Mock()
+            listener.process_update(
+                {
+                    "update_id": 1,
+                    "message": {
+                        "message_id": 600,
+                        "chat": {"id": 1001, "type": "private"},
+                        "from": {"id": 7},
+                        "text": "reply to agent",
+                        "reply_to_message": {
+                            "message_id": 500,
+                            "chat": {"id": 1001},
+                            "from": {"id": 1234567},
+                            "text": "agent reply",
+                        },
+                    },
+                }
+            )
+            self.assertEqual(router.calls[-1]["pane_id"], "%15")
+
+    def test_process_update_reply_miss_falls_back_to_auto(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            m = MessagePaneMap(Path(tmpdir) / "map.json")
+            router = FakeRouter()
+            listener = TelegramListener(
+                client=mock.Mock(),
+                router=router,
+                message_pane_map=m,
+            )
+            listener.client.send_message = mock.Mock()
+            listener.process_update(
+                {
+                    "update_id": 2,
+                    "message": {
+                        "message_id": 601,
+                        "chat": {"id": 1001, "type": "private"},
+                        "from": {"id": 7},
+                        "text": "reply to unknown",
+                        "reply_to_message": {
+                            "message_id": 999,
+                            "chat": {"id": 1001},
+                            "from": {"id": 1234567},
+                            "text": "old message",
+                        },
+                    },
+                }
+            )
+            self.assertIsNone(router.calls[-1]["pane_id"])
+
+    def test_process_update_non_reply_pane_id_is_none(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            m = MessagePaneMap(Path(tmpdir) / "map.json")
+            m.remember(message_id=500, pane_id="%15")
+            router = FakeRouter()
+            listener = TelegramListener(
+                client=mock.Mock(),
+                router=router,
+                message_pane_map=m,
+            )
+            listener.client.send_message = mock.Mock()
+            listener.process_update(
+                {
+                    "update_id": 3,
+                    "message": {
+                        "message_id": 602,
+                        "chat": {"id": 1001, "type": "private"},
+                        "from": {"id": 7},
+                        "text": "plain message",
+                    },
+                }
+            )
+            self.assertIsNone(router.calls[-1]["pane_id"])
+
+    def test_process_update_reply_without_map_falls_back(self) -> None:
+        router = FakeRouter()
+        listener = TelegramListener(
+            client=mock.Mock(),
+            router=router,
+        )
+        listener.client.send_message = mock.Mock()
+        listener.process_update(
+            {
+                "update_id": 4,
+                "message": {
+                    "message_id": 603,
+                    "chat": {"id": 1001, "type": "private"},
+                    "from": {"id": 7},
+                    "text": "reply but no map",
+                    "reply_to_message": {
+                        "message_id": 500,
+                        "chat": {"id": 1001},
+                        "from": {"id": 1234567},
+                        "text": "agent reply",
+                    },
+                },
+            }
+        )
+        self.assertIsNone(router.calls[-1]["pane_id"])
+
+    def test_process_update_reply_malformed_message_id_falls_back(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            m = MessagePaneMap(Path(tmpdir) / "map.json")
+            m.remember(message_id=500, pane_id="%15")
+            router = FakeRouter()
+            listener = TelegramListener(
+                client=mock.Mock(),
+                router=router,
+                message_pane_map=m,
+            )
+            listener.client.send_message = mock.Mock()
+            listener.process_update(
+                {
+                    "update_id": 5,
+                    "message": {
+                        "message_id": 604,
+                        "chat": {"id": 1001, "type": "private"},
+                        "from": {"id": 7},
+                        "text": "reply with bad id",
+                        "reply_to_message": {
+                            "chat": {"id": 1001},
+                            "from": {"id": 1234567},
+                        },
+                    },
+                }
+            )
+            self.assertIsNone(router.calls[-1]["pane_id"])
+
+
+class ReplyBridgeMessagePaneMapPathTests(unittest.TestCase):
+    def test_default_message_pane_map_path_matches_facade(self) -> None:
+        bridge = load_reply_bridge()
+        self.assertEqual(bridge.DEFAULT_MESSAGE_PANE_MAP_PATH, default_message_pane_map_path())
+
+    def test_send_reply_records_message_id_to_pane_id(self) -> None:
+        bridge = load_reply_bridge()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps({"allowed_user_ids": [7]}),
+                encoding="utf-8",
+            )
+            secret_env_path = Path(tmpdir) / "telegram.env"
+            secret_env_path.write_text("PSC_TELEGRAM_BOT_TOKEN=fake-token\n", encoding="utf-8")
+            bindings_path = Path(tmpdir) / "bindings.json"
+            bindings_path.write_text(json.dumps({"7": 1001}), encoding="utf-8")
+            map_path = Path(tmpdir) / "map.json"
+            opener = FakeOpener([{"ok": True, "result": {"message_id": 42}}])
+
+            bridge.send_reply(
+                text="agent reply",
+                source_user_id=7,
+                config_path=config_path,
+                secret_env_path=secret_env_path,
+                bindings_path=bindings_path,
+                message_pane_map_path=map_path,
+                pane_id="%5",
+                opener=opener,
+            )
+
+            m = bridge.MessagePaneMap(map_path)
+            self.assertEqual(m.lookup_pane_id(42), "%5")
+
+    def test_send_reply_without_pane_id_skips_recording(self) -> None:
+        bridge = load_reply_bridge()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps({"allowed_user_ids": [7]}),
+                encoding="utf-8",
+            )
+            secret_env_path = Path(tmpdir) / "telegram.env"
+            secret_env_path.write_text("PSC_TELEGRAM_BOT_TOKEN=fake-token\n", encoding="utf-8")
+            bindings_path = Path(tmpdir) / "bindings.json"
+            bindings_path.write_text(json.dumps({"7": 1001}), encoding="utf-8")
+            map_path = Path(tmpdir) / "map.json"
+            opener = FakeOpener([{"ok": True, "result": {"message_id": 42}}])
+
+            bridge.send_reply(
+                text="agent reply",
+                source_user_id=7,
+                config_path=config_path,
+                secret_env_path=secret_env_path,
+                bindings_path=bindings_path,
+                message_pane_map_path=map_path,
+                pane_id=None,
+                env={"TMUX_PANE": "", "PSC_TELEGRAM_BOT_TOKEN": "fake-token"},
+                opener=opener,
+            )
+
+            self.assertFalse(map_path.exists())
