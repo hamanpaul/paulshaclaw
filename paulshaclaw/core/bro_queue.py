@@ -186,3 +186,65 @@ def flush(
             if isinstance(queued_at, (int, float)):
                 pending_seconds = max(0.0, time.time() - queued_at)
     return FlushResult(delivered=delivered, remaining=len(entries), pending_seconds=pending_seconds)
+
+
+@dataclass(frozen=True)
+class PaneBacklog:
+    """單一 pane 佇列的唯讀積壓摘要（#275 告警用，不改動佇列檔）。"""
+
+    pane_id: str
+    remaining: int
+    head_queued_at: float | None  # 佇列最前筆的 enqueue 時間戳；佇列空時為 None
+    head_message: str | None
+    pending_seconds: float | None  # 最前筆已等待秒數；無 queued_at 時為 None
+
+
+def _pane_id_from_queue_file(path: Path) -> str:
+    """由佇列檔名反推 pane_id（`queue_file` 把 leading `%` 剝掉，這裡補回）。
+
+    tmux pane_id 恆以 `%` 開頭，故非 `unknown` 的檔名一律補回 `%`；`unknown`
+    為 `queue_file` 對空 pane_id 的 fallback，保持原樣。
+    """
+    stem = path.stem  # 去掉 .jsonl
+    if stem == "unknown":
+        return "unknown"
+    return f"%{stem}"
+
+
+def list_backlogs(*, now: Callable[[], float] = time.time) -> list[PaneBacklog]:
+    """唯讀列出各 pane 佇列的積壓狀況，供告警模組輪詢（#275）。
+
+    不呼叫 `flush()`、不改動任何佇列檔；逐一對每個佇列檔取跨程序鎖後讀內容。
+    空佇列檔（已消化）不列入回傳值——沒積壓就不需要告警。
+    """
+    root = paths.state_path("bro-queue")
+    if not root.exists():
+        return []
+    # 只取一次時間：逐 pane 各自呼叫 now() 會讓同一輪的 pending_seconds 互相漂移。
+    now_value = now()
+    results: list[PaneBacklog] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_file() or entry.suffix != ".jsonl":
+            continue
+        pane_id = _pane_id_from_queue_file(entry)
+        with _locked(pane_id):
+            entries = _read_entries(entry)
+        if not entries:
+            continue
+        head = entries[0]
+        raw_queued_at = head.get("queued_at")
+        head_queued_at = raw_queued_at if isinstance(raw_queued_at, (int, float)) else None
+        head_message = str(head.get("message", "")) if "message" in head else None
+        pending_seconds = None
+        if head_queued_at is not None:
+            pending_seconds = max(0.0, now_value - head_queued_at)
+        results.append(
+            PaneBacklog(
+                pane_id=pane_id,
+                remaining=len(entries),
+                head_queued_at=head_queued_at,
+                head_message=head_message,
+                pending_seconds=pending_seconds,
+            )
+        )
+    return results
