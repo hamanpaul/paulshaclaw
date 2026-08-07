@@ -127,7 +127,41 @@ flowchart TB
 
 `paulshaclaw` 是 operator shell，記憶平面（`paulsha-hippo`）與治理平面（`paulsha-cortex`）是**外部依賴**。兩者皆已 public，`pip`/`pipx` 免認證即可安裝；版本由 `pyproject.toml` 的 git+SHA pin 鎖定。
 
-### A. 全新安裝
+安裝分成兩種情境，請依身分選：
+
+- **End-user 生產安裝**：從 GitHub Release 下載 wheel 安裝，不 clone repo（見 §A）。
+- **Developer 開發安裝**：clone repo 後 editable install，含可跑測試的完整 runtime（見 §B）。
+
+完整 release 契約（版本來源一致性、前置 gate、失敗重跑、撤回規則、distribution strategy 裁決）見 [`docs/release-contract.md`](./docs/release-contract.md)。
+
+### A. 從 release artifact 安裝（end-user 生產安裝）
+
+正式版本以 GitHub Release artifact 為 distribution authority（裁決見 release-contract §5）。
+從對應 `vX.Y.Z` Release 下載 wheel（含 SHA-256 checksums 驗證），在專用 venv 安裝：
+
+```bash
+# 1. 建立 end-user venv（不要用系統 Python，PEP 668）
+python3 -m venv ~/.venv-paulshaclaw
+~/.venv-paulshaclaw/bin/python -m pip install --upgrade pip
+
+# 2. 從 vX.Y.Z Release 下載 wheel 與 checksums
+#    https://github.com/hamanpaul/paulshaclaw/releases
+#    下載 paulshaclaw-X.Y.Z-py3-none-any.whl 與 checksums-sha256.txt
+
+# 3. 驗證 checksum
+sha256sum -c checksums-sha256.txt --ignore-missing
+
+# 4. 從 wheel 安裝（會依 pyproject 的 git+SHA pin 自動拉 hippo/cortex）
+~/.venv-paulshaclaw/bin/python -m pip install paulshaclaw-X.Y.Z-py3-none-any.whl
+
+# 5. 確認（psc 是 dispatcher，無參數會印 usage 並以 exit 2 結束，這是正常行為）
+~/.venv-paulshaclaw/bin/psc
+~/.venv-paulshaclaw/bin/python -m pip show paulshaclaw   # 顯示版本與來源
+```
+
+> **為何不是 PyPI**：`paulsha-hippo` / `paulsha-cortex` 是 `git+<url>@<SHA>` direct reference，PyPI 上傳政策不接受 direct URL 參照，故第一階段僅以 GitHub Release 分發。詳見 release-contract §5 的實測依據。
+
+### B. 開發安裝（clone + editable install）
 
 ```bash
 # 1. 取得 operator shell
@@ -148,7 +182,7 @@ pipx install "git+https://github.com/hamanpaul/paulsha-cortex"
 
 Ubuntu 24.04 / Debian 的系統 Python 受 PEP 668 管理，請勿用 `pip install --user -e .` 繞過；上面的 repo `.venv` 流程可直接重跑以刷新 pin。pipx 的 plane CLI 位於各自的隔離 venv，只有當 `cortex` shebang 指向的 Python 同時可 import `paulsha_cortex` 與 `textual` 時，`scripts/start.sh` 才會把它當成 operator runtime；一般情況仍以 repo `.venv` 為準。
 
-### B. 部署常駐服務
+### C. 部署常駐服務
 
 ```bash
 # 記憶平面：dream 蒸餾常駐 + agent host hooks（systemd 偵測 + fallback）
@@ -164,7 +198,7 @@ hippo doctor          # 記憶側健檢
 - **monitor 需要 project 設定**：`~/.agents/config/paulsha/project-cortex.yaml`（`workspaces: name/path`）；缺了 monitor 會以「無 project 設定」失敗。舊 `~/.config/paulshaclaw/paulshaclaw.yaml` 會被 legacy 讀取順序自動接上（帶 deprecation 警告）。可選再併 `project-hippo.yaml`（hippo 產生的 git/path registry）取 union。
 - **服務啟動總管**：[`scripts/start.sh`](./scripts/start.sh) 委派 `cortex install service` / `enable --now`，systemd 不可用時退回前景 fallback。
 
-### C. 既有機器：移植/更新到 operator shell 形態（cutover）
+### D. 既有機器：移植/更新到 operator shell 形態（cutover）
 
 主 repo 已刪除 `persona/coordinator/control/deck/monitor` 五包，舊機器不能只 `git pull`——要把舊的 manager/monitor **cutover 到 cortex 服務**。一鍵腳本（冪等、systemd-aware、含 hippo）：
 
@@ -204,12 +238,29 @@ scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路�
 - Stage 4 persona / handoff / guardrail 研究脈絡（現為 cortex 治理平面歷史來源）：[`docs/research/04.stage4-persona-role-catalog-handoff-guardrails-research.md`](./docs/research/04.stage4-persona-role-catalog-handoff-guardrails-research.md)
 - 記憶路由：[`paulsha-hippo/routing.md`](https://github.com/hamanpaul/paulsha-hippo/blob/main/paulsha_hippo/routing.md)
 - 規格與變更：[`openspec/`](./openspec/)
+- Release 契約與 distribution strategy：[`docs/release-contract.md`](./docs/release-contract.md)
 
 ---
 
 ## Version
 
 當前版本見 [`VERSION`](./VERSION)；變更紀錄見 [`CHANGELOG.md`](./CHANGELOG.md)。
+
+查詢已安裝版本：
+
+```bash
+pip show paulshaclaw                       # 顯示版本
+python -c "import paulshaclaw; print('ok')"  # 確認可 import
+```
+
+### Release recovery / 撤回
+
+- **回滾到上一穩定版本**：從上一個 `vX.Y.Z` GitHub Release 下載 wheel，在目標 venv
+  `pip install --force-reinstall <舊版 wheel>`。runtime 狀態（`~/.agents/`）不隨 artifact 變動，
+  回滾 operator shell 不會動到 state/secret。
+- **不把「刪除 GitHub Release」當唯一 rollback**：建議先在 Release 說明標記撤回並保留 artifact
+  供稽核，再停止推薦安裝；刪除 Release 與 tag 為最後手段且需 owner 裁決。完整撤回流程見
+  [`docs/release-contract.md`](./docs/release-contract.md) §4.3。
 
 ---
 
