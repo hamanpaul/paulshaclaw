@@ -110,8 +110,18 @@ import paulshaclaw.cockpit as c
 assert (Path(c.__file__).parent / 'cockpit.tcss').exists(), 'cockpit.tcss 未隨安裝'
 print('import closure + tcss OK')
 "
-    "$clean_root/venv/bin/psc" --help >/dev/null
-    echo "psc --help OK"
+    # psc 是 dispatcher：無參數（或無法辨識的參數）印 usage 到 stderr 並回 2，
+    # 沒有 --help。smoke test 驗的是 console script 裝得起來、能載入模組並印出
+    # usage，不能要求 exit 0（會讓 set -e 直接中止）。
+    set +e
+    psc_out="$("$clean_root/venv/bin/psc" 2>&1)"
+    psc_rc=$?
+    set -e
+    if [[ "$psc_rc" != "2" ]] || [[ "$psc_out" != *"usage: psc"* ]]; then
+      echo "FAIL: psc entry point 異常（exit=$psc_rc, output=$psc_out）" >&2
+      exit 1
+    fi
+    echo "psc entry point OK（usage + exit 2）"
   )
   rm -rf "$smoke_dir"
 fi

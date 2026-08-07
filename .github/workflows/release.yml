@@ -101,7 +101,16 @@ jobs:
           assert (Path(c.__file__).parent / 'cockpit.tcss').exists(), 'cockpit.tcss 未隨安裝'
           print('import closure + tcss OK')
           " )
-          ( cd /tmp && /tmp/clean-venv/bin/psc --help >/dev/null && echo "psc --help OK" )
+          # psc 是 dispatcher：無參數印 usage 到 stderr 並回 2，沒有 --help。
+          # 驗的是 console script 裝得起來並能載入模組，不能要求 exit 0。
+          set +e
+          psc_out="$(cd /tmp && /tmp/clean-venv/bin/psc 2>&1)"
+          psc_rc=$?
+          set -e
+          if [[ "$psc_rc" != "2" || "$psc_out" != *"usage: psc"* ]]; then
+            echo "FAIL: psc entry point 異常（exit=$psc_rc, output=$psc_out）"; exit 1
+          fi
+          echo "psc entry point OK（usage + exit 2）"
 
       - name: SHA-256 checksums
         id: checksums
