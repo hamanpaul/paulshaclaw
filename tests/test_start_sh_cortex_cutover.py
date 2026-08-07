@@ -671,8 +671,11 @@ def test_ensure_cortex_services_skips_install_when_manager_env_belongs_to_other_
     在同時裝了 paulshaclaw 與 paulsha-cortex 的機器上會劫持對方的 instance，
     症狀是 cortex 所有 work-action 掛住、且潛伏到下次重啟才爆。
     """
+    # 取 tmp_path 底下的假路徑而非字面 `/home/<user>/...`：本 repo 為 public，
+    # R-21 會把個人絕對路徑樣式判為 structural finding（即使使用者名是虛構的）。
+    # 這裡只需要「一個不等於本 repo root 的路徑」，用 tmp_path 同樣達意且更 hermetic。
     completed, call_log = _run_ensure_cortex_services(
-        tmp_path, existing_repo_root="/home/other/prj/paulsha-cortex"
+        tmp_path, existing_repo_root=str(tmp_path / "other-owner" / "paulsha-cortex")
     )
 
     calls = call_log.read_text(encoding="utf-8") if call_log.exists() else ""
