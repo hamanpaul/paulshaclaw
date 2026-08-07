@@ -148,7 +148,11 @@ class EventReplayTests(unittest.TestCase):
 
 class GoldenSliceTests(unittest.TestCase):
     def test_golden_slice_full_flow(self) -> None:
+        # 本表必須覆蓋 schema.PHASES 的每一個 phase（下方直接迭代它）。
+        # `claim` 是治理平面 paulsha-cortex 的 work item 認領階段，隨 lifecycle
+        # 詞彙聯集進入共用詞彙表；其產物是認領記錄，故對應 artifact kind `task`。
         artifact_kind_by_phase = {
+            "claim": "task",
             "research": "research",
             "define": "spec",
             "plan": "plan",
