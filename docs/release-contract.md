@@ -217,7 +217,9 @@ python -m paulshaclaw.deploy upgrade --apply --verify \
    被覆寫，core runtime env / state / secret 存在即跳過。
 3. `preserve-state-plane` / `preserve-secret-plane`：由 create-only 規則保證，不另刪改。
 4. `restart-service-unit`：對每個 `verify_units` 跑 `systemctl --user restart`（systemd
-   不可用時 skip）。
+   不可用時 skip）。**任一 unit 重啟失敗即 fail-closed**：拋錯 → 自動 rollback →
+   report `status: failed` + exit 1。只記錄 returncode 而回報成功會讓 operator
+   誤以為升級完成，但服務其實是停的。
 5. `verify-systemd-user-units`：沿用 `verify_install_plan()`。
 
 ### 8.4 rollback（E4）
@@ -225,8 +227,12 @@ python -m paulshaclaw.deploy upgrade --apply --verify \
 - checkpoint 存放於 `~/.agents/deploy-checkpoints/<instance>/<command>-<timestamp>/`，
   含 `manifest.json` 與鏡射的 core 檔案；可清理、不污染 repo。
 - `restore-core-from-checkpoint` 把 core 檔案逐檔還原到升級前內容。
-- **upgrade 執行途中失敗自動 rollback**：`run_upgrade()` 在套用階段拋例外時，
-  自動從當次 checkpoint 還原 core，report 標記 `rollback_triggered: true` 並回 exit 1。
+- **upgrade 執行途中失敗自動 rollback**：`run_upgrade()` 在套用階段拋例外時（含
+  unit 重啟失敗），自動從當次 checkpoint 還原 core，report 標記
+  `rollback_triggered: true` 並回 exit 1。
+- **`--verify` 階段失敗不自動 rollback**：此時 core 已套用完成且服務已重啟，
+  verify 回報的是「檢查沒過」而非「套用失敗」。report 標 `status: failed` + exit 1，
+  是否還原交由 operator 以下方的 rollback 命令明確決定。
 - 明確 rollback 入口：
 
   ```

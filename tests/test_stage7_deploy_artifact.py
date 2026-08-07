@@ -49,18 +49,29 @@ def write_script(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def make_fake_tools(base: Path) -> tuple[Path, Path]:
+def make_fake_tools(base: Path, *, restart_fails: bool = False) -> tuple[Path, Path]:
     fakebin = base / "fakebin"
     fakebin.mkdir(parents=True, exist_ok=True)
     command_log = base / "command.log"
     linger_flag = base / "linger.enabled"
 
+    # restart_fails=True 模擬「新版 unit 起不來」：只有 restart 回非零，
+    # 其餘子命令照常成功，用來驗證 upgrade 會 fail-closed 並自動 rollback。
+    restart_branch = (
+        """if [[ "${1:-}" == "--user" && "${2:-}" == "restart" ]]; then
+  printf 'Job for %s failed.\\n' "${3:-unit}" >&2
+  exit 1
+fi
+"""
+        if restart_fails
+        else ""
+    )
     write_script(
         fakebin / "systemctl",
         f"""#!/bin/bash
 set -euo pipefail
 printf '%s\\n' "systemctl $*" >> "{command_log}"
-exit 0
+{restart_branch}exit 0
 """,
     )
     write_script(
@@ -328,10 +339,44 @@ class UpgradeExecutionTests(unittest.TestCase):
             unit = home_dir / ".config" / "systemd" / "user" / "demo-agent-cost.service"
             self.assertIn("service-cost.sh", unit.read_text(encoding="utf-8"))
 
-            # install record 袇更新為 upgrade 版本。
+            # install record 被更新為 upgrade 版本。
             record = read_install_record(str(home_dir), instance_name="demo-agent")
             self.assertEqual(record["command"], "upgrade")
             self.assertEqual(record["version"], "0.2.0")
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
+    def test_upgrade_fails_closed_and_rolls_back_when_restart_fails(self) -> None:
+        # 新版 unit 起不來時，upgrade 不得回報成功——否則 operator 以為升級完成
+        # 但服務其實是停的。應 fail-closed、自動 rollback 並回 exit 1。
+        scratch = make_test_dir("stage7-e3-restart-fail")
+        home_dir = scratch / "home"
+        home_dir.mkdir(parents=True, exist_ok=True)
+        seed_bin, _ = make_fake_tools(scratch)
+        try:
+            seed_install(home_dir, seed_bin)
+            unit = home_dir / ".config" / "systemd" / "user" / "demo-agent-cost.service"
+            custom = unit.read_text(encoding="utf-8").replace("RestartSec=10", "RestartSec=42")
+            unit.write_text(custom, encoding="utf-8")
+            real = write_real_state_and_secret(home_dir)
+
+            failing_bin, _ = make_fake_tools(scratch / "fail", restart_fails=True)
+            completed = run_deploy(home_dir, failing_bin, "upgrade", "--apply", "--verify")
+
+            self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertEqual(payload["status"], "failed")
+            self.assertTrue(payload["rollback_triggered"])
+            self.assertIn("restart", payload["error"])
+            # rollback 把 core unit 還原成升級前的內容。
+            self.assertEqual(unit.read_text(encoding="utf-8"), custom)
+            # state/secret 全程不受影響。
+            self.assertEqual(
+                Path(real["secret_path"]).read_text(encoding="utf-8"), real["secret"]
+            )
+            self.assertEqual(
+                Path(real["state_path"]).read_text(encoding="utf-8"), real["state"]
+            )
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
 

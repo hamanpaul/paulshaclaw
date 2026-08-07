@@ -455,12 +455,23 @@ def latest_checkpoint(home_dir: Path, *, instance_name: str, command: str | None
 
 
 def _restart_service_units(plan: CommandPlan) -> list[str]:
+    """重啟 plan 的 verify_units；任一失敗即拋錯（由 run_upgrade 觸發 rollback）。
+
+    只把 returncode 記進 report 是 fail-open：新版 unit 起不來時 upgrade 仍會
+    回報 `status: ok`，operator 以為升級成功但服務其實是停的。部署面必須
+    fail-closed，故 rc 非零直接拋錯。
+    """
     actions: list[str] = []
     if not _user_systemd_available():
         return actions
     for unit in plan.verify_units:
         completed = _run_command(["systemctl", "--user", "restart", unit])
         actions.append(f"systemctl --user restart {unit} -> rc={completed.returncode}")
+        if completed.returncode != 0:
+            detail = (completed.stderr or completed.stdout or "").strip()
+            raise RuntimeError(
+                f"systemctl --user restart {unit} 失敗（rc={completed.returncode}）：{detail}"
+            )
     return actions
 
 
