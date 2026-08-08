@@ -8,6 +8,7 @@ and this project adheres to Semantic Versioning.
 ## [Unreleased]
 
 ### Fixed
+- `paulsha-cortex` pin 改指向正式 release **v0.1.4** 的 SHA（`b868760`），取代前一輪暫時指向的未發版 main commit `ea4cd53`；內容相同（v0.1.4 即該 commit 的發版），此變更是讓 pin 對齊「部署以 release 為主」，本機 pipx 亦已升到 v0.1.4，pin 與部署版本自此一致。`paulsha-hippo` 本輪不動、續留 main SHA `96513bc`（詞彙聯集已進 hippo main 但尚未收進 tag），已在 `pyproject.toml` 註明下次 hippo 發版時改指向該 tag 的 SHA。
 - 兩個平面 pin 成對升級並修掉 lifecycle 詞彙分歧：`paulsha-cortex` `3dfea79` → `ea4cd53`（原 pin 落後 main 613 個 commit），`paulsha-hippo` `eb2ccb8` → `96513bc`。cortex 於 `ae4bc43` 把 lifecycle 首階段由 `research` 改名為 `claim` 而 hippo 未跟進，使 `tests/test_cortex_alignment.py::test_cortex_phases_match_hippo_schema` FAIL；上游採詞彙聯集而非任一側改名（cortex#376、hippo#126），兩邊 `PHASES` 現同為 8 個。因兩平面之間刻意零 import 依賴、相等性僅靠本 repo 這條對齊測試守，pin 必須成對移動，已在 `pyproject.toml` 註記。同步調整兩處測試：`test_stage3_lifecycle_mvp.py` 的 `artifact_kind_by_phase` 補 `claim → task`（迭代 `schema.PHASES` 缺鍵會 `KeyError`）；`test_stage11_operator_cockpit.py` 的假 pid 改為 `os.getpid()`，因 cortex v0.1.3 起 `read_status()` 會把「有 pid 但 pid 不存活」判為 `degraded="dead"`。另順帶修掉一個既有的 R-21 structural finding（非本次引入）：`test_start_sh_cortex_cutover.py` 的 fixture 寫死一個家目錄形式的絕對路徑字面值，本 repo 為 public 且未宣告 `tier`，該樣式被判為個人絕對路徑；改用 `tmp_path` 底下的假路徑。
 
 
