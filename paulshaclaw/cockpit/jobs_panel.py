@@ -26,7 +26,7 @@ _WAIT_START = "#E2E8F0"
 _WORKING = "#22C55E"
 _BROKE = "#EF4444"
 _WAIT_CONFIRM = "#F97316"
-_FINISHED = "#64748B"
+_FINISHED = "#94A3B8"  # 與白色 name 並排仍可辨；#64748B 太暗（#311）
 
 _STATUS_STYLE: dict[str, tuple[str, str]] = {
     # wait for start（白）：還沒輪到它動（含依賴未滿足的 blocked/held）
@@ -59,7 +59,7 @@ _STATUS_STYLE: dict[str, tuple[str, str]] = {
     "workflow-tracked": ("•", _FINISHED),
     "superseded": ("•", _FINISHED),
 }
-_STATUS_DEFAULT: tuple[str, str] = ("•", "#94A3B8")
+_STATUS_DEFAULT: tuple[str, str] = ("•", "#64748B")  # 未知狀態退更暗，讓 #94A3B8 給 finished（#311）
 
 
 def status_style(status: str) -> tuple[str, str]:
@@ -156,6 +156,11 @@ _TRAILER_RESERVE = 16
 _JOBS_WIDTH_FALLBACK = 88
 
 
+# 頂層無子列沒有 Tree 箭頭，首段補兩格與「▶ •」的列對齊（#311：三種列的
+# •／state／name／trailer 四欄同 x 起點；phase 子列吃 guide 縮排 2，天然對齊）。
+_ROW_ALIGN_PREFIX = "  "
+
+
 def _layout_columns(
     groups: tuple[JobGroup, ...], width: int
 ) -> tuple[int, int, int]:
@@ -177,7 +182,9 @@ def _layout_columns(
                     _display_width(_abbrev_label(row.human_state or row.state))
                 )
     state_col = min(max(state_widths), _STATE_COL_MAX)
-    avail = width - state_col - 4
+    # 起點統一 +2：群組列的 Tree 展開箭頭吃 2 欄，無子列由 _ROW_ALIGN_PREFIX
+    # 補齊——可用寬因此再 -2（#311）。
+    avail = width - state_col - 6
     max_name = max(name_widths)
     name_col = min(max_name, max(_NAME_COL_MIN, avail - _TRAILER_RESERVE))
     name_col = max(min(name_col, avail), 1)
@@ -263,18 +270,20 @@ def build_jobs_nodes(
             ),
             trailer_budget,
         )
-        main_segments = (
-            (f"{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
-            (
-                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col), name_col)} ",
-                "#E2E8F0",
-            ),
-            (trailer, "#64748B"),
-        )
         if group.is_single:
             children = _single_detail_children(group)
         else:
             children = tuple(_phase_child(group, row, state_col) for row in group.rows)
+        align = _ROW_ALIGN_PREFIX if not children else ""
+        main_segments = (
+            (f"{align}{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
+            (
+                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col), name_col)} ",
+                "#E2E8F0",
+            ),
+            # trailer 維持白（owner：feat 串不上暗色）；灰階只留給 state 欄語意。
+            (trailer, "#E2E8F0"),
+        )
         specs.append(
             JobsNodeSpec(
                 key=group.key,

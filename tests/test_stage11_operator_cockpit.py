@@ -1608,6 +1608,49 @@ class Stage11StateTests(unittest.TestCase):
             panel.on_resize(None)
         rebuild.assert_not_called()
 
+    def test_rows_align_regardless_of_tree_arrow(self) -> None:
+        """#311：頂層無子列補兩格前綴、有子列（Tree 會畫箭頭）不補——三種列的
+        state／name 欄同 x 起點；trailer 為白色（feat 串不上暗色）。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-aaaa11111-subagent-build",
+                            "gate_status": "workflow-tracked",
+                            "branch": "feature/1-single",
+                        },
+                        {
+                            "slice_id": "wf-bbbb22222-subagent-build",
+                            "gate_status": "workflow-tracked",
+                            "branch": "feature/2-multi",
+                        },
+                        {
+                            "slice_id": "wf-bbbb22222-code-review",
+                            "gate_status": "workflow-tracked",
+                            "branch": "feature/2-multi",
+                        },
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=100)
+
+        by_children = {bool(spec.children): spec for spec in nodes}
+        single, multi = by_children[False], by_children[True]
+        # 無子列補前綴；有子列由 Tree 箭頭吃掉同寬起點。
+        self.assertTrue(single.segments[0][0].startswith("  • "), single.segments[0][0])
+        self.assertTrue(multi.segments[0][0].startswith("• "), multi.segments[0][0])
+        # 首段（前綴＋glyph＋state pad）顯示寬相差恰為 2 → name 欄同 x 起點。
+        self.assertEqual(
+            _display_width(single.segments[0][0]),
+            _display_width(multi.segments[0][0]) + 2,
+        )
+        # trailer 白色。
+        self.assertEqual(single.segments[2][1], "#E2E8F0")
+
     def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
         """混合群組：lead 是不帶 branch 的 in_flight row，branch 要從 recent_done
         phase 借用（JobGroup.branch 的 fallback 在群組情境生效）並上到主行。"""

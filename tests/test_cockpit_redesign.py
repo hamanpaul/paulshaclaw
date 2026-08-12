@@ -34,7 +34,7 @@ class StatusStyleTests(unittest.TestCase):
         # wait-for-start 白）。
         self.assertEqual(status_style("running"), ("•", "#22C55E"))
         self.assertEqual(status_style("failed"), ("•", "#EF4444"))
-        self.assertEqual(status_style("done"), ("•", "#64748B"))
+        self.assertEqual(status_style("done"), ("•", "#94A3B8"))
         self.assertEqual(status_style("pending"), ("•", "#E2E8F0"))
 
     def test_case_insensitive(self) -> None:
@@ -42,8 +42,9 @@ class StatusStyleTests(unittest.TestCase):
         self.assertEqual(status_style("  Running  "), status_style("running"))
 
     def test_unknown_status_falls_back_to_neutral(self) -> None:
-        self.assertEqual(status_style("banana"), ("•", "#94A3B8"))
-        self.assertEqual(status_style(""), ("•", "#94A3B8"))
+        # #311：未知退更暗中性色，#94A3B8 讓給 finished。
+        self.assertEqual(status_style("banana"), ("•", "#64748B"))
+        self.assertEqual(status_style(""), ("•", "#64748B"))
 
 
 class SessionSummaryTests(unittest.TestCase):
