@@ -18,27 +18,46 @@ except Exception:  # pragma: no cover - fallback when textual not installed
     _HAS_TEXTUAL = False
 
 
-# 語意狀態樣式（ui-ux-pro-max design-system 色盤）：狀態 → (glyph, rich 顏色)。
-# running/success 綠、failed/error 紅、blocked/pending 琥珀、done 收斂為淡灰（去強調），
-# 未知狀態退回中性點。純函式，供工作清單／DETAIL／JOBS 上色與單測共用。
+# 語意狀態樣式（#308 owner 裁決）：glyph 統一「•」，狀態靠顏色五桶區分——
+# wait-for-start 白、working 綠、broke 紅、wait-confirm 橘、finished 灰。
+# 純函式，供工作清單／DETAIL／JOBS 上色與單測共用；未知狀態退回中性藍灰
+# （不猜語意，寧可視覺上退到「非五桶」）。
+_WAIT_START = "#E2E8F0"
+_WORKING = "#22C55E"
+_BROKE = "#EF4444"
+_WAIT_CONFIRM = "#F97316"
+_FINISHED = "#64748B"
+
 _STATUS_STYLE: dict[str, tuple[str, str]] = {
-    "running": ("●", "#22C55E"),
-    "active": ("●", "#22C55E"),
-    "success": ("✓", "#22C55E"),
-    "passed": ("✓", "#22C55E"),
-    "ok": ("✓", "#22C55E"),
-    "done": ("✓", "#64748B"),
-    "completed": ("✓", "#64748B"),
-    "failed": ("✗", "#EF4444"),
-    "error": ("✗", "#EF4444"),
-    "attention": ("!", "#FBBF24"),
-    # 最該亮起來的狀態先前沒有樣式，退回中性灰點——等人工的列看起來跟雜訊一樣。
-    "needs_human": ("!", "#FBBF24"),
-    "blocked": ("◼", "#FBBF24"),
-    "pending": ("◔", "#FBBF24"),
-    "ready": ("◔", "#94A3B8"),
-    "queued": ("◔", "#94A3B8"),
-    "unmapped": ("·", "#64748B"),
+    # wait for start（白）：還沒輪到它動（含依賴未滿足的 blocked/held）
+    "ready": ("•", _WAIT_START),
+    "queued": ("•", _WAIT_START),
+    "pending": ("•", _WAIT_START),
+    "blocked": ("•", _WAIT_START),
+    "held": ("•", _WAIT_START),
+    "dispatched": ("•", _WAIT_START),
+    # working（綠）
+    "running": ("•", _WORKING),
+    "active": ("•", _WORKING),
+    "reviewing": ("•", _WORKING),
+    # broke（紅）
+    "failed": ("•", _BROKE),
+    "error": ("•", _BROKE),
+    "dead": ("•", _BROKE),
+    "degraded": ("•", _BROKE),
+    # wait confirm（橘）
+    "needs_human": ("•", _WAIT_CONFIRM),
+    "attention": ("•", _WAIT_CONFIRM),
+    # finished（灰）
+    "passed": ("•", _FINISHED),
+    "verified": ("•", _FINISHED),
+    "success": ("•", _FINISHED),
+    "ok": ("•", _FINISHED),
+    "done": ("•", _FINISHED),
+    "completed": ("•", _FINISHED),
+    "exited": ("•", _FINISHED),
+    "workflow-tracked": ("•", _FINISHED),
+    "superseded": ("•", _FINISHED),
 }
 _STATUS_DEFAULT: tuple[str, str] = ("•", "#94A3B8")
 
@@ -109,6 +128,7 @@ def _fit_trailer(parts: tuple[str, ...], width: int) -> str:
 _LABEL_ABBREVS: tuple[tuple[str, str], ...] = (
     ("workflow-tracked", "[wf]-tracked"),
     ("subagent-build", "[sub]-build"),
+    (" phase", " ph"),
 )
 
 
@@ -125,11 +145,44 @@ def _abbrev_branch(branch: str) -> str:
     return branch
 
 
-# JOBS 主行欄寬（顯示寬，非字元數）與量不到 widget 寬度時的保守後備值。
-# 超出可用寬度會被 Textual 折行，折出來的那行不在行預算內，實際顯示會比算的少。
-_JOBS_STATE_COL = 16
-_JOBS_NAME_COL = 26
+# JOBS 主行版面（顯示寬，非字元數）：state／name 欄依本批 rows 的自然寬伸縮
+# （#308），剩餘全給 trailer；固定值只剩上下限與量不到 widget 寬度時的保守後備。
+# 版面模板：glyph(1)＋空格(1)＋state_col＋空格(1)＋name_col＋空格(1)＋trailer，
+# 欄間距由模板的固定空格保證，永遠可分辨。
+_STATE_COL_MIN = 6
+_STATE_COL_MAX = 20
+_NAME_COL_MIN = 12
+_TRAILER_RESERVE = 16
 _JOBS_WIDTH_FALLBACK = 88
+
+
+def _layout_columns(
+    groups: tuple[JobGroup, ...], width: int
+) -> tuple[int, int, int]:
+    """量本批 rows 的自然欄寬 → (state_col, name_col, trailer_budget)。
+
+    寬面板：兩欄拿剛好夠用的，全名不省略、剩餘全給 trailer；窄面板：name
+    先讓步到 _NAME_COL_MIN，再輪到 trailer 的退讓語意——省略號是最後手段。
+    """
+    state_widths = [_STATE_COL_MIN]
+    name_widths = [0]
+    for group in groups:
+        state_widths.append(_display_width(_abbrev_label(group.headline_state)))
+        name_widths.append(
+            _display_width(_abbrev_branch(_abbrev_label(group.display_name)))
+        )
+        if not group.is_single:
+            for row in group.rows:
+                state_widths.append(
+                    _display_width(_abbrev_label(row.human_state or row.state))
+                )
+    state_col = min(max(state_widths), _STATE_COL_MAX)
+    avail = width - state_col - 4
+    max_name = max(name_widths)
+    name_col = min(max_name, max(_NAME_COL_MIN, avail - _TRAILER_RESERVE))
+    name_col = max(min(name_col, avail), 1)
+    trailer_budget = max(avail - name_col, 0)
+    return state_col, name_col, trailer_budget
 
 
 @dataclass(frozen=True)
@@ -163,12 +216,12 @@ def _single_detail_children(group: JobGroup) -> tuple[JobsNodeSpec, ...]:
     return ()
 
 
-def _phase_child(group: JobGroup, row: JobRow) -> JobsNodeSpec:
+def _phase_child(group: JobGroup, row: JobRow, state_col: int) -> JobsNodeSpec:
     glyph, color = status_style(_row_state_key(row))
     label_state = _abbrev_label(row.human_state or row.state)
     phase_name = _abbrev_label(group._phase_label(row))
     segments = (
-        (f"{glyph} {_pad_display(label_state, _JOBS_STATE_COL)} ", color),
+        (f"{glyph} {_pad_display(label_state, state_col)} ", color),
         (phase_name, "#E2E8F0"),
     )
     children: tuple[JobsNodeSpec, ...] = ()
@@ -188,6 +241,7 @@ def build_jobs_nodes(
 ) -> tuple[JobsNodeSpec, ...]:
     """JobGroup 序列 → Tree 節點描述（純函式，不碰 widget，供單測與 widget 共用）。"""
     specs: list[JobsNodeSpec] = []
+    state_col, name_col, trailer_budget = _layout_columns(groups, width)
     for group in groups:
         glyph, color = status_style(
             group.lead.state if group.is_single else _group_state_key(group)
@@ -207,12 +261,12 @@ def build_jobs_nodes(
                 group.note,
                 _abbrev_label(group.raw_state),
             ),
-            width - _JOBS_STATE_COL - _JOBS_NAME_COL - 4,
+            trailer_budget,
         )
         main_segments = (
-            (f"{glyph} {_pad_display(_abbrev_label(group.headline_state), _JOBS_STATE_COL)} ", color),
+            (f"{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
             (
-                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
+                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col), name_col)} ",
                 "#E2E8F0",
             ),
             (trailer, "#64748B"),
@@ -220,7 +274,7 @@ def build_jobs_nodes(
         if group.is_single:
             children = _single_detail_children(group)
         else:
-            children = tuple(_phase_child(group, row) for row in group.rows)
+            children = tuple(_phase_child(group, row, state_col) for row in group.rows)
         specs.append(
             JobsNodeSpec(
                 key=group.key,
@@ -277,6 +331,7 @@ if _HAS_TEXTUAL:
             # key -> 使用者上次手動設的展開狀態；優先於 spec.expand 的預設值。
             self._user_expanded: dict[str, bool] = {}
             self._last_projection: tuple[tuple[str, str], ...] | None = None
+            self._last_groups: tuple[JobGroup, ...] = ()
 
         # node.expand()/collapse()（space、enter 觸發 auto_expand、滑鼠點箭頭）
         # 一定會 post 這兩個 message；重建時我們改用 add(expand=...) 直接設
@@ -299,7 +354,14 @@ if _HAS_TEXTUAL:
                 return _JOBS_WIDTH_FALLBACK
             return width if width > 40 else _JOBS_WIDTH_FALLBACK
 
+        def on_resize(self, event: object) -> None:
+            # resize 立即以新寬度重排，不等下一個 status tick（#308）；寬度沒
+            # 實質改變時投影 diff 會判「沒變」而跳過重建，這裡不必自己防抖。
+            if self._last_groups:
+                self.set_groups(self._last_groups)
+
         def set_groups(self, groups: tuple[JobGroup, ...]) -> None:
+            self._last_groups = tuple(groups)
             specs = build_jobs_nodes(tuple(groups), width=self._panel_width())
             projection = _project_specs(specs)
             if projection == self._last_projection:

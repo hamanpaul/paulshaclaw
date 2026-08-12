@@ -1481,35 +1481,9 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_fit_trailer_ellipsizes_last_item_instead_of_blank(self) -> None:
         """#299：退讓到只剩一項仍塞不下時要縮排顯示，不得留白。今日真實資料形狀
-        （repo=null、branch 37 字元）在 pane 寬 70（trailer 預算 24）下，#292 的
-        整項退讓會讓 trailer 全空——比修之前連 wf-hash 都不剩。縮排後 issue 編號
-        （branch 頭段）必須可見。"""
-        groups = group_job_rows(
-            slices_from_status(
-                {
-                    "recent_done": [
-                        {
-                            "slice_id": "wf-e13fa4daae-subagent-build",
-                            "gate_status": "passed",
-                            "branch": "feature/294-feat-slice-executor-model",
-                        }
-                    ],
-                    "degraded": False,
-                }
-            )
-        )
-
-        nodes = build_jobs_nodes(groups, width=70)
-
-        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertIn("feat/294", main_text)
-        self.assertIn("…", main_text)
-        self.assertNotIn("feat/294-feat-slice-executor-model", main_text)
-        self.assertLessEqual(_display_width(main_text), 70, main_text)
-
-    def test_fit_trailer_stays_blank_below_ellipsize_floor(self) -> None:
-        """#299：預算低於下限（8 顯示欄）時維持留白——縮到一小截沒有資訊量，
-        寧可不顯示（width=50 → trailer 預算 4）。"""
+        （repo=null、branch 37 字元）在窄面板（#308 自適應版面下 width=50 →
+        trailer 預算 29）下，#292 的整項退讓會讓 trailer 全空——比修之前連
+        wf-hash 都不剩。縮排後 issue 編號（branch 頭段）必須可見。"""
         groups = group_job_rows(
             slices_from_status(
                 {
@@ -1526,6 +1500,32 @@ class Stage11StateTests(unittest.TestCase):
         )
 
         nodes = build_jobs_nodes(groups, width=50)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertIn("feat/294", main_text)
+        self.assertIn("…", main_text)
+        self.assertNotIn("feat/294-feat-slice-executor-model", main_text)
+        self.assertLessEqual(_display_width(main_text), 50, main_text)
+
+    def test_fit_trailer_stays_blank_below_ellipsize_floor(self) -> None:
+        """#299：預算低於下限（8 顯示欄）時維持留白——縮到一小截沒有資訊量，
+        寧可不顯示（#308 版面下 width=28 → trailer 預算 7）。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "passed",
+                            "branch": "feature/294-feat-slice-executor-model",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=28)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
         self.assertNotIn("feat", main_text)
@@ -1547,12 +1547,66 @@ class Stage11StateTests(unittest.TestCase):
         rendered = _flatten_nodes(build_jobs_nodes(groups))
 
         self.assertIn("[wf]-tracked", rendered)
-        self.assertIn("2 phase [wf]-tracked", rendered)
+        self.assertIn("2 ph [wf]-tracked", rendered)
         self.assertIn("[sub]-build", rendered)
         self.assertNotIn("workflow-tracked", rendered)
         self.assertNotIn("subagent-build", rendered)
         states = {row.state for group in groups for row in group.rows}
         self.assertEqual(states, {"workflow-tracked"})
+
+    def test_layout_adapts_to_wide_panel_without_ellipsis(self) -> None:
+        """#308：寬面板（120）整列自適應——name 全名、trailer 整條 branch，
+        全程不出現省略號；窄面板的退讓已由上兩個測試釘住。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "workflow-tracked",
+                            "branch": "feature/294-feat-slice-executor-model",
+                            "workflow_repo": "hamanpaul/paulsha-cortex",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=120)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertIn("[sub]-build", main_text)
+        self.assertIn("paulsha-cortex", main_text)
+        self.assertIn("feat/294-feat-slice-executor-model", main_text)
+        self.assertNotIn("…", main_text)
+        self.assertLessEqual(_display_width(main_text), 120, main_text)
+
+    def test_jobs_panel_resize_triggers_rebuild_with_cached_groups(self) -> None:
+        """#308：resize 立即用快取的 groups 重排（不等 status tick）；沒資料時
+        resize 是 no-op。"""
+        from paulshaclaw.cockpit.jobs_panel import JobsPanel
+
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {"slice_id": "wf-e13fa4daae-subagent-build", "gate_status": "passed"}
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+        panel = JobsPanel()
+        panel._last_groups = groups
+        with patch.object(panel, "set_groups") as rebuild:
+            panel.on_resize(None)
+        rebuild.assert_called_once_with(groups)
+
+        panel._last_groups = ()
+        with patch.object(panel, "set_groups") as rebuild:
+            panel.on_resize(None)
+        rebuild.assert_not_called()
 
     def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
         """混合群組：lead 是不帶 branch 的 in_flight row，branch 要從 recent_done
@@ -1636,8 +1690,8 @@ class Stage11StateTests(unittest.TestCase):
         for run in ("wf-e13fa4daae", "wf-7f4e4a8f1b", "wf-2fa3d22552", "wf-6f0a583d0d", "wf-e6ad935ef9"):
             self.assertIn(run, rendered, f"{run} 被丟掉了")
         self.assertIn("add-cortex-version-flag-build", rendered)
-        self.assertIn("4 phase 全待裁決", rendered)
-        self.assertIn("3 phase 全待裁決", rendered)
+        self.assertIn("4 ph 全待裁決", rendered)
+        self.assertIn("3 ph 全待裁決", rendered)
 
     def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
         app = self._minimal_app()
