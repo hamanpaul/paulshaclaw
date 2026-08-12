@@ -30,10 +30,12 @@ def pane(pid, *, session="main", window="0", title="pane", command="bash",
 
 class StatusStyleTests(unittest.TestCase):
     def test_known_statuses_map_to_glyph_and_semantic_color(self) -> None:
-        self.assertEqual(status_style("running"), ("●", "#22C55E"))
-        self.assertEqual(status_style("failed"), ("✗", "#EF4444"))
-        self.assertEqual(status_style("done")[0], "✓")
-        self.assertEqual(status_style("pending"), ("◔", "#FBBF24"))
+        # #308：glyph 統一「•」、五桶顏色（working 綠／broke 紅／finished 灰／
+        # wait-for-start 白）。
+        self.assertEqual(status_style("running"), ("•", "#22C55E"))
+        self.assertEqual(status_style("failed"), ("•", "#EF4444"))
+        self.assertEqual(status_style("done"), ("•", "#64748B"))
+        self.assertEqual(status_style("pending"), ("•", "#E2E8F0"))
 
     def test_case_insensitive(self) -> None:
         self.assertEqual(status_style("FAILED"), status_style("failed"))

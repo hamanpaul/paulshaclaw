@@ -178,6 +178,22 @@ class BuildJobsNodesKeyStabilityTests(unittest.TestCase):
 
 
 class BuildJobsNodesColorTests(unittest.TestCase):
+    def test_status_style_five_buckets(self):
+        """#308 owner 裁決：glyph 統一「•」，五桶顏色——wait-for-start 白、
+        working 綠、broke 紅、wait-confirm 橘、finished 灰；未知退中性。"""
+        self.assertEqual(status_style("ready"), ("•", "#E2E8F0"))
+        self.assertEqual(status_style("blocked"), ("•", "#E2E8F0"))
+        self.assertEqual(status_style("running"), ("•", "#22C55E"))
+        self.assertEqual(status_style("failed"), ("•", "#EF4444"))
+        self.assertEqual(status_style("needs_human"), ("•", "#F97316"))
+        self.assertEqual(status_style("attention"), ("•", "#F97316"))
+        self.assertEqual(status_style("passed"), ("•", "#64748B"))
+        self.assertEqual(status_style("workflow-tracked"), ("•", "#64748B"))
+        self.assertEqual(status_style("exited"), ("•", "#64748B"))
+        glyph, color = status_style("mystery-state")
+        self.assertEqual(glyph, "•")
+        self.assertEqual(color, "#94A3B8")
+
     def test_running_uses_status_style_color(self):
         groups = (JobGroup(key="wf-abc", rows=(row("wf-abc-build", state="running"),)),)
         spec = build_jobs_nodes(groups)[0]

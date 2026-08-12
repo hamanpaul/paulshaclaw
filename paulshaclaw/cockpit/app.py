@@ -67,8 +67,6 @@ from .jobs_panel import (
     _display_width,
     _ellipsize_middle,
     _fit_trailer,
-    _JOBS_NAME_COL,
-    _JOBS_STATE_COL,
     _JOBS_WIDTH_FALLBACK,
     _pad_display,
     _STATUS_DEFAULT,
