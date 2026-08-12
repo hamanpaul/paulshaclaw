@@ -7,9 +7,24 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-12
+
+### Added
+- JOBS 面板 workflow job 的次要欄（trailer）新增 **branch**（#292）：排在 project 之後、workflow id 之前，`recent_done`／`attention` 條目的 `feature/<N>-<slug>` 分支名直接可見，operator 不用開 handoff manifest 就能辨識 job 屬於哪個 issue——上游 `repo` 因 hamanpaul/paulsha-cortex#465 目前全為 null，branch 是唯一的歸屬線索。多 phase 群組 lead 優先、lead 沒值（in_flight／ready／held 上游不帶 branch）時取第一個有值的 phase；寬度不足時沿用 `_fit_trailer` 既有「從尾端整項丟棄、標示省略」語意，不硬切分支名。cortex#465 落地後同列 project 欄自動補上 repo 名，兩者互不衝突。
+- 新增 `paulshaclaw` console script 作為**正式啟動路徑**（#288）：安裝 release wheel 後即可在全新機器啟動 operator shell，行為與 `scripts/start.sh` 對等（cost／telegram／dream／cortex fallback／cockpit），執行期鎖定自身安裝版本、不讀取 repo 工作樹。
+  - systemd unit 模板 `ExecStart` 改為 `__PYTHON__ -m paulshaclaw.launcher.services <role>`（render 時代入安裝 venv 直譯器），release artifact 不再依賴 repo `scripts/`。
+  - 兩條啟動路徑共用 `paulshaclaw-start.lock` 互斥、**後起的為主**：新啟動方自動停掉既有 operator shell（process 持有者送 SIGTERM；systemd unit 持有者走 `systemctl --user stop`），停不掉即 fail-closed 明確報告；接管邊界僅及操作面自身行程與 units，不波及 cortex／hippo 常駐服務。
+  - `scripts/start.sh` 維持開發驗證路徑定位，偵測到既有實例由「拒絕啟動」改為「接管」。
+  - `paulshaclaw.launcher.__version__` 提供可查版本字串（`importlib.metadata`，未安裝時 `0+unknown`），release-contract §6 的回滾步驟自此可直接查版本。
+
 ### Fixed
 - `paulsha-cortex` pin 改指向正式 release **v0.1.4** 的 SHA（`b868760`），取代前一輪暫時指向的未發版 main commit `ea4cd53`；內容相同（v0.1.4 即該 commit 的發版），此變更是讓 pin 對齊「部署以 release 為主」，本機 pipx 亦已升到 v0.1.4，pin 與部署版本自此一致。`paulsha-hippo` 本輪不動、續留 main SHA `96513bc`（詞彙聯集已進 hippo main 但尚未收進 tag），已在 `pyproject.toml` 註明下次 hippo 發版時改指向該 tag 的 SHA。
 - 兩個平面 pin 成對升級並修掉 lifecycle 詞彙分歧：`paulsha-cortex` `3dfea79` → `ea4cd53`（原 pin 落後 main 613 個 commit），`paulsha-hippo` `eb2ccb8` → `96513bc`。cortex 於 `ae4bc43` 把 lifecycle 首階段由 `research` 改名為 `claim` 而 hippo 未跟進，使 `tests/test_cortex_alignment.py::test_cortex_phases_match_hippo_schema` FAIL；上游採詞彙聯集而非任一側改名（cortex#376、hippo#126），兩邊 `PHASES` 現同為 8 個。因兩平面之間刻意零 import 依賴、相等性僅靠本 repo 這條對齊測試守，pin 必須成對移動，已在 `pyproject.toml` 註記。同步調整兩處測試：`test_stage3_lifecycle_mvp.py` 的 `artifact_kind_by_phase` 補 `claim → task`（迭代 `schema.PHASES` 缺鍵會 `KeyError`）；`test_stage11_operator_cockpit.py` 的假 pid 改為 `os.getpid()`，因 cortex v0.1.3 起 `read_status()` 會把「有 pid 但 pid 不存活」判為 `degraded="dead"`。另順帶修掉一個既有的 R-21 structural finding（非本次引入）：`test_start_sh_cortex_cutover.py` 的 fixture 寫死一個家目錄形式的絕對路徑字面值，本 repo 為 public 且未宣告 `tier`，該樣式被判為個人絕對路徑；改用 `tmp_path` 底下的假路徑。
+- 移除孤兒 hook `scripts/gemma4-hooks/psc-bro-return.py` 與其專屬測試（#289）。forensics 證實它不存在於任何 hook 註冊表（claude/codex/copilot/gemini），`~/.agents/log/bro-hook.log` 的 203 筆 `本輪回覆讀不到` 失敗全部是測試套件副作用——`tests/test_psc_bro_return.py` 的 reply=None 案例以未隔離的真實 log 路徑寫入，每跑一次全套測試就多一筆，從無任何生產呼叫。
+  - Telegram 回程的 live 管線不變：Claude 走 `bro_in.py`/`bro_out.py`（launcher 注入），cortex 派工走 `psc-relay-hook.sh` → `reply_bridge.py`；`paulsha-cortex` 早已在 hook 模板移除 psc-bro-return glue，本次把留在本 repo 的殘骸拔掉。
+  - 同步刪除 live spec 中 mandate 此 hook 的 Requirement 區塊（`openspec/specs/agent-conversation-routing/spec.md`），並修正 `custom-skills/bro/tests/test_reply_bridge.py` docstring 的過期引用（測試本體保留，仍守護「呼叫端不傳路徑」的現役行為）。runtime 側 `bro-hook.log` 於部署時歸檔，寫入者歸零後不再累積。
+- `paulsha-cortex` pin 升到正式 release **v0.1.8** 的 SHA（`dc8a968`），取代 v0.1.4（`b868760`）。v0.1.8 收進 repo 歸屬鏈全通（cortex#465 workflow-lane manifest、cortex#469 slice-lane 顯式宣告）等四個 fix，本機 pipx 部署已同步升至 v0.1.8 並重啟 manager/monitor units，pin 與部署版本一致。
+  - `paulsha-hippo` 本輪仍**不動**（成對升級原則下先驗證 `persona/contract.py` 的 `PHASES` 於 v0.1.4→v0.1.8 零變更，`tests/test_cortex_alignment.py` 不受單升影響）。
 
 
 ## [0.1.0] - 2026-08-07
