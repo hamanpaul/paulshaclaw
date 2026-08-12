@@ -1650,6 +1650,15 @@ class Stage11StateTests(unittest.TestCase):
         )
         # trailer 白色。
         self.assertEqual(single.segments[2][1], "#E2E8F0")
+        # #314：群組列 name 段留白、branch 在 trailer 段——與單列的 feat/ 同一
+        # 垂直欄（前兩段顯示寬含箭頭補償後相等 → trailer 同 x 起點）。
+        self.assertEqual(multi.segments[1][0].strip(), "")
+        self.assertIn("feat/2-multi", multi.segments[2][0])
+        self.assertIn("feat/1-single", single.segments[2][0])
+        self.assertEqual(
+            _display_width(single.segments[0][0]) + _display_width(single.segments[1][0]),
+            _display_width(multi.segments[0][0]) + 2 + _display_width(multi.segments[1][0]),
+        )
 
     def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
         """混合群組：lead 是不帶 branch 的 in_flight row，branch 要從 recent_done
