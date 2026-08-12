@@ -76,14 +76,25 @@ def _ellipsize_middle(text: str, width: int) -> str:
     return "".join(head) + "…" + "".join(reversed(tail))
 
 
+_TRAILER_ELLIPSIZE_MIN = 8  # 縮到比這還窄只剩無資訊量的碎片，寧可留白
+
+
 def _fit_trailer(parts: tuple[str, ...], width: int) -> str:
     """次要欄依重要性由高到低排；塞不下時從尾端整項丟棄並標示有省略。
 
-    硬切字元會把 `paulsha-cortex` 砍成半個名字，比少顯示一項更難讀。
+    硬切字元會把 `paulsha-cortex` 砍成半個名字，比少顯示一項更難讀。但退讓到
+    只剩最重要的一項仍塞不下時（窄面板＋37 字元 branch 是常態），整項丟棄會讓
+    trailer 全空、連 wf-hash 都不剩（#299）——這時改用 _ellipsize_middle 縮進
+    預算：頭尾都保，branch 的 issue 編號在頭段不會丟。
     """
     kept = [part for part in parts if part]
     dropped = False
     while kept and _display_width(" · ".join(kept)) > width:
+        if len(kept) == 1:
+            budget = width - 2 if dropped else width  # dropped 時預留 " …" 兩欄
+            if budget >= _TRAILER_ELLIPSIZE_MIN:
+                kept[0] = _ellipsize_middle(kept[0], budget)
+                break
         kept.pop()
         dropped = True
     text = " · ".join(kept)

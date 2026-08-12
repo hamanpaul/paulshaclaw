@@ -1481,6 +1481,58 @@ class Stage11StateTests(unittest.TestCase):
         self.assertTrue(main_text.endswith("…"), main_text)
         self.assertLessEqual(_display_width(main_text), 66, main_text)
 
+    def test_fit_trailer_ellipsizes_last_item_instead_of_blank(self) -> None:
+        """#299：退讓到只剩一項仍塞不下時要縮排顯示，不得留白。今日真實資料形狀
+        （repo=null、branch 37 字元）在 pane 寬 70（trailer 預算 24）下，#292 的
+        整項退讓會讓 trailer 全空——比修之前連 wf-hash 都不剩。縮排後 issue 編號
+        （branch 頭段）必須可見。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "passed",
+                            "branch": "feature/294-feat-slice-executor-model",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=70)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertIn("feature/294", main_text)
+        self.assertIn("…", main_text)
+        self.assertNotIn("feature/294-feat-slice-executor-model", main_text)
+        self.assertLessEqual(_display_width(main_text), 70, main_text)
+
+    def test_fit_trailer_stays_blank_below_ellipsize_floor(self) -> None:
+        """#299：預算低於下限（8 顯示欄）時維持留白——縮到一小截沒有資訊量，
+        寧可不顯示（width=50 → trailer 預算 4）。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "passed",
+                            "branch": "feature/294-feat-slice-executor-model",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=50)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertNotIn("feature", main_text)
+        self.assertNotIn("…", main_text)
+
     def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
         """混合群組：lead 是不帶 branch 的 in_flight row，branch 要從 recent_done
         phase 借用（JobGroup.branch 的 fallback 在群組情境生效）並上到主行。"""
