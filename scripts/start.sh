@@ -37,7 +37,9 @@ start_bot_supervised() {
         fi
       fi
     done
-  ) &
+  ) 200>&- &
+  # supervisor subshell 必須關掉 fd 200：否則它繼承 start lock fd，start.sh 主
+  # 程序死亡而 supervisor 孤兒化時鎖被永久持有，接管只能 fail-closed（#288）。
   TELEGRAM_PID=$!
 }
 
@@ -298,10 +300,7 @@ fi
 # /tmp 與 /run/user/<uid> 兩個 lock 路徑，single-instance 保護就破了。
 ensure_xdg_runtime_dir
 
-start_lock="${XDG_RUNTIME_DIR:-/tmp}/paulshaclaw-start.lock"
-exec 200>"$start_lock"
-flock -n 200 || { echo 已有實例在跑; exit 1; }
-
+# REPO/PY 解析必須在 lock 之前：接管 helper（launcher.lock takeover）需要 PY。
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$script_dir/.." && pwd)"
 # The operator runtime needs both the governance client and the Textual cockpit.
@@ -311,6 +310,22 @@ if ! PY="$(resolve_operator_python "$REPO")"; then
   echo "找不到同時含 paulsha_cortex 與 textual 的 python——請在 repo 執行 'python3 -m venv .venv && .venv/bin/python -m pip install --upgrade --force-reinstall -e .'（或設 PSC_PYTHON 指向具備完整 operator runtime 的 python）" >&2
   exit 1
 fi
+
+# #288：兩條啟動路徑（dev start.sh / release paulshaclaw）共用同一把 start lock，
+# 「後起的為主」——先透過共用模組接管既有持有者（process 送 SIGTERM、systemd
+# 持有者走 systemctl --user stop），停不掉即 fail-closed 不啟動。
+start_lock="${PSC_START_LOCK:-${XDG_RUNTIME_DIR:-/tmp}/paulshaclaw-start.lock}"
+if ! PYTHONPATH="$REPO" "$PY" -m paulshaclaw.launcher.lock takeover \
+  --lock-file "$start_lock" --timeout "${PSC_TAKEOVER_TIMEOUT_SECONDS:-30}"; then
+  echo "接管既有 operator shell 失敗（fail-closed，不啟動）" >&2
+  exit 1
+fi
+# append 開檔：`>` 會在 flock 檢查前就截毀持有者 metadata。
+exec 200>>"$start_lock"
+flock -n 200 || { echo "接管後仍取不到 start lock（可能有並發啟動），fail-closed" >&2; exit 1; }
+# flock 已在手上，write-holder 由路徑截斷重寫 metadata 是安全的。
+PYTHONPATH="$REPO" "$PY" -m paulshaclaw.launcher.lock write-holder \
+  --lock-file "$start_lock" --holder dev --pid $$ --source "$REPO"
 
 # Load Telegram secrets and state config from well-known paths when not already
 # set. Only fill in defaults if the files actually exist, so missing-config

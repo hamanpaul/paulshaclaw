@@ -136,7 +136,7 @@ hippo/cortex 的 package publication，不在本 umbrella 內隱性擴張。
 
 使用者端的版本回滾：
 
-1. 確認目前安裝版本：`pip show paulshaclaw` 或 `python -c "import paulshaclaw; print(paulshaclaw.__version__)"`（待 `__version__` 補上後；目前以 `pip show` 為準）。
+1. 確認目前安裝版本：`pip show paulshaclaw` 或 `python -c "import paulshaclaw; print(paulshaclaw.__version__)"`（`__version__` 已於 #288 提供，來源為 `importlib.metadata`；未安裝的原始碼樹直跑會回 `0+unknown`）。
 2. 從上一穩定版本的 GitHub Release 下載 wheel。
 3. 在目標 venv `pip install --force-reinstall <舊版 wheel>`。
 4. runtime 狀態（`~/.agents/`）**不隨 artifact 變動**，回滾 operator shell 不會動到 state/secret。
@@ -331,3 +331,79 @@ rm -f ~/.config/paulshaclaw/demo-agent.secret.env \
 改寫成錯誤的 `PSC_REPO_ROOT`，以 paulsha-cortex checkout 下重新跑
 `python -m paulsha_cortex.cli install service` 導正（#285 問題 B 的 start.sh 側已加
 fail-closed 檢查，不會再覆寫指向別 repo 的 env）。
+## 9. 啟動路徑契約（#288）
+
+> 實作：`paulshaclaw/launcher/`（`lock.py` / `services.py` / `supervisor.py` / `cli.py`）；
+> 測試：`tests/test_launcher_lock.py`、`test_launcher_services.py`、`test_launcher_cli.py`、
+> `test_launcher_takeover_integration.py`。
+
+### 9.1 兩條啟動路徑職責分離（issue #288 owner 裁決）
+
+| 路徑 | 定位 | 來源 | 版本 |
+|---|---|---|---|
+| `scripts/start.sh` | **開發驗證** | repo checkout | 跟著工作樹，隨時可變 |
+| `paulshaclaw`（console script） | **正式啟動** | 已安裝的 release artifact | **只 pin 該 release 的版本** |
+
+- 兩者**不互用**：release 路徑不依賴 repo `scripts/`（systemd 模板 ExecStart 為
+  `__PYTHON__ -m paulshaclaw.launcher.services <role>`，render 時代入安裝 venv 的
+  直譯器）；dev 路徑不改走 artifact。
+- 兩者**二擇一**：同一台機器同時間只有一套 operator shell 在跑。
+- **後起的為主**：新啟動方接管（停掉）既有持有者後才啟動，而非拒絕啟動。
+
+### 9.2 start lock 與 metadata schema
+
+lock 檔：`paulshaclaw-start.lock`，路徑解析順序 `PSC_START_LOCK` >
+`XDG_RUNTIME_DIR` > `/run/user/<uid>`（存在且可寫）> `/tmp`。
+
+- **flock 為活性真相**：kernel flock 才代表有人活著持有；crash 殘留的 stale
+  檔案會被正確判為 free。
+- 檔內 metadata（單行 JSON，schema v1）只用於辨識持有者與停法：
+
+```json
+{"schema": 1, "holder": "dev|release", "pid": 123, "pgid": 123,
+ "stop": {"kind": "process", "pid": 123},
+ "version": "0.1.0 或 dev@<repo>", "started_at": "..."}
+```
+
+`stop.kind` 亦可為 `{"kind": "systemd", "unit": "<unit>"}`——systemd 持有者
+**必須走 `systemctl --user stop`**（直接 kill 會被 `Restart=on-failure` 拉回，
+造成兩套並存的假象循環）。
+
+### 9.3 接管流程與 fail-closed 條款
+
+1. 停操作面 units：僅 `<operator-instance>-cost.service` / `-telegram.service`
+   （instance 取 `PSC_OPERATOR_INSTANCE`，預設 `paulshaclaw`；白名單建構）。
+2. flock 探測：free 即直接取鎖；被持有則讀 metadata——**unreadable / corrupt
+   即 fail-closed**，不盲殺。
+3. 依 `stop.kind` 停現任持有者（process → SIGTERM；systemd → systemctl stop）。
+4. 每 0.2s 輪詢 flock 至 timeout（預設 30s，`PSC_TAKEOVER_TIMEOUT_SECONDS`
+   覆寫）；**逾時即 fail-closed** 並回報持有者 metadata，不升級為 KILL。
+
+**三平面邊界**：接管僅停操作面自己的行程與 units；cortex / hippo 由 systemd
+常駐的服務不受影響（stop 目標含 `manager` / `monitor` 字樣或 `cortex-` /
+`hippo-` 前綴一律 fail-closed 拒絕）。
+
+### 9.4 B 節裁決紀錄：service 交付選方案 2（指令自承 loop）
+
+理由（對照 issue #288 B 節兩案）：
+
+1. `scripts/service-*.sh` 與 repo 佈局深耦合（自身位置推 REPO、source
+   `start.sh --source-only`、以 repo 路徑注入模組搜尋路徑），納入 package data
+   仍須整段重寫。
+2. wheel 對 package data 的執行位元與安裝路徑無契約保證，shell script 交付
+   在 wheel 語境是二等公民。
+3. Python loop（`launcher/services.py`）可單元測試，ready-gate / backoff /
+   偵測順序皆有測試釘住。
+4. `__PYTHON__` render（`installer.render_template`，預設 `sys.executable`）讓
+   unit ExecStart 直指安裝 venv，版本 pin 自動閉合。
+
+### 9.5 release 路徑與 dev 路徑的明確差異裁決
+
+- release supervisor **不跑 `cortex install service`**：該動作綁 repo checkout
+  （`--repo-root`），屬治理面部署。release 路徑只做偵測（`manager.lock` flock
+  探測＋monitor pgrep），缺者以本 venv 起 local fallback。
+- `paulshaclaw` 執行期**不讀 repo 工作樹**：全程 `sys.executable`＋安裝 venv
+  內套件（`tests/test_launcher_cli.py` 以原始碼掃描釘住）。
+- dev 路徑 `scripts/start.sh`＋`service-*.sh` 定位不變；start.sh 偵測到既有
+  實例由「拒絕啟動」改為呼叫共用模組 `-m paulshaclaw.launcher.lock takeover`
+  接管後重取鎖。

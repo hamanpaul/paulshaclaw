@@ -85,7 +85,6 @@ echo "    cockpit.tcss 已包含於 wheel"
 extract_dir="$(mktemp -d)"
 meta_version="$("$python_bin" -m zipfile -e "$wheel" "$extract_dir" >/dev/null 2>&1; \
   grep -m1 '^Version:' "$extract_dir"/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
-rm -rf "$extract_dir"
 file_version="$(cat "$repo_root/VERSION")"
 if [[ "$meta_version" != "$file_version" ]]; then
   echo "FAIL: wheel METADATA version($meta_version) != VERSION($file_version)" >&2
@@ -99,6 +98,30 @@ if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "entry_points.txt"; then
   exit 1
 fi
 echo "    entry_points.txt 已包含於 wheel"
+
+# 3d. #288：launcher 四模組必須入 wheel（release artifact 自足）。
+for mod in lock services supervisor cli; do
+  if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/launcher/${mod}.py"; then
+    echo "FAIL: wheel 未包含 paulshaclaw/launcher/${mod}.py" >&2
+    exit 1
+  fi
+done
+echo "    launcher 模組（lock/services/supervisor/cli）已包含於 wheel"
+
+# 3e. #288：entry point paulshaclaw 必須指向 launcher.cli:main。
+if ! grep -q "paulshaclaw = paulshaclaw.launcher.cli:main" "$extract_dir"/paulshaclaw-*.dist-info/entry_points.txt; then
+  echo "FAIL: entry_points 缺 paulshaclaw console script（launcher.cli:main）" >&2
+  exit 1
+fi
+echo "    entry point paulshaclaw -> launcher.cli:main 確認"
+
+# 3f. #288：systemd 模板不得殘留 __ROOT_DIR__/scripts（release 不依賴 repo checkout）。
+if grep -R "__ROOT_DIR__/scripts" "$extract_dir/paulshaclaw/deploy/templates/" >/dev/null 2>&1; then
+  echo "FAIL: systemd 模板仍引用 __ROOT_DIR__/scripts" >&2
+  exit 1
+fi
+echo "    systemd 模板無 __ROOT_DIR__/scripts 殘留"
+rm -rf "$extract_dir"
 
 # 4. 乾淨 venv 安裝 smoke test。
 if [[ "$do_install" == "1" ]]; then
@@ -133,6 +156,9 @@ print('import closure + tcss OK')
       exit 1
     fi
     echo "psc entry point OK（usage + exit 2）"
+    # #288：paulshaclaw 正式啟動入口 --help 必須 exit 0。
+    "$clean_root/venv/bin/paulshaclaw" --help >/dev/null
+    echo "paulshaclaw entry point OK（--help exit 0）"
   )
   rm -rf "$smoke_dir"
 fi

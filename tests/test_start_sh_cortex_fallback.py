@@ -222,7 +222,7 @@ def test_start_sh_normalizes_xdg_runtime_dir_before_start_lock() -> None:
 
     src = START_SH.read_text(encoding="utf-8")
     call_index = src.index("\nensure_xdg_runtime_dir\n")
-    lock_index = src.index('start_lock="${XDG_RUNTIME_DIR:-/tmp}')
+    lock_index = src.index('start_lock="${PSC_START_LOCK:-${XDG_RUNTIME_DIR:-/tmp}')
 
     assert call_index < lock_index, "ensure_xdg_runtime_dir 必須在 start_lock 之前呼叫"
 

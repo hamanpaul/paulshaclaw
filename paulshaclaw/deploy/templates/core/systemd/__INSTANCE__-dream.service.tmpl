@@ -11,7 +11,7 @@ StartLimitBurst=5
 [Service]
 EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env
 EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-dream.env
-ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-dream.sh
+ExecStart=__PYTHON__ -m paulshaclaw.launcher.services dream
 KillMode=control-group
 Restart=on-failure
 RestartSec=10

@@ -23,6 +23,8 @@ dependencies = [
 
 [project.scripts]
 psc = "paulshaclaw.cli:main"
+# #288：正式啟動路徑（release artifact 自足）；與 psc（cortex dispatcher）語意分離。
+paulshaclaw = "paulshaclaw.launcher.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

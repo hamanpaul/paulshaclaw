@@ -161,6 +161,32 @@ sha256sum -c checksums-sha256.txt --ignore-missing
 
 > **為何不是 PyPI**：`paulsha-hippo` / `paulsha-cortex` 是 `git+<url>@<SHA>` direct reference，PyPI 上傳政策不接受 direct URL 參照，故第一階段僅以 GitHub Release 分發。詳見 release-contract §5 的實測依據。
 
+#### 正式啟動（`paulshaclaw` 指令，#288）
+
+裝好 wheel 後，operator shell 的**正式啟動路徑**是 `paulshaclaw` console script——不需要 clone repo：
+
+```bash
+# tmux 內啟動（含 cockpit TUI）
+~/.venv-paulshaclaw/bin/paulshaclaw
+
+# 無 tmux 的機器：不起 cockpit、常駐前景
+~/.venv-paulshaclaw/bin/paulshaclaw --no-cockpit  # 等同 `paulshaclaw up --no-cockpit`
+
+# 停掉現任 operator shell（不啟動新的）／查狀態
+~/.venv-paulshaclaw/bin/paulshaclaw down
+~/.venv-paulshaclaw/bin/paulshaclaw status
+```
+
+兩條啟動路徑職責分離（詳見 [release-contract §9](./docs/release-contract.md)）：
+
+| 路徑 | 定位 | 來源 | 版本 |
+|---|---|---|---|
+| `scripts/start.sh` | 開發驗證 | repo checkout | 跟著工作樹，隨時可變 |
+| `paulshaclaw` | 正式啟動 | 已安裝的 release artifact | 只 pin 該 release 的版本 |
+
+- **二擇一、後起的為主**：兩者共用同一把 start lock，新啟動的那套會先停掉既有的（process 持有者送 SIGTERM、systemd 持有者走 `systemctl --user stop`），**停不掉即 fail-closed** 明確報告、絕不兩套並存。接管邊界僅及操作面自身行程與 units，不波及 cortex / hippo 常駐服務。
+- 與 `psc` 的區隔：`psc` 是轉發 coordinator/deck/monitor 給 cortex 的 **dispatcher**，`paulshaclaw` 是 operator shell 的**啟動入口**，語意不同、不要混用。
+
 ### B. 開發安裝（clone + editable install）
 
 ```bash
