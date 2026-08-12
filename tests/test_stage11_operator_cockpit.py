@@ -1425,9 +1425,9 @@ class Stage11StateTests(unittest.TestCase):
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
         self.assertIn("feat/294-feat-slice-executor-model", main_text)
 
-    def test_build_jobs_nodes_orders_branch_between_project_and_workflow_id(self) -> None:
-        """cortex#465 落地後 project 欄有值的共存驗收：project → branch → workflow id
-        的順序（寬度 120，trailer 預算 74，三者全放得下）。"""
+    def test_build_jobs_nodes_orders_branch_after_project_without_hash(self) -> None:
+        """cortex#465 落地後 project 欄有值的共存驗收：project → branch 順序；
+        wf-hash／job_id 是機器 id，不再出現在主行任何位置（#305）。"""
         groups = group_job_rows(
             slices_from_status(
                 {
@@ -1450,9 +1450,7 @@ class Stage11StateTests(unittest.TestCase):
         self.assertLess(
             main_text.index("paulsha-cortex"), main_text.index("feat/294-"), main_text
         )
-        self.assertLess(
-            main_text.index("feat/294-"), main_text.index("wf-e13fa4daae"), main_text
-        )
+        self.assertNotIn("wf-e13fa4daae", main_text)
 
     def test_build_jobs_nodes_drops_branch_whole_when_width_is_tight(self) -> None:
         """寬度不足時沿用 _fit_trailer 既有語意：branch 整項退讓並標示省略，
@@ -1586,7 +1584,10 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertIn("feat/292-feat-jobs-trailer-branch", main_text)
+        # #305：多 phase 群主欄就是 branch（feat/ 縮寫＋名稱欄 26 欄中段省略），
+        # wf-hash 不再出現。
+        self.assertIn("feat/292", main_text)
+        self.assertNotIn("wf-2fa3d22552", main_text)
 
     def test_refresh_widgets_reports_full_waiting_count_after_folding_phases(self) -> None:
         """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine；
