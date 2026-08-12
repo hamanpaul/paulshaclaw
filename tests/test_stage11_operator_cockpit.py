@@ -1236,8 +1236,8 @@ class Stage11StateTests(unittest.TestCase):
         # 兩種 needs_human 語意在畫面上分得開。
         self.assertIn("阻塞中", rendered)
         self.assertIn("待裁決", rendered)
-        # workflow hash 退成次要，主欄位是看得懂的任務名。
-        self.assertIn("subagent-build", rendered)
+        # workflow hash 退成次要，主欄位是看得懂的任務名（#302 縮寫後）。
+        self.assertIn("[sub]-build", rendered)
         self.assertIn("wf-e13fa4daae", rendered)
         # 上游有給 repo 時，project 要出現在次要欄的最前面。
         self.assertIn("paulsha-cortex", rendered)
@@ -1423,7 +1423,7 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertIn("feature/294-feat-slice-executor-model", main_text)
+        self.assertIn("feat/294-feat-slice-executor-model", main_text)
 
     def test_build_jobs_nodes_orders_branch_between_project_and_workflow_id(self) -> None:
         """cortex#465 落地後 project 欄有值的共存驗收：project → branch → workflow id
@@ -1448,10 +1448,10 @@ class Stage11StateTests(unittest.TestCase):
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
         self.assertLess(
-            main_text.index("paulsha-cortex"), main_text.index("feature/294-"), main_text
+            main_text.index("paulsha-cortex"), main_text.index("feat/294-"), main_text
         )
         self.assertLess(
-            main_text.index("feature/294-"), main_text.index("wf-e13fa4daae"), main_text
+            main_text.index("feat/294-"), main_text.index("wf-e13fa4daae"), main_text
         )
 
     def test_build_jobs_nodes_drops_branch_whole_when_width_is_tight(self) -> None:
@@ -1477,7 +1477,7 @@ class Stage11StateTests(unittest.TestCase):
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
         self.assertIn("paulsha-cortex", main_text)
-        self.assertNotIn("feature/", main_text)
+        self.assertNotIn("feat/", main_text)
         self.assertTrue(main_text.endswith("…"), main_text)
         self.assertLessEqual(_display_width(main_text), 66, main_text)
 
@@ -1504,9 +1504,9 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups, width=70)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertIn("feature/294", main_text)
+        self.assertIn("feat/294", main_text)
         self.assertIn("…", main_text)
-        self.assertNotIn("feature/294-feat-slice-executor-model", main_text)
+        self.assertNotIn("feat/294-feat-slice-executor-model", main_text)
         self.assertLessEqual(_display_width(main_text), 70, main_text)
 
     def test_fit_trailer_stays_blank_below_ellipsize_floor(self) -> None:
@@ -1530,8 +1530,31 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups, width=50)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertNotIn("feature", main_text)
+        self.assertNotIn("feat", main_text)
         self.assertNotIn("…", main_text)
+
+    def test_build_jobs_nodes_abbreviates_verbose_labels(self) -> None:
+        """#302：顯示層去贅詞——workflow-tracked→[wf]-tracked、subagent-build→
+        [sub]-build（單列主欄、多 phase 群狀態列、phase 子行都要縮）；model 層
+        維持原始字串（style key 與資料契約不受影響）。"""
+        status = {
+            "recent_done": [
+                {"slice_id": "wf-aaaa11111-subagent-build", "gate_status": "workflow-tracked"},
+                {"slice_id": "wf-bbbb22222-subagent-build", "gate_status": "workflow-tracked"},
+                {"slice_id": "wf-bbbb22222-code-review", "gate_status": "workflow-tracked"},
+            ],
+            "degraded": False,
+        }
+        groups = group_job_rows(slices_from_status(status))
+        rendered = _flatten_nodes(build_jobs_nodes(groups))
+
+        self.assertIn("[wf]-tracked", rendered)
+        self.assertIn("2 phase [wf]-tracked", rendered)
+        self.assertIn("[sub]-build", rendered)
+        self.assertNotIn("workflow-tracked", rendered)
+        self.assertNotIn("subagent-build", rendered)
+        states = {row.state for group in groups for row in group.rows}
+        self.assertEqual(states, {"workflow-tracked"})
 
     def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
         """混合群組：lead 是不帶 branch 的 in_flight row，branch 要從 recent_done
@@ -1563,7 +1586,7 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertIn("feature/292-feat-jobs-trailer-branch", main_text)
+        self.assertIn("feat/292-feat-jobs-trailer-branch", main_text)
 
     def test_refresh_widgets_reports_full_waiting_count_after_folding_phases(self) -> None:
         """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine；

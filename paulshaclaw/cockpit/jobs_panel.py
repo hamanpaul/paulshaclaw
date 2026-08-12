@@ -103,6 +103,28 @@ def _fit_trailer(parts: tuple[str, ...], width: int) -> str:
     return text
 
 
+# 顯示層縮寫表（#302，owner 指定字面）：只在渲染組裝時替換——model 層屬性、
+# style key（status_style 吃原始 state）與 detail 行的可複製命令都維持原始字串。
+# 日後擴充（如 adversarial-review）在這裡加一行即可。
+_LABEL_ABBREVS: tuple[tuple[str, str], ...] = (
+    ("workflow-tracked", "[wf]-tracked"),
+    ("subagent-build", "[sub]-build"),
+)
+
+
+def _abbrev_label(text: str) -> str:
+    for verbose, short in _LABEL_ABBREVS:
+        text = text.replace(verbose, short)
+    return text
+
+
+def _abbrev_branch(branch: str) -> str:
+    """`feature/<N>-<slug>` → `feat/<N>-<slug>`：前綴是 git 慣例贅詞，編號才是資訊。"""
+    if branch.startswith("feature/"):
+        return "feat/" + branch[len("feature/") :]
+    return branch
+
+
 # JOBS 主行欄寬（顯示寬，非字元數）與量不到 widget 寬度時的保守後備值。
 # 超出可用寬度會被 Textual 折行，折出來的那行不在行預算內，實際顯示會比算的少。
 _JOBS_STATE_COL = 16
@@ -143,8 +165,8 @@ def _single_detail_children(group: JobGroup) -> tuple[JobsNodeSpec, ...]:
 
 def _phase_child(group: JobGroup, row: JobRow) -> JobsNodeSpec:
     glyph, color = status_style(_row_state_key(row))
-    label_state = row.human_state or row.state
-    phase_name = group._phase_label(row)
+    label_state = _abbrev_label(row.human_state or row.state)
+    phase_name = _abbrev_label(group._phase_label(row))
     segments = (
         (f"{glyph} {_pad_display(label_state, _JOBS_STATE_COL)} ", color),
         (phase_name, "#E2E8F0"),
@@ -175,20 +197,21 @@ def build_jobs_nodes(
                 group.project,
                 # branch 帶著 feature/<N>-<slug> 的 issue 編號，是上游 repo 仍為 null
                 # （cortex#465）時 workflow job 唯一的歸屬線索；排在 project 之後，
-                # _fit_trailer 從尾端丟棄時它比 workflow id 活得久。
-                group.branch,
+                # _fit_trailer 從尾端丟棄時它比 workflow id 活得久。縮寫要在
+                # _fit_trailer 之前做，寬度計算才用得上省下來的欄位。
+                _abbrev_branch(group.branch),
                 # 多 phase 群的主欄位已經是 workflow id，不再重複一次。
                 group.workflow_id if group.is_single else "",
                 group.note,
-                group.raw_state,
+                _abbrev_label(group.raw_state),
                 group.job_id,
             ),
             width - _JOBS_STATE_COL - _JOBS_NAME_COL - 4,
         )
         main_segments = (
-            (f"{glyph} {_pad_display(group.headline_state, _JOBS_STATE_COL)} ", color),
+            (f"{glyph} {_pad_display(_abbrev_label(group.headline_state), _JOBS_STATE_COL)} ", color),
             (
-                f"{_pad_display(_ellipsize_middle(group.display_name, _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
+                f"{_pad_display(_ellipsize_middle(_abbrev_label(group.display_name), _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
                 "#E2E8F0",
             ),
             (trailer, "#64748B"),
