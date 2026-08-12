@@ -162,6 +162,10 @@ def build_jobs_nodes(
         trailer = _fit_trailer(
             (
                 group.project,
+                # branch 帶著 feature/<N>-<slug> 的 issue 編號，是上游 repo 仍為 null
+                # （cortex#465）時 workflow job 唯一的歸屬線索；排在 project 之後，
+                # _fit_trailer 從尾端丟棄時它比 workflow id 活得久。
+                group.branch,
                 # 多 phase 群的主欄位已經是 workflow id，不再重複一次。
                 group.workflow_id if group.is_single else "",
                 group.note,
