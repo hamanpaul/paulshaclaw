@@ -167,8 +167,18 @@ class DeployInstallCliTests(unittest.TestCase):
             self.assertIn("StartLimitIntervalSec=300", telegram_unit)
             self.assertIn("StartLimitBurst=5", telegram_unit)
             self.assertIn("KillMode=control-group", telegram_unit)
-            self.assertIn("ExecStart=/usr/bin/env bash /srv/paulshaclaw/scripts/service-bot.sh", telegram_unit)
-            self.assertNotIn("/home/", telegram_unit)
+            # #288：ExecStart 直指執行 deploy 的直譯器（render 時 __PYTHON__ 代入
+            # sys.executable），不再依賴 repo scripts/。
+            self.assertIn(
+                f"ExecStart={sys.executable} -m paulshaclaw.launcher.services telegram",
+                telegram_unit,
+            )
+            # ExecStart 行是安裝 venv 直譯器的絕對路徑（可能含 /home/...）；
+            # 其餘行仍必須用 %h，不得寫死家目錄。
+            non_exec_lines = "\n".join(
+                line for line in telegram_unit.splitlines() if not line.startswith("ExecStart=")
+            )
+            self.assertNotIn("/home/", non_exec_lines)
 
             log_text = command_log.read_text(encoding="utf-8")
             self.assertEqual(log_text.count("loginctl enable-linger stage7tester"), 1)

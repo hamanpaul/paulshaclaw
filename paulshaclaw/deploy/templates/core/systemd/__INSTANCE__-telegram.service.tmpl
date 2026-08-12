@@ -10,7 +10,7 @@ EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env
 EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env
 EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env
 Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json
-ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-bot.sh
+ExecStart=__PYTHON__ -m paulshaclaw.launcher.services telegram
 KillMode=control-group
 Restart=on-failure
 RestartSec=10

@@ -341,7 +341,7 @@ class UpgradeExecutionTests(unittest.TestCase):
 
             # unit 檔允許覆寫（升級新版）。
             unit = home_dir / ".config" / "systemd" / "user" / "demo-agent-cost.service"
-            self.assertIn("service-cost.sh", unit.read_text(encoding="utf-8"))
+            self.assertIn("-m paulshaclaw.launcher.services cost", unit.read_text(encoding="utf-8"))
 
             # install record 被更新為 upgrade 版本。
             record = read_install_record(str(home_dir), instance_name="demo-agent")

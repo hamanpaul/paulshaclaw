@@ -11,6 +11,7 @@ from paulshaclaw.deploy import (
     build_command_plan,
     complete_secret_install_flow,
     list_template_assets,
+    render_template,
     resolve_template_target,
     validate_plane_permissions,
 )
@@ -62,7 +63,7 @@ class TemplateMappingTests(unittest.TestCase):
         self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__.env", telegram_unit_text)
         self.assertIn("EnvironmentFile=%h/.agents/core/runtime/__INSTANCE__-telegram.env", telegram_unit_text)
         self.assertIn("EnvironmentFile=%h/.config/paulshaclaw/__INSTANCE__.telegram.secret.env", telegram_unit_text)
-        self.assertIn("ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/service-bot.sh", telegram_unit_text)
+        self.assertIn("ExecStart=__PYTHON__ -m paulshaclaw.launcher.services telegram", telegram_unit_text)
         self.assertIn("Environment=PSC_STAGE1_CONFIG=%h/.agents/state/config/__INSTANCE__.state.json", telegram_unit_text)
         self.assertEqual(
             telegram_unit.env_catalog,
@@ -236,17 +237,19 @@ class DeployCliTests(unittest.TestCase):
 class ServiceUnitCatalogTests(unittest.TestCase):
     def test_dream_cost_and_telegram_units_follow_service_script_contract(self) -> None:
         assets = {asset.template_relpath: asset for asset in list_template_assets()}
+        # #288：ExecStart 改直指 `__PYTHON__ -m paulshaclaw.launcher.services <role>`
+        #（render 時代入安裝 venv 直譯器），release artifact 不再依賴 repo scripts/。
         expected = {
             "core/systemd/__INSTANCE__-dream.service.tmpl": {
-                "script": "service-dream.sh",
+                "role": "dream",
                 "env_catalog": ("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-dream.env"),
             },
             "core/systemd/__INSTANCE__-cost.service.tmpl": {
-                "script": "service-cost.sh",
+                "role": "cost",
                 "env_catalog": ("core/runtime/__INSTANCE__.env", "core/runtime/__INSTANCE__-cost.env"),
             },
             "core/systemd/__INSTANCE__-telegram.service.tmpl": {
-                "script": "service-bot.sh",
+                "role": "telegram",
                 "env_catalog": (
                     "core/runtime/__INSTANCE__.env",
                     "core/runtime/__INSTANCE__-telegram.env",
@@ -268,8 +271,23 @@ class ServiceUnitCatalogTests(unittest.TestCase):
                 self.assertEqual(asset.env_catalog, info["env_catalog"])
                 for line in required_lines:
                     self.assertIn(line, text)
-                self.assertIn(f"ExecStart=/usr/bin/env bash __ROOT_DIR__/scripts/{info['script']}", text)
+                self.assertIn(
+                    f"ExecStart=__PYTHON__ -m paulshaclaw.launcher.services {info['role']}", text
+                )
+                self.assertNotIn("__ROOT_DIR__/scripts", text)
                 self.assertNotIn("/home/", text)
+                rendered = render_template(
+                    asset,
+                    instance_name="demo-agent",
+                    root_dir="/srv/paulshaclaw",
+                    python_exe="/opt/psc-venv/bin/python",
+                )
+                self.assertIn(
+                    f"ExecStart=/opt/psc-venv/bin/python -m paulshaclaw.launcher.services {info['role']}",
+                    rendered,
+                )
+                self.assertNotIn("__PYTHON__", rendered)
+                self.assertNotIn("__ROOT_DIR__/scripts", rendered)
 
         dream_env = assets["core/runtime/__INSTANCE__-dream.env.tmpl"]
         self.assertEqual(

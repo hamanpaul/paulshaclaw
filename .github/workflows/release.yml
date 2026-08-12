@@ -92,6 +92,19 @@ jobs:
           # entry point psc 必須存在
           python -m zipfile -l "$wheel" | grep -q "entry_points.txt" \
             || { echo "FAIL: wheel 缺 entry_points.txt"; exit 1; }
+          # #288：launcher 四模組必須入 wheel（release artifact 自足）
+          for mod in lock services supervisor cli; do
+            python -m zipfile -l "$wheel" | grep -q "paulshaclaw/launcher/${mod}.py" \
+              || { echo "FAIL: wheel 缺 launcher/${mod}.py"; exit 1; }
+          done
+          # #288：entry point paulshaclaw 必須指向 launcher.cli:main
+          grep -q "paulshaclaw = paulshaclaw.launcher.cli:main" \
+            /tmp/wheel-meta/paulshaclaw-*.dist-info/entry_points.txt \
+            || { echo "FAIL: entry_points 缺 paulshaclaw console script"; exit 1; }
+          # #288：systemd 模板不得殘留 __ROOT_DIR__/scripts（release 不依賴 repo checkout）
+          if grep -R "__ROOT_DIR__/scripts" /tmp/wheel-meta/paulshaclaw/deploy/templates/ >/dev/null 2>&1; then
+            echo "FAIL: systemd 模板仍引用 __ROOT_DIR__/scripts"; exit 1
+          fi
           echo "artifact content 檢查通過"
 
       - name: 乾淨 venv 安裝 smoke test
@@ -125,6 +138,9 @@ jobs:
             echo "FAIL: psc entry point 異常（exit=$psc_rc, output=$psc_out）"; exit 1
           fi
           echo "psc entry point OK（usage + exit 2）"
+          # #288：paulshaclaw 正式啟動入口 --help 必須 exit 0
+          ( cd /tmp && /tmp/clean-venv/bin/paulshaclaw --help >/dev/null )
+          echo "paulshaclaw entry point OK（--help exit 0）"
 
       - name: SHA-256 checksums
         id: checksums

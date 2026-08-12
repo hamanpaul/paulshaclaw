@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -44,11 +45,16 @@ def detect_installed_version() -> str | None:
     return None
 
 
-def render_template(asset: TemplateAsset, *, instance_name: str, root_dir: str) -> str:
+def render_template(asset: TemplateAsset, *, instance_name: str, root_dir: str, python_exe: str | None = None) -> str:
+    # __PYTHON__：#288 起 systemd unit ExecStart 直指安裝 venv 的直譯器
+    # （`-m paulshaclaw.launcher.services <role>`）。deploy 由目標 venv 的 python
+    # 執行，故預設 sys.executable 即正確 pin，版本自動閉合。
+    resolved_python = python_exe or sys.executable
     return (
         asset.template_path.read_text(encoding="utf-8")
         .replace("__INSTANCE__", instance_name)
         .replace("__ROOT_DIR__", root_dir)
+        .replace("__PYTHON__", resolved_python)
     )
 
 
@@ -188,7 +194,7 @@ def _asset_is_overwritable(asset: TemplateAsset) -> bool:
     return asset.template_relpath.startswith("core/systemd/")
 
 
-def apply_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, list[str]]:
+def apply_install_plan(plan: CommandPlan, *, home_dir: Path, python_exe: str | None = None) -> dict[str, list[str]]:
     written_files: list[str] = []
     skipped_existing: list[str] = []
     for asset in plan.templates:
@@ -198,7 +204,7 @@ def apply_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, list[s
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_text(
-            render_template(asset, instance_name=plan.instance_name, root_dir=plan.root_dir),
+            render_template(asset, instance_name=plan.instance_name, root_dir=plan.root_dir, python_exe=python_exe),
             encoding="utf-8",
         )
         _apply_permissions(asset, destination)
