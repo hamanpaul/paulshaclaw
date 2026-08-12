@@ -35,7 +35,7 @@ class StatusStyleTests(unittest.TestCase):
         self.assertEqual(status_style("running"), ("•", "#22C55E"))
         self.assertEqual(status_style("failed"), ("•", "#EF4444"))
         self.assertEqual(status_style("done"), ("•", "#94A3B8"))
-        self.assertEqual(status_style("pending"), ("•", "#E2E8F0"))
+        self.assertEqual(status_style("pending"), ("•", ""))
 
     def test_case_insensitive(self) -> None:
         self.assertEqual(status_style("FAILED"), status_style("failed"))

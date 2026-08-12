@@ -1649,7 +1649,7 @@ class Stage11StateTests(unittest.TestCase):
             _display_width(multi.segments[0][0]) + 2,
         )
         # trailer 白色。
-        self.assertEqual(single.segments[2][1], "#E2E8F0")
+        self.assertEqual(single.segments[2][1], "")  # 白＝終端預設（#317）
         # #314：群組列 name 段留白、branch 在 trailer 段——與單列的 feat/ 同一
         # 垂直欄（前兩段顯示寬含箭頭補償後相等 → trailer 同 x 起點）。
         self.assertEqual(multi.segments[1][0].strip(), "")

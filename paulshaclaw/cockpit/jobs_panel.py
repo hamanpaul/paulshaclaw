@@ -22,7 +22,7 @@ except Exception:  # pragma: no cover - fallback when textual not installed
 # wait-for-start 白、working 綠、broke 紅、wait-confirm 橘、finished 灰。
 # 純函式，供工作清單／DETAIL／JOBS 上色與單測共用；未知狀態退回中性藍灰
 # （不猜語意，寧可視覺上退到「非五桶」）。
-_WAIT_START = "#E2E8F0"
+_WAIT_START = ""  # 白＝終端預設前景（與 banner 一致，#317：指定 #E2E8F0 會有色差）
 _WORKING = "#22C55E"
 _BROKE = "#EF4444"
 _WAIT_CONFIRM = "#F97316"
@@ -232,7 +232,7 @@ def _phase_child(group: JobGroup, row: JobRow, state_col: int) -> JobsNodeSpec:
     phase_name = _abbrev_label(group._phase_label(row))
     segments = (
         (f"{glyph} {_pad_display(label_state, state_col)} ", color),
-        (phase_name, "#E2E8F0"),
+        (phase_name, ""),
     )
     children: tuple[JobsNodeSpec, ...] = ()
     if row.needs_human and row.detail_line:
@@ -282,10 +282,11 @@ def build_jobs_nodes(
             (f"{align}{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
             (
                 f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col) if group.is_single else '', name_col)} ",
-                "#E2E8F0",
+                "",
             ),
-            # trailer 維持白（owner：feat 串不上暗色）；灰階只留給 state 欄語意。
-            (trailer, "#E2E8F0"),
+            # trailer 維持白＝終端預設前景（owner：feat 串不上暗色，#317 消色差）；
+            # 灰階只留給 state 欄語意。
+            (trailer, ""),
         )
         specs.append(
             JobsNodeSpec(
