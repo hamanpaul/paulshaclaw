@@ -214,10 +214,14 @@ class JobGroup:
 
     @property
     def display_name(self) -> str:
-        """多筆時主欄位放群組身分（workflow id 或 work 名），phase 移到細節行。"""
+        """多筆時主欄位放群組身分，phase 移到細節行。
+
+        operator 認得的身分是 branch（issue 編號在裡面），wf-hash 是機器 id
+        （#305）——有 branch 就用它，沒有才退回 workflow id／work 名。
+        """
         if self.is_single:
             return self.lead.display_name
-        return self.workflow_id or self.key
+        return self.branch or self.workflow_id or self.key
 
     @property
     def note(self) -> str:

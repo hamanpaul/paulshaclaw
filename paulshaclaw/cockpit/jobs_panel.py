@@ -196,22 +196,23 @@ def build_jobs_nodes(
             (
                 group.project,
                 # branch 帶著 feature/<N>-<slug> 的 issue 編號，是上游 repo 仍為 null
-                # （cortex#465）時 workflow job 唯一的歸屬線索；排在 project 之後，
-                # _fit_trailer 從尾端丟棄時它比 workflow id 活得久。縮寫要在
+                # （cortex#465）時 workflow job 唯一的歸屬線索。縮寫要在
                 # _fit_trailer 之前做，寬度計算才用得上省下來的欄位。
-                _abbrev_branch(group.branch),
-                # 多 phase 群的主欄位已經是 workflow id，不再重複一次。
-                group.workflow_id if group.is_single else "",
+                # 只有單列放這裡——多 phase 群的主欄位就是 branch（#305）。
+                # wf-hash／job_id 是機器 id，有 branch 時是純噪音不顯示；但沒
+                # branch 的列拿掉 hash 會讓多列長得一模一樣（同 phase 同狀態），
+                # 故無 branch 才退回 workflow id 當最後的身分。job_id 一律不進
+                # trailer；對帳用的原始 id 留在 needs_human detail 行的可複製命令。
+                (_abbrev_branch(group.branch) or group.workflow_id) if group.is_single else "",
                 group.note,
                 _abbrev_label(group.raw_state),
-                group.job_id,
             ),
             width - _JOBS_STATE_COL - _JOBS_NAME_COL - 4,
         )
         main_segments = (
             (f"{glyph} {_pad_display(_abbrev_label(group.headline_state), _JOBS_STATE_COL)} ", color),
             (
-                f"{_pad_display(_ellipsize_middle(_abbrev_label(group.display_name), _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
+                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), _JOBS_NAME_COL), _JOBS_NAME_COL)} ",
                 "#E2E8F0",
             ),
             (trailer, "#64748B"),
