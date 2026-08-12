@@ -187,7 +187,7 @@ class ReplyBridgeTests(unittest.TestCase):
 
     def test_send_reply_resolves_defaults_without_explicit_paths(self) -> None:
         """回歸測試（issue #90 約束2 的實際生產情境）：
-        scripts/gemma4-hooks/bro_out.py 與 psc-bro-return.py 呼叫
+        scripts/gemma4-hooks/bro_out.py 與 cortex 的 psc-relay-hook.sh 呼叫
         reply_bridge.py 時目前只傳 --source-user-id / --text，不傳任何路徑
         參數。此測試把整支 script 當 subprocess 跑、只覆寫 HOME，證明在
         「呼叫端不傳路徑」的情境下，reply_bridge 仍能從 DEFAULT_*_PATH
