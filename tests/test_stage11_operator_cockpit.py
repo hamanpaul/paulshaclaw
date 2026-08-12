@@ -55,7 +55,7 @@ def _flatten_nodes(nodes) -> str:
     return "\n".join(_flatten_node_text(node) for node in nodes)
 from paulshaclaw.cockpit.help import HelpModal
 from paulshaclaw.cockpit.manager_panel import ManagerModal
-from paulshaclaw.cockpit.models import JobRow, JobSummary, PaneRecord, SlotAnchor
+from paulshaclaw.cockpit.models import JobGroup, JobRow, JobSummary, PaneRecord, SlotAnchor
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import (
     TmuxClient,
@@ -1364,6 +1364,154 @@ class Stage11StateTests(unittest.TestCase):
             rendered,
         )
         self.assertNotIn("slice-a…", rendered)
+
+    # --- #292：JOBS trailer 顯示 branch ---
+
+    def test_job_group_branch_prefers_lead_then_first_nonempty(self) -> None:
+        """純 model 層：lead 有 branch 取 lead；lead 空（in_flight／ready／held 的
+        ingest 不帶 branch）時退到第一個有值的 row；全空回空字串。"""
+
+        def row(slice_id: str, section: str, branch: str = "") -> JobRow:
+            return JobRow(
+                slice_id=slice_id, state="running", source_section=section, branch=branch
+            )
+
+        lead_has_branch = JobGroup(
+            key="wf-aaaa",
+            rows=(
+                row("wf-aaaa-subagent-build", "recent_done", branch="feature/1-lead"),
+                row("wf-aaaa-verification", "recent_done", branch="feature/1-later"),
+            ),
+        )
+        lead_empty = JobGroup(
+            key="wf-bbbb",
+            rows=(
+                row("wf-bbbb-subagent-build", "in_flight"),
+                row("wf-bbbb-verification", "recent_done", branch="feature/2-fallback"),
+            ),
+        )
+        all_empty = JobGroup(
+            key="wf-cccc",
+            rows=(
+                row("wf-cccc-subagent-build", "in_flight"),
+                row("wf-cccc-verification", "ready"),
+            ),
+        )
+
+        self.assertEqual(lead_has_branch.branch, "feature/1-lead")
+        self.assertEqual(lead_empty.branch, "feature/2-fallback")
+        self.assertEqual(all_empty.branch, "")
+
+    def test_build_jobs_nodes_shows_branch_in_trailer_for_workflow_job(self) -> None:
+        """今日真實資料形狀：repo 全為 null（cortex#465），branch 是 workflow job
+        唯一的歸屬線索——`feature/<N>-<slug>` 必須直接出現在主行 trailer。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "passed",
+                            "branch": "feature/294-feat-slice-executor-model",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertIn("feature/294-feat-slice-executor-model", main_text)
+
+    def test_build_jobs_nodes_orders_branch_between_project_and_workflow_id(self) -> None:
+        """cortex#465 落地後 project 欄有值的共存驗收：project → branch → workflow id
+        的順序（寬度 120，trailer 預算 74，三者全放得下）。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "passed",
+                            "branch": "feature/294-feat-slice-executor-model",
+                            "workflow_repo": "hamanpaul/paulsha-cortex",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=120)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertLess(
+            main_text.index("paulsha-cortex"), main_text.index("feature/294-"), main_text
+        )
+        self.assertLess(
+            main_text.index("feature/294-"), main_text.index("wf-e13fa4daae"), main_text
+        )
+
+    def test_build_jobs_nodes_drops_branch_whole_when_width_is_tight(self) -> None:
+        """寬度不足時沿用 _fit_trailer 既有語意：branch 整項退讓並標示省略，
+        絕不硬切成半條分支名（width=66 → trailer 預算 20，只放得下 project）。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "passed",
+                            "branch": "feature/294-feat-slice-executor-model",
+                            "workflow_repo": "hamanpaul/paulsha-cortex",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        nodes = build_jobs_nodes(groups, width=66)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertIn("paulsha-cortex", main_text)
+        self.assertNotIn("feature/", main_text)
+        self.assertTrue(main_text.endswith("…"), main_text)
+        self.assertLessEqual(_display_width(main_text), 66, main_text)
+
+    def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
+        """混合群組：lead 是不帶 branch 的 in_flight row，branch 要從 recent_done
+        phase 借用（JobGroup.branch 的 fallback 在群組情境生效）並上到主行。"""
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "in_flight": [
+                        {
+                            "slice_id": "wf-2fa3d22552-subagent-build",
+                            "state": "running",
+                        }
+                    ],
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-2fa3d22552-verification",
+                            "gate_status": "passed",
+                            "branch": "feature/292-feat-jobs-trailer-branch",
+                        }
+                    ],
+                    "degraded": False,
+                }
+            )
+        )
+
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0].branch, "feature/292-feat-jobs-trailer-branch")
+
+        nodes = build_jobs_nodes(groups)
+
+        main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
+        self.assertIn("feature/292-feat-jobs-trailer-branch", main_text)
 
     def test_refresh_widgets_reports_full_waiting_count_after_folding_phases(self) -> None:
         """現場回歸：6 群等人工（其中兩群各含 3~4 個 phase）＋ 大量 routine；

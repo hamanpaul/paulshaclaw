@@ -158,6 +158,15 @@ class JobGroup:
         return self.lead.project
 
     @property
+    def branch(self) -> str:
+        """群組的 branch：同一 workflow 各 phase 共用一條分支；lead 沒值時
+        （in_flight／ready／held 的 ingest 不帶 branch，見 app.py）退到第一個有值的 row。"""
+        for row in self.rows:
+            if row.branch:
+                return row.branch
+        return ""
+
+    @property
     def workflow_id(self) -> str:
         return self.lead.workflow_id
 
