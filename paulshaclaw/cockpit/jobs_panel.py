@@ -173,10 +173,13 @@ def _layout_columns(
     name_widths = [0]
     for group in groups:
         state_widths.append(_display_width(_abbrev_label(group.headline_state)))
-        name_widths.append(
-            _display_width(_abbrev_branch(_abbrev_label(group.display_name)))
-        )
-        if not group.is_single:
+        if group.is_single:
+            # name 欄只放單列的 phase 名；群組列 name 留白、branch 走 trailer
+            # 與單列同欄對齊（#314）。
+            name_widths.append(
+                _display_width(_abbrev_branch(_abbrev_label(group.display_name)))
+            )
+        else:
             for row in group.rows:
                 state_widths.append(
                     _display_width(_abbrev_label(row.human_state or row.state))
@@ -259,12 +262,12 @@ def build_jobs_nodes(
                 # branch 帶著 feature/<N>-<slug> 的 issue 編號，是上游 repo 仍為 null
                 # （cortex#465）時 workflow job 唯一的歸屬線索。縮寫要在
                 # _fit_trailer 之前做，寬度計算才用得上省下來的欄位。
-                # 只有單列放這裡——多 phase 群的主欄位就是 branch（#305）。
+                # 單列與群組列都放這欄——feat/ 串垂直對齊一整欄（#314）。
                 # wf-hash／job_id 是機器 id，有 branch 時是純噪音不顯示；但沒
                 # branch 的列拿掉 hash 會讓多列長得一模一樣（同 phase 同狀態），
                 # 故無 branch 才退回 workflow id 當最後的身分。job_id 一律不進
                 # trailer；對帳用的原始 id 留在 needs_human detail 行的可複製命令。
-                (_abbrev_branch(group.branch) or group.workflow_id) if group.is_single else "",
+                _abbrev_branch(group.branch) or group.workflow_id,
                 group.note,
                 _abbrev_label(group.raw_state),
             ),
@@ -278,7 +281,7 @@ def build_jobs_nodes(
         main_segments = (
             (f"{align}{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
             (
-                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col), name_col)} ",
+                f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col) if group.is_single else '', name_col)} ",
                 "#E2E8F0",
             ),
             # trailer 維持白（owner：feat 串不上暗色）；灰階只留給 state 欄語意。
