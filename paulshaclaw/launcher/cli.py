@@ -17,8 +17,7 @@ import subprocess
 import sys
 from typing import Sequence
 
-from paulshaclaw import __version__
-
+from . import __version__
 from . import lock as lock_mod
 
 

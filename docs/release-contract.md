@@ -136,7 +136,7 @@ hippo/cortex 的 package publication，不在本 umbrella 內隱性擴張。
 
 使用者端的版本回滾：
 
-1. 確認目前安裝版本：`pip show paulshaclaw` 或 `python -c "import paulshaclaw; print(paulshaclaw.__version__)"`（`__version__` 已於 #288 提供，來源為 `importlib.metadata`；未安裝的原始碼樹直跑會回 `0+unknown`）。
+1. 確認目前安裝版本：`pip show paulshaclaw` 或 `python -c "from paulshaclaw import launcher; print(launcher.__version__)"`（`launcher.__version__` 已於 #288 提供，來源為 `importlib.metadata`；未安裝的原始碼樹直跑會回 `0+unknown`）。
 2. 從上一穩定版本的 GitHub Release 下載 wheel。
 3. 在目標 venv `pip install --force-reinstall <舊版 wheel>`。
 4. runtime 狀態（`~/.agents/`）**不隨 artifact 變動**，回滾 operator shell 不會動到 state/secret。

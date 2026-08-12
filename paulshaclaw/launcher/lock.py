@@ -384,7 +384,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "write-holder":
         if args.holder == "release":
-            from paulshaclaw import __version__ as version
+            from . import __version__ as version
         else:
             version = _dev_version(args.source)
         meta = build_holder_meta(

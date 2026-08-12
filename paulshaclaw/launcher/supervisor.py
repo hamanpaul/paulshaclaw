@@ -25,9 +25,9 @@ import sys
 import time
 from pathlib import Path
 
-from paulshaclaw import __version__
 from paulshaclaw.config import paths
 
+from . import __version__
 from . import lock as lock_mod
 from .services import cost_interval_seconds
 

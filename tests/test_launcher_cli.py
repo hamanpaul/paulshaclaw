@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import paulshaclaw
+from paulshaclaw import launcher
 from paulshaclaw.launcher import cli, lock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -15,9 +15,10 @@ LAUNCHER_DIR = REPO_ROOT / "paulshaclaw" / "launcher"
 
 
 def test_package_version_is_available_and_non_empty() -> None:
-    # #280 審計缺口：release-contract §6 需要 `paulshaclaw.__version__` 可查。
-    assert isinstance(paulshaclaw.__version__, str)
-    assert paulshaclaw.__version__
+    # release-contract §6 需要可查版本字串：由 launcher 套件提供
+    # （importlib.metadata；未安裝的原始碼樹直跑 fallback "0+unknown"）。
+    assert isinstance(launcher.__version__, str)
+    assert launcher.__version__
 
 
 def test_pyproject_declares_both_entry_points() -> None:
