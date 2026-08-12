@@ -181,8 +181,9 @@ class BuildJobsNodesColorTests(unittest.TestCase):
     def test_status_style_five_buckets(self):
         """#308 owner 裁決：glyph 統一「•」，五桶顏色——wait-for-start 白、
         working 綠、broke 紅、wait-confirm 橘、finished 灰；未知退中性。"""
-        self.assertEqual(status_style("ready"), ("•", "#E2E8F0"))
-        self.assertEqual(status_style("blocked"), ("•", "#E2E8F0"))
+        # 白＝終端預設前景（#317）
+        self.assertEqual(status_style("ready"), ("•", ""))
+        self.assertEqual(status_style("blocked"), ("•", ""))
         self.assertEqual(status_style("running"), ("•", "#22C55E"))
         self.assertEqual(status_style("failed"), ("•", "#EF4444"))
         self.assertEqual(status_style("needs_human"), ("•", "#F97316"))

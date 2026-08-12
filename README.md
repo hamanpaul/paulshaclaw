@@ -161,6 +161,15 @@ sha256sum -c checksums-sha256.txt --ignore-missing
 
 > **為何不是 PyPI**：`paulsha-hippo` / `paulsha-cortex` 是 `git+<url>@<SHA>` direct reference，PyPI 上傳政策不接受 direct URL 參照，故第一階段僅以 GitHub Release 分發。詳見 release-contract §5 的實測依據。
 
+**建議改用 pipx**（指令直接進 PATH，不必進 venv）：
+
+```bash
+pipx install paulshaclaw-X.Y.Z-py3-none-any.whl   # 之後任何目錄直接打 paulshaclaw / psc
+pipx upgrade paulshaclaw                            # 升級改裝新 wheel 時：pipx install --force <新 wheel>
+```
+
+pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`，與上面手動 venv 流程等價；兩者擇一即可。
+
 #### 正式啟動（`paulshaclaw` 指令，#288）
 
 裝好 wheel 後，operator shell 的**正式啟動路徑**是 `paulshaclaw` console script——不需要 clone repo：
