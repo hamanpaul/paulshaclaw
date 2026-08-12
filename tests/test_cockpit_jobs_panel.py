@@ -187,12 +187,13 @@ class BuildJobsNodesColorTests(unittest.TestCase):
         self.assertEqual(status_style("failed"), ("•", "#EF4444"))
         self.assertEqual(status_style("needs_human"), ("•", "#F97316"))
         self.assertEqual(status_style("attention"), ("•", "#F97316"))
-        self.assertEqual(status_style("passed"), ("•", "#64748B"))
-        self.assertEqual(status_style("workflow-tracked"), ("•", "#64748B"))
-        self.assertEqual(status_style("exited"), ("•", "#64748B"))
+        self.assertEqual(status_style("passed"), ("•", "#94A3B8"))
+        self.assertEqual(status_style("workflow-tracked"), ("•", "#94A3B8"))
+        self.assertEqual(status_style("exited"), ("•", "#94A3B8"))
+        # 未知狀態退更暗的中性色，不與 finished 撞色（#311）。
         glyph, color = status_style("mystery-state")
         self.assertEqual(glyph, "•")
-        self.assertEqual(color, "#94A3B8")
+        self.assertEqual(color, "#64748B")
 
     def test_running_uses_status_style_color(self):
         groups = (JobGroup(key="wf-abc", rows=(row("wf-abc-build", state="running"),)),)
