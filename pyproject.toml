@@ -17,8 +17,8 @@ dependencies = [
     # 尚未發版：詞彙聯集在 hippo main 但未收進 tag，下次 hippo 發版時改指向該 tag
     # 的 SHA（v0.1.1 + hamanpaul/paulsha-hippo#126）
     "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@96513bcf298f22dfb94ff5e85c3836dd781486b0",
-    # v0.1.4（tag 為人讀標記；pin 為對應不可變 SHA）
-    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@b8687603e976e35ce5e2e236b2eb47d2ed9b1c8c",
+    # v0.1.8（tag 為人讀標記；pin 為對應不可變 SHA）
+    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@dc8a968742ce587fba0ec013232a8a9ff1597596",
 ]
 
 [project.scripts]
