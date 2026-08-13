@@ -22,7 +22,14 @@ def test_ci_smokes_editable_install_runtime_closure_without_stage_requirements()
 
     assert "requirements-stage9.txt" not in workflow
     assert "requirements-stage11.txt" not in workflow
-    assert workflow.index("Smoke import editable install runtime closure") < workflow.index("Install test runner")
+    # pytest 安裝與 R-19 policy 同步工法合併進「Run test suite」step
+    # （見 policy 1.0.17 同步變更）；不再有獨立的「Install test runner」
+    # step，改以 pytest 安裝命令本身作為順序錨點，維持原意：smoke import
+    # 必須在任何測試專用套件安裝之前，確保它只驗證 operator shell 自身
+    # 宣告的 runtime 依賴閉包，不被 pytest 污染 sys.path。
+    assert workflow.index("Smoke import editable install runtime closure") < workflow.index(
+        "python -m pip install pytest"
+    )
     for module_name in (
         "paulshaclaw",
         "paulsha_cortex",
