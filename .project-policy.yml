@@ -1,5 +1,5 @@
 policy_profile: stage-driven
-policy_version: 1.0.15
+policy_version: 1.0.17
 conventions_engine:
   repo: hamanpaul/paulsha-conventions
 secret_scan:

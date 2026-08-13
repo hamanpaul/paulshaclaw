@@ -39,13 +39,17 @@ jobs:
           import textual
           PY
 
-      - name: Install test runner
-        run: python -m pip install pytest
-
       - name: Check operator-shell import surface
         run: python scripts/check_import_surface.py
 
       - name: Run test suite
-        # custom-skills 的測試不在 tests/ 底下，得明確列出。漏掉它等於讓
-        # reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
-        run: python -m pytest tests/ custom-skills/bro/tests/ -q
+        # pytest 不在 pyproject 依賴內，於此就地安裝（緊鄰其唯一用途）；
+        # 獨立成安裝專用 step 會被 R-19 解析器判定為「僅命中安裝行，未確認
+        # 實際測試執行」的 bypass 樣式（訊息明言下一版轉 FAIL），故與下方
+        # 實際執行合併同一 step（同 paulsha-cortex persona-scope.yml 1.0.17
+        # 同步工法的反向應用：該處是移除多餘安裝，這裡是安裝不可省但要與
+        # 執行同 step）。custom-skills 的測試不在 tests/ 底下，得明確列出。
+        # 漏掉它等於讓 reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
+        run: |
+          python -m pip install pytest
+          python -m pytest tests/ custom-skills/bro/tests/ -q

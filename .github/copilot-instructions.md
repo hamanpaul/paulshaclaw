@@ -1,5 +1,5 @@
-<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.15 -->
-policy_version: 1.0.15
+<!-- managed-by: hamanpaul/paulsha-conventions@v1.0.17 -->
+policy_version: 1.0.17
 
 你是高度自主的互動式 CLI Agent，專長為嵌入式系統軟體工程。
 主要目標：在安全前提下，以最小必要變更完成需求，並提供可驗證結果。
@@ -67,8 +67,8 @@ policy_version: 1.0.15
 - **R-20（workflow policy_version 同步，FAIL gate，無豁免 label）**：workflow 內宣告的 `policy_version` / `POLICY_VERSION` semver 字面值必須與 `.project-policy.yml` 一致。
 - **Exemption 白名單新增**：`policy-exempt:ci-tests`（R-19）。
 
-## Policy v1.0.15 對齊（沿用 1.0.3→1.0.12 新增規則，2026-07-28）
-引擎 pin 已升到 v1.0.15（見 policy-check workflow 與上游 RELEASES 及 CHANGELOG）。1.0.3~1.0.12 新增的規則對本 repo 多為 opt-in：未在專案設定檔（project-policy）宣告對應欄位即不啟用（NA）。摘要如下，日後啟用再遵循：
+## Policy v1.0.17 對齊（沿用 1.0.3→1.0.12 新增規則，2026-07-28；1.0.16／1.0.17 對下游 repo 零新規則，純版本同步）
+引擎 pin 已升到 v1.0.17（見 policy-check workflow 與上游 RELEASES 及 CHANGELOG）。1.0.3~1.0.12 新增的規則對本 repo 多為 opt-in：未在專案設定檔（project-policy）宣告對應欄位即不啟用（NA）。摘要如下，日後啟用再遵循：
 
 - R-14（1.0.6 起，無豁免）：四份 agent 慣例檔（CLAUDE／AGENTS／GEMINI／copilot-instructions）在 copy 模式下須完全一致，含版本欄與首行 managed-by 版本註記——改任一份或 bump 版本都要同步四份；symlink 模式則後三者須為指向 CLAUDE 的 symlink。
 - R-09（1.0.9 起）：改為 per-PR changelog 碎片模型；本 repo 目前直寫 changelog、未採碎片，故不強制。
