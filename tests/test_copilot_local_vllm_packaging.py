@@ -16,7 +16,7 @@ _VALID_ENV = (
     "COPILOT_PROVIDER_BASE_URL=http://192.0.2.10:8001/v1\n"
     "COPILOT_PROVIDER_TYPE=openai\n"
     "COPILOT_PROVIDER_API_KEY=sk-test-123\n"
-    "COPILOT_MODEL=gemma4-26b-a4b-nvfp4\n"
+    "COPILOT_MODEL=vllm\n"
 )
 
 
@@ -73,7 +73,7 @@ class CopilotLocalVllmPackagingTests(unittest.TestCase):
             env_file = Path(tmp) / "nokey.env"
             env_file.write_text(
                 "COPILOT_PROVIDER_BASE_URL=http://192.0.2.10:8001/v1\n"
-                "COPILOT_MODEL=gemma4-26b-a4b-nvfp4\n",
+                "COPILOT_MODEL=vllm\n",
                 encoding="utf-8",
             )
             result = _run_launcher(

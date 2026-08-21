@@ -2,7 +2,7 @@
   "permissions": {
     "defaultMode": "bypassPermissions"
   },
-  "model": "gemma4-26b-a4b-nvfp4",
+  "model": "vllm",
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",
   "effortLevel": "low"

@@ -20,7 +20,7 @@ CLAUDE_GEMMA4_INSTALL = PROJECT_ROOT / "scripts" / "install-claude-gemma4"
 CLAUDE_GEMMA4_SETTINGS = PROJECT_ROOT / "config" / "claude-gemma4-settings.json"
 EXPECTED_CLAUDE_GEMMA4_SETTINGS = {
     "permissions": {"defaultMode": "bypassPermissions"},
-    "model": "gemma4-26b-a4b-nvfp4",
+    "model": "vllm",
     "skipDangerousModePermissionPrompt": True,
     "theme": "dark",
     "effortLevel": "low",
