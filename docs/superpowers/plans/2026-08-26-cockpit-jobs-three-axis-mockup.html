@@ -1,0 +1,532 @@
+<title>Cockpit JOBS 面板重設計</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+
+<style>
+/* 頁面 chrome 的三態主題。終端視窗本身恆深色——真實終端就是深色，
+   讓它跟著頁面翻白會失去「這是我的 cockpit」的辨識。 */
+:root{
+  --ground:#F2F3F7;
+  --surface:#FFFFFF;
+  --ink:#1A2233;
+  --ink-dim:#5A6478;
+  --ink-faint:#8B94A6;
+  --rule:#DDE1EA;
+  --brand:#C2410C;
+  --brand-soft:#FDEAD9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#070C15;
+    --surface:#0D1420;
+    --ink:#DDE3ED;
+    --ink-dim:#8A96AB;
+    --ink-faint:#5C6779;
+    --rule:#1E2838;
+    --brand:#F97316;
+    --brand-soft:#2A1608;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#070C15;
+  --surface:#0D1420;
+  --ink:#DDE3ED;
+  --ink-dim:#8A96AB;
+  --ink-faint:#5C6779;
+  --rule:#1E2838;
+  --brand:#F97316;
+  --brand-soft:#2A1608;
+}
+
+/* 終端內部：cockpit.tcss 的實際色值，不隨主題變動 */
+:root{
+  --t-bg:#0F172A;
+  --t-border:#F97316;
+  --t-fg:#E2E8F0;
+  --t-guide:#475569;
+  --t-cursor:#1E293B;
+  --s-working:#22C55E;
+  --s-broke:#EF4444;
+  --s-confirm:#F97316;
+  --s-finished:#94A3B8;
+  --s-wait:#E2E8F0;
+  --s-detail:#FBBF24;
+  --t-dim:#7C8AA3;
+}
+
+*{box-sizing:border-box;}
+
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+  font-size:16px;
+  line-height:1.6;
+  margin:0;
+  padding:clamp(24px,5vw,64px) clamp(16px,4vw,32px) 96px;
+}
+
+.wrap{max-width:1120px;margin:0 auto;display:flex;flex-direction:column;gap:40px;}
+
+.eyebrow{
+  font-size:12px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--brand);margin:0;
+}
+h1{
+  font-size:clamp(28px,4.2vw,42px);line-height:1.15;font-weight:600;
+  margin:8px 0 0;text-wrap:balance;letter-spacing:-.015em;
+}
+.lede{
+  font-size:17px;color:var(--ink-dim);margin:14px 0 0;max-width:64ch;
+}
+.lede b{color:var(--ink);font-weight:600;}
+
+/* ---- 控制列 ---- */
+.controls{
+  display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+}
+.seg{
+  display:inline-flex;border:1px solid var(--rule);border-radius:8px;
+  overflow:hidden;background:var(--surface);
+}
+.seg button{
+  font-family:inherit;font-size:13px;font-weight:500;
+  padding:8px 15px;border:0;background:transparent;color:var(--ink-dim);
+  cursor:pointer;transition:background .12s,color .12s;
+  border-right:1px solid var(--rule);
+}
+.seg button:last-child{border-right:0;}
+.seg button:hover{background:var(--brand-soft);color:var(--ink);}
+.seg button[aria-pressed="true"]{background:var(--brand);color:#fff;}
+.seg button:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;}
+
+.hint{
+  font-size:13px;color:var(--ink-faint);
+}
+kbd{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:11px;
+  border:1px solid var(--rule);border-bottom-width:2px;border-radius:4px;
+  padding:1px 5px;background:var(--surface);color:var(--ink-dim);
+}
+
+/* ---- 終端視窗 ---- */
+.term-outer{overflow-x:auto;padding-bottom:4px;}
+.term{
+  background:var(--t-bg);
+  border:1px solid var(--t-border);
+  border-radius:6px;
+  width:102ch;min-width:102ch;
+  font-family:"IBM Plex Mono",ui-monospace,"Noto Sans Mono CJK TC","Microsoft JhengHei",monospace;
+  font-size:13px;line-height:20px;
+  font-variant-ligatures:none;
+}
+.term-title{
+  display:flex;justify-content:space-between;gap:16px;
+  padding:0 10px;margin-top:-10px;
+}
+.term-title span{
+  background:var(--t-bg);padding:0 6px;font-size:12px;color:var(--t-border);
+  font-weight:500;white-space:nowrap;
+}
+.term-body{
+  height:200px;               /* 10 內容行 × 20px：忠實呈現 max-height 12 的限制 */
+  overflow-y:auto;overflow-x:hidden;
+  padding:2px 10px 4px;
+  scrollbar-width:thin;scrollbar-color:var(--t-guide) transparent;
+}
+.term-body::-webkit-scrollbar{width:8px;}
+.term-body::-webkit-scrollbar-thumb{background:var(--t-guide);border-radius:4px;}
+.term-foot{
+  border-top:1px solid var(--t-guide);
+  padding:3px 12px;font-size:11px;color:var(--t-dim);
+  display:flex;justify-content:space-between;gap:16px;
+}
+.line{white-space:pre;color:var(--t-fg);}
+.line.group{cursor:pointer;}
+.line.group:hover{background:var(--t-cursor);}
+.line.detail{color:var(--s-detail);}
+.tw{color:var(--s-working);}
+.tb{color:var(--s-broke);}
+.tc{color:var(--s-confirm);}
+.tf{color:var(--s-finished);}
+.tt{color:var(--s-wait);}
+.td{color:var(--t-dim);}
+.tg{color:var(--t-guide);}
+
+/* ---- 說明區塊 ---- */
+.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));}
+.card{
+  background:var(--surface);border:1px solid var(--rule);border-radius:10px;
+  padding:20px 22px;
+}
+.card h3{
+  margin:0 0 8px;font-size:14px;font-weight:600;letter-spacing:.02em;
+}
+.card p{margin:0;font-size:14px;color:var(--ink-dim);line-height:1.65;}
+.card code,.inline-code{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12.5px;
+  background:var(--brand-soft);color:var(--brand);padding:1px 5px;border-radius:4px;
+}
+
+h2{
+  font-size:22px;font-weight:600;margin:0 0 6px;letter-spacing:-.01em;
+}
+.sect-note{font-size:14.5px;color:var(--ink-dim);margin:0 0 20px;max-width:70ch;}
+
+table{
+  width:100%;border-collapse:collapse;font-size:14px;
+  font-variant-numeric:tabular-nums;
+}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--rule);}
+th{
+  font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-faint);font-weight:600;
+}
+td.num{text-align:right;font-family:"IBM Plex Mono",ui-monospace,monospace;}
+.tbl-wrap{overflow-x:auto;background:var(--surface);border:1px solid var(--rule);border-radius:10px;}
+
+.callout{
+  border-left:3px solid var(--brand);background:var(--surface);
+  border-radius:0 10px 10px 0;padding:16px 20px;
+}
+.callout p{margin:0;font-size:14.5px;color:var(--ink-dim);}
+.callout strong{color:var(--ink);}
+
+footer{
+  font-size:13px;color:var(--ink-faint);border-top:1px solid var(--rule);padding-top:20px;
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;}}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">paulshaclaw · stage 11 operator cockpit</p>
+    <h1>JOBS 面板重設計</h1>
+    <p class="lede">
+      下面這個終端不是示意圖。它讀你 <b>2026-08-26 現場的 <code class="inline-code">~/.agents/control/status.json</code></b>，
+      59 筆真實工作，用新版的欄位與排版演算法即時渲染，並鎖在 cockpit 真正的 10 行可視高度裡。
+      切換「修之前」就是你現在打開 cockpit 會看到的畫面。
+    </p>
+  </header>
+
+  <section>
+    <div class="controls">
+      <div class="seg" role="group" aria-label="版本">
+        <button type="button" data-ver="after" aria-pressed="true">修之後</button>
+        <button type="button" data-ver="before" aria-pressed="false">修之前（現況）</button>
+      </div>
+      <div class="seg" role="group" aria-label="分組軸" id="axis-seg">
+        <button type="button" data-axis="project" aria-pressed="true">by project</button>
+        <button type="button" data-axis="stage" aria-pressed="false">by stage</button>
+        <button type="button" data-axis="agent" aria-pressed="false">by agent</button>
+      </div>
+      <span class="hint"><kbd>g</kbd> 切軸 · 點群組行展開／收合 · 面板內可捲動</span>
+    </div>
+
+    <div class="term-outer">
+      <div class="term">
+        <div class="term-title">
+          <span id="term-t">JOBS</span>
+          <span id="term-s">[by project]</span>
+        </div>
+        <div class="term-body" id="term-body" tabindex="0" role="region" aria-label="JOBS 面板模擬"></div>
+        <div class="term-foot">
+          <span id="foot-l"></span>
+          <span id="foot-r"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>差別在哪</h2>
+    <p class="sect-note">
+      #292 到 #317 一連串改的是配色、對齊、縮寫、trailer 排版——都在調那 11 列的樣式。
+      真正該管的 42 件工作從來沒進到畫面，所以怎麼調都不會變好讀。
+    </p>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>現場資料</th><th class="num">筆數</th><th>修之前</th><th>修之後</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code class="inline-code">attention</code> · kind=workflow_run</td><td class="num">42</td><td>全部丟棄</td><td>完整顯示</td></tr>
+          <tr><td><code class="inline-code">attention</code> · kind=slice（legacy）</td><td class="num">1</td><td>顯示</td><td>顯示</td></tr>
+          <tr><td><code class="inline-code">not_claimable</code></td><td class="num">6</td><td>從未讀取</td><td>歸入「未認領」</td></tr>
+          <tr><td><code class="inline-code">slices</code></td><td class="num">1</td><td>從未讀取</td><td>顯示</td></tr>
+          <tr><td><code class="inline-code">recent_done</code></td><td class="num">10</td><td>顯示</td><td>沉底、不佔預設視野</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>三個為什麼</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>為什麼 42 筆會消失</h3>
+        <p><code>app.py:217</code> 對每筆 attention 呼叫 <code>_slice_id_from_item()</code>，只認
+        <code>slice_id</code>/<code>id</code>/<code>name</code>/<code>title</code>，取不到就 <code>continue</code>。
+        cortex 已遷到 workflow_run 平面，帶的是 <code>work_id</code> + <code>run_id</code>——四個 key 一個都沒有。</p>
+      </div>
+      <div class="card">
+        <h3>agent 欄怎麼來的</h3>
+        <p>不讀 <code>jobs.json</code>、不動 cortex。cortex 的
+        <code>validate_manager_spine</code> 對 phase→persona 是強制綁定：
+        claim/ship→manager、define/plan→planner、build→builder、verify/review→reviewer。
+        這是契約推導，不是猜測。</p>
+      </div>
+      <div class="card">
+        <h3>為什麼 claim 沉底</h3>
+        <p>30 筆卡在 <code>claim</code>，在 <code>jobs.json</code> 裡完全沒有對應 job——它們還沒派工出去。
+        排序讓 12 件真正在管線裡的工作浮上來，剛好填滿 10 行可視區；30 筆積壓落在捲動線以下。</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="callout">
+      <p><strong>一個誠實的取捨。</strong>
+      你原本要的「stage 兩層嵌套」上層是 Stage 0~5，但 <code class="inline-code">paulshaclaw/</code> 整個套件沒有任何
+      <code class="inline-code">stage_id</code> 常數，cortex 的 job／run 也沒有欄位指回 Stage N——那只存在
+      <code class="inline-code">docs/research/05.*.md</code> 的文字裡。所以 stage 收成一層，用 cortex 真的在跑的 7 個 phase。</p>
+    </div>
+  </section>
+
+  <footer>
+    資料快照 2026-08-26T09:41Z · <code class="inline-code">~/.agents/control/status.json</code> ·
+    59 筆全為現場真實內容，未經編造
+  </footer>
+
+</div>
+
+<script>
+const ROWS = [{"src":"attention","kind":"slice","repo":"","work":"add-cortex-version-flag-build","phase":"","persona":"","reason":"pinned-input-mismatch","detail":"","actions":["retry-build","abandon","retry-verify"],"run":"","state":"exited","branch":"main","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"test-r21-regex-resilience","phase":"build","persona":"builder","reason":"","detail":"","actions":["abandon","retry-card"],"run":"workflow-cac7b351c6cec0d6a1dd","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-log-error-dedup-v2","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-c2dbf88cd643f27a07cb","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"builder-task-boundary-segmentation","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-0fcbaf1a5efe83e8cc94","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"continuation-adoption-dispatch","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-41a19899a1fd94bc7d8a","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"cost-governance-cluster","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-2efa05a22b4fae147bf5","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"cost-governance-judge","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-8a87b18a6b4d572cbe79","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"dedupe-legacy-config-warnings-delivery","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-fca81f50a9718cf0b8ab","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"design-adhoc-oneshot-dispatch","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-6448ae52e0d0ba96146b","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"design-model-capability-envelope","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-16576e935b3b37a6cf92","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"design-task-type-taxonomy","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-8c2fdaafe4e3e60ecd25","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"design-task-type-taxonomy-v2","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-b9d784e83ef6a2a35fdd","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"engineering-outcome-contract","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-8aa3a6f9557f1c8230e5","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"feat-work-gc","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-76c21350f447322e17c4","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"feat-work-gc-v2","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-9e66ef9b09f902d41f67","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-doctor-diagnostics-delivery","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-50447216d57f1d6be8f7","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-systemctl-install-failure-delivery-v3","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-36d95b47231b0e608dc9","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-hippo","work":"issue-18-consumption-funnel-closeout","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-e39b5c2b3bef5418d49c","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"oneshot-lesson-loop","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-851e5c7f6d5e5c1060d9","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"pretooluse-capacity-gate","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-d733beae0357365ffe36","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"sizing-envelope-calibration","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-a568a66ec216e805a0f9","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"skill-usage-ledger-park-janitor","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-19251867966821d3a4f0","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-hippo","work":"issue-18-luna-closeout-followup-v7","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-ae15ad176b6fc8e94247","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-hippo","work":"issue-41-usage-feedback-loop-v5-sonnet","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-6ab90e36fa98ba64aba4","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"default-envelope-values","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-263a1785e158b74a996d","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"envelope-mapping","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-04553a86d5e45296b2d0","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"model-persona-roster-matrix","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-d44daa50d56bd321fb4a","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-read-repo-tier-fail-closed","phase":"define","persona":"planner","reason":"","detail":"","actions":["abandon"],"run":"workflow-6b3e215f18c5b68b991c","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-brainstorm-revalidation-diagnostics","phase":"build","persona":"builder","reason":"","detail":"","actions":["abandon"],"run":"workflow-6607ac1307feb02ffe06","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-build-needs-human-diagnostics","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-e9aa452eb551202c5091","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-planning-rollback-destroys-operator-work","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-14c19ee4cef8a90e26f9","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-claim-provider-scope","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-0b6b8a0cf1ed4fec9046","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-degraded-retention-collision","phase":"claim","persona":"manager","reason":"","detail":"","actions":["abandon"],"run":"workflow-4b5e8ea70fa45f859d66","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-instance-config-isolation","phase":"build","persona":"builder","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: workflow card terminal evidence did not pass","actions":["abandon","regenerate-gates","retry-card"],"run":"workflow-084f75e2178cf7547476","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"trust-root-isolation","phase":"claim","persona":"manager","reason":"claim-blocked","detail":"claim 判定需要人工介入即建立 run：missing_issue","actions":["abandon"],"run":"workflow-74c3b5b3f16e99704c10","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"fix-verification-contract-hash-overwrite","phase":"verify","persona":"reviewer","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: workflow job binding mismatch: workflow_claim_key","actions":["abandon","regenerate-gates"],"run":"workflow-50b4fb018b3412a7f487","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"trust-root-manager-visibility","phase":"review","persona":"reviewer","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: workflow ship card audit missing or ambiguous: openspec-archive","actions":["abandon"],"run":"workflow-39a9784f70428baa4a17","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"generated-asset-attestation","phase":"review","persona":"reviewer","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：RuntimeError: archive gate blocked: canonical-specs-invalid","actions":["abandon"],"run":"workflow-ab6d658578e1a62518a9","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"trust-root-copilot-toolchain-pinning","phase":"verify","persona":"reviewer","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: workflow terminal log has no JSON evidence","actions":["abandon","retry-card"],"run":"workflow-1f97737837e18139419a","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"trust-root-home-fail-closed","phase":"build","persona":"builder","reason":"provider-retry-exhausted","detail":"builder/reviewer job 以 provider 層失敗終局，bounded retry 已耗盡或不可重試：workflow terminal log has no JSON evidence","actions":["abandon","regenerate-gates"],"run":"workflow-e92029a824263c4145ef","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"trust-root-agent-loop-qualification","phase":"verify","persona":"reviewer","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: workflow terminal log has no JSON evidence","actions":["abandon","retry-card"],"run":"workflow-8ab2b70f88646d253248","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"manager-gitconfig-delivery","phase":"verify","persona":"reviewer","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: workflow terminal log has no JSON evidence","actions":["abandon","retry-card"],"run":"workflow-d68f1453f18e74989158","state":"running","branch":"","needs_human":true},{"src":"attention","kind":"workflow_run","repo":"hamanpaul/paulsha-cortex","work":"trust-root-executor-hardening","phase":"build","persona":"builder","reason":"resume-workflow-failed","detail":"periodic tick 續跑 workflow 時擲出例外：ValueError: existing worktree branch has commits outside requested base","actions":["abandon"],"run":"workflow-bb12dee65f8aa7c51ec0","state":"running","branch":"","needs_human":true},{"src":"not_claimable","kind":"not_claimable","repo":"hamanpaul/paulsha-cortex","work":"manager-gitconfig-delivery","phase":"未認領","persona":"","reason":"missing_issue","detail":"本 work item 沒有對應的 GitHub issue，claim 因此不建立 run。workstream 類（`docs/superpowers/workstreams/*`，設計上不對應單一 issue）維持現狀即可；若這是漏開 issue，開好之後以 `cortex work link manager-gitconfig-delivery --repo hamanpaul/paulsha-cortex --issue <N>` 綁定，下一輪掃描即自動 claim，本筆記錄同時自動消失。","actions":[],"run":"","state":"blocked","branch":"","needs_human":false},{"src":"not_claimable","kind":"not_claimable","repo":"hamanpaul/paulsha-cortex","work":"phase2-718-runtime-instance-authority","phase":"未認領","persona":"","reason":"missing_issue","detail":"本 work item 沒有對應的 GitHub issue，claim 因此不建立 run。workstream 類（`docs/superpowers/workstreams/*`，設計上不對應單一 issue）維持現狀即可；若這是漏開 issue，開好之後以 `cortex work link phase2-718-runtime-instance-authority --repo hamanpaul/paulsha-cortex --issue <N>` 綁定，下一輪掃描即自動 claim，本筆記錄同時自動消失。","actions":[],"run":"","state":"blocked","branch":"","needs_human":false},{"src":"not_claimable","kind":"not_claimable","repo":"hamanpaul/paulsha-cortex","work":"planner-job-downgrade","phase":"未認領","persona":"","reason":"missing_issue","detail":"本 work item 沒有對應的 GitHub issue，claim 因此不建立 run。workstream 類（`docs/superpowers/workstreams/*`，設計上不對應單一 issue）維持現狀即可；若這是漏開 issue，開好之後以 `cortex work link planner-job-downgrade --repo hamanpaul/paulsha-cortex --issue <N>` 綁定，下一輪掃描即自動 claim，本筆記錄同時自動消失。","actions":[],"run":"","state":"blocked","branch":"","needs_human":false},{"src":"not_claimable","kind":"not_claimable","repo":"hamanpaul/paulsha-cortex","work":"r3-testpilot-case-corpus","phase":"未認領","persona":"","reason":"missing_issue","detail":"本 work item 沒有對應的 GitHub issue，claim 因此不建立 run。workstream 類（`docs/superpowers/workstreams/*`，設計上不對應單一 issue）維持現狀即可；若這是漏開 issue，開好之後以 `cortex work link r3-testpilot-case-corpus --repo hamanpaul/paulsha-cortex --issue <N>` 綁定，下一輪掃描即自動 claim，本筆記錄同時自動消失。","actions":[],"run":"","state":"blocked","branch":"","needs_human":false},{"src":"not_claimable","kind":"not_claimable","repo":"hamanpaul/paulsha-cortex","work":"trust-root-home-fail-closed","phase":"未認領","persona":"","reason":"missing_issue","detail":"本 work item 沒有對應的 GitHub issue，claim 因此不建立 run。workstream 類（`docs/superpowers/workstreams/*`，設計上不對應單一 issue）維持現狀即可；若這是漏開 issue，開好之後以 `cortex work link trust-root-home-fail-closed --repo hamanpaul/paulsha-cortex --issue <N>` 綁定，下一輪掃描即自動 claim，本筆記錄同時自動消失。","actions":[],"run":"","state":"blocked","branch":"","needs_human":false},{"src":"not_claimable","kind":"not_claimable","repo":"hamanpaul/paulsha-cortex","work":"trust-root-isolation","phase":"未認領","persona":"","reason":"claim-blocked-stale-run","detail":"殭屍 run workflow-74c3b5b3f16e99704c10 是 #669 修正前「判定 missing_issue 仍建立 run」留下的，永遠不會推進。確認無誤後以 `cortex work abandon trust-root-isolation --repo hamanpaul/paulsha-cortex --expected-run-id workflow-74c3b5b3f16e99704c10 --actor <operator> --reason '#669 claim-blocked zombie'` 清除；清掉之後本項目只會留在 not_claimable 清單，不再佔用 attention。","actions":[],"run":"","state":"blocked","branch":"","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-38f53ecb0e-code-review","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/695-generated-asset-attestation","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-678141ebbf-verification","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/716-trust-root-agent-loop-qualification","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-38f53ecb0e-verification","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/695-generated-asset-attestation","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-888dbfa4b8-verification","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/681-trust-root-copilot-toolchain-pinning","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-694bf8809e-subagent-build","phase":"done","persona":"","reason":"builder-failed-rate_limited","detail":"","actions":[],"run":"","state":"failed","branch":"feature/692-trust-root-home-fail-closed","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-694bf8809e-code-review","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/692-trust-root-home-fail-closed","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-694bf8809e-verification","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/692-trust-root-home-fail-closed","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-694bf8809e-openspec-archive","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/692-trust-root-home-fail-closed","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-38f53ecb0e-subagent-build","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/695-generated-asset-attestation","needs_human":false},{"src":"recent_done","kind":"recent_done","repo":"hamanpaul/paulsha-cortex","work":"wf-f37a67d85f-verification","phase":"done","persona":"","reason":"workflow-lane-job","detail":"","actions":[],"run":"","state":"workflow-tracked","branch":"feature/763-manager-gitconfig-delivery","needs_human":false}];
+
+/* ---- 版面演算法：與 jobs_panel.py 的 _display_width / _pad_display / _ellipsize_middle 同語意 ---- */
+const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹯＀-｠￠-￦]/;
+function dw(s){let n=0;for(const ch of s) n += WIDE.test(ch)?2:1; return n;}
+function pad(s,w){return s + " ".repeat(Math.max(0,w-dw(s)));}
+function cut(s,w){
+  if(dw(s)<=w) return s;
+  if(w<=1) return "…";
+  let head="",tail="",hw=0,tw=0;
+  const cs=[...s], budget=w-1, half=Math.floor(budget/2);
+  for(const ch of cs){const c=WIDE.test(ch)?2:1; if(hw+c>half) break; head+=ch; hw+=c;}
+  for(let i=cs.length-1;i>=0;i--){const c=WIDE.test(cs[i])?2:1; if(tw+c>budget-hw) break; tail=cs[i]+tail; tw+=c;}
+  return head+"…"+tail;
+}
+const esc = s => s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+/* ---- 狀態五桶（jobs_panel.py 的 _STATUS_STYLE）---- */
+function bucket(st){
+  st=(st||"").toLowerCase();
+  if(["running","active","reviewing"].includes(st)) return "tw";
+  if(["failed","error","dead","degraded"].includes(st)) return "tb";
+  if(["needs_human","attention"].includes(st)) return "tc";
+  if(["passed","verified","success","ok","done","completed","exited","workflow-tracked","superseded"].includes(st)) return "tf";
+  return "tt";
+}
+
+const TERM_W = 100;
+const PHASE_ORDER = {build:0,verify:0,review:0,define:0,plan:0,ship:0,"":0,claim:1,"未認領":2,done:3};
+const AXIS_LABEL = {project:"by project",stage:"by stage",agent:"by agent"};
+
+let axis="project", ver="after";
+const expanded = {};   /* `${ver}:${axis}:${key}` -> bool */
+
+function shortRepo(r){ return r ? r.split("/").pop() : "未歸屬"; }
+
+/* ---- 修之後：軸驅動分組 ---- */
+function groupsAfter(){
+  const keyOf = r => axis==="project" ? shortRepo(r.repo)
+                   : axis==="stage"   ? (r.phase || "(legacy slice)")
+                   : (r.persona || "未派工");
+  const map = new Map();
+  for(const r of ROWS){
+    const k = keyOf(r);
+    if(!map.has(k)) map.set(k,[]);
+    map.get(k).push(r);
+  }
+  const gs=[...map.entries()].map(([key,rows])=>({key,rows}));
+  for(const g of gs){
+    g.rows.sort((a,b)=>{
+      const d=(PHASE_ORDER[a.phase]??0)-(PHASE_ORDER[b.phase]??0);
+      if(d) return d;
+      if(a.needs_human!==b.needs_human) return a.needs_human?-1:1;
+      return (a.work||"").localeCompare(b.work||"");
+    });
+    g.live = g.rows.filter(r=>r.src==="attention" && r.phase!=="claim").length;
+    g.claim = g.rows.filter(r=>r.phase==="claim").length;
+    g.nc = g.rows.filter(r=>r.src==="not_claimable").length;
+    g.done = g.rows.filter(r=>r.src==="recent_done").length;
+    g.rank = (PHASE_ORDER[g.rows[0].phase]??0);
+  }
+  gs.sort((a,b)=> a.rank-b.rank || b.live-a.live || b.rows.length-a.rows.length);
+  return gs;
+}
+
+/* ---- 修之前：現行 slices_from_status + _group_key 的實際行為 ---- */
+function groupsBefore(){
+  const kept = ROWS.filter(r =>
+      (r.src==="attention" && r.kind==="slice") || r.src==="recent_done");
+  const SUF=["subagent-build","adversarial-review","openspec-archive","writing-plans","code-review","verification","build"];
+  const gkey = id => {
+    const m = /^wf-([0-9a-f]+)-(.+)$/.exec(id);
+    if(m) return "wf-"+m[1];
+    for(const s of SUF){ if(id.endsWith("-"+s)) return id.slice(0,-(s.length+1)); }
+    return id;
+  };
+  const map=new Map();
+  for(const r of kept){
+    const k=gkey(r.work);
+    if(!map.has(k)) map.set(k,[]);
+    map.get(k).push(r);
+  }
+  const gs=[...map.entries()].map(([key,rows])=>({key,rows}));
+  gs.sort((a,b)=>{
+    const ah=a.rows.some(r=>r.needs_human)?0:2, bh=b.rows.some(r=>r.needs_human)?0:2;
+    return ah-bh;
+  });
+  return gs;
+}
+
+/* ---- 渲染 ---- */
+function render(){
+  const body=document.getElementById("term-body");
+  const out=[];
+  const gs = ver==="after" ? groupsAfter() : groupsBefore();
+
+  if(ver==="after"){
+    /* 四欄寬度：glyph(1) sp phase(P) sp work(W) sp persona(A) */
+    const A=9;
+    let P=5;
+    for(const g of gs) for(const r of g.rows) P=Math.max(P,dw(r.phase||"—"));
+    P=Math.min(P,10);
+    const W = TERM_W - 2 - 2 - P - 1 - A - 2;
+
+    for(const g of gs){
+      const k=`${ver}:${axis}:${g.key}`;
+      const open = expanded[k] ?? (g.rank===0);
+      const bits=[];
+      if(g.live) bits.push(`${g.live} 在管線`);
+      if(g.claim) bits.push(`${g.claim} 待認領`);
+      if(g.nc) bits.push(`${g.nc} 不可認領`);
+      if(g.done) bits.push(`${g.done} 剛完成`);
+      const right = `${g.rows.length} 件 · ${bits.join(" · ")}`;
+      const arrow = open?"▾":"▸";
+      const lead = g.rows.find(r=>r.needs_human) || g.rows[0];
+      const cls = bucket(lead.needs_human ? "needs_human" : lead.state);
+      const left = `${arrow} <span class="${cls}">●</span> `;
+      const nameW = TERM_W - 4 - dw(right) - 2;
+      const name = pad(cut(g.key,nameW), nameW);
+      out.push(`<div class="line group" data-k="${esc(k)}">${left}${esc(name)}  <span class="td">${esc(right)}</span></div>`);
+      if(!open) continue;
+
+      for(const r of g.rows){
+        const gl = bucket(r.needs_human ? "needs_human" : r.state);
+        const ph = axis==="stage" ? "" : (r.phase||"—");
+        const ag = axis==="agent" ? "" : (r.persona||"");
+        let third = r.work;
+        if(axis==="stage" || axis==="agent") third = `${r.work}`;
+        const tail = axis==="stage" ? shortRepo(r.repo)
+                   : axis==="agent" ? shortRepo(r.repo)
+                   : ag;
+        const note = (r.phase==="claim" && r.src==="attention") ? " 尚未派工" : "";
+        const line =
+          `    <span class="${gl}">●</span> ` +
+          `<span class="td">${esc(pad(cut(ph,P),P))}</span> ` +
+          esc(pad(cut(third, W - dw(note)), W - dw(note))) +
+          `<span class="tg">${esc(note)}</span> ` +
+          `<span class="td">${esc(pad(cut(tail,A),A))}</span>`;
+        out.push(`<div class="line">${line}</div>`);
+
+        if(r.needs_human){
+          const why = r.detail || r.reason || "上游未帶 reason";
+          const act = r.actions.length ? " · 可用: "+r.actions.join("|") : "";
+          out.push(`<div class="line detail">      ${esc(cut("↳ "+why+act, TERM_W-6))}</div>`);
+        }
+      }
+    }
+  }else{
+    for(const g of gs){
+      const k=`${ver}:before:${g.key}`;
+      const open = expanded[k] ?? g.rows.some(r=>r.needs_human);
+      const single = g.rows.length===1;
+      const lead = g.rows[0];
+      const cls = bucket(lead.needs_human ? "needs_human" : lead.state);
+      const headline = single ? (lead.needs_human ? "阻塞中" : lead.state)
+                              : `${g.rows.length} ph ${[...new Set(g.rows.map(r=>r.state))].join("/")}`;
+      const trailer = [ shortRepo(lead.repo)===""?"":shortRepo(lead.repo),
+                        (lead.branch||"").replace(/^feature\//,"feat/") || g.key
+                      ].filter(Boolean).join(" · ");
+      const arrow = single?"  ":(open?"▾ ":"▸ ");
+      const S=12, N=34;
+      const line = `${arrow}<span class="${cls}">●</span> ` +
+        `<span class="${cls}">${esc(pad(cut(headline,S),S))}</span> ` +
+        esc(pad(cut(single?g.key:"",N),N)) + " " +
+        esc(cut(trailer, TERM_W-6-S-N));
+      out.push(`<div class="line group" data-k="${esc(k)}">${line}</div>`);
+      if(single || !open) continue;
+      for(const r of g.rows){
+        out.push(`<div class="line">      <span class="${bucket(r.state)}">●</span> ${esc(pad(cut(r.state,S),S))} ${esc(cut(r.work.replace(g.key+"-",""),40))}</div>`);
+      }
+    }
+  }
+
+  body.innerHTML = out.join("");
+  body.querySelectorAll(".line.group").forEach(el=>{
+    el.addEventListener("click",()=>{
+      const k=el.dataset.k;
+      const gsNow = ver==="after"?groupsAfter():groupsBefore();
+      const g = gsNow.find(x=>`${ver}:${ver==="after"?axis:"before"}:${x.key}`===k);
+      const dflt = ver==="after" ? (g?g.rank===0:false) : (g?g.rows.some(r=>r.needs_human):false);
+      expanded[k] = !(expanded[k] ?? dflt);
+      render();
+    });
+  });
+
+  /* 標題列與 footer */
+  const live = ROWS.filter(r=>r.src==="attention" && r.phase!=="claim").length;
+  const claim = ROWS.filter(r=>r.phase==="claim").length;
+  const nc = ROWS.filter(r=>r.src==="not_claimable").length;
+  document.getElementById("term-t").textContent =
+    ver==="after" ? `JOBS · ${ROWS.length} 件 · ${live} 在管線 · ${claim} 待認領 · ${nc} 不可認領`
+                  : `JOBS · 11 slices · 1 待人工`;
+  document.getElementById("term-s").textContent =
+    ver==="after" ? `[${AXIS_LABEL[axis]}]` : "[無分組軸]";
+  document.getElementById("foot-l").textContent =
+    ver==="after" ? `${out.length} 行 · 可視 10 行` : `${out.length} 行 · 可視 10 行`;
+  document.getElementById("foot-r").textContent =
+    ver==="after" ? "顯示 59 / 59 筆" : "顯示 11 / 59 筆 — 42 筆在 ingest 被丟棄";
+  document.getElementById("axis-seg").style.opacity = ver==="after" ? "1" : ".35";
+  document.getElementById("axis-seg").querySelectorAll("button").forEach(b=>b.disabled = ver!=="after");
+}
+
+document.querySelectorAll("[data-ver]").forEach(b=>{
+  b.addEventListener("click",()=>{
+    ver=b.dataset.ver;
+    document.querySelectorAll("[data-ver]").forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+    render();
+  });
+});
+document.querySelectorAll("[data-axis]").forEach(b=>{
+  b.addEventListener("click",()=>{
+    axis=b.dataset.axis;
+    document.querySelectorAll("[data-axis]").forEach(x=>x.setAttribute("aria-pressed", String(x===b)));
+    render();
+  });
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="g" && ver==="after" && !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)){
+    const order=["project","stage","agent"];
+    axis = order[(order.indexOf(axis)+1)%3];
+    document.querySelectorAll("[data-axis]").forEach(x=>x.setAttribute("aria-pressed", String(x.dataset.axis===axis)));
+    render();
+  }
+});
+
+render();
+</script>
