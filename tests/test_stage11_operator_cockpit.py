@@ -1194,9 +1194,9 @@ class Stage11StateTests(unittest.TestCase):
         with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
             app._refresh_widgets()
 
-        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS")
-        # slice-attn 落在 attention（= needs_human），border 直接把「幾件等人」講出來。
-        self.assertEqual(widgets["#global-jobs"].border_subtitle, "5 slices · 1 待人工")
+        # #322：標題改成分層計數（N 件 · …），副標顯示當前行軸。
+        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS · 5 件")
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "[by project]")
         # 有 rows 時 app 把分好群的 JobGroup 直接餵給 widget（渲染成 node 是 widget 自己的事）。
         (groups,), _ = widgets["#global-jobs"].set_groups.call_args
         self.assertEqual(groups, group_job_rows(slices_from_status(status)))
@@ -1734,8 +1734,9 @@ class Stage11StateTests(unittest.TestCase):
         with patch.object(app, "query_one", side_effect=lambda sel, *a, **k: widgets[sel]):
             app._refresh_widgets()
 
-        # 11 個 slice 收成 6 群等人工；border 仍以 slice 為單位報總量。
-        self.assertEqual(widgets["#global-jobs"].border_subtitle, "31 slices · 11 待人工")
+        # #322：標題的分層計數只印非零區段（本fixture無在管線／待認領／不可認領）。
+        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS · 31 件")
+        self.assertEqual(widgets["#global-jobs"].border_subtitle, "[by project]")
 
         (groups,), _ = widgets["#global-jobs"].set_groups.call_args
         rendered = _flatten_nodes(build_jobs_nodes(groups))

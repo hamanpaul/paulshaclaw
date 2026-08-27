@@ -1,3 +1,7 @@
+---
+work_item: cockpit-jobs-three-axis
+---
+
 # Plan：cockpit JOBS 面板三軸重設計（issue #322）
 
 目標 repo：paulshaclaw｜對應 issue：#322｜PR body 須 `Closes #322`

@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Callable
+from typing import Literal
 
 import paulsha_cortex.control.client as control_client
 from . import branding, cost_bar, sysmon
@@ -74,7 +75,7 @@ from .jobs_panel import (
     status_style,
 )
 from .manager_panel import ManagerModal
-from .models import JobGroup, JobRow, JobSummary, PaneRecord
+from .models import JobGroup, JobRow, JobSummary, PaneRecord, _UNCLAIMED_PHASE
 from .store import CockpitState
 
 
@@ -123,7 +124,10 @@ def _slice_id_from_item(item: object) -> str:
     if isinstance(item, str):
         return item
     if isinstance(item, dict):
-        for key in ("slice_id", "id", "name", "title"):
+        # #322：老版 slice 條目（slice_id/id/name/title）優先序在前不受影響；
+        # workflow_run 平面（cortex 0.1.8+）帶的是 work_id／run_id，落在之後當
+        # fallback——讓四個辨識 key 一個都沒有的 42 筆 workflow_run 不再被静默丢棄。
+        for key in ("slice_id", "id", "name", "title", "work_id", "run_id"):
             value = item.get(key)
             if isinstance(value, str) and value:
                 return value
@@ -146,29 +150,183 @@ def _actions_field(item: dict[str, object], key: str = "next_actions") -> tuple[
     return tuple(entry for entry in value if isinstance(entry, str) and entry)
 
 
+def _blocking_detail(item: dict[str, object]) -> str:
+    """結構化卡住理由的人可讀內容。
+
+    cortex 的 ``blocking_reason`` 是 ``DiagnosticReason`` dict：機器碼在
+    ``reason``、人可讀內容在 ``detail``（≤400 字）。現場 42 筆 workflow_run 有
+    32 筆 ``reason`` 為 `None`——只靠 ``reason`` 會有大半列看不到說明。``slice``
+    與老版資料的 ``blocking_reason`` 多為 `None`，一律退回空字串。
+    """
+    reason = item.get("blocking_reason")
+    if isinstance(reason, dict):
+        detail = reason.get("detail")
+        if isinstance(detail, str) and detail:
+            return detail
+    return ""
+
+
+def _reason_for(item: dict[str, object]) -> str:
+    """reason 取用順序：結構化理由的人可讀 ``blocking_reason.detail`` 優先，
+    退回 ``reason``／``gate_reason``（machine code）。（#322）"""
+    return _blocking_detail(item) or _text_field(item, "reason", "gate_reason")
+
+
+def _ingest_in_flight(in_flight: object, rows: list[JobRow]) -> None:
+    # 在跑的卡。老版 ``in_flight`` 是 ``{"slice_id", "state"}``（slice 平面）；
+    # #322 後 cortex 讓在跑的 workflow run 也帶 ``kind="workflow_run"`` 與
+    # work_id／current_phase／run_id，走新欄位。兩種都兼容。
+    if not isinstance(in_flight, list):
+        return
+    for item in in_flight:
+        if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "workflow_run":
+            _ingest_workflow_run(item, rows, source_section="in_flight")
+            continue
+        slice_id = _slice_id_from_item(item)
+        if not slice_id:
+            continue
+        state = str(item.get("state") or "running")
+        rows.append(
+            JobRow(
+                slice_id=slice_id,
+                state=state,
+                source_section="in_flight",
+                repo=_text_field(item, "repo", "workflow_repo"),
+            )
+        )
+
+
+def _ingest_attention(attention: object, rows: list[JobRow]) -> None:
+    """manager 只把 slice_state == needs_human 的條目放進 attention。
+    workflow_run 條目帶 work_id／current_phase／run_id／blocking_reason，走新
+    欄位；slice（與缺 ``kind`` 的舊資料）沿用既有 reason／next_actions／job
+    身分欄位。（#322）"""
+    if not isinstance(attention, list):
+        return
+    for item in attention:
+        if not isinstance(item, dict):
+            continue
+        if item.get("kind") == "workflow_run":
+            _ingest_workflow_run(item, rows, source_section="attention")
+            continue
+        slice_id = _slice_id_from_item(item)
+        if not slice_id:
+            continue
+        state = str(item.get("job_state") or item.get("gate_state") or "attention")
+        rows.append(
+            JobRow(
+                slice_id=slice_id,
+                state=state,
+                source_section="attention",
+                reason=_reason_for(item),
+                next_actions=_actions_field(item),
+                job_id=_text_field(item, "builder_job_id", "reviewer_job_id", "job_id"),
+                branch=_text_field(item, "target_branch", "branch"),
+                repo=_text_field(item, "repo", "workflow_repo"),
+                needs_human=True,
+            )
+        )
+
+
+def _ingest_workflow_run(
+    item: dict[str, object], rows: list[JobRow], *, source_section: str
+) -> None:
+    """把 workflow_run 平面條目收成 JobRow。
+
+    slice_id 缺省（workflow_run 不帶 slice_id）時回退成 work_id；phase 取
+    ``current_phase``，machine code 取 ``blocking_reason.reason``，人可讀取
+    ``blocking_reason.detail``。（#322）"""
+    work_id = _text_field(item, "work_id")
+    phase = _text_field(item, "current_phase")
+    run_id = _text_field(item, "run_id")
+    slice_id = _slice_id_from_item(item) or work_id
+    state = str(item.get("gate_state") or item.get("slice_state") or "running")
+    rows.append(
+        JobRow(
+            slice_id=slice_id,
+            state=state,
+            source_section=source_section,
+            reason=_reason_for(item),
+            next_actions=_actions_field(item),
+            work_id=work_id,
+            phase=phase,
+            run_id=run_id,
+            kind="workflow_run",
+            repo=_text_field(item, "repo", "workflow_repo"),
+            needs_human=state == "needs_human" or source_section == "attention",
+        )
+    )
+
+
+def _ingest_slices(slices: object, rows: list[JobRow]) -> None:
+    """已認領 slice 清單（cortex 0.1.8+）。phase 由 ``slice["phase"]`` 給，沒
+    有就退回 ``slice_state``。``needs_human`` 的 slice 同時出現在 `attention`
+    ——processed 在後，去重時保留 earlier 處理的 needs_human 版本。（#322）"""
+    if not isinstance(slices, list):
+        return
+    for item in slices:
+        if not isinstance(item, dict):
+            continue
+        slice_id = _slice_id_from_item(item)
+        if not slice_id:
+            continue
+        state = str(
+            item.get("slice_state") or item.get("gate_state") or item.get("state") or "running"
+        )
+        phase = _text_field(item, "phase") or state
+        rows.append(
+            JobRow(
+                slice_id=slice_id,
+                state=state,
+                source_section="slices",
+                reason=_reason_for(item),
+                next_actions=_actions_field(item),
+                phase=phase,
+                kind="slice",
+                repo=_text_field(item, "repo", "workflow_repo"),
+            )
+        )
+
+
+def _ingest_not_claimable(not_claimable: object, rows: list[JobRow]) -> None:
+    """把 ``not_claimable`` ledger 投影成合成 phase ``未認領``（#322 / #669）。
+
+    這些 work item 被 claim 判定「不可 claim」（如 ``missing_issue``）而刻意不
+    建 run——面板上不能變成盲區，但也不是 `attention` 那類可行動項目。用 ``state``
+    ``blocked`` 呈現、``detail`` 當 reason，並靠 ``is_not_claimable`` 讓它們沉底。
+    容錯：安裝版 cortex 0.1.8 沒有此 key（R-19 相容）。
+    """
+    if not isinstance(not_claimable, list):
+        return
+    for item in not_claimable:
+        if not isinstance(item, dict):
+            continue
+        work_id = _text_field(item, "work_id")
+        if not work_id:
+            continue
+        rows.append(
+            JobRow(
+                slice_id=work_id,
+                state="blocked",
+                source_section="not_claimable",
+                reason=_text_field(item, "detail") or _text_field(item, "reason"),
+                phase=_UNCLAIMED_PHASE,
+                kind="not_claimable",
+                work_id=work_id,
+                repo=_text_field(item, "repo"),
+            )
+        )
+
+
 def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
     if not isinstance(status, dict) or status.get("degraded"):
         return ()
 
     rows: list[JobRow] = []
 
-    in_flight = status.get("in_flight")
-    if isinstance(in_flight, list):
-        for item in in_flight:
-            if not isinstance(item, dict):
-                continue
-            slice_id = _slice_id_from_item(item)
-            if not slice_id:
-                continue
-            state = str(item.get("state") or "running")
-            rows.append(
-                JobRow(
-                    slice_id=slice_id,
-                    state=state,
-                    source_section="in_flight",
-                    repo=_text_field(item, "repo", "workflow_repo"),
-                )
-            )
+    _ingest_in_flight(status.get("in_flight"), rows)
 
     ready = status.get("ready")
     if isinstance(ready, list):
@@ -209,29 +367,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                 )
             )
 
-    attention = status.get("attention")
-    if isinstance(attention, list):
-        for item in attention:
-            if not isinstance(item, dict):
-                continue
-            slice_id = _slice_id_from_item(item)
-            if not slice_id:
-                continue
-            state = str(item.get("job_state") or item.get("gate_state") or "attention")
-            # manager 只把 slice_state == needs_human 的條目放進 attention。
-            rows.append(
-                JobRow(
-                    slice_id=slice_id,
-                    state=state,
-                    source_section="attention",
-                    reason=_text_field(item, "reason", "gate_reason"),
-                    next_actions=_actions_field(item),
-                    job_id=_text_field(item, "builder_job_id", "reviewer_job_id", "job_id"),
-                    branch=_text_field(item, "target_branch", "branch"),
-                    repo=_text_field(item, "repo", "workflow_repo"),
-                    needs_human=True,
-                )
-            )
+    _ingest_attention(status.get("attention"), rows)
 
     recent_done = status.get("recent_done")
     if isinstance(recent_done, list):
@@ -259,7 +395,21 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                 )
             )
 
-    return tuple(rows)
+    _ingest_slices(status.get("slices"), rows)
+    # #669 / #322：claim 不可認的 work item 合成「未認領」phase，不混進 attention。
+    _ingest_not_claimable(status.get("not_claimable"), rows)
+
+    # 同一 slice 可能同時落在 slices 與 attention（needs_human 版）——保留較有資訊
+    # 的那一版（attention 先處理），避免重複列。順序沿用 section 處理序。
+    seen: set[str] = set()
+    deduped: list[JobRow] = []
+    for row in rows:
+        if row.slice_id in seen:
+            continue
+        seen.add(row.slice_id)
+        deduped.append(row)
+
+    return tuple(deduped)
 
 
 # manager 的 phase 命名（cortex 端定義）。只用於顯示層分組：認得就把同一個 work
@@ -286,21 +436,91 @@ def _group_key(row: JobRow) -> str:
     return row.slice_id
 
 
-def group_job_rows(rows: tuple[JobRow, ...]) -> tuple[JobGroup, ...]:
+#: 三軸分組軸（#322）。
+GroupAxis = Literal["project", "stage", "agent"]
+
+# 軸上缺值的歸屬標記。與「未認領」不同：未歸屬＝沒有 repo、未派工＝沒有 persona、
+# 未分類＝沒有 phase。
+_UNPROJECTED = "未歸屬"
+_UNASSIGNED = "未派工"
+_UNCATEGORIZED = "未分類"
+
+
+def _axis_key(row: JobRow, axis: GroupAxis) -> str:
+    """三軸各軸的第 1 層身分：project→repo、stage→phase、agent→persona，缺值退回
+    各自的歸屬標記。（#322）"""
+    if axis == "stage":
+        return row.phase or _UNCATEGORIZED
+    if axis == "agent":
+        return row.persona or _UNASSIGNED
+    return row.project or _UNPROJECTED
+
+
+def _group_rank(group: JobGroup) -> tuple[int, int, int, int]:
+    """群組排序鍵（#322）：1) 有人在等優先；2) 非 claim 優先於 claim（12 行只容得
+    下真正在管線的工作）；3) recent_done 沉底；4) 未認領永遠最底。元組逐欄比
+    較，同時滿足這四層優先。"""
+    rows = group.rows
+    has_in_flight = any(row.source_section == "in_flight" for row in rows)
+    unclaimed = bool(rows) and all(row.is_not_claimable for row in rows)
+    has_needs_human = group.needs_human
+    all_recent_done = bool(rows) and all(row.source_section == "recent_done" for row in rows)
+    has_claim = any(row.is_pending_claim for row in rows)
+    # 五層優先，依序降幂：等人工 > 在跑 > 非 claim > recent_done > 未認領。
+    # 元組逐欄升序排序，較小者排前，故「優先」欄位用 0。
+    return (
+        0 if has_needs_human else 1,  # 有人在等優先（elem0 = 0 排最前）
+        0 if has_in_flight else 1,    # 在跑次之（elem1 = 0）
+        1 if has_claim else 0,        # 非 claim 優先於 claim（12 行只容得下在管線工作）
+        1 if all_recent_done else 0,  # recent_done 沉底
+        1 if unclaimed else 0,        # 未認領 永遠最底
+    )
+
+
+def group_job_rows(
+    rows: tuple[JobRow, ...], axis: GroupAxis = "project"
+) -> tuple[JobGroup, ...]:
     """把同一 workflow／work 的 slice 收成一群，並讓有人在等的群排最前面。"""
     buckets: dict[str, list[JobRow]] = {}
+    order: list[str] = []
+
+    def bucket_for(row: JobRow) -> str:
+        # wf-* 行（帶 workflow_id）沿用舊的 workflow 前綴收群，優先於 repo——這樣
+        # #264 的wf多phase折疊行為原樣保留。workflow_run 行的 workflow_id 為空
+        # （work_id 不以 wf- 開頭），才走軸分組。
+        if row.workflow_id:
+            return _group_key(row)
+        if row.repo or row.work_id or row.phase:
+            return _axis_key(row, axis)
+        return _group_key(row)
+
     for row in rows:
-        buckets.setdefault(_group_key(row), []).append(row)
-    groups = [JobGroup(key=key, rows=tuple(members)) for key, members in buckets.items()]
+        key = bucket_for(row)
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(row)
 
-    def rank(group: JobGroup) -> int:
-        if group.needs_human:
-            return 0
-        if any(row.source_section == "in_flight" for row in group.rows):
-            return 1
-        return 2
+    groups = [JobGroup(key=key, rows=tuple(buckets[key])) for key in order]
+    return tuple(sorted(groups, key=_group_rank))
 
-    return tuple(sorted(groups, key=rank))
+
+def jobs_counts_summary(rows: tuple[JobRow, ...]) -> str:
+    """JOBS 面板標題的分層計數：`N 件 · X 在管線 · Y 待認領 · Z 不可認領`。
+
+    只印非零區段——純在管線群不顯示待認領，純未認領群只顯示「不可認領」，讓
+    operator 一眼看出積壓結構而非只剩一個總量（#322）。"""
+    parts = [f"{len(rows)} 件"]
+    in_line = sum(1 for row in rows if row.is_in_line)
+    pending = sum(1 for row in rows if row.is_pending_claim)
+    unclaimed = sum(1 for row in rows if row.is_not_claimable)
+    if in_line:
+        parts.append(f"{in_line} 在管線")
+    if pending:
+        parts.append(f"{pending} 待認領")
+    if unclaimed:
+        parts.append(f"{unclaimed} 不可認領")
+    return " · ".join(parts)
 
 
 # How often the cockpit re-reads the tmux pane list so the work summary stays
@@ -332,6 +552,7 @@ class CockpitApp(App[None]):
     BINDINGS = [
         Binding("tab", "focus_next", "切換面板"),
         Binding("j", "toggle_jobs", "JOBS 收合"),
+        Binding("g", "cycle_jobs_axis", "JOBS 分組軸（project→stage→agent）"),
         Binding("m", "manager_panel", "manager"),
         Binding("t", "manager_tick", "tick"),
         Binding("c", "focus_cockpit", "回 cockpit"),
@@ -358,6 +579,8 @@ class CockpitApp(App[None]):
         self._last_click: tuple[str, float] | None = None
         self._displacement: tuple[str, str] | None = None
         self._jobs_collapsed = False
+        # #322 三軸分組軸：project → stage → agent 循環（`g` 鍵）。
+        self._jobs_axis: GroupAxis = "project"
         # 系統監控（banner 右側 htop 風）：CPU%/IO%/Net 速率需前後快照差值，故保留上次快照；
         # _last_stats 存最後有效讀數，None 時沿用以避免快速重刷閃爍。
         self._mon_prev = None
@@ -847,12 +1070,12 @@ class CockpitApp(App[None]):
             return
 
         if rows:
-            waiting = sum(1 for row in rows if row.needs_human)
-            summary = f"{len(rows)} slices"
-            if waiting:
-                summary = f"{summary} · {waiting} 待人工"
-            self._set_border(jobs_widget, "JOBS", summary)
-            jobs_widget.set_groups(group_job_rows(rows))
+            # #322：標題加分層計數（在管線／待認領／不可認領），副標顯示當前行軸。
+            summary = jobs_counts_summary(rows)
+            self._set_border(jobs_widget, f"JOBS · {summary}", f"[by {self._jobs_axis}]")
+            jobs_widget.set_groups(
+                group_job_rows(rows, axis=self._jobs_axis), axis=self._jobs_axis
+            )
         else:
             self._set_border(jobs_widget, "JOBS", "0 slices")
             jobs_widget.set_message("manager slices: 0")
@@ -861,6 +1084,17 @@ class CockpitApp(App[None]):
         if self._background_actions_blocked():
             return
         self._jobs_collapsed = not self._jobs_collapsed
+        self._refresh_jobs_panel()
+
+    # #322：`g` 鍵循環分組軸。每軸用不同的 `_user_expanded` 儲存，切回來展開
+    # 狀態不亂。
+    _JOBS_AXIES: tuple[GroupAxis, ...] = ("project", "stage", "agent")
+
+    def action_cycle_jobs_axis(self) -> None:
+        if self._background_actions_blocked():
+            return
+        current_index = self._JOBS_AXIES.index(self._jobs_axis)
+        self._jobs_axis = self._JOBS_AXIES[(current_index + 1) % len(self._JOBS_AXIES)]
         self._refresh_jobs_panel()
 
     def _activate(self, target_pane_id: str, slot_pane_id: str) -> None:

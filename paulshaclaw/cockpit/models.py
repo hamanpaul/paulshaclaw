@@ -2,6 +2,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# #322：phase → 執行角色。映射來源是 cortex 套件 `coordinator/workflow.py` 的
+# `validate_manager_spine`（phase/persona 契約），不是 cockpit 端猜測。
+# `未認領` 與未知 phase（含 legacy slice 無 phase）都退回空字串。
+_PHASE_TO_PERSONA: dict[str, str] = {
+    "claim": "manager",
+    "ship": "manager",
+    "define": "planner",
+    "plan": "planner",
+    "build": "builder",
+    "verify": "reviewer",
+    "review": "reviewer",
+}
+
+# #322：cortex 的 seven phases。`claim` 單列為「待認積壓」（沉底），其餘視為
+# 「真正在管線里」（12 件那種）。`未認領`（合成 self，來自 not_claimable）與未知
+# phase 都不算 in-line。
+_IN_LINE_PHASES: frozenset[str] = frozenset(
+    {"define", "plan", "build", "verify", "review", "ship"}
+)
+_PENDING_PHASE: str = "claim"
+_UNCLAIMED_PHASE: str = "未認領"
+
 
 @dataclass(frozen=True)
 class SlotAnchor:
@@ -70,14 +92,43 @@ class JobRow:
     job_id: str = ""
     branch: str = ""
     needs_human: bool = False
-    # manager 是跨 repo 派工的，同一個 JOBS 面板會混進別的 project 的 workflow。
-    # 不標 project，operator 根本不知道該去哪個 repo 動手（#264）。
+    # manager 是跨 repo 派工的，同一個 JOBS 面板會混進别的 project 的 workflow。
+    # 不標 project，operator 根本知道該去哪個 repo 動手（#264）。
     repo: str = ""
+    # #322 三軸重設計新增：workflow_run 條目本帶的真實三軸欄位（cortex 已從
+    # slice 平面遷移到 workflow_run 平面，每條帶 work_id / current_phase / run_id）。
+    # 全是預設值，舊的 legacy slice 建構點與既有測試不受影響。
+    work_id: str = ""
+    phase: str = ""
+    run_id: str = ""
+    kind: str = ""
 
     @property
     def project(self) -> str:
         """顯示用 project 名：`hamanpaul/paulsha-cortex` → `paulsha-cortex`。"""
         return self.repo.rpartition("/")[2] if self.repo else ""
+
+    @property
+    def persona(self) -> str:
+        """phase → 執行角色。來源：cortex 套件 `coordinator/workflow.py`
+        的 ``validate_manager_spine`` 是契約不是猜測（#322）。"""
+        return _PHASE_TO_PERSONA.get(self.phase, "")
+
+    @property
+    def is_in_line(self) -> bool:
+        """是否「真正在管線里」：real phase 為 build/verify/review/...（非
+        `claim` 待認積壓、非 `未認領`）。控制群組排序與「X 在管線」計數（#322）。"""
+        return self.phase in _IN_LINE_PHASES
+
+    @property
+    def is_pending_claim(self) -> bool:
+        """卡在 `claim`（尚未派工、無 job 紀錄）的積壓列（#322）。"""
+        return self.phase == _PENDING_PHASE
+
+    @property
+    def is_not_claimable(self) -> bool:
+        """`未認領`（来自 status.not_claimable，安裝版 cortex 0.1.8 沒此 key）（#322）。"""
+        return self.phase == _UNCLAIMED_PHASE
 
     @property
     def workflow_id(self) -> str:
@@ -152,6 +203,42 @@ class JobGroup:
     @property
     def needs_human(self) -> bool:
         return self.needs_human_count > 0
+
+    @property
+    def item_count(self) -> int:
+        """本群的工作總數（含各 phase）。（#322）"""
+        return len(self.rows)
+
+    @property
+    def in_line_count(self) -> int:
+        """本群「真正在管線里」的個數（non-`claim`、non-`未認領` 的 real phase）。
+        供群組標題「N 件 · X 在管線」的 X 使用。（#322）"""
+        return sum(1 for row in self.rows if row.is_in_line)
+
+    @property
+    def pending_claim_count(self) -> int:
+        """本群卡在 `claim`（尚未派工）的個數，控制排序沉底與標題「Y 待認領」。（#322）"""
+        return sum(1 for row in self.rows if row.is_pending_claim)
+
+    @property
+    def is_unclaimed(self) -> bool:
+        """整群都是未認領（全部 row 皆 `not_claimable`）。（#322）"""
+        return bool(self.rows) and all(row.is_not_claimable for row in self.rows)
+
+    @property
+    def summary_trailer(self) -> str:
+        """群組標題的計數副標：`N 件 · X 在管線 · Y 待認領 · Z 不可認領`。
+
+        只印非零的區段：純未認領群只顯示「不可認領」，純在管線群不顯示待認領。
+        供三軸分組時讓 operator 一眼看清每群的大小與積壓結構。（#322）"""
+        parts = [f"{self.item_count} 件"]
+        if self.in_line_count:
+            parts.append(f"{self.in_line_count} 在管線")
+        if self.pending_claim_count:
+            parts.append(f"{self.pending_claim_count} 待認領")
+        if self.is_unclaimed:
+            parts.append(f"{self.item_count} 不可認領")
+        return " · ".join(parts)
 
     @property
     def project(self) -> str:
