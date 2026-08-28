@@ -514,6 +514,10 @@ def group_job_rows(
     """把同一 workflow／work 的 slice 收成一群，並讓有人在等的群排最前面。"""
     buckets: dict[str, list[JobRow]] = {}
     order: list[str] = []
+    # #322：project 軸遇到真正的 workflow_run（帶 work_id）時，legacy recent_done 才
+    # 需要跟著 repo 群落下去，避免多佔一個 wf-* 群。若整批都是 legacy recent_done，
+    # 則維持既有 workflow 折疊行為，讓各 run 仍各自成群、可在主行看見 wf-hash。
+    project_axis_with_workflows = axis == "project" and any(row.work_id for row in rows)
 
     def bucket_for(row: JobRow) -> str:
         # workflow_run 行（帶 work_id）一律走軸分組——work_id 才是唯一身分。
@@ -522,6 +526,15 @@ def group_job_rows(
         # workflow_id property 仍會回前缀；若優先判 workflow_id 會把 stage／agent
         # 軸也收成工作流前缀群，丢掉 phase／persona 軸身分。（#322 regression）
         if row.work_id:
+            return _axis_key(row, axis)
+        # 混合 workflow_run + legacy recent_done 時，project 軸要先用 repo 把
+        # recent_done 收進同一個 project 群；純 legacy recent_done 則沿用 workflow
+        # 折疊，避免一次把多個 run 壓成一個 repo 群看不見個別身分（#322 / #264）。
+        if project_axis_with_workflows and row.repo:
+            return _axis_key(row, axis)
+        # 非 project 軸時，只要 row 帶真 phase 就用 phase/persona 分組，不讓 wf-* 前綴
+        # 把 stage / agent 軸吃回 workflow 群。
+        if axis != "project" and row.phase:
             return _axis_key(row, axis)
         if row.workflow_id:
             return _group_key(row)
