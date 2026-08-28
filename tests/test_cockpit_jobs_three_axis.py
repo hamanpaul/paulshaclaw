@@ -494,6 +494,31 @@ class JobReviewRegressionTests(unittest.TestCase):
         phases = [r.phase for r in group.rows]
         self.assertEqual(phases, ["build", "verify", "claim"])
 
+    def test_project_axis_recent_done_workflow_rows_stay_in_repo_group(self) -> None:
+        """#322 regression：project 軸下的 recent_done 不得因 wf-* slice_id 拆成
+        獨立 workflow 群；它要歸到 repo 群底下，才不會佔掉預設視野。"""
+        rows = slices_from_status(
+            {
+                "degraded": False,
+                "in_flight": [self._wf_run("wf-live-build", "build")],
+                "recent_done": [
+                    {
+                        "slice_id": "wf-done-verification",
+                        "gate_status": "passed",
+                        "workflow_repo": "hamanpaul/paulsha-cortex",
+                    }
+                ],
+            }
+        )
+
+        groups = group_job_rows(rows, axis="project")
+
+        self.assertEqual([g.key for g in groups], ["paulsha-cortex"])
+        self.assertEqual(
+            [(row.slice_id, row.source_section) for row in groups[0].rows],
+            [("wf-live-build", "in_flight"), ("wf-done-verification", "recent_done")],
+        )
+
     def test_stage_axis_columns_show_work_id_persona_repo(self) -> None:
         """#6（jobs_panel）回归：stage 軸三欄是 work_id·persona·repo（非
         work_id·work_id·？），且带 persona——project／agent 轴才显示 persona 的误区
