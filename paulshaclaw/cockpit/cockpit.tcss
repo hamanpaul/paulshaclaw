@@ -61,9 +61,12 @@ Footer > .footer--description {
     border: round #22C55E;
 }
 
-/* JOBS · 全域工作狀態（可 focus／捲動的 Tree，見 jobs_panel.py） */
+/* JOBS · 全域工作狀態（可 focus／捲動的 Tree，見 jobs_panel.py）
+ * 用固定高度 12（bounded）；Tree 的 height:auto 自然高度只會收斂到 3，
+ * 在縱向 Stack 裡被 #work-list { height: 1fr } 擠扁。收合時由 App 層把
+ * max_height 設為 3 蓋過此值（見 _refresh_jobs_panel）。 */
 #global-jobs {
-    height: auto;
+    height: 12;
     max-height: 12;
     overflow-y: auto;
     padding: 0 1;

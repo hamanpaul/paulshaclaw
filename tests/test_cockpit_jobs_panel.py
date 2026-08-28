@@ -33,7 +33,7 @@ class BuildJobsNodesSingleTests(unittest.TestCase):
         spec = specs[0]
         self.assertEqual(spec.key, "wf-abc")
         self.assertEqual(spec.children, ())
-        self.assertFalse(spec.expand)
+        self.assertTrue(spec.expand, "群組層預設展開（#322）")
         plain = "".join(text for text, _ in spec.segments)
         self.assertIn("build", plain)
 
@@ -79,10 +79,12 @@ class BuildJobsNodesSingleTests(unittest.TestCase):
         self.assertTrue(spec.expand)
         self.assertEqual(spec.children, ())
 
-    def test_not_needs_human_not_expanded_no_child(self):
+    def test_not_needs_human_single_group_expands_no_child(self):
+        # 群組層預設展開（#322）：即便非 needs_human 的單列群也要展開，让工作列可见；
+        # 沒有 detail 子列，expand 僅是「已展開但無子節點」。
         not_needing = JobGroup(key="wf-ok", rows=(row("wf-ok-build"),))
         ok_spec = build_jobs_nodes((not_needing,))[0]
-        self.assertFalse(ok_spec.expand)
+        self.assertTrue(ok_spec.expand)
         self.assertEqual(ok_spec.children, ())
 
 
@@ -122,7 +124,8 @@ class BuildJobsNodesMultiPhaseTests(unittest.TestCase):
         group = self._multi_group(second_needs_human=True)
         specs = build_jobs_nodes((group,))
         verify_child = specs[0].children[1]
-        self.assertTrue(verify_child.expand)
+        # detail 預設收合（#322）：detail 子列仍在，但預設不展開，需 enter/space 才展開。
+        self.assertFalse(verify_child.expand)
         self.assertEqual(len(verify_child.children), 1)
         detail = verify_child.children[0]
         self.assertEqual(detail.key, "wf-abc/wf-abc-verification/detail")
@@ -131,11 +134,12 @@ class BuildJobsNodesMultiPhaseTests(unittest.TestCase):
         self.assertIn("等 CI", text)
         self.assertEqual(color, "#FBBF24")
 
-    def test_multi_phase_without_needs_human_no_detail_and_not_expanded(self):
+    def test_multi_phase_without_needs_human_no_detail(self):
         group = self._multi_group(second_needs_human=False)
         specs = build_jobs_nodes((group,))
         spec = specs[0]
-        self.assertFalse(spec.expand)
+        # 群組層預設展開（#322）：讓分 phase 行可見；detail 一律預設收合。
+        self.assertTrue(spec.expand)
         for child in spec.children:
             self.assertEqual(child.children, ())
             self.assertFalse(child.expand)
@@ -282,7 +286,8 @@ class JobsPanelWidgetTests(unittest.IsolatedAsyncioTestCase):
             build_node, verify_node = group_node.children
             self.assertEqual(build_node.data, "wf-abc/wf-abc-build")
             self.assertEqual(verify_node.data, "wf-abc/wf-abc-verification")
-            self.assertTrue(verify_node.is_expanded)
+            # detail 預設收合（#322）：detail 子列仍在，但預設不展開。
+            self.assertFalse(verify_node.is_expanded)
             self.assertEqual(len(verify_node.children), 1)
             self.assertEqual(verify_node.children[0].data, "wf-abc/wf-abc-verification/detail")
 

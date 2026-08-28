@@ -195,6 +195,97 @@ def _layout_columns(
     return state_col, name_col, trailer_budget
 
 
+# #322 三軸行的固定欄寬：phase 與 persona 用定寬，work_id 吃剩餘的彈性欄。
+_PHASE_COL = 8  # build／verify／claim／review…
+_PERSONA_COL = 9  # manager／planner／builder／reviewer
+_WORK_COL_MIN = 16  # work_id／任務名至少留出可辨識的寬度
+# 與 app.py 的軸歸屬標記同步（缺值退回）。
+_UNPROJECTED = "未歸屬"  # 無 repo
+_UNASSIGNED = "未派工"  # 無 persona
+_UNCATEGORIZED = "未分類"  # 無 phase
+
+
+def _row_work_id(row: JobRow) -> str:
+    """工作識別欄：workflow_run 帶 work_id，legacy slice 退回看得懂的 display_name。"""
+    return row.work_id or row.display_name
+
+
+def _row_is_axis(row: JobRow) -> bool:
+    """是否「真正的三軸行」：workflow_run 才帶 phase／work_id／persona。
+
+    legacy slice 只用 slice_id 字串猜 phase，沿用舊的 state／name／trailer 渲染
+    （#322）。這道門檻是兩種版面並存的分界線。"""
+    return bool(row.work_id and row.phase)
+
+
+def _col1_text(row: JobRow, axis: str) -> str:
+    """三軸行第 1 欄：stage 軸顯示 work_id，project／agent 軸顯示 phase。
+
+    能進這道門檻的 row 一定帶 phase（`_row_is_axis` 的條件），故 phase 永不為空。"""
+    if axis == "stage":
+        return _row_work_id(row)
+    return row.phase
+
+
+def _col2_text(row: JobRow, axis: str) -> str:
+    """三軸行第 2 欄：stage 軸顯示 persona（work_id 已佔第 1 欄），其餘軸顯示
+    work_id。三軸每欄依 plan「第 2 層列」定：project→phase·work_id·persona、
+    stage→work_id·persona·repo、agent→phase·work_id·repo。（#322 回归：stage
+    軸原把 work_id 重複在第 1、2 欄，且整列缺 persona）"""
+    if axis == "stage":
+        return row.persona or _UNASSIGNED
+    return _row_work_id(row)
+
+
+def _col3_text(row: JobRow, axis: str) -> str:
+    """三軸行第 3 欄：project 軸顯示 persona，stage／agent 軸顯示 project（退未歸屬）。"""
+    if axis == "project":
+        return row.persona or _UNASSIGNED
+    return row.project or _UNPROJECTED
+
+
+def _axis_layout_columns(
+    groups: tuple[JobGroup, ...], width: int, axis: str
+) -> tuple[int, int, int]:
+    """量本批三軸行的自然欄寬 → (first_col, work_col, third_col)。
+
+    第 1、3 欄依本批最寬者取寬（設上下限），work_id 吃掉剩餘全部預算；寬度不足
+    時先保 work_id（辨識關鍵），再壓縮第 1、3 欄。（#322）"""
+    firsts: list[int] = []
+    thirds: list[int] = []
+    for group in groups:
+        for row in group.rows:
+            if _row_is_axis(row):
+                firsts.append(_display_width(_col1_text(row, axis)))
+                thirds.append(_display_width(_col3_text(row, axis)))
+    first_col = min(max(firsts, default=_PHASE_COL), 14)
+    first_col = max(first_col, _PHASE_COL)
+    third_col = min(max(thirds, default=_PERSONA_COL), 16)
+    third_col = max(third_col, _PERSONA_COL)
+    work_col = max(width - 1 - 1 - first_col - 1 - third_col - 1, _WORK_COL_MIN)
+    return first_col, work_col, third_col
+
+
+def _render_axis_row(
+    row: JobRow, first_col: int, work_col: int, third_col: int, axis: str
+) -> tuple[tuple[str, str], ...]:
+    """三軸行的四欄語意化版面：`glyph(1) phase(8) work_id(彈性) persona(9)`。
+
+    glyph 承載狀態語意（顏色），phase／work_id／persona 皆中性色——狀態不用文字
+    展現，寬度不足時由 _pad_display 把 work_id 推到最右、省略號由 _ellipsize 處理
+    （#317：trailer 維持終端預設前景）。"""
+    glyph, color = status_style(_row_state_key(row))
+    c1 = _pad_display(_ellipsize_middle(_col1_text(row, axis), first_col), first_col)
+    c2 = _pad_display(_ellipsize_middle(_col2_text(row, axis), work_col), work_col)
+    c3 = _pad_display(_ellipsize_middle(_col3_text(row, axis), third_col), third_col)
+    return (
+        (f"{glyph} ", color),
+        (f"{c1} ", ""),
+        (f"{c2} ", ""),
+        (f"{c3} ", ""),
+    )
+
+
 @dataclass(frozen=True)
 class JobsNodeSpec:
     """build_jobs_nodes 的純資料輸出：一個 Tree 節點該長什麼樣，不碰 widget。"""
@@ -226,14 +317,37 @@ def _single_detail_children(group: JobGroup) -> tuple[JobsNodeSpec, ...]:
     return ()
 
 
-def _phase_child(group: JobGroup, row: JobRow, state_col: int) -> JobsNodeSpec:
+def _legacy_phase_child(group: JobGroup, row: JobRow, state_col: int) -> tuple[tuple[str, str], ...]:
+    """legacy slice 行（無 phase／work_id）的舊兩欄渲染：`glyph+state · phase_name`。
+
+    保留原有字面：`_phase_label` 從 slice_id 字剝出 phase 短名（`wf-abc-build`
+    → `build`），legacy 測試斷言「顯示 build 但不顯示完整 slice_id」靠它。（#322）"""
     glyph, color = status_style(_row_state_key(row))
     label_state = _abbrev_label(row.human_state or row.state)
     phase_name = _abbrev_label(group._phase_label(row))
-    segments = (
+    return (
         (f"{glyph} {_pad_display(label_state, state_col)} ", color),
         (phase_name, ""),
     )
+
+
+def _row_child(
+    group: JobGroup,
+    row: JobRow,
+    first_col: int,
+    work_col: int,
+    third_col: int,
+    state_col: int,
+    axis: str,
+) -> JobsNodeSpec:
+    """一行工作的 Tree 子節點：三軸行走四欄語意化，legacy 行走舊兩欄。
+
+    detail 子行一律預設收合（enter/space 才展開），`_single_detail_children`
+    的單列 detail 不在這裡（群組層已處理）——這裡只有多 phase 群的分 phase 行。"""
+    if _row_is_axis(row):
+        segments = _render_axis_row(row, first_col, work_col, third_col, axis)
+    else:
+        segments = _legacy_phase_child(group, row, state_col)
     children: tuple[JobsNodeSpec, ...] = ()
     if row.needs_human and row.detail_line:
         children = (_detail_child(f"{group.key}/{row.slice_id}/detail", row.detail_line),)
@@ -241,62 +355,154 @@ def _phase_child(group: JobGroup, row: JobRow, state_col: int) -> JobsNodeSpec:
         key=f"{group.key}/{row.slice_id}",
         segments=segments,
         children=children,
-        # 該 phase 自己在等人，就自動展開讓 detail 直接可見，不必再多按一次。
-        expand=row.needs_human,
+        # detail 一律預設收合（#322：42 筆 needs_human 全展開會把 10 行區吃光），
+        # 游標停在該列按 enter/space 才展開（Tree 原生行為）。
+        expand=False,
     )
 
 
 def build_jobs_nodes(
-    groups: tuple[JobGroup, ...], width: int = _JOBS_WIDTH_FALLBACK
+    groups: tuple[JobGroup, ...],
+    width: int = _JOBS_WIDTH_FALLBACK,
+    axis: str = "project",
 ) -> tuple[JobsNodeSpec, ...]:
-    """JobGroup 序列 → Tree 節點描述（純函式，不碰 widget，供單測與 widget 共用）。"""
-    specs: list[JobsNodeSpec] = []
+    """JobGroup 序列 → Tree 節點描述（純函式，不碰 widget，供單測與 widget 共用）。
+
+    `axis`（`project`／`stage`／`agent`）決定三軸分組的版面：workflow_run 行（帶
+    phase／work_id／persona）走四欄語意化，legacy slice 行沿用舊的 state／name／
+    trailer。群組頭對三軸行顯示「軸身分（group.key）＋計數副標」；legacy 群組
+    保留既有 headline_state／trailer。預設 `project` 軸（既有測試相容）。"""
+    # 欄寬對整批 rows 計算一次（與舊版同：一次 layout 供全部群組共用）。
+    first_col, work_col, third_col = _axis_layout_columns(groups, width, axis)
     state_col, name_col, trailer_budget = _layout_columns(groups, width)
+    specs: list[JobsNodeSpec] = []
     for group in groups:
-        glyph, color = status_style(
-            group.lead.state if group.is_single else _group_state_key(group)
+        specs.append(
+            _group_spec(group, axis, first_col, work_col, third_col, state_col, name_col, trailer_budget)
         )
+    return tuple(specs)
+
+
+def _group_spec(
+    group: JobGroup,
+    axis: str,
+    first_col: int,
+    work_col: int,
+    third_col: int,
+    state_col: int,
+    name_col: int,
+    trailer_budget: int,
+) -> JobsNodeSpec:
+    """群組節點：單列直接當行顯示，多列走軸身分頭＋分 phase 行。"""
+    if group.is_single:
+        return _single_group_spec(
+            group, axis, first_col, work_col, third_col, state_col, name_col, trailer_budget
+        )
+    return _multi_group_spec(
+        group, axis, first_col, work_col, third_col, state_col, name_col, trailer_budget
+    )
+
+
+def _single_group_spec(
+    group: JobGroup,
+    axis: str,
+    first_col: int,
+    work_col: int,
+    third_col: int,
+    state_col: int,
+    name_col: int,
+    trailer_budget: int,
+) -> JobsNodeSpec:
+    """單列群：群組節點直接當一行（三軸行四欄、legacy 行舊版），detail 掛群組層。"""
+    row = group.lead
+    children = _single_detail_children(group)
+    align = _ROW_ALIGN_PREFIX if not children else ""
+    if _row_is_axis(row):
+        # 三軸行不含 align，這裡補上（無子列補兩格與 Tree 箭頭同寬起點）。
+        segments = list(_render_axis_row(row, first_col, work_col, third_col, axis))
+        first_text, first_color = segments[0]
+        segments = ((f"{align}{first_text}", first_color), *segments[1:])
+    else:
+        glyph, color = status_style(group.lead.state)
         trailer = _fit_trailer(
             (
                 group.project,
-                # branch 帶著 feature/<N>-<slug> 的 issue 編號，是上游 repo 仍為 null
-                # （cortex#465）時 workflow job 唯一的歸屬線索。縮寫要在
-                # _fit_trailer 之前做，寬度計算才用得上省下來的欄位。
-                # 單列與群組列都放這欄——feat/ 串垂直對齊一整欄（#314）。
-                # wf-hash／job_id 是機器 id，有 branch 時是純噪音不顯示；但沒
-                # branch 的列拿掉 hash 會讓多列長得一模一樣（同 phase 同狀態），
-                # 故無 branch 才退回 workflow id 當最後的身分。job_id 一律不進
-                # trailer；對帳用的原始 id 留在 needs_human detail 行的可複製命令。
                 _abbrev_branch(group.branch) or group.workflow_id,
                 group.note,
                 _abbrev_label(group.raw_state),
             ),
             trailer_budget,
         )
-        if group.is_single:
-            children = _single_detail_children(group)
-        else:
-            children = tuple(_phase_child(group, row, state_col) for row in group.rows)
-        align = _ROW_ALIGN_PREFIX if not children else ""
-        main_segments = (
+        # legacy 頭已把 align 寫進首段，這裡不再重複補。
+        segments = (
             (f"{align}{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
             (
                 f"{_pad_display(_ellipsize_middle(_abbrev_branch(_abbrev_label(group.display_name)), name_col) if group.is_single else '', name_col)} ",
                 "",
             ),
-            # trailer 維持白＝終端預設前景（owner：feat 串不上暗色，#317 消色差）；
-            # 灰階只留給 state 欄語意。
             (trailer, ""),
         )
-        specs.append(
-            JobsNodeSpec(
-                key=group.key,
-                segments=main_segments,
-                children=children,
-                expand=group.needs_human,
-            )
+    all_recent_done = bool(group.rows) and all(
+        row.source_section == "recent_done" for row in group.rows
+    )
+    return JobsNodeSpec(
+        key=group.key,
+        segments=segments,
+        children=children,
+        # 整群都是 recent_done 時不展開（#322）；其餘（含 needs_human 單列的
+        # reason）預設展開，讓工作列與其可執行下一步一眼可見。
+        expand=not all_recent_done,
+    )
+
+
+def _multi_group_spec(
+    group: JobGroup,
+    axis: str,
+    first_col: int,
+    work_col: int,
+    third_col: int,
+    state_col: int,
+    name_col: int,
+    trailer_budget: int,
+) -> JobsNodeSpec:
+    """多列群：三軸行顯示「軸身分＋計数」頭＋分 phase 行；legacy 群保留舊版。"""
+    has_axis_rows = any(_row_is_axis(row) for row in group.rows)
+    glyph, color = status_style(_group_state_key(group))
+    trailer = _fit_trailer(
+        (
+            group.project,
+            _abbrev_branch(group.branch) or group.workflow_id,
+            group.note,
+            _abbrev_label(group.raw_state),
+        ),
+        trailer_budget,
+    )
+    if has_axis_rows:
+        # 三軸頭：glyph + 軸身分（group.key：repo／phase／persona）+ 計数副標。
+        main_segments = ((f"{glyph} {_abbrev_label(group.key)} ", color), (group.summary_trailer, ""))
+    else:
+        # legacy 頭：headline_state＋留白 name 欄＋trailer（#314 多列 name 留白）。
+        # 多列群永遠有子列（分 phase 行），Tree 箭頭吃掉同寬起點，故不加 align 前綴。
+        main_segments = (
+            (f"{glyph} {_pad_display(_abbrev_label(group.headline_state), state_col)} ", color),
+            (f"{_pad_display('', name_col)} ", ""),
+            (trailer, ""),
         )
-    return tuple(specs)
+    # 分 phase 行：三軸行四欄、legacy 行舊兩欄，detail 一律預設收合。
+    children = tuple(
+        _row_child(group, row, first_col, work_col, third_col, state_col, axis)
+        for row in group.rows
+    )
+    all_recent_done = bool(group.rows) and all(
+        row.source_section == "recent_done" for row in group.rows
+    )
+    return JobsNodeSpec(
+        key=group.key,
+        segments=main_segments,
+        children=children,
+        # 群組層預設展開（讓工作列可見）；整群都是 recent_done 時不展開（#322）。
+        expand=not all_recent_done,
+    )
 
 
 def _project_specs(specs: tuple[JobsNodeSpec, ...]) -> tuple[tuple[str, str], ...]:
@@ -341,8 +547,9 @@ if _HAS_TEXTUAL:
             super().__init__("jobs", name=name, id=id, classes=classes, disabled=disabled)
             self.show_root = False
             self.guide_depth = 2
-            # key -> 使用者上次手動設的展開狀態；優先於 spec.expand 的預設值。
-            self._user_expanded: dict[str, bool] = {}
+            # axis -> key -> 使用者上次手動設的展開狀態；軸切換後原軸的展開狀態照舊。
+            self._user_expanded: dict[str, dict[str, bool]] = {}
+            self._last_axis: str = "project"
             self._last_projection: tuple[tuple[str, str], ...] | None = None
             self._last_groups: tuple[JobGroup, ...] = ()
 
@@ -352,12 +559,12 @@ if _HAS_TEXTUAL:
         def on_tree_node_expanded(self, event: "Tree.NodeExpanded") -> None:
             key = event.node.data
             if key is not None:
-                self._user_expanded[key] = True
+                self._user_expanded.setdefault(self._last_axis, {})[key] = True
 
         def on_tree_node_collapsed(self, event: "Tree.NodeCollapsed") -> None:
             key = event.node.data
             if key is not None:
-                self._user_expanded[key] = False
+                self._user_expanded.setdefault(self._last_axis, {})[key] = False
 
         def _panel_width(self) -> int:
             """widget 目前可寫入的顯示寬度；量不到（尚未 layout）時退回保守值。"""
@@ -371,11 +578,12 @@ if _HAS_TEXTUAL:
             # resize 立即以新寬度重排，不等下一個 status tick（#308）；寬度沒
             # 實質改變時投影 diff 會判「沒變」而跳過重建，這裡不必自己防抖。
             if self._last_groups:
-                self.set_groups(self._last_groups)
+                self.set_groups(self._last_groups, axis=self._last_axis)
 
-        def set_groups(self, groups: tuple[JobGroup, ...]) -> None:
+        def set_groups(self, groups: tuple[JobGroup, ...], axis: str = "project") -> None:
             self._last_groups = tuple(groups)
-            specs = build_jobs_nodes(tuple(groups), width=self._panel_width())
+            self._last_axis = axis
+            specs = build_jobs_nodes(tuple(groups), width=self._panel_width(), axis=axis)
             projection = _project_specs(specs)
             if projection == self._last_projection:
                 return
@@ -383,11 +591,12 @@ if _HAS_TEXTUAL:
             cursor_key = self.cursor_node.data if self.cursor_node is not None else None
             scroll_offset = self.scroll_offset
             restored: list[object] = [None]
+            axis_store = self._user_expanded.setdefault(axis, {})
 
             def build(parent, spec: JobsNodeSpec) -> None:
                 label = _label(spec.segments)
                 if spec.children:
-                    expand = self._user_expanded.get(spec.key, spec.expand)
+                    expand = axis_store.get(spec.key, spec.expand)
                     node = parent.add(label, data=spec.key, expand=expand)
                     for child in spec.children:
                         build(node, child)
@@ -441,7 +650,7 @@ else:  # pragma: no cover - fallback when textual not installed
             self.border_title = ""
             self.border_subtitle = ""
 
-        def set_groups(self, groups) -> None:  # pragma: no cover - noop
+        def set_groups(self, groups, axis: str = "project") -> None:  # pragma: no cover - noop
             return None
 
         def set_message(self, text: str, style: str = "#64748B") -> None:  # pragma: no cover - noop

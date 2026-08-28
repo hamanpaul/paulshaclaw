@@ -184,18 +184,28 @@ class JobsKeyboardRoutingTests(unittest.IsolatedAsyncioTestCase):
 @unittest.skipUnless(HAS_TEXTUAL, "textual not installed")
 class JobsExpandCollapseTests(unittest.IsolatedAsyncioTestCase):
     async def test_enter_toggles_expand_on_multi_phase_group(self) -> None:
+        """#322 回溯：非 needs_human 的多 phase 群預設展開（契約：群層預設展開，
+        recent_done 除外）。三軸行已是葉、enter 不觸發群 toggle，需先 down 把游標
+        落回群節點，再按 enter 收／展開（Tree 原生 toggle）。"""
         app = make_app(manager_status=_multi_phase_status())
         async with app.run_test(size=(100, 40)) as pilot:
             await pilot.pause()
             jobs = app.query_one("#global-jobs")
             (group_node,) = jobs.root.children
-            # 非 needs_human 的多 phase 群預設收合（契約：只有 needs_human 才 expand=True）。
-            self.assertFalse(group_node.is_expanded)
+            # 群層預設展開（让工作列可見）。
+            self.assertTrue(group_node.is_expanded)
 
             await _tab_until(pilot, app, "global-jobs")
-            await pilot.press("enter")
+            await pilot.pause()
+            await pilot.press("down")  # 游標從根落到群節點
             await pilot.pause()
 
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertFalse(group_node.is_expanded)
+
+            await pilot.press("enter")
+            await pilot.pause()
             self.assertTrue(group_node.is_expanded)
 
     async def test_needs_human_group_defaults_expanded_with_visible_detail_child(self) -> None:

@@ -2,6 +2,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# #322：phase → 執行角色。映射來源是 cortex 套件 `coordinator/workflow.py` 的
+# `validate_manager_spine`（phase/persona 契約），不是 cockpit 端猜測。
+# `未認領` 與未知 phase（含 legacy slice 無 phase）都退回空字串。
+_PHASE_TO_PERSONA: dict[str, str] = {
+    "claim": "manager",
+    "ship": "manager",
+    "define": "planner",
+    "plan": "planner",
+    "build": "builder",
+    "verify": "reviewer",
+    "review": "reviewer",
+}
+
+# #322：cortex 的 seven phases。`claim` 單列為「待認積壓」（沉底），其餘視為
+# 「真正在管線裡」（12 件那種）。`未認領`（合成 self，來自 not_claimable）與未知
+# phase 都不算 in-line。
+_IN_LINE_PHASES: frozenset[str] = frozenset(
+    {"define", "plan", "build", "verify", "review", "ship"}
+)
+_PENDING_PHASE: str = "claim"
+_UNCLAIMED_PHASE: str = "未認領"
+
 
 @dataclass(frozen=True)
 class SlotAnchor:
@@ -71,13 +93,42 @@ class JobRow:
     branch: str = ""
     needs_human: bool = False
     # manager 是跨 repo 派工的，同一個 JOBS 面板會混進別的 project 的 workflow。
-    # 不標 project，operator 根本不知道該去哪個 repo 動手（#264）。
+    # 不標 project，operator 根本知道該去哪個 repo 動手（#264）。
     repo: str = ""
+    # #322 三軸重設計新增：workflow_run 條目本帶的真實三軸欄位（cortex 已從
+    # slice 平面遷移到 workflow_run 平面，每條帶 work_id / current_phase / run_id）。
+    # 全是預設值，舊的 legacy slice 建構點與既有測試不受影響。
+    work_id: str = ""
+    phase: str = ""
+    run_id: str = ""
+    kind: str = ""
 
     @property
     def project(self) -> str:
         """顯示用 project 名：`hamanpaul/paulsha-cortex` → `paulsha-cortex`。"""
         return self.repo.rpartition("/")[2] if self.repo else ""
+
+    @property
+    def persona(self) -> str:
+        """phase → 執行角色。來源：cortex 套件 `coordinator/workflow.py`
+        的 ``validate_manager_spine`` 是契約不是猜測（#322）。"""
+        return _PHASE_TO_PERSONA.get(self.phase, "")
+
+    @property
+    def is_in_line(self) -> bool:
+        """是否「真正在管線裡」：real phase 為 build/verify/review/...（非
+        `claim` 待認積壓、非 `未認領`）。控制群組排序與「X 在管線」計數（#322）。"""
+        return self.phase in _IN_LINE_PHASES
+
+    @property
+    def is_pending_claim(self) -> bool:
+        """卡在 `claim`（尚未派工、無 job 紀錄）的積壓列（#322）。"""
+        return self.phase == _PENDING_PHASE
+
+    @property
+    def is_not_claimable(self) -> bool:
+        """`未認領`（來自 status.not_claimable，安裝版 cortex 0.1.8 沒此 key）（#322）。"""
+        return self.phase == _UNCLAIMED_PHASE
 
     @property
     def workflow_id(self) -> str:
@@ -109,14 +160,33 @@ class JobRow:
 
         任一項缺就明說是上游沒給，不留一列「只有狀態、沒有意義」的東西給
         operator 猜。命令用 ``--actor $USER`` 而非佔位符，讓它可以直接複製執行；
-        多個 action 時保留 ``a|b`` 形式，因為那本來就要人挑一個。
+        多個 action 時保留 ``a|b`` 形式，因為那本來就要人挑一個。（#322）
+
+        workflow_run 走 ``cortex work <action> <work_id> --repo``（非 slice-action），
+        但多數 action 需 fail-closed 的名義參數（``abandon`` 需 ``expected_run_id``＋
+        ``reason``；``retry-build`` 需 40-hex ``expected_candidate``），detail 通常
+        不附——故只給 ``next_actions`` 清單＋``run_id`` 讓使用者自行組命令（寧可少給
+        也不給錯命令）。``claim`` 階段 manager 尚未派工，直接標「尚未派工」，勿誤讀成
+        manager 正在跑。
         """
         if not self.needs_human:
             return ""
         if not self.reason and not self.next_actions:
             return "上游未帶 reason／next_actions（manager status 契約缺口）"
         why = self.reason or "上游未帶 reason"
-        if self.next_actions:
+        if self.is_pending_claim:
+            # claim（派工前）manager 尚未建立 run：detail 明説「尚未派工」，勿誤讀。
+            how = "尚未派工（manager 尚未建立 run）——需 manager 重新派工"
+        elif self.kind == "workflow_run":
+            # workflow_run 走 work-action，fail-closed 名義參數 detail 通常不附，
+            # 只給可參考的下一步與 run_id，讓 operator 自行組命令（#322）。
+            parts: list[str] = []
+            if self.next_actions:
+                parts.append("可選 action：" + "|".join(self.next_actions))
+            if self.run_id:
+                parts.append(f"run_id：{self.run_id}")
+            how = "、".join(parts) if parts else "action 需 fail-closed 名義參數，無法自動產生可執行命令"
+        elif self.next_actions:
             actions = "|".join(self.next_actions)
             how = f"cortex slice-action {self.slice_id} {actions} --actor $USER"
         else:
@@ -152,6 +222,49 @@ class JobGroup:
     @property
     def needs_human(self) -> bool:
         return self.needs_human_count > 0
+
+    @property
+    def item_count(self) -> int:
+        """本群的工作總數（含各 phase）。（#322）"""
+        return len(self.rows)
+
+    @property
+    def in_line_count(self) -> int:
+        """本群「真正在管線裡」的個數（non-`claim`、non-`未認領` 的 real phase）。
+        供群組標題「N 件 · X 在管線」的 X 使用。（#322）"""
+        return sum(1 for row in self.rows if row.is_in_line)
+
+    @property
+    def pending_claim_count(self) -> int:
+        """本群卡在 `claim`（尚未派工）的個數，控制排序沉底與標題「Y 待認領」。（#322）"""
+        return sum(1 for row in self.rows if row.is_pending_claim)
+
+    @property
+    def not_claimable_count(self) -> int:
+        """本群不可認領（全部 row 皆 ``not_claimable``）的個數；混合群（部分不可
+        認領）亦列出，供標題「Z 不可認領」使用，補 ``is_unclaimed`` 只认整群的缺口。
+        （#322）"""
+        return sum(1 for row in self.rows if row.is_not_claimable)
+
+    @property
+    def is_unclaimed(self) -> bool:
+        """整群都是未認領（全部 row 皆 `not_claimable`）。（#322）"""
+        return bool(self.rows) and all(row.is_not_claimable for row in self.rows)
+
+    @property
+    def summary_trailer(self) -> str:
+        """群組標題的計數副標：`N 件 · X 在管線 · Y 待認領 · Z 不可認領`。
+
+        只印非零的區段：純未認領群只顯示「不可認領」，純在管線群不顯示待認領。
+        供三軸分組時讓 operator 一眼看清每群的大小與積壓結構。（#322）"""
+        parts = [f"{self.item_count} 件"]
+        if self.in_line_count:
+            parts.append(f"{self.in_line_count} 在管線")
+        if self.pending_claim_count:
+            parts.append(f"{self.pending_claim_count} 待認領")
+        if self.not_claimable_count:
+            parts.append(f"{self.not_claimable_count} 不可認領")
+        return " · ".join(parts)
 
     @property
     def project(self) -> str:
