@@ -227,6 +227,16 @@ def _col1_text(row: JobRow, axis: str) -> str:
     return row.phase
 
 
+def _col2_text(row: JobRow, axis: str) -> str:
+    """三軸行第 2 欄：stage 軸顯示 persona（work_id 已佔第 1 欄），其餘軸顯示
+    work_id。三軸每欄依 plan「第 2 層列」定：project→phase·work_id·persona、
+    stage→work_id·persona·repo、agent→phase·work_id·repo。（#322 回归：stage
+    軸原把 work_id 重複在第 1、2 欄，且整列缺 persona）"""
+    if axis == "stage":
+        return row.persona or _UNASSIGNED
+    return _row_work_id(row)
+
+
 def _col3_text(row: JobRow, axis: str) -> str:
     """三軸行第 3 欄：project 軸顯示 persona，stage／agent 軸顯示 project（退未歸屬）。"""
     if axis == "project":
@@ -265,14 +275,14 @@ def _render_axis_row(
     展現，寬度不足時由 _pad_display 把 work_id 推到最右、省略號由 _ellipsize 處理
     （#317：trailer 維持終端預設前景）。"""
     glyph, color = status_style(_row_state_key(row))
-    c1 = _pad_display(_col1_text(row, axis), first_col)
-    c2 = _pad_display(_row_work_id(row), work_col)
-    c3 = _col3_text(row, axis)
+    c1 = _pad_display(_ellipsize_middle(_col1_text(row, axis), first_col), first_col)
+    c2 = _pad_display(_ellipsize_middle(_col2_text(row, axis), work_col), work_col)
+    c3 = _pad_display(_ellipsize_middle(_col3_text(row, axis), third_col), third_col)
     return (
         (f"{glyph} ", color),
         (f"{c1} ", ""),
         (f"{c2} ", ""),
-        (c3, ""),
+        (f"{c3} ", ""),
     )
 
 
@@ -345,8 +355,9 @@ def _row_child(
         key=f"{group.key}/{row.slice_id}",
         segments=segments,
         children=children,
-        # 有 detail 才展開：該 phase 自己在等人就讓 detail 直接可見。
-        expand=bool(children),
+        # detail 一律預設收合（#322：42 筆 needs_human 全展開會把 10 行區吃光），
+        # 游標停在該列按 enter/space 才展開（Tree 原生行為）。
+        expand=False,
     )
 
 
@@ -431,7 +442,17 @@ def _single_group_spec(
             ),
             (trailer, ""),
         )
-    return JobsNodeSpec(key=group.key, segments=segments, children=children, expand=group.needs_human)
+    all_recent_done = bool(group.rows) and all(
+        row.source_section == "recent_done" for row in group.rows
+    )
+    return JobsNodeSpec(
+        key=group.key,
+        segments=segments,
+        children=children,
+        # 整群都是 recent_done 時不展開（#322）；其餘（含 needs_human 單列的
+        # reason）預設展開，讓工作列與其可執行下一步一眼可見。
+        expand=not all_recent_done,
+    )
 
 
 def _multi_group_spec(
@@ -472,7 +493,16 @@ def _multi_group_spec(
         _row_child(group, row, first_col, work_col, third_col, state_col, axis)
         for row in group.rows
     )
-    return JobsNodeSpec(key=group.key, segments=main_segments, children=children, expand=group.needs_human)
+    all_recent_done = bool(group.rows) and all(
+        row.source_section == "recent_done" for row in group.rows
+    )
+    return JobsNodeSpec(
+        key=group.key,
+        segments=main_segments,
+        children=children,
+        # 群組層預設展開（讓工作列可見）；整群都是 recent_done 時不展開（#322）。
+        expand=not all_recent_done,
+    )
 
 
 def _project_specs(specs: tuple[JobsNodeSpec, ...]) -> tuple[tuple[str, str], ...]:
@@ -548,7 +578,7 @@ if _HAS_TEXTUAL:
             # resize 立即以新寬度重排，不等下一個 status tick（#308）；寬度沒
             # 實質改變時投影 diff 會判「沒變」而跳過重建，這裡不必自己防抖。
             if self._last_groups:
-                self.set_groups(self._last_groups)
+                self.set_groups(self._last_groups, axis=self._last_axis)
 
         def set_groups(self, groups: tuple[JobGroup, ...], axis: str = "project") -> None:
             self._last_groups = tuple(groups)

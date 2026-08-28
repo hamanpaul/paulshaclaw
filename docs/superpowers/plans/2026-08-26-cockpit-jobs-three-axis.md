@@ -145,7 +145,10 @@ JOBS · 58 件 · 12 在管線 · 30 待認領                    [by project]
 
 現行 `JobRow.detail_line`（`models.py:107-125`）產出 `cortex slice-action <slice_id> <actions> --actor $USER`。workflow_run 走的是不同 request type（cortex 套件 `control/contract.py` 的 `REQUEST_TYPES` 含 `work-action`），且多數 action 有 fail-closed 的必要參數（`abandon` 需 `expected_run_id` + `actor` + `reason`；`retry-build` 需 40-hex `expected_candidate`）。
 
-**實作時必須先跑 `cortex work-action --help` 確認實際 CLI 形式與參數**，不可照抄 slice-action 的格式。若 CLI 無法在一行內完整表達，detail 行改為顯示 `next_actions` 清單 + `run_id`，讓使用者自行組命令——寧可少給也不給錯命令。
+**實作時已確認實際 CLI 為 ``cortex work <action> <work_id> --repo <repo> ...``
+（cortex 0.1.9；``<action>`` 取自 ``work`` 子指令如 ``abandon``／``retry-build``，
+非 slice-action 的格式）。若 CLI 無法在一行內完整表達，detail 行改為顯示
+`next_actions` 清單 + `run_id`，讓使用者自行組命令——寧可少給也不給錯命令。**
 
 ---
 

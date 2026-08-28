@@ -228,6 +228,46 @@ class Stage11StateTests(unittest.TestCase):
             row.detail_line,
         )
 
+    def test_workflow_run_detail_line_shows_next_actions_not_slice_action(self) -> None:
+        """#322 回溯：workflow_run needs_human 行走 ``cortex work``（非 slice-action），
+        但 fail-closed 的必要參數 detail 通常不附——故 detail 只給 next_actions + run_id，
+        不產生可複製卻會失敗的 ``cortex slice-action`` 命令。"""
+        (row,) = slices_from_status(
+            {
+                "in_flight": [
+                    {
+                        "kind": "workflow_run",
+                        "work_id": "wf-abc123-build",
+                        "current_phase": "build",
+                        "run_id": "run-xyz",
+                        "repo": "hamanpaul/paulsha-cortex",
+                        "gate_state": "needs_human",
+                        "next_actions": ["retry-build", "abandon"],
+                    }
+                ]
+            }
+        )
+        self.assertTrue(row.needs_human)
+        self.assertEqual(row.kind, "workflow_run")
+        self.assertIn("retry-build|abandon", row.detail_line)
+        self.assertIn("run-xyz", row.detail_line)
+        self.assertNotIn("cortex slice-action", row.detail_line)
+
+    def test_claim_phase_detail_line_marks_not_dispatched(self) -> None:
+        """#322 回溯：claim（派工前）needs_human 行的 detail 標「尚未派工」，勿誤判成
+        manager 正在跑；也不產生錯誤命令。"""
+        row = JobRow(
+            "wf-abc-build",
+            "claim",
+            "in_flight",
+            phase="claim",
+            reason="manager 在排程",
+            needs_human=True,
+        )
+        self.assertTrue(row.is_pending_claim)
+        self.assertIn("尚未派工", row.detail_line)
+        self.assertNotIn("cortex slice-action", row.detail_line)
+
     def test_recent_done_needs_human_reads_as_awaiting_decision(self) -> None:
         """#264 回歸案例：`recent_done • needs_human` 是「跑完但 gate 沒過」，不是還在跑。"""
         (row,) = slices_from_status(
@@ -1601,7 +1641,7 @@ class Stage11StateTests(unittest.TestCase):
         panel._last_groups = groups
         with patch.object(panel, "set_groups") as rebuild:
             panel.on_resize(None)
-        rebuild.assert_called_once_with(groups)
+        rebuild.assert_called_once_with(groups, axis="project")
 
         panel._last_groups = ()
         with patch.object(panel, "set_groups") as rebuild:

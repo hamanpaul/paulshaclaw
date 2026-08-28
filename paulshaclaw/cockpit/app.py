@@ -126,7 +126,7 @@ def _slice_id_from_item(item: object) -> str:
     if isinstance(item, dict):
         # #322：老版 slice 條目（slice_id/id/name/title）優先序在前不受影響；
         # workflow_run 平面（cortex 0.1.8+）帶的是 work_id／run_id，落在之後當
-        # fallback——讓四個辨識 key 一個都沒有的 42 筆 workflow_run 不再被静默丢棄。
+        # fallback——讓四個辨識 key 一個都沒有的 42 筆 workflow_run 不再被靜默丟棄。
         for key in ("slice_id", "id", "name", "title", "work_id", "run_id"):
             value = item.get(key)
             if isinstance(value, str) and value:
@@ -295,8 +295,9 @@ def _ingest_not_claimable(not_claimable: object, rows: list[JobRow]) -> None:
 
     這些 work item 被 claim 判定「不可 claim」（如 ``missing_issue``）而刻意不
     建 run——面板上不能變成盲區，但也不是 `attention` 那類可行動項目。用 ``state``
-    ``blocked`` 呈現、``detail`` 當 reason，並靠 ``is_not_claimable`` 讓它們沉底。
-    容錯：安裝版 cortex 0.1.8 沒有此 key（R-19 相容）。
+    ``blocked`` 呈現、``detail`` 當 reason（優先取上游 ``next_step_hint``，並
+    靠 ``is_not_claimable`` 讓它們沉底）。容錯：安裝版 cortex 0.1.8 沒有此 key
+    （R-19 相容）。
     """
     if not isinstance(not_claimable, list):
         return
@@ -311,13 +312,23 @@ def _ingest_not_claimable(not_claimable: object, rows: list[JobRow]) -> None:
                 slice_id=work_id,
                 state="blocked",
                 source_section="not_claimable",
-                reason=_text_field(item, "detail") or _text_field(item, "reason"),
+                reason=_text_field(item, "next_step_hint")
+                or _text_field(item, "detail") or _text_field(item, "reason"),
                 phase=_UNCLAIMED_PHASE,
                 kind="not_claimable",
                 work_id=work_id,
                 repo=_text_field(item, "repo"),
             )
         )
+
+
+def _dedup_key(row: JobRow) -> str:
+    """去重身分（#322）。workflow_run 行用（repo、work_id）：work_id 非全域唯一，
+    不同 repo 同名 work 不得互相吃彼此。legacy slice／not_claimable 行用 slice_id：
+    已內含 repo／phase，是唯一身分，沿用舊制不破 slices／attention 的去重（#264）。"""
+    if row.kind == "workflow_run":
+        return f"{row.repo or _UNPROJECTED}::{row.work_id or row.slice_id}"
+    return row.slice_id
 
 
 def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
@@ -401,12 +412,14 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
 
     # 同一 slice 可能同時落在 slices 與 attention（needs_human 版）——保留較有資訊
     # 的那一版（attention 先處理），避免重複列。順序沿用 section 處理序。
+    # 身分用 _dedup_key（workflow_run 加 repo，避免跨 repo 同名吃彼此）（#322）。
     seen: set[str] = set()
     deduped: list[JobRow] = []
     for row in rows:
-        if row.slice_id in seen:
+        key = _dedup_key(row)
+        if key in seen:
             continue
-        seen.add(row.slice_id)
+        seen.add(key)
         deduped.append(row)
 
     return tuple(deduped)
@@ -439,7 +452,10 @@ def _group_key(row: JobRow) -> str:
 #: 三軸分組軸（#322）。
 GroupAxis = Literal["project", "stage", "agent"]
 
-# 軸上缺值的歸屬標記。與「未認領」不同：未歸屬＝沒有 repo、未派工＝沒有 persona、
+#: pipeline 階段序（#322）：供群內行排序，把同一工作各 phase 排成 define→…→ship。
+_PIPELINE_ORDER: tuple[str, ...] = ("define", "plan", "build", "verify", "review", "ship")
+
+#: 軸上缺值的歸屬標記。與「未認領」不同：未歸屬＝沒有 repo、未派工＝沒有 persona、
 # 未分類＝沒有 phase。
 _UNPROJECTED = "未歸屬"
 _UNASSIGNED = "未派工"
@@ -456,7 +472,7 @@ def _axis_key(row: JobRow, axis: GroupAxis) -> str:
     return row.project or _UNPROJECTED
 
 
-def _group_rank(group: JobGroup) -> tuple[int, int, int, int]:
+def _group_rank(group: JobGroup) -> tuple[int, int, int, int, int]:
     """群組排序鍵（#322）：1) 有人在等優先；2) 非 claim 優先於 claim（12 行只容得
     下真正在管線的工作）；3) recent_done 沉底；4) 未認領永遠最底。元組逐欄比
     較，同時滿足這四層優先。"""
@@ -477,6 +493,21 @@ def _group_rank(group: JobGroup) -> tuple[int, int, int, int]:
     )
 
 
+def _row_sort_key(row: JobRow) -> tuple[int, int, int]:
+    """群內行排序鍵（#322）：1) 等人優先；2) 在管線優先於積壓（claim/recent_done/
+    未認領）；3) 在管線內依 pipeline 序排（define→plan→build→verify→review→ship）。
+    在「群排最前」之後，把群內各行的相對次序也排整齊，避免 claim 排在 build／verify
+    之前（#264 跨 phase 折疊群尤其明顯）。"""
+    pipeline_index = (
+        _PIPELINE_ORDER.index(row.phase) if row.phase in _PIPELINE_ORDER else len(_PIPELINE_ORDER)
+    )
+    return (
+        0 if row.needs_human else 1,   # 等人行優先
+        0 if row.is_in_line else 1,    # 在管線優先
+        pipeline_index,                # 在管線內依 pipeline 序
+    )
+
+
 def group_job_rows(
     rows: tuple[JobRow, ...], axis: GroupAxis = "project"
 ) -> tuple[JobGroup, ...]:
@@ -485,12 +516,16 @@ def group_job_rows(
     order: list[str] = []
 
     def bucket_for(row: JobRow) -> str:
-        # wf-* 行（帶 workflow_id）沿用舊的 workflow 前綴收群，優先於 repo——這樣
-        # #264 的wf多phase折疊行為原樣保留。workflow_run 行的 workflow_id 為空
-        # （work_id 不以 wf- 開頭），才走軸分組。
+        # workflow_run 行（帶 work_id）一律走軸分組——work_id 才是唯一身分。
+        # 舊的「workflow_id 前綴優先」只对 legacy slice 行成立：workflow_run 的
+        # work_id 也可能碰巧以 wf- 開頭（如測試用的 wf-0001-build），此時
+        # workflow_id property 仍會回前缀；若優先判 workflow_id 會把 stage／agent
+        # 軸也收成工作流前缀群，丢掉 phase／persona 軸身分。（#322 regression）
+        if row.work_id:
+            return _axis_key(row, axis)
         if row.workflow_id:
             return _group_key(row)
-        if row.repo or row.work_id or row.phase:
+        if row.repo or row.phase:
             return _axis_key(row, axis)
         return _group_key(row)
 
@@ -500,6 +535,8 @@ def group_job_rows(
             buckets[key] = []
             order.append(key)
         buckets[key].append(row)
+        # 群內行依 pipeline 序排整齊（#322 / #264）。
+        buckets[key].sort(key=_row_sort_key)
 
     groups = [JobGroup(key=key, rows=tuple(buckets[key])) for key in order]
     return tuple(sorted(groups, key=_group_rank))

@@ -31,8 +31,15 @@ from paulshaclaw.cockpit.app import (
     jobs_counts_summary,
     slices_from_status,
 )
-from paulshaclaw.cockpit.jobs_panel import build_jobs_nodes
-from paulshaclaw.cockpit.models import JobRow, _PHASE_TO_PERSONA, PaneRecord
+from paulshaclaw.cockpit.jobs_panel import (
+    _axis_layout_columns,
+    _display_width,
+    _ellipsize_middle,
+    _pad_display,
+    _row_work_id,
+    build_jobs_nodes,
+)
+from paulshaclaw.cockpit.models import JobRow, JobGroup, _PHASE_TO_PERSONA, PaneRecord
 from paulshaclaw.cockpit.actions import LayoutActionService
 
 
@@ -149,6 +156,32 @@ class JobIngestTests(unittest.TestCase):
         # 無 key：0 列，不崩潰（slices_from_status 回傳空 tuple）。
         self.assertFalse(slices_from_status({"in_flight": []}))
 
+    def test_group_summary_trailer_only_includes_nonzero_segments(self) -> None:
+        """#322 回溯：summary_trailer 只印非零區段。純未認領群只印「不可認領」、
+        不含「在管線／待認領」；混合群（在管線＋待認領＋未認領）三段皆印。"""
+        # 纯未認領：is_not_claimable 全 2，在管線／待認領皆 0。
+        unclaimed = JobGroup("g1", (jrow("u1", phase="未認領"), jrow("u2", phase="未認領")))
+        self.assertEqual(unclaimed.not_claimable_count, 2)
+        self.assertEqual(unclaimed.in_line_count, 0)
+        self.assertEqual(unclaimed.pending_claim_count, 0)
+        self.assertEqual(unclaimed.summary_trailer, "2 件 · 2 不可認領")
+        self.assertNotIn("在管線", unclaimed.summary_trailer)
+        self.assertNotIn("待認領", unclaimed.summary_trailer)
+
+        # 混合：在管線（build）＋待認領（claim）＋未認領。三段皆非零。
+        mix = JobGroup(
+            "g2",
+            (
+                jrow("b1", phase="build", source_section="in_flight", repo="r", work_id="wf-x-build"),
+                jrow("c1", phase="claim", source_section="in_flight"),
+                jrow("u3", phase="未認領", source_section="in_flight"),
+            ),
+        )
+        self.assertEqual(mix.in_line_count, 1)
+        self.assertEqual(mix.pending_claim_count, 1)
+        self.assertEqual(mix.not_claimable_count, 1)
+        self.assertEqual(mix.summary_trailer, "3 件 · 1 在管線 · 1 待認領 · 1 不可認領")
+
 
 # --- 4. persona 屬性對應 cortex validate_manager_spine -------------------
 
@@ -157,7 +190,7 @@ class JobPersonaTests(unittest.TestCase):
         """persona 映射必须与 cortex WorkflowManifest.validate_manager_spine 的
         实际执行一致：用 cockpit 的 _PHASE_TO_PERSONA 产出每 phase 的 persona 建构
         完整 manifest，cortex 须接受（契约）；把任一 persona 改错，cortex 须拒绝。
-        这是真·双向交叉验证，非 cockpit 端自证自答。"""
+        這是真·雙向交叉驗證，非 cockpit 端自證自答。"""
         from paulsha_cortex.coordinator.workflow import (
             WORKFLOW_MANIFEST_VERSION,
             WORKFLOW_PHASES,
@@ -391,6 +424,103 @@ class JobAxisPilotTests(unittest.IsolatedAsyncioTestCase):
             widget = self._widget(app)
             self.assertEqual(app._jobs_axis, "project")
             self.assertEqual(set(widget._user_expanded), {"project", "stage", "agent"})
+
+
+# --- 8. review #322 regression：workflow_run 路由／stage 軸列／群內排序 ----------
+
+class JobReviewRegressionTests(unittest.TestCase):
+    """Codex luna review #322 的 FAIL findings 修复回归。锁定修复后的契约，
+    防止日后回归：workflow_run 行（work_id 以 wf- 開頭）须走軸分組、stage 軸
+    三欄须为 work_id·persona·repo、群內 claim 须沉底於在管線行之後。"""
+
+    def _status(self, entries) -> dict:
+        return {"in_flight": entries, "degraded": False}
+
+    def _wf_run(self, work_id, phase, repo="hamanpaul/paulsha-cortex") -> dict:
+        return {
+            "kind": "workflow_run",
+            "work_id": work_id,
+            "current_phase": phase,
+            "run_id": f"run-{work_id}",
+            "repo": repo,
+        }
+
+    def test_workflow_run_work_id_starting_wf_routes_by_axis_not_hash(self) -> None:
+        """#1（ingest）回归：work_id 以 wf- 開頭的 workflow_run 行（如 wf-0001-build），
+        三軸分組须走 _axis_key——stage 軸收成 phase、agent 軸收成 persona，
+        不得因 workflow_id property 回 wf-0001 而收成工作流前缀群。"""
+        rows = slices_from_status(
+            self._status(
+                [
+                    self._wf_run("wf-0001-build", "build"),
+                    self._wf_run("wf-0002-verify", "verify"),
+                    self._wf_run("wf-0003-verify", "verify"),
+                ]
+            )
+        )
+        self.assertEqual(len(rows), 3)
+        # stage 軸：build／verify 兩群（非 wf-0001 之类前缀群）。
+        self.assertEqual([g.key for g in group_job_rows(rows, axis="stage")], ["build", "verify"])
+        # agent 軸：builder／reviewer。
+        self.assertEqual([g.key for g in group_job_rows(rows, axis="agent")], ["builder", "reviewer"])
+        # project 軸按 repo 收群（不因 wf- 前缀拆群）。
+        self.assertEqual([g.key for g in group_job_rows(rows, axis="project")], ["paulsha-cortex"])
+
+    def test_dedup_keeps_cross_repo_same_work_id(self) -> None:
+        """#4（dedup）回归：不同 repo 同名 work_id 的 workflow_run 不互相吃彼此——
+        用 (repo, work_id) 复合身分去重，跨 repo 同名各列。"""
+        rows = slices_from_status(
+            self._status(
+                [
+                    self._wf_run("wf-0001-build", "build", repo="hamanpaul/paulsha-cortex"),
+                    self._wf_run("wf-0001-build", "build", repo="hamanpaul/paulsha-hippo"),
+                ]
+            )
+        )
+        # 两笔不同 repo，不去重，各列。
+        self.assertEqual(len(rows), 2)
+        projects = {r.project for r in rows}
+        self.assertEqual(projects, {"paulsha-cortex", "paulsha-hippo"})
+
+    def test_group_rows_sorted_claim_sinks_below_in_line(self) -> None:
+        """#2（sort）回归：同一群內，claim（待認積壓）行排在 build／verify（在管線）
+        之後，不反序。"""
+        rows = (
+            jrow("wf-abc-claim", phase="claim", source_section="in_flight"),
+            jrow("wf-abc-build", phase="build", source_section="in_flight"),
+            jrow("wf-abc-verify", phase="verify", source_section="in_flight"),
+        )
+        (group,) = group_job_rows(rows, axis="project")  # 同一 wf-abc 群
+        phases = [r.phase for r in group.rows]
+        self.assertEqual(phases, ["build", "verify", "claim"])
+
+    def test_stage_axis_columns_show_work_id_persona_repo(self) -> None:
+        """#6（jobs_panel）回归：stage 軸三欄是 work_id·persona·repo（非
+        work_id·work_id·？），且带 persona——project／agent 轴才显示 persona 的误区
+        不再发生。"""
+        rows = slices_from_status(
+            self._status([self._wf_run("wf-1-build", "build")])
+        )
+        (group,) = group_job_rows(rows, axis="stage")
+        nodes = build_jobs_nodes([group], 80, axis="stage")
+        rendered = _flatten_node_text(nodes[0])
+        self.assertIn("wf-1-build", rendered)         # col1 = work_id
+        self.assertIn("builder", rendered)            # col2 = persona（stage 軸特有）
+        self.assertIn("paulsha-cortex", rendered)     # col3 = repo
+
+    def test_render_axis_row_ellipsizes_long_work_id(self) -> None:
+        """#9（jobs_panel）回溯：工作識別欄（project／agent 軸的第 2 欄 work_id）超過
+        column 寬時由 _ellipsize_middle 處理，不超出寬度預算——長 work_id 以「…」
+        省略中段，不撐破 @80 版面。"""
+        rows = (jrow("x", phase="build", repo="hamanpaul/paulsha-cortex",
+                     work_id="wf-" + "a" * 100),)
+        groups = group_job_rows(rows, axis="project")
+        first_col, work_col, third_col = _axis_layout_columns(groups, 80, "project")
+        raw = _row_work_id(rows[0])
+        c2 = _pad_display(_ellipsize_middle(raw, work_col), work_col)
+        # work_id 远宽于预算 → 触发省略，且显示宽度不超过 work_col（不超宽、不崩溃）。
+        self.assertLessEqual(_display_width(c2), work_col)
+        self.assertIn("…", c2)
 
 
 if __name__ == "__main__":
