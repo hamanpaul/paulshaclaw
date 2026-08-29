@@ -8,7 +8,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 
-from .models import JobGroup, JobRow
+from .models import JobGroup, JobRow, _group_relative_label
 
 try:
     from textual.widgets import Tree
@@ -311,6 +311,13 @@ def _detail_child(key: str, detail: str) -> JobsNodeSpec:
     return JobsNodeSpec(key=key, segments=((f"↳ {detail}", "#FBBF24"),))
 
 
+def _group_trailer_identity(group: JobGroup) -> str:
+    """legacy 群主列的次要身分：branch 優先，否則用不與 project 重複的群組鍵。"""
+    if group.branch:
+        return _abbrev_branch(group.branch)
+    return "" if group.key == group.project else group.key
+
+
 def _single_detail_children(group: JobGroup) -> tuple[JobsNodeSpec, ...]:
     if group.needs_human and group.detail_line:
         return (_detail_child(f"{group.key}/detail", group.detail_line),)
@@ -320,11 +327,11 @@ def _single_detail_children(group: JobGroup) -> tuple[JobsNodeSpec, ...]:
 def _legacy_phase_child(group: JobGroup, row: JobRow, state_col: int) -> tuple[tuple[str, str], ...]:
     """legacy slice 行（無 phase／work_id）的舊兩欄渲染：`glyph+state · phase_name`。
 
-    保留原有字面：`_phase_label` 從 slice_id 字剝出 phase 短名（`wf-abc-build`
+    保留原有字面：共用群前綴從 slice_id 字剝出 phase 短名（`wf-abc-build`
     → `build`），legacy 測試斷言「顯示 build 但不顯示完整 slice_id」靠它。（#322）"""
     glyph, color = status_style(_row_state_key(row))
     label_state = _abbrev_label(row.human_state or row.state)
-    phase_name = _abbrev_label(group._phase_label(row))
+    phase_name = _abbrev_label(_group_relative_label(group.key, row))
     return (
         (f"{glyph} {_pad_display(label_state, state_col)} ", color),
         (phase_name, ""),
@@ -427,7 +434,7 @@ def _single_group_spec(
         trailer = _fit_trailer(
             (
                 group.project,
-                _abbrev_branch(group.branch) or group.workflow_id,
+                _group_trailer_identity(group),
                 group.note,
                 _abbrev_label(group.raw_state),
             ),
@@ -449,9 +456,9 @@ def _single_group_spec(
         key=group.key,
         segments=segments,
         children=children,
-        # 整群都是 recent_done 時不展開（#322）；其餘（含 needs_human 單列的
-        # reason）預設展開，讓工作列與其可執行下一步一眼可見。
-        expand=not all_recent_done,
+        # 單列群的 detail 子列預設收合：工作列本身已可見，auto-expand 只會把 10 行區
+        # 變成「一列工作 + 一列 detail」的雙倍高度；recent_done 一樣維持收合。
+        expand=not all_recent_done and not children,
     )
 
 
@@ -471,7 +478,7 @@ def _multi_group_spec(
     trailer = _fit_trailer(
         (
             group.project,
-            _abbrev_branch(group.branch) or group.workflow_id,
+            _group_trailer_identity(group),
             group.note,
             _abbrev_label(group.raw_state),
         ),

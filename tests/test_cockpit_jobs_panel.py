@@ -54,7 +54,7 @@ class BuildJobsNodesSingleTests(unittest.TestCase):
         )
         specs = build_jobs_nodes(groups)
         spec = specs[0]
-        self.assertTrue(spec.expand, "needs_human 群預設要展開")
+        self.assertFalse(spec.expand, "單列 detail 預設收合，避免 10 行區被 detail 吃光")
         self.assertEqual(len(spec.children), 1)
         detail = spec.children[0]
         self.assertEqual(detail.key, "wf-abc/detail")

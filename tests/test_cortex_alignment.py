@@ -48,6 +48,10 @@ def test_repo_and_cortex_path_roots_align_under_same_overrides(monkeypatch, tmp_
     _clear_path_env(monkeypatch)
 
     expected = tmp_path / env_name.lower()
+    if env_name == "PSC_WORKTREE_ROOT":
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        monkeypatch.setenv("PSC_REPO_ROOT", str(repo))
     monkeypatch.setenv(env_name, str(expected))
 
     assert getattr(repo_paths, func_name)() == expected
