@@ -1,17 +1,17 @@
 ## Why
 
 Issue #330 is a docs-only Stage 11 closeout follow-up after PR #329 merged and
-issue #322 closed. The active OpenSpec change needs proposal metadata and an
-explicit docs-only marker so strict validation can represent the pre-archive
-bookkeeping work without inventing a spec delta.
+issue #322 closed. The closeout needed explicit OpenSpec metadata so strict
+validation could represent this docs-only bookkeeping work without inventing a
+spec delta.
 
 ## What Changes
 
-- Add the missing OpenSpec proposal and docs-only change metadata for
-  `cockpit-jobs-three-axis-closeout`.
-- Keep the Stage 11 closeout bookkeeping limited to the existing todo updates
-  and dedicated tracking artifacts.
-- Leave archive, merge, and issue closure to the later Manager-controlled flow.
+- Record the docs-only closeout metadata in
+  `openspec/changes/archive/2026-08-29-cockpit-jobs-three-axis-closeout/`.
+- Keep the Stage 11 closeout bookkeeping limited to the existing todo updates,
+  archived OpenSpec record, and closeout changelog fragment.
+- Leave merge and issue closure to the later Manager-controlled flow.
 
 ## Capabilities
 
@@ -26,7 +26,9 @@ bookkeeping work without inventing a spec delta.
 
 ## Impact
 
-- `openspec/changes/cockpit-jobs-three-axis-closeout/`
+- `openspec/changes/archive/2026-08-29-cockpit-jobs-three-axis-closeout/`
+- `changelog.d/cockpit-jobs-three-axis-closeout.md`
 - `docs/superpowers/workstreams/stage11-operator-cockpit/todo.md`
 - `docs/superpowers/workstreams/cockpit-jobs-three-axis-closeout/todo.md`
-- No source code, dependency, runtime, or archive content changes
+- No source code, dependency, or runtime changes; this closeout only updates
+  docs-only bookkeeping artifacts

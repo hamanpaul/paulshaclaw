@@ -7,7 +7,7 @@
 
 ## Blockers
 
-- [x] 本次 closeout 只處理 Stage 11 bookkeeping；原始實作、OpenSpec archive、changelog 維持不變
+- [x] 本次 closeout 只處理 Stage 11 bookkeeping；原始實作不變，僅補齊 docs-only bookkeeping artifacts（OpenSpec archive metadata / changelog fragment）
 - [x] #328 executor/model display 需求仍需獨立 change，未在本 closeout 宣告完成
 
 ## Evidence / Links
@@ -15,7 +15,7 @@
 - [x] PR #329 已 merged
 - [x] issue #322 已 closed
 - [x] closeout tracking：`docs/superpowers/workstreams/cockpit-jobs-three-axis-closeout/todo.md`
-- [x] OpenSpec tracking：`openspec/changes/cockpit-jobs-three-axis-closeout/tasks.md`
+- [x] OpenSpec tracking：`openspec/changes/archive/2026-08-29-cockpit-jobs-three-axis-closeout/tasks.md`
 
 ## Handoff Notes
 
