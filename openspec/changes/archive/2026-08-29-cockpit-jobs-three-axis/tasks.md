@@ -18,3 +18,4 @@
 ## 4. Review repair alignment
 
 - [x] 4.1 將 archived proposal 的 Impact 改寫為如實描述：此 candidate 以 OpenSpec / bookkeeping 為主，但同時包含已核准的 #322 cockpit 程式、`scripts/preflight-tests.sh` 收尾修正與相關測試
+- [x] 4.2 更新 `tests/test_cortex_alignment.py` 的 worktree override case，顯式提供 `PSC_REPO_ROOT` 以對齊 pinned Cortex 的 fail-closed `worktree_root()` 契約
