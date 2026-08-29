@@ -2,20 +2,20 @@
 
 ## Current Sprint
 
-- [x] 將 #329 已 merge、#322 已 closed 的交付事實回寫至 Stage 11 todo
-- [x] 保留原 JOBS 三軸 implementation 不變，僅補齊 docs-only bookkeeping artifacts（archive metadata / changelog fragment）
-- [ ] 以獨立的 Cortex repo remote closeout PR 完成 remote todo closure
+- [ ] 將 #329 已 merge、#322 已 closed 的交付事實回寫至 Stage 11 todo
+- [ ] 保留原 JOBS 三軸 implementation、archive 與 changelog 不變
+- [ ] 以獨立 closeout PR 完成 remote todo closure
 
 ## Blockers
 
-- [ ] 上述 Cortex repo remote closeout PR 尚未完成 verification / review / ship
+- [ ] closeout PR 尚未完成 Cortex verification / review / ship
 
 ## Evidence / Links
 
-- [x] 前置 implementation PR：`hamanpaul/paulshaclaw#329`
-- [x] 前置 issue：`hamanpaul/paulshaclaw#322`
-- [x] closeout issue：`hamanpaul/paulshaclaw#330`
+- [ ] 前置 implementation PR：`hamanpaul/paulshaclaw#329`
+- [ ] 前置 issue：`hamanpaul/paulshaclaw#322`
+- [ ] closeout issue：`hamanpaul/paulshaclaw#330`
 
 ## Handoff Notes
 
-- [x] #328 的 executor / model 顯示需求另開 change，不在本 closeout 宣告完成
+- [ ] #328 的 executor / model 顯示需求另開 change，不在本 closeout 宣告完成
