@@ -11,7 +11,8 @@ spec delta.
   `openspec/changes/archive/2026-08-29-cockpit-jobs-three-axis-closeout/`.
 - Keep the Stage 11 closeout bookkeeping limited to the existing todo updates,
   archived OpenSpec record, and closeout changelog fragment.
-- Leave merge and issue closure to the later Manager-controlled flow.
+- Leave merge, and the GitHub auto-closure triggered by `Closes #330`, to the
+  Manager-controlled merge flow.
 
 ## Capabilities
 

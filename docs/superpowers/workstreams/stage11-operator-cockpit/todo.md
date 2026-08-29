@@ -20,4 +20,4 @@
 ## Handoff Notes
 
 - [x] Stage 11 operator cockpit 的 closeout 交由 `cockpit-jobs-three-axis-closeout` / #330 收尾
-- [ ] 獨立 PR 需以 `Closes #330` 交付 Cortex remote closure
+- [ ] 本 repo closeout PR 會以 `Closes #330` 交付；若仍需 Cortex remote closure，另由後續 Cortex repo PR 處理
