@@ -14,3 +14,7 @@
 
 - [x] 3.1 讓 `scripts/preflight-tests.sh` 共用 operator runtime resolver，worktree 缺 `.venv` 時仍可重跑全套 pytest preflight
 - [x] 3.2 將 Stage 11 workstream todo 的 change 路徑對齊 archived location，並只保留 merge / issue closure 待 Manager 執行的 handoff 語意
+
+## 4. Review repair alignment
+
+- [x] 4.1 將 archived proposal 的 Impact 改寫為如實描述：此 candidate 以 OpenSpec / bookkeeping 為主，但同時包含已核准的 #322 cockpit 程式、`scripts/preflight-tests.sh` 收尾修正與相關測試

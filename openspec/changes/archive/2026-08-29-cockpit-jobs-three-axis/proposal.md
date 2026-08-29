@@ -30,7 +30,8 @@ pre-archive 交付；不在這裡提前宣告 archive、merge、issue closure �
 
 ## Impact
 
-- 只改 OpenSpec、workstream 與 canonical changelog bookkeeping；不改既有 cockpit 程式碼，
-  並保留已核准的 #322 changelog 內容。
+- 本 change 以 OpenSpec、workstream 與 canonical changelog bookkeeping 為主，但對齊
+  的是同一個 candidate 內已核准的 #322 cockpit 實作、`scripts/preflight-tests.sh`
+  preflight 收尾修正與相關測試；不是純文件整理，並保留既有 #322 changelog 內容。
 - Manager 仍保留 archive / merge / issue closure 的唯一權威；本 change 只描述
   pre-archive 狀態。
