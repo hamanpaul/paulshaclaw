@@ -9,3 +9,8 @@
 - [x] 2.1 建立 `docs/superpowers/workstreams/stage11-operator-cockpit/todo.md`，串起本 change、`changelog.d/cockpit-jobs-three-axis.md` 與既有 `changelog.d/322-cockpit-jobs-three-axis.md`
 - [x] 2.2 補上 canonical preflight fragment `changelog.d/cockpit-jobs-three-axis.md`，並保留 `changelog.d/322-cockpit-jobs-three-axis.md` 作為 #322 既有交付碎片
 - [x] 2.3 保持 handoff 為 pre-archive 範圍，不在 tasks / todo 提前宣告 archive、merge 或 issue closure
+
+## 3. Delivery handoff hygiene
+
+- [x] 3.1 讓 `scripts/preflight-tests.sh` 共用 operator runtime resolver，worktree 缺 `.venv` 時仍可重跑全套 pytest preflight
+- [x] 3.2 將 Stage 11 workstream todo 的 change 路徑對齊 archived location，並只保留 merge / issue closure 待 Manager 執行的 handoff 語意
