@@ -6,6 +6,7 @@
 - `tests/test_stage11_operator_cockpit.py`
 - `tests/test_cockpit_jobs_panel.py`
 - `tests/test_cockpit_jobs_ux.py`
+- `changelog.d/cockpit-jobs-three-axis.md`
 - `changelog.d/322-cockpit-jobs-three-axis.md`
 
 缺的是交付 bookkeeping：
@@ -46,9 +47,11 @@
    - 只補 todo，不回填不存在的 plan/review/evidence，避免把這張 card 沒做過的流程補寫成
      既成事實。
 
-4. **沿用既有 #322 changelog fragment**
-   - `changelog.d/322-cockpit-jobs-three-axis.md` 已是 delivery preflight 需要的 artifact；
-     保留原檔，不搬動、不複製。
+4. **補 canonical changelog，同時保留既有 #322 fragment**
+   - archive gate 需要與 change slug 同名的 `changelog.d/cockpit-jobs-three-axis.md`；
+     補最小片段即可。
+   - `changelog.d/322-cockpit-jobs-three-axis.md` 仍保留原檔，延續已核准的 #322 cockpit
+     交付紀錄，不搬動、不覆寫。
 
 ## Risks / Trade-offs
 

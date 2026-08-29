@@ -6,5 +6,6 @@
 
 ## 2. Workstream correlation
 
-- [x] 2.1 建立 `docs/superpowers/workstreams/stage11-operator-cockpit/todo.md`，串起本 change 與 `changelog.d/322-cockpit-jobs-three-axis.md`
-- [x] 2.2 保持 handoff 為 pre-archive 範圍，不在 tasks / todo 提前宣告 archive、merge 或 issue closure
+- [x] 2.1 建立 `docs/superpowers/workstreams/stage11-operator-cockpit/todo.md`，串起本 change、`changelog.d/cockpit-jobs-three-axis.md` 與既有 `changelog.d/322-cockpit-jobs-three-axis.md`
+- [x] 2.2 補上 canonical preflight fragment `changelog.d/cockpit-jobs-three-axis.md`，並保留 `changelog.d/322-cockpit-jobs-three-axis.md` 作為 #322 既有交付碎片
+- [x] 2.3 保持 handoff 為 pre-archive 範圍，不在 tasks / todo 提前宣告 archive、merge 或 issue closure

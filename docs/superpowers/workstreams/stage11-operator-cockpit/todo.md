@@ -3,7 +3,7 @@
 ## Current Sprint
 
 - [x] 以 `openspec/changes/cockpit-jobs-three-axis/` formalize #322 已核准的 JOBS 三軸 follow-up，避免再借 `stage11-multi-session-pane-listing-v2` 任務列掛帳
-- [x] 保留 `changelog.d/322-cockpit-jobs-three-axis.md` 作為 #322 的 pre-archive 交付碎片
+- [x] 保留 `changelog.d/322-cockpit-jobs-three-axis.md`，並補上 `changelog.d/cockpit-jobs-three-axis.md`，讓 #322 handoff 與 canonical delivery preflight 都有對應碎片
 - [x] 將 Stage 11 的 JOBS 內容 delta 連回 change spec 與現有 cockpit tests
 
 ## Blockers
@@ -15,7 +15,8 @@
 
 - [x] 規格變更：`openspec/changes/cockpit-jobs-three-axis/specs/stage11-operator-cockpit/spec.md`
 - [x] 任務追蹤：`openspec/changes/cockpit-jobs-three-axis/tasks.md`
-- [x] 交付碎片：`changelog.d/322-cockpit-jobs-three-axis.md`
+- [x] 交付碎片：`changelog.d/cockpit-jobs-three-axis.md`
+- [x] 既有 #322 碎片：`changelog.d/322-cockpit-jobs-three-axis.md`
 
 ## Handoff Notes
 
