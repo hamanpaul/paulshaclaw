@@ -3,12 +3,12 @@
 ## Current Sprint
 
 - [x] 將 #329 已 merge、#322 已 closed 的交付事實回寫至 Stage 11 todo
-- [x] 保留原 JOBS 三軸 implementation 不變，僅補齊 docs-only bookkeeping artifacts（OpenSpec archive metadata / changelog fragment）
+- [x] 保留原 JOBS 三軸 implementation、archive 與 changelog 不變
 - [ ] 以獨立 closeout PR 完成 remote todo closure
 
 ## Blockers
 
-- [x] closeout PR 尚未完成 Cortex verification / review / ship
+- [ ] closeout PR 尚未完成 Cortex verification / review / ship
 
 ## Evidence / Links
 
