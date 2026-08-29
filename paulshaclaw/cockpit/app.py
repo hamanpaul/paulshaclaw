@@ -75,7 +75,14 @@ from .jobs_panel import (
     status_style,
 )
 from .manager_panel import ManagerModal
-from .models import JobGroup, JobRow, JobSummary, PaneRecord, _UNCLAIMED_PHASE
+from .models import (
+    JobGroup,
+    JobRow,
+    JobSummary,
+    PaneRecord,
+    _UNCLAIMED_PHASE,
+    _legacy_group_key_from_slice_id,
+)
 from .store import CockpitState
 
 
@@ -425,28 +432,9 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
     return tuple(deduped)
 
 
-# manager 的 phase 命名（cortex 端定義）。只用於顯示層分組：認得就把同一個 work
-# 的各 phase 收成一群，認不得就各自成群——分錯不影響正確性，只影響好不好讀。
-_PHASE_SUFFIXES: tuple[str, ...] = (
-    "subagent-build",
-    "adversarial-review",
-    "openspec-archive",
-    "writing-plans",
-    "code-review",
-    "verification",
-    "build",
-)
-
-
-def _group_key(row: JobRow) -> str:
-    """群組身分：`wf-<hash>-<phase>` 取 workflow 前綴，其餘試著剝掉已知 phase 後綴。"""
-    if row.workflow_id:
-        return row.workflow_id
-    for suffix in _PHASE_SUFFIXES:
-        trailer = f"-{suffix}"
-        if row.slice_id.endswith(trailer):
-            return row.slice_id[: -len(trailer)]
-    return row.slice_id
+def _legacy_bucket_key(row: JobRow) -> str:
+    """舊 slice 相容分組鍵：workflow_run 以外的命名解析局限在這個 helper。"""
+    return _legacy_group_key_from_slice_id(row.slice_id) or row.slice_id
 
 
 #: 三軸分組軸（#322）。
@@ -520,11 +508,8 @@ def group_job_rows(
     project_axis_with_workflows = axis == "project" and any(row.work_id for row in rows)
 
     def bucket_for(row: JobRow) -> str:
-        # workflow_run 行（帶 work_id）一律走軸分組——work_id 才是唯一身分。
-        # 舊的「workflow_id 前綴優先」只对 legacy slice 行成立：workflow_run 的
-        # work_id 也可能碰巧以 wf- 開頭（如測試用的 wf-0001-build），此時
-        # workflow_id property 仍會回前缀；若優先判 workflow_id 會把 stage／agent
-        # 軸也收成工作流前缀群，丢掉 phase／persona 軸身分。（#322 regression）
+        # 顯式三軸欄位（workflow_run / not_claimable synthetic rows）一律走軸分組，
+        # 不再先套舊 slice-id 猜測，以免 work_id 剛好長成 wf-* 就被吃回 workflow 群。
         if row.work_id:
             return _axis_key(row, axis)
         # 混合 workflow_run + legacy recent_done 時，project 軸要先用 repo 把
@@ -536,11 +521,12 @@ def group_job_rows(
         # 把 stage / agent 軸吃回 workflow 群。
         if axis != "project" and row.phase:
             return _axis_key(row, axis)
-        if row.workflow_id:
-            return _group_key(row)
+        legacy_key = _legacy_bucket_key(row)
+        if legacy_key != row.slice_id:
+            return legacy_key
         if row.repo or row.phase:
             return _axis_key(row, axis)
-        return _group_key(row)
+        return legacy_key
 
     for row in rows:
         key = bucket_for(row)

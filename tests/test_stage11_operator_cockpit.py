@@ -277,8 +277,8 @@ class Stage11StateTests(unittest.TestCase):
         self.assertTrue(row.needs_human)
         self.assertEqual(row.human_state, "待裁決")
         # worktree/workflow 前綴降為次要，主顯示是看得懂的任務名。
-        self.assertEqual(row.workflow_id, "wf-e13fa4daae")
         self.assertEqual(row.display_name, "subagent-build")
+        self.assertEqual(group_job_rows((row,))[0].key, "wf-e13fa4daae")
 
     def test_recent_done_row_uses_upstream_gate_reason_when_present(self) -> None:
         """manager handoff manifest 已有 gate_reason；上游一旦帶上來就要直接用。"""
@@ -530,7 +530,6 @@ class Stage11StateTests(unittest.TestCase):
     def test_display_name_keeps_plain_slice_ids_intact(self) -> None:
         row = JobRow("add-cortex-version-flag-build", "exited", "attention")
 
-        self.assertEqual(row.workflow_id, "")
         self.assertEqual(row.display_name, "add-cortex-version-flag-build")
 
     def test_parse_list_panes_skips_malformed_numeric_fields(self) -> None:
@@ -1283,13 +1282,13 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("paulsha-cortex", rendered)
         # 上游沒帶 reason 時明說，而不是留一列空白狀態。
         self.assertIn("原因未知", rendered)
-        # needs_human 群必須排最前面、預設展開，operator 一進面板就看得到。
-        # （group key 會剝掉已知 phase 後綴 `-build`，見 _group_key；display_name
-        # 保留完整 slice_id，上面的 rendered 斷言已經驗過看得懂的名字還在。）
+        # needs_human 群必須排最前面；單列 detail 預設收合，operator 仍先看到工作列。
+        # （group key 會把已知 phase 後綴折回 work 身分，display_name 保留完整
+        # slice_id，上面的 rendered 斷言已經驗過看得懂的名字還在。）
         self.assertEqual(groups[0].key, "add-cortex-version-flag")
         nodes = build_jobs_nodes(groups)
         self.assertEqual(nodes[0].key, "add-cortex-version-flag")
-        self.assertTrue(nodes[0].expand)
+        self.assertFalse(nodes[0].expand)
 
     def test_build_jobs_nodes_keeps_needs_human_group_first_when_routine_rows_are_plentiful(
         self,
@@ -1313,7 +1312,7 @@ class Stage11StateTests(unittest.TestCase):
 
         self.assertEqual(len(nodes), len(groups))
         self.assertEqual(nodes[0].key, "add-cortex-version-flag")
-        self.assertTrue(nodes[0].expand)
+        self.assertFalse(nodes[0].expand)
         rendered = _flatten_nodes(nodes)
         self.assertIn("candidate-worktree-dirty", rendered)
 

@@ -208,15 +208,22 @@ class JobsExpandCollapseTests(unittest.IsolatedAsyncioTestCase):
             await pilot.pause()
             self.assertTrue(group_node.is_expanded)
 
-    async def test_needs_human_group_defaults_expanded_with_visible_detail_child(self) -> None:
+    async def test_needs_human_group_defaults_collapsed_until_operator_expands(self) -> None:
         app = make_app(manager_status=_needs_human_status())
         async with app.run_test(size=(100, 40)) as pilot:
             await pilot.pause()
             jobs = app.query_one("#global-jobs")
             (group_node,) = jobs.root.children
 
-            self.assertTrue(group_node.is_expanded)
+            self.assertFalse(group_node.is_expanded)
             self.assertTrue(len(group_node.children) >= 1, "needs_human 群應該掛出 detail child")
+            await _tab_until(pilot, app, "global-jobs")
+            await pilot.pause()
+            await pilot.press("down")  # 游標從根落到群節點
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            self.assertTrue(group_node.is_expanded)
             detail_text = str(group_node.children[0].label)
             self.assertIn("↳", detail_text)
             self.assertIn("candidate-worktree-dirty", detail_text)

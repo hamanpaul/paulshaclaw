@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import unittest
 
+import paulshaclaw.cockpit.app as cockpit_app
+
 try:
     from textual.pilot import Pilot
     from textual.app import App as _TextualApp
@@ -445,10 +447,19 @@ class JobReviewRegressionTests(unittest.TestCase):
             "repo": repo,
         }
 
+    def test_review_cleanup_removes_legacy_string_guessing_api_remnants(self) -> None:
+        """review #322 指出的收尾：舊的 workflow_id／_phase_label／_PHASE_SUFFIXES
+        不再外漏於目前的模型／分組 API；legacy 相容由內聚 helper 處理。"""
+        self.assertFalse(hasattr(JobRow, "workflow_id"))
+        self.assertFalse(hasattr(JobGroup, "workflow_id"))
+        self.assertFalse(hasattr(JobGroup, "_phase_label"))
+        self.assertFalse(hasattr(cockpit_app, "_PHASE_SUFFIXES"))
+        self.assertFalse(hasattr(cockpit_app, "_group_key"))
+
     def test_workflow_run_work_id_starting_wf_routes_by_axis_not_hash(self) -> None:
         """#1（ingest）回归：work_id 以 wf- 開頭的 workflow_run 行（如 wf-0001-build），
         三軸分組须走 _axis_key——stage 軸收成 phase、agent 軸收成 persona，
-        不得因 workflow_id property 回 wf-0001 而收成工作流前缀群。"""
+        不得被 legacy slice-id 相容路徑收成工作流前缀群。"""
         rows = slices_from_status(
             self._status(
                 [
