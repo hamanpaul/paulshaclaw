@@ -33,6 +33,3 @@
 - [ ] 5.1 Add a multi-session e2e smoke test where a pane from another session appears in the candidate list
 - [x] 5.2 Run `.venv/bin/python -m pytest tests/test_stage11_operator_cockpit.py tests/test_stage11_operator_cockpit_e2e.py -v`
 - [ ] 5.3 Update implementation notes or workstream evidence if the implementation changes from this design
-- [x] 5.4 Add a RED regression test for #322 so workflow-style `recent_done` rows stay inside their repo group on the JOBS project axis
-- [x] 5.5 Repair the #322 review follow-ups: collapse single-row detail nodes by default and remove public legacy string-guessing helpers while preserving legacy grouping coverage
-- [x] 5.6 Add the required `changelog.d/` fragment for #322 so delivery preflight stays pre-archive complete
