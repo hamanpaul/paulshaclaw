@@ -23,6 +23,50 @@ _IN_LINE_PHASES: frozenset[str] = frozenset(
 )
 _PENDING_PHASE: str = "claim"
 _UNCLAIMED_PHASE: str = "未認領"
+_LEGACY_GROUP_SUFFIXES: tuple[str, ...] = (
+    "subagent-build",
+    "adversarial-review",
+    "openspec-archive",
+    "writing-plans",
+    "code-review",
+    "verification",
+    "build",
+)
+
+
+def _legacy_group_key_from_slice_id(slice_id: str) -> str:
+    """legacy slice 相容用的折疊鍵。
+
+    新版 workflow_run / not_claimable 已帶 work_id/phase，不再對外暴露 workflow_id
+    這類字串猜測 API；仍需兼容的舊 slice 命名則把解析收斂在這個私有 helper。"""
+    if not slice_id:
+        return ""
+    prefix, _, remainder = slice_id.partition("-")
+    if prefix == "wf" and remainder:
+        run_hash, sep, label = remainder.partition("-")
+        if sep and run_hash and label:
+            return f"wf-{run_hash}"
+    for suffix in _LEGACY_GROUP_SUFFIXES:
+        trailer = f"-{suffix}"
+        if slice_id.endswith(trailer):
+            return slice_id[: -len(trailer)]
+    return slice_id
+
+
+def _legacy_display_name(slice_id: str) -> str:
+    """主顯示名只弱化 workflow hash 前綴；非 wf-* 的舊 slice 保留完整名稱。"""
+    group_key = _legacy_group_key_from_slice_id(slice_id)
+    prefix = f"{group_key}-"
+    if group_key.startswith("wf-") and slice_id.startswith(prefix):
+        return slice_id[len(prefix) :]
+    return slice_id
+
+
+def _group_relative_label(group_key: str, row: "JobRow") -> str:
+    """群組內 phase/卡片短名：移除共用群前綴，只留辨識用尾段。"""
+    name = row.display_name
+    prefix = f"{group_key}-"
+    return name[len(prefix) :] if name.startswith(prefix) else name
 
 
 @dataclass(frozen=True)
@@ -131,21 +175,9 @@ class JobRow:
         return self.phase == _UNCLAIMED_PHASE
 
     @property
-    def workflow_id(self) -> str:
-        """``wf-<hash>-<phase>`` 形式的 slice 拆出 workflow 前綴，其餘回空字串。"""
-        prefix, _, remainder = self.slice_id.partition("-")
-        if prefix != "wf" or not remainder:
-            return ""
-        run_hash, _, phase = remainder.partition("-")
-        return f"wf-{run_hash}" if phase else ""
-
-    @property
     def display_name(self) -> str:
         """主顯示名：`wf-<hash>-` 這種執行環境前綴降為次要，留下看得懂的任務名。"""
-        workflow_id = self.workflow_id
-        if not workflow_id:
-            return self.slice_id
-        return self.slice_id[len(workflow_id) + 1 :]
+        return _legacy_display_name(self.slice_id)
 
     @property
     def human_state(self) -> str:
@@ -280,10 +312,6 @@ class JobGroup:
         return ""
 
     @property
-    def workflow_id(self) -> str:
-        return self.lead.workflow_id
-
-    @property
     def job_id(self) -> str:
         return self.lead.job_id if self.is_single else ""
 
@@ -330,11 +358,11 @@ class JobGroup:
         """多筆時主欄位放群組身分，phase 移到細節行。
 
         operator 認得的身分是 branch（issue 編號在裡面），wf-hash 是機器 id
-        （#305）——有 branch 就用它，沒有才退回 workflow id／work 名。
+        （#305）——有 branch 就用它；沒有時群組 key 已是相容後的唯一身分。
         """
         if self.is_single:
             return self.lead.display_name
-        return self.branch or self.workflow_id or self.key
+        return self.branch or self.key
 
     @property
     def note(self) -> str:
@@ -363,15 +391,10 @@ class JobGroup:
         reasons = {row.reason for row in self.rows if row.reason}
         if not reasons:
             return ""
-        phases = " / ".join(self._phase_label(row) for row in self.rows)
+        phases = " / ".join(_group_relative_label(self.key, row) for row in self.rows)
         if len(reasons) == 1:
             return f"{reasons.pop()} · {phases}"
         return " / ".join(
-            f"{self._phase_label(row)}: {row.reason or '—'}" for row in self.rows
+            f"{_group_relative_label(self.key, row)}: {row.reason or '—'}"
+            for row in self.rows
         )
-
-    def _phase_label(self, row: JobRow) -> str:
-        """群組內的短 phase 名：把共用的 work 前綴剝掉，只留辨識用的尾段。"""
-        name = row.display_name
-        prefix = f"{self.key}-"
-        return name[len(prefix) :] if name.startswith(prefix) else name

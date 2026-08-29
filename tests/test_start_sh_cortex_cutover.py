@@ -11,6 +11,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[1]
 START_SH = REPO_ROOT / "scripts" / "start.sh"
 CUTOVER_SH = REPO_ROOT / "scripts" / "cutover-to-planes.sh"
+PREFLIGHT_SH = REPO_ROOT / "scripts" / "preflight-tests.sh"
 PEP668_INSTALL = (
     "python3 -m venv .venv && "
     ".venv/bin/python -m pip install --upgrade --force-reinstall -e ."
@@ -64,6 +65,24 @@ def _write_command_logger(path: Path, log_variable: str) -> None:
     path.write_text(
         f"""#!/usr/bin/env bash
 printf '%s\\n' "$*" > "${{{log_variable}:?}}"
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _write_fake_preflight_python(path: Path, log_path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""#!/usr/bin/env bash
+if [[ "${{1:-}}" == "-c" ]]; then
+  if [[ -n "${{EXPECTED_REPO:-}}" && "${{PYTHONPATH:-}}" != "$EXPECTED_REPO" ]]; then
+    exit 91
+  fi
+  exit 0
+fi
+printf 'PYTHONPATH=%s\\nARGS=%s\\n' "${{PYTHONPATH:-}}" "$*" > "{log_path}"
+exit 0
 """,
         encoding="utf-8",
     )
@@ -233,6 +252,25 @@ def _run_service_resolver(service: Path, repo: Path, bin_dir: Path) -> subproces
     )
 
 
+def _run_preflight_script(repo: Path, python: Path) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": "/usr/bin:/bin",
+            "PSC_PYTHON": str(python),
+            "EXPECTED_REPO": str(repo),
+        }
+    )
+    return subprocess.run(
+        [str(repo / "scripts" / "preflight-tests.sh")],
+        cwd=repo,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def _run_cutover_function(
     command: str,
     bin_dir: Path,
@@ -391,6 +429,13 @@ def test_service_scripts_share_operator_runtime_resolver() -> None:
         assert "pip install --user" not in src
 
 
+def test_preflight_script_shares_operator_runtime_resolver() -> None:
+    src = PREFLIGHT_SH.read_text(encoding="utf-8")
+    assert 'source "$script_dir/start.sh" --source-only' in src
+    assert 'resolve_operator_python "$repo_root"' in src
+    assert 'exec env PYTHONPATH="$repo_root" "$python_bin" -m pytest' in src
+
+
 def test_standalone_service_scripts_reuse_operator_resolver(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     bin_dir = tmp_path / "bin"
@@ -405,6 +450,30 @@ def test_standalone_service_scripts_reuse_operator_resolver(tmp_path: Path) -> N
         completed = _run_service_resolver(REPO_ROOT / "scripts" / f"service-{name}.sh", repo, bin_dir)
         assert completed.returncode == 0, f"service-{name}: {completed.stderr}"
         assert completed.stdout.strip() == str(repo_python)
+
+
+def test_preflight_script_reuses_operator_resolver_in_worktree(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    scripts_dir = repo / "scripts"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "custom-skills" / "bro" / "tests").mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "start.sh").symlink_to(START_SH)
+    (scripts_dir / "preflight-tests.sh").symlink_to(PREFLIGHT_SH)
+
+    log_path = tmp_path / "preflight.log"
+    python = tmp_path / "psc" / "python"
+    _write_fake_preflight_python(python, log_path)
+
+    completed = _run_preflight_script(repo, python)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert log_path.read_text(encoding="utf-8") == (
+        f"PYTHONPATH={repo}\n"
+        f"ARGS=-m pytest {repo}/tests/ {repo}/custom-skills/bro/tests/ -q\n"
+    )
 
 
 def test_readme_install_uses_repo_venv_for_operator_runtime() -> None:

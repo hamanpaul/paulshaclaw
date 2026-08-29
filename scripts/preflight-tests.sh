@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-python_bin="$repo_root/.venv/bin/python"
+script_dir="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -P "$script_dir/.." && pwd)"
 
-if [[ ! -x "$python_bin" ]]; then
-  echo "找不到 repo operator runtime：請先依 README 建立並安裝 .venv" >&2
+# shellcheck source=/dev/null
+source "$script_dir/start.sh" --source-only
+
+if ! python_bin="$(resolve_operator_python "$repo_root")"; then
+  echo "找不到完整 operator runtime：請先依 README 建立並安裝 .venv（或設 PSC_PYTHON 指向具備完整 operator runtime 的 python）" >&2
   exit 2
 fi
 
@@ -18,4 +21,5 @@ fi
 
 # custom-skills 的測試不在 tests/ 底下，得明確列出。漏掉它等於讓
 # reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
-exec "$python_bin" -m pytest "$repo_root/tests/" "$repo_root/custom-skills/bro/tests/" -q
+exec env PYTHONPATH="$repo_root" "$python_bin" -m pytest \
+  "$repo_root/tests/" "$repo_root/custom-skills/bro/tests/" -q
