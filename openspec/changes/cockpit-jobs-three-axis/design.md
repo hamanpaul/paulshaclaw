@@ -37,7 +37,7 @@
    - #322 的 RED regression / review follow-up / changelog fragment 改由新 change 承接。
 
 2. **專用 change 只 formalize 已落地行為**
-   - `stage11-cockpit-jobs-three-axis` 的 proposal/design/spec/tasks 都描述既有程式與測試
+   - `cockpit-jobs-three-axis` 的 proposal/design/spec/tasks 都描述既有程式與測試
      已落地的事實，不在文件裡虛構新的實作工作。
    - tasks 全部限制在 spec/workstream/delivery bookkeeping，避免提前宣告 archive。
 

@@ -12,7 +12,7 @@ pre-archive 交付；不在這裡提前宣告 archive、merge、issue closure �
 
 ## What Changes
 
-- 新增專用 OpenSpec change `stage11-cockpit-jobs-three-axis`，記錄 #322 已落地的
+- 新增專用 OpenSpec change `cockpit-jobs-three-axis`，記錄 #322 已落地的
   JOBS workflow-run ingest、project/stage/agent 三軸、排序/計數與 safe detail 行契約。
 - 新增 `docs/superpowers/workstreams/stage11-operator-cockpit/todo.md`，把 Stage 11
   JOBS follow-up 的 spec、tasks 與 `changelog.d/322-cockpit-jobs-three-axis.md` 串在同一個
