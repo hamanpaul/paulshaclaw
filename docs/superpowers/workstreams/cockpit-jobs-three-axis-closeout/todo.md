@@ -2,22 +2,20 @@
 
 ## Current Sprint
 
-- [x] 維持 `cockpit-jobs-three-axis-closeout` dedicated tracking artifacts，對應 closeout issue #330
-- [x] 補齊 Stage 11 todo，記錄 PR #329 已 merged 且 issue #322 已 closed
+- [x] 將 #329 已 merge、#322 已 closed 的交付事實回寫至 Stage 11 todo
+- [x] 保留原 JOBS 三軸 implementation、archive 與 changelog 不變
+- [ ] 以獨立 closeout PR 完成 remote todo closure
 
 ## Blockers
 
-- [x] 本 work item 僅做 closeout bookkeeping，不變更 Stage 11 implementation、OpenSpec archive 與 changelog
-- [x] 獨立 PR `Closes #330` 仍待 ship 流程交付
+- [x] closeout PR 尚未完成 Cortex verification / review / ship
 
 ## Evidence / Links
 
-- [x] accepted plan：`docs/superpowers/plans/cockpit-jobs-three-axis-closeout.md`
-- [x] Stage 11 closeout todo：`docs/superpowers/workstreams/stage11-operator-cockpit/todo.md`
-- [x] OpenSpec tasks：`openspec/changes/cockpit-jobs-three-axis-closeout/tasks.md`
-- [x] delivery issue：#330
+- [x] 前置 implementation PR：`hamanpaul/paulshaclaw#329`
+- [x] 前置 issue：`hamanpaul/paulshaclaw#322`
+- [x] closeout issue：`hamanpaul/paulshaclaw#330`
 
 ## Handoff Notes
 
-- [x] `cockpit-jobs-three-axis-closeout` 保留為 #330 的 closeout work item 名稱
-- [ ] 透過獨立 PR `Closes #330` 完成 remote closure
+- [x] #328 的 executor / model 顯示需求另開 change，不在本 closeout 宣告完成
