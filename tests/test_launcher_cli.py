@@ -157,7 +157,7 @@ def test_pyproject_declares_commands_json_package_data() -> None:
 def test_release_artifacts_script_checks_commands_json() -> None:
     """#334: scripts/release-artifacts.sh 必須檢查 commands.json package data。"""
     script_text = (REPO_ROOT / "scripts" / "release-artifacts.sh").read_text(encoding="utf-8")
-    assert "paulshaclaw/core/commands.json" in script_text or "commands.json" in script_text
+    assert "paulshaclaw/core/commands.json" in script_text
 
 
 def test_built_wheel_contains_commands_json_archive(tmp_path: Path) -> None:
@@ -166,9 +166,10 @@ def test_built_wheel_contains_commands_json_archive(tmp_path: Path) -> None:
         [
             sys.executable,
             "-m",
-            "build",
-            "--wheel",
-            "--outdir",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--wheel-dir",
             str(tmp_path),
             str(REPO_ROOT),
         ],

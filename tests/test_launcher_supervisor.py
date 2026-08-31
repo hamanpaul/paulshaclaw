@@ -120,6 +120,21 @@ def test_manager_lock_reports_free_when_no_locks_exist(
     assert supervisor._manager_lock_is_held() is False
 
 
+def test_manager_lock_reports_free_on_non_blocking_oserror(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """非 EWOULDBLOCK 的 flock 錯誤不得被誤判成 held。"""
+    lock_path = tmp_path / "manager.lock"
+    lock_path.write_text("", encoding="utf-8")
+
+    def raise_io_error(*args, **kwargs):
+        raise OSError("simulated flock failure")
+
+    monkeypatch.setattr(supervisor.fcntl, "flock", raise_io_error)
+
+    assert supervisor._lock_file_is_held(lock_path) is False
+
+
 def test_supervisor_ensure_cortex_skips_when_cortex_subpath_lock_is_held(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:

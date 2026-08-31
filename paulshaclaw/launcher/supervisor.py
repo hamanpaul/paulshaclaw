@@ -128,15 +128,17 @@ def _lock_file_is_held(lock_path: Path) -> bool:
         return False
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    except BlockingIOError:
         return True
+    except OSError:
+        return False
     finally:
         os.close(fd)
     return False
 
 
 def _manager_lock_is_held() -> bool:
-    """flock 探測（鏡射 start.sh:151-160）：kernel 鎖狀態才是真相。
+    """flock 探測（鏡射 start.sh:148-164）：kernel 鎖狀態才是真相。
 
     支援 control_root/manager.lock 與 control_root/cortex/manager.lock（#334）。
     """
