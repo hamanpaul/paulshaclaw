@@ -119,13 +119,11 @@ def apply_stage8_footer() -> None:
         _tmux(["set-option", "status-right", f"{existing_right} {footer_cmd}"])
 
 
-def _manager_lock_is_held() -> bool:
-    """flock 探測（鏡射 start.sh:151-160）：kernel 鎖狀態才是真相。"""
-    manager_lock = paths.control_root() / "manager.lock"
-    if not manager_lock.is_file():
+def _lock_file_is_held(lock_path: Path) -> bool:
+    if not lock_path.is_file():
         return False
     try:
-        fd = os.open(manager_lock, os.O_RDWR)
+        fd = os.open(lock_path, os.O_RDWR)
     except OSError:
         return False
     try:
@@ -135,6 +133,18 @@ def _manager_lock_is_held() -> bool:
     finally:
         os.close(fd)
     return False
+
+
+def _manager_lock_is_held() -> bool:
+    """flock 探測（鏡射 start.sh:151-160）：kernel 鎖狀態才是真相。
+
+    支援 control_root/manager.lock 與 control_root/cortex/manager.lock（#334）。
+    """
+    candidates = [
+        paths.control_root() / "manager.lock",
+        paths.control_root() / "cortex" / "manager.lock",
+    ]
+    return any(_lock_file_is_held(p) for p in candidates)
 
 
 def _monitor_is_running() -> bool:

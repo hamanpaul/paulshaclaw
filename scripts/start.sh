@@ -152,12 +152,14 @@ cortex_tick_interval_seconds() {
 # 情況維持原本行為（照常嘗試起 daemon，起不來再 fail-closed）。
 cortex_manager_lock_is_held() {
   local lock status=0
-  lock="$(cortex_control_root)/manager.lock"
-  [[ -f "$lock" ]] || return 1
-  flock -n -E 100 "$lock" true || status=$?
-  if (( status == 100 )); then
-    return 0
-  fi
+  for lock in "$(cortex_control_root)/manager.lock" "$(cortex_control_root)/cortex/manager.lock"; do
+    [[ -f "$lock" ]] || continue
+    status=0
+    flock -n -E 100 "$lock" true || status=$?
+    if (( status == 100 )); then
+      return 0
+    fi
+  done
   return 1
 }
 
