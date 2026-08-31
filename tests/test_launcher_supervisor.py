@@ -61,6 +61,65 @@ def test_manager_lock_reports_held_when_cortex_subpath_lock_is_held(
         holder.close()
 
 
+def test_manager_lock_reports_free_when_cortex_subpath_lock_is_stale(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#334: control/cortex/manager.lock 存在但無 flock 持有（stale），探測必須回報 free。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    cortex_lock = control_root / "cortex" / "manager.lock"
+    cortex_lock.parent.mkdir(parents=True, exist_ok=True)
+    cortex_lock.write_text("12345\n", encoding="utf-8")
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+
+    assert supervisor._manager_lock_is_held() is False
+
+
+def test_manager_lock_reports_held_when_legacy_flat_lock_is_held(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#334: legacy flat control/manager.lock 被持有且 nested lock 不存在時，探測必須回報 held。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    legacy_lock = control_root / "manager.lock"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+
+    holder = _LockHolder(legacy_lock)
+    try:
+        assert supervisor._manager_lock_is_held() is True
+    finally:
+        holder.close()
+
+
+def test_manager_lock_reports_free_when_legacy_flat_lock_is_stale(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#334: legacy flat control/manager.lock 存在但無 flock 持有（stale），探測必須回報 free。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    legacy_lock = control_root / "manager.lock"
+    legacy_lock.parent.mkdir(parents=True, exist_ok=True)
+    legacy_lock.write_text("12345\n", encoding="utf-8")
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+
+    assert supervisor._manager_lock_is_held() is False
+
+
+def test_manager_lock_reports_free_when_no_locks_exist(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """#334: 兩個 lock 檔皆不存在時，探測必須回報 free。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+
+    assert supervisor._manager_lock_is_held() is False
+
+
 def test_supervisor_ensure_cortex_skips_when_cortex_subpath_lock_is_held(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
@@ -84,4 +143,30 @@ def test_supervisor_ensure_cortex_skips_when_cortex_subpath_lock_is_held(
             sup.shutdown()
     finally:
         holder.close()
+
+
+def test_supervisor_ensure_cortex_skips_when_legacy_flat_lock_is_held(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#334: legacy flat manager lock 被持有時，ensure_cortex 亦不得啟動 fallback manager。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    legacy_lock = control_root / "manager.lock"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+    monkeypatch.setattr(supervisor, "_monitor_is_running", lambda: True)
+
+    holder = _LockHolder(legacy_lock)
+    sup = supervisor.Supervisor()
+    try:
+        try:
+            sup.ensure_cortex()
+            assert sup.manager is None
+            err = capsys.readouterr().err
+            assert "cortex manager 已在運行" in err
+        finally:
+            sup.shutdown()
+    finally:
+        holder.close()
+
 
