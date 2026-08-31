@@ -183,5 +183,3 @@ def test_built_wheel_contains_commands_json_archive(tmp_path: Path) -> None:
         names = zf.namelist()
         assert "paulshaclaw/core/commands.json" in names, f"commands.json 未包含於 wheel 內容: {names}"
         assert "paulshaclaw/cockpit/cockpit.tcss" in names
-
-

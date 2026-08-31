@@ -168,5 +168,3 @@ def test_supervisor_ensure_cortex_skips_when_legacy_flat_lock_is_held(
             sup.shutdown()
     finally:
         holder.close()
-
-
