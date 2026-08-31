@@ -71,6 +71,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--version", action="version", version=f"paulshaclaw {__version__}"
     )
+    parser.add_argument(
+        "--no-cockpit",
+        action="store_true",
+        help="不起 cockpit TUI，常駐前景（無 tmux 環境用）",
+    )
     sub = parser.add_subparsers(dest="command")
     p_up = sub.add_parser("up", help="啟動 operator shell（預設子命令）")
     p_up.add_argument(

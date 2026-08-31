@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tomllib
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -84,3 +87,100 @@ def test_launcher_sources_do_not_reference_repo_worktree() -> None:
         text = source.read_text(encoding="utf-8")
         for token in banned:
             assert token not in text, f"{source.name} 不得引用 {token}"
+
+
+def test_top_level_no_cockpit_flag(monkeypatch) -> None:
+    """#334: 頂層 paulshaclaw --no-cockpit 與 paulshaclaw up --no-cockpit 一致。"""
+    called: dict[str, bool] = {}
+
+    def fake_up(no_cockpit: bool) -> int:
+        called["no_cockpit"] = no_cockpit
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_up", fake_up)
+    rc = cli.main(["--no-cockpit"])
+    assert rc == 0
+    assert called.get("no_cockpit") is True
+
+
+def test_top_level_default_up(monkeypatch) -> None:
+    """#334: 頂層 paulshaclaw 預設執行 _cmd_up(no_cockpit=False)。"""
+    called: dict[str, bool] = {}
+
+    def fake_up(no_cockpit: bool) -> int:
+        called["no_cockpit"] = no_cockpit
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_up", fake_up)
+    rc = cli.main([])
+    assert rc == 0
+    assert called.get("no_cockpit") is False
+
+
+def test_explicit_up_default(monkeypatch) -> None:
+    """#334: 明確子命令 paulshaclaw up 執行 _cmd_up(no_cockpit=False)。"""
+    called: dict[str, bool] = {}
+
+    def fake_up(no_cockpit: bool) -> int:
+        called["no_cockpit"] = no_cockpit
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_up", fake_up)
+    rc = cli.main(["up"])
+    assert rc == 0
+    assert called.get("no_cockpit") is False
+
+
+def test_explicit_up_with_no_cockpit(monkeypatch) -> None:
+    """#334: 明確子命令 paulshaclaw up --no-cockpit 執行 _cmd_up(no_cockpit=True)。"""
+    called: dict[str, bool] = {}
+
+    def fake_up(no_cockpit: bool) -> int:
+        called["no_cockpit"] = no_cockpit
+        return 0
+
+    monkeypatch.setattr(cli, "_cmd_up", fake_up)
+    rc = cli.main(["up", "--no-cockpit"])
+    assert rc == 0
+    assert called.get("no_cockpit") is True
+
+
+def test_pyproject_declares_commands_json_package_data() -> None:
+    """#334: pyproject.toml 必須宣告 paulshaclaw.core package-data 包含 commands.json。"""
+    payload = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    pkg_data = payload.get("tool", {}).get("setuptools", {}).get("package-data", {})
+    assert "paulshaclaw.core" in pkg_data, "package-data 缺少 paulshaclaw.core"
+    patterns = pkg_data["paulshaclaw.core"]
+    assert any("json" in pat for pat in patterns), f"paulshaclaw.core package-data 缺少 json 檔宣告：{patterns}"
+
+
+def test_release_artifacts_script_checks_commands_json() -> None:
+    """#334: scripts/release-artifacts.sh 必須檢查 commands.json package data。"""
+    script_text = (REPO_ROOT / "scripts" / "release-artifacts.sh").read_text(encoding="utf-8")
+    assert "paulshaclaw/core/commands.json" in script_text
+
+
+def test_built_wheel_contains_commands_json_archive(tmp_path: Path) -> None:
+    """#334 Task 1.1: build wheel 並斷言 paulshaclaw/core/commands.json 存在於 archive 中。"""
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--wheel-dir",
+            str(tmp_path),
+            str(REPO_ROOT),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, f"wheel build 失敗:\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}"
+    wheels = list(tmp_path.glob("*.whl"))
+    assert len(wheels) == 1, f"預期 1 個 wheel，找到: {wheels}"
+    with zipfile.ZipFile(wheels[0]) as zf:
+        names = zf.namelist()
+        assert "paulshaclaw/core/commands.json" in names, f"commands.json 未包含於 wheel 內容: {names}"
+        assert "paulshaclaw/cockpit/cockpit.tcss" in names

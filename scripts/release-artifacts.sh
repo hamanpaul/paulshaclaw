@@ -79,6 +79,13 @@ if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit
   exit 1
 fi
 echo "    cockpit.tcss 已包含於 wheel"
+
+# 3a2. #334: wheel 必須含 commands.json（core package data）。
+if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/core/commands.json"; then
+  echo "FAIL: wheel 未包含 paulshaclaw/core/commands.json package data" >&2
+  exit 1
+fi
+echo "    paulshaclaw/core/commands.json 已包含於 wheel"
 # 3b. METADATA version 必須等於 VERSION。
 # 每次解壓到獨立的暫存目錄：固定路徑會讓併發執行互相干擾，殘留的舊版
 # dist-info 也會讓下面的 glob 命中多個 METADATA。

@@ -1,0 +1,31 @@
+{
+  "source_path": "~/.agents/coordinator/logs/workflow/wf-9589ecbfff-subagent-build-1454.gates.json",
+  "source_sha256": "bc4be2e07f8645e339edba2167162c29e05ebccc0dc165272088a133bb7df50d",
+  "redactions": [
+    "ledger.gates[0].command repository root replaced with <repo> for public-safe evidence"
+  ],
+  "ledger": {
+    "gates": [
+      {
+        "command": "env -u PSC_REPO_ROOT <repo>/.venv/bin/python -m pytest -q",
+        "detail": "",
+        "exit_code": 0,
+        "name": "pytest",
+        "status": "passed"
+      }
+    ],
+    "kind": "workflow-gate-ledger",
+    "schema_version": 1,
+    "slice_id": "wf-9589ecbfff-subagent-build-1454",
+    "worktree_state": {
+      "ancestry_baseline": null,
+      "ancestry_ok": null,
+      "dirty": [
+        "?? docs/superpowers/plans/launcher-anywhere-startup-v2.md"
+      ],
+      "dirty_total": 1,
+      "head": "ac4c27e004d0e468ca2e8c362b89264cedaf3e3b",
+      "probe": "ok"
+    }
+  }
+}
