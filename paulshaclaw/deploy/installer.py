@@ -8,6 +8,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Mapping
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -30,6 +31,36 @@ class ArtifactVerificationError(RuntimeError):
     """artifact 來源驗證失敗（checksum 不符或檔案不存在），必須 fail-closed。"""
 
 
+class TemplatePreflightError(RuntimeError):
+    """部署前模板預檢失敗；呼叫端不得進入任何寫入或 checkpoint 步驟。"""
+
+    def __init__(self, failures: list[dict[str, str]]) -> None:
+        self.failures = failures
+        self.actionable_message = (
+            "請修復或重新安裝 wheel 中列出的 template 資產後重試；"
+            "本次預檢失敗未寫入部署檔案、install record 或 systemd。"
+        )
+        summary = "; ".join(
+            f"{failure['asset']}: {failure['message']}" for failure in failures
+        )
+        super().__init__(f"template preflight failed: {summary}")
+
+
+class InstallPlanApplyError(RuntimeError):
+    """模板已通過預檢但套用時發生一般 I/O 失敗。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        written_files: list[str],
+        skipped_existing: list[str],
+    ) -> None:
+        self.written_files = sorted(written_files)
+        self.skipped_existing = sorted(skipped_existing)
+        super().__init__(message)
+
+
 def detect_installed_version() -> str | None:
     """偵測目前安裝的 paulshaclaw 版本；不可得時回 None。"""
     if _pkg_version is not None:
@@ -45,17 +76,83 @@ def detect_installed_version() -> str | None:
     return None
 
 
-def render_template(asset: TemplateAsset, *, instance_name: str, root_dir: str, python_exe: str | None = None) -> str:
-    # __PYTHON__：#288 起 systemd unit ExecStart 直指安裝 venv 的直譯器
-    # （`-m paulshaclaw.launcher.services <role>`）。deploy 由目標 venv 的 python
-    # 執行，故預設 sys.executable 即正確 pin，版本自動閉合。
+def _render_template_text(
+    template_text: str,
+    *,
+    instance_name: str,
+    root_dir: str,
+    python_exe: str | None = None,
+) -> str:
+    """Render one already-read template and reject unresolved deploy tokens."""
     resolved_python = python_exe or sys.executable
-    return (
-        asset.template_path.read_text(encoding="utf-8")
+    rendered = (
+        template_text
         .replace("__INSTANCE__", instance_name)
         .replace("__ROOT_DIR__", root_dir)
         .replace("__PYTHON__", resolved_python)
     )
+    unresolved = tuple(
+        token for token in ("__INSTANCE__", "__ROOT_DIR__", "__PYTHON__") if token in rendered
+    )
+    if unresolved:
+        raise ValueError(f"render 後仍有未解析 token: {', '.join(unresolved)}")
+    return rendered
+
+
+def render_template(asset: TemplateAsset, *, instance_name: str, root_dir: str, python_exe: str | None = None) -> str:
+    # __PYTHON__：#288 起 systemd unit ExecStart 直指安裝 venv 的直譯器
+    # （`-m paulshaclaw.launcher.services <role>`）。deploy 由目標 venv 的 python
+    # 執行，故預設 sys.executable 即正確 pin，版本自動閉合。
+    return _render_template_text(
+        asset.template_path.read_text(encoding="utf-8"),
+        instance_name=instance_name,
+        root_dir=root_dir,
+        python_exe=python_exe,
+    )
+
+
+def preflight_templates(
+    plan: CommandPlan,
+    *,
+    python_exe: str | None = None,
+) -> dict[str, str]:
+    """Read and render every deploy template before any host-side mutation.
+
+    Returning prepared text also prevents the apply loop from silently reading
+    a different template after the preflight.  All failures are collected so a
+    single machine-readable report can identify every broken asset.
+    """
+    prepared: dict[str, str] = {}
+    failures: list[dict[str, str]] = []
+    for asset in plan.templates:
+        template_path = asset.template_path
+        try:
+            if not template_path.is_file():
+                raise FileNotFoundError(f"檔案不存在: {template_path}")
+            template_text = template_path.read_text(encoding="utf-8")
+            prepared[asset.template_relpath] = _render_template_text(
+                template_text,
+                instance_name=plan.instance_name,
+                root_dir=plan.root_dir,
+                python_exe=python_exe,
+            )
+        except Exception as exc:
+            failures.append(
+                {
+                    "asset": asset.template_relpath,
+                    "path": str(template_path),
+                    "message": str(exc) or exc.__class__.__name__,
+                }
+            )
+    if failures:
+        raise TemplatePreflightError(failures)
+    return prepared
+
+
+# Descriptive aliases keep the preflight contract discoverable to callers
+# without duplicating the implementation.
+validate_template_assets = preflight_templates
+prepare_template_renderings = preflight_templates
 
 
 def resolve_install_path(asset: TemplateAsset, *, home_dir: Path) -> Path:
@@ -194,7 +291,13 @@ def _asset_is_overwritable(asset: TemplateAsset) -> bool:
     return asset.template_relpath.startswith("core/systemd/")
 
 
-def apply_install_plan(plan: CommandPlan, *, home_dir: Path, python_exe: str | None = None) -> dict[str, list[str]]:
+def apply_install_plan(
+    plan: CommandPlan,
+    *,
+    home_dir: Path,
+    python_exe: str | None = None,
+    prepared_templates: Mapping[str, str] | None = None,
+) -> dict[str, list[str]]:
     written_files: list[str] = []
     skipped_existing: list[str] = []
     for asset in plan.templates:
@@ -202,13 +305,33 @@ def apply_install_plan(plan: CommandPlan, *, home_dir: Path, python_exe: str | N
         if destination.exists() and not _asset_is_overwritable(asset):
             skipped_existing.append(str(destination))
             continue
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            render_template(asset, instance_name=plan.instance_name, root_dir=plan.root_dir, python_exe=python_exe),
-            encoding="utf-8",
-        )
-        _apply_permissions(asset, destination)
-        written_files.append(str(destination))
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if prepared_templates is None:
+                rendered = render_template(
+                    asset,
+                    instance_name=plan.instance_name,
+                    root_dir=plan.root_dir,
+                    python_exe=python_exe,
+                )
+            else:
+                rendered = prepared_templates[asset.template_relpath]
+            destination.write_text(rendered, encoding="utf-8")
+            # Record the write before chmod: a permission failure must not
+            # hide a file that was already created or overwritten.
+            written_files.append(str(destination))
+            _apply_permissions(asset, destination)
+        except Exception as exc:
+            attempted = list(written_files)
+            if destination.is_file() and str(destination) not in attempted:
+                # A custom filesystem can raise after partially completing
+                # write_text; report that path conservatively.
+                attempted.append(str(destination))
+            raise InstallPlanApplyError(
+                f"寫入部署資產失敗 {destination}: {exc}",
+                written_files=attempted,
+                skipped_existing=skipped_existing,
+            ) from exc
     return {"written": sorted(written_files), "skipped_existing": sorted(skipped_existing)}
 
 
@@ -223,6 +346,42 @@ def verify_install_plan(plan: CommandPlan, *, home_dir: Path) -> dict[str, objec
         "issues": issues,
         "systemd": systemd_result,
     }
+
+
+def _record_template_preflight_failure(
+    report: dict[str, object],
+    error: TemplatePreflightError,
+) -> tuple[dict[str, object], int]:
+    failed_assets = [failure["asset"] for failure in error.failures]
+    report["status"] = "failed"
+    report["error"] = str(error)
+    report["failed_assets"] = failed_assets
+    report["actionable_message"] = error.actionable_message
+    report["template_preflight"] = {
+        "status": "failed",
+        "failed_assets": error.failures,
+        "message": error.actionable_message,
+    }
+    return report, 1
+
+
+def _record_apply_failure(
+    report: dict[str, object],
+    error: InstallPlanApplyError,
+) -> tuple[dict[str, object], int]:
+    report["status"] = "failed"
+    report["error"] = str(error)
+    report["applied_files"] = error.written_files
+    report["skipped_existing"] = error.skipped_existing
+    # A preflight protects the all-or-nothing *template-read* boundary only;
+    # ordinary filesystem I/O can still fail after earlier files were written.
+    report["mutation"] = {
+        "status": "failed",
+        "atomic": False,
+        "written_files": error.written_files,
+        "message": "一般 I/O 失敗；已寫入清單如上，未宣稱整體原子性。",
+    }
+    return report, 1
 
 
 def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool, home_dir: str | Path | None = None, version: str | None = None, artifact: str | None = None, artifact_sha256: str | None = None) -> tuple[dict[str, object], int]:
@@ -242,19 +401,47 @@ def run_install(*, instance_name: str, root_dir: str, apply: bool, verify: bool,
             artifact_sha256=artifact_sha256,
         )
         report["artifact"] = artifact_record
-        applied = apply_install_plan(plan, home_dir=resolved_home)
-        report["applied_files"] = applied["written"]
-        report["skipped_existing"] = applied["skipped_existing"]
-        report["linger"] = _ensure_linger_enabled()
-        report["daemon_reload"] = _run_daemon_reload()
-        _write_install_record(
-            resolved_home,
-            instance_name=instance_name,
-            command="install",
-            version=version,
-            artifact=artifact,
-            artifact_sha256=artifact_record["sha256"],
-        )
+
+    try:
+        prepared_templates = preflight_templates(plan)
+    except TemplatePreflightError as exc:
+        return _record_template_preflight_failure(report, exc)
+    report["template_preflight"] = {
+        "status": "passed",
+        "checked_assets": sorted(prepared_templates),
+    }
+
+    if apply:
+        try:
+            applied = apply_install_plan(
+                plan,
+                home_dir=resolved_home,
+                prepared_templates=prepared_templates,
+            )
+            report["applied_files"] = applied["written"]
+            report["skipped_existing"] = applied["skipped_existing"]
+            report["linger"] = _ensure_linger_enabled()
+            report["daemon_reload"] = _run_daemon_reload()
+            _write_install_record(
+                resolved_home,
+                instance_name=instance_name,
+                command="install",
+                version=version,
+                artifact=artifact,
+                artifact_sha256=artifact_record["sha256"],
+            )
+        except InstallPlanApplyError as exc:
+            return _record_apply_failure(report, exc)
+        except Exception as exc:
+            report["status"] = "failed"
+            report["error"] = str(exc)
+            report["mutation"] = {
+                "status": "failed",
+                "atomic": False,
+                "written_files": list(report.get("applied_files", [])),
+                "message": "一般 I/O 或部署副作用失敗；已寫入清單如上，未宣稱整體原子性。",
+            }
+            return report, 1
 
     if verify:
         verification = verify_install_plan(plan, home_dir=resolved_home)
@@ -560,13 +747,27 @@ def run_upgrade(*, instance_name: str, root_dir: str, apply: bool, verify: bool,
         artifact_record = _verify_and_record_artifact(artifact=artifact, artifact_sha256=artifact_sha256)
         report["artifact"] = artifact_record
 
+    try:
+        prepared_templates = preflight_templates(plan)
+    except TemplatePreflightError as exc:
+        return _record_template_preflight_failure(report, exc)
+    report["template_preflight"] = {
+        "status": "passed",
+        "checked_assets": sorted(prepared_templates),
+    }
+
+    if apply:
         checkpoint = _new_checkpoint_dir(resolved_home, instance_name=instance_name, command="upgrade")
         snapshot = snapshot_core_plane(plan, home_dir=resolved_home, checkpoint_dir=checkpoint)
         report["checkpoint"] = str(checkpoint)
         report["snapshot"] = snapshot
 
         try:
-            applied = apply_install_plan(plan, home_dir=resolved_home)
+            applied = apply_install_plan(
+                plan,
+                home_dir=resolved_home,
+                prepared_templates=prepared_templates,
+            )
             report["applied_files"] = applied["written"]
             report["skipped_existing"] = applied["skipped_existing"]
             report["daemon_reload"] = _run_daemon_reload()
@@ -581,11 +782,20 @@ def run_upgrade(*, instance_name: str, root_dir: str, apply: bool, verify: bool,
             )
         except Exception as exc:
             # E4：升級途中失敗自動 rollback 並標記。
+            if isinstance(exc, InstallPlanApplyError):
+                report["applied_files"] = exc.written_files
+                report["skipped_existing"] = exc.skipped_existing
             restore = restore_core_from_checkpoint(checkpoint, home_dir=resolved_home)
             report["status"] = "failed"
             report["error"] = str(exc)
             report["rollback_triggered"] = True
             report["rollback"] = restore
+            report["mutation"] = {
+                "status": "failed",
+                "atomic": False,
+                "written_files": list(report.get("applied_files", [])),
+                "message": "一般 I/O 失敗後依既有 upgrade rollback 契約還原；已寫入清單如上。",
+            }
             return report, 1
 
     if verify:

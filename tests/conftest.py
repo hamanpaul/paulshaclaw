@@ -26,7 +26,11 @@ from pathlib import Path
 import pytest
 
 # 受第二道防線保護的測試模組檔名前綴：deploy 流程會寫家目錄的測試。
-_DEPLOY_TEST_PREFIXES = ("test_stage7_deploy", "test_home_isolation")
+_DEPLOY_TEST_PREFIXES = (
+    "test_stage7_deploy",
+    "test_home_isolation",
+    "test_deploy_template_packaging",
+)
 
 
 def _is_deploy_test(request: pytest.FixtureRequest) -> bool:

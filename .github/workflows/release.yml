@@ -81,31 +81,12 @@ jobs:
           fi
           wheel="${wheels[0]}"
           sdist="${sdists[0]}"
-          # wheel 必須含 cockpit.tcss package data
-          python -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit.tcss" \
-            || { echo "FAIL: wheel 未含 cockpit.tcss"; exit 1; }
-          # METADATA version 必須等於 VERSION
-          rm -rf /tmp/wheel-meta && python -m zipfile -e "$wheel" /tmp/wheel-meta
-          meta_ver="$(grep -m1 '^Version:' /tmp/wheel-meta/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
-          file_ver="$(cat VERSION)"
-          [[ "$meta_ver" == "$file_ver" ]] || { echo "FAIL: METADATA($meta_ver) != VERSION($file_ver)"; exit 1; }
-          # entry point psc 必須存在
-          python -m zipfile -l "$wheel" | grep -q "entry_points.txt" \
-            || { echo "FAIL: wheel 缺 entry_points.txt"; exit 1; }
-          # #288：launcher 四模組必須入 wheel（release artifact 自足）
-          for mod in lock services supervisor cli; do
-            python -m zipfile -l "$wheel" | grep -q "paulshaclaw/launcher/${mod}.py" \
-              || { echo "FAIL: wheel 缺 launcher/${mod}.py"; exit 1; }
-          done
-          # #288：entry point paulshaclaw 必須指向 launcher.cli:main
-          grep -q "paulshaclaw = paulshaclaw.launcher.cli:main" \
-            /tmp/wheel-meta/paulshaclaw-*.dist-info/entry_points.txt \
-            || { echo "FAIL: entry_points 缺 paulshaclaw console script"; exit 1; }
-          # #288：systemd 模板不得殘留 __ROOT_DIR__/scripts（release 不依賴 repo checkout）
-          if grep -R "__ROOT_DIR__/scripts" /tmp/wheel-meta/paulshaclaw/deploy/templates/ >/dev/null 2>&1; then
-            echo "FAIL: systemd 模板仍引用 __ROOT_DIR__/scripts"; exit 1
-          fi
-          echo "artifact content 檢查通過"
+          # local release 與 GitHub release 共用同一個 checker，避免
+          # wheel/sdist/template 契約在兩條 release 入口漂移。
+          python scripts/check-release-artifacts.py \
+            --wheel "$wheel" \
+            --sdist "$sdist" \
+            --source-root .
 
       - name: 乾淨 venv 安裝 smoke test
         run: |
