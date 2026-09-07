@@ -1,7 +1,7 @@
 ## 1. templates 與 artifact 可用性
 
 - [x] RED：wheel、sdist、由 sdist 重建的 wheel 逐一驗 templates 相對路徑集合等於 source；source 集合非空且涵蓋 planner 所需資產，並保留 core commands.json、cockpit.tcss、entry points 與 launcher 檢查
-- [ ] 加 deploy package-data 規則；集合比較不硬編碼數量，並攔截缺檔、多餘錯路徑、空目錄與整個目錄缺失
+- [x] 加 deploy package-data 規則；集合比較不硬編碼數量，並攔截缺檔、多餘錯路徑、空目錄與整個目錄缺失
 - [ ] 兩個 release 入口共用 artifact checker，並在 PR CI 執行
 
 ## 2. deploy 失敗契約
