@@ -177,62 +177,63 @@ def _check_wheel(path: Path, expected_templates: set[str], source_version: str) 
     if not path.is_file():
         return [f"{archive_name}: file does not exist"]
     try:
-        with zipfile.ZipFile(path) as archive:
-            names = archive.namelist()
-            name_set = set(names)
-            errors = _template_layout_errors(archive_name, names)
-            errors.extend(_compare_template_paths(
-                archive_name=archive_name,
-                actual=_template_relative_paths(names),
-                expected=expected_templates,
-            ))
-            errors.extend(_check_required_members(archive_name, name_set, suffix_match=False))
-
-            metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
-            entry_point_names = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
-            if len(metadata_names) != 1:
-                errors.append(f"{archive_name}: expected exactly one METADATA member")
-            if len(entry_point_names) != 1:
-                errors.append(f"{archive_name}: expected exactly one entry_points.txt member")
-
-            if len(metadata_names) == 1:
-                try:
-                    metadata = archive.read(metadata_names[0]).decode("utf-8")
-                except Exception as exc:
-                    errors.append(f"{archive_name}: unable to read METADATA: {exc}")
-                else:
-                    version_line = next(
-                        (line for line in metadata.splitlines() if line.startswith("Version:")),
-                        "",
-                    )
-                    if version_line != f"Version: {source_version}":
-                        errors.append(
-                            f"{archive_name}: METADATA version does not match VERSION "
-                            f"({version_line!r} != 'Version: {source_version}')"
-                        )
-
-            if len(entry_point_names) == 1:
-                try:
-                    entry_points = archive.read(entry_point_names[0]).decode("utf-8")
-                except Exception as exc:
-                    errors.append(f"{archive_name}: unable to read entry_points.txt: {exc}")
-                else:
-                    for required in REQUIRED_ENTRY_POINTS:
-                        if required not in entry_points:
-                            errors.append(f"{archive_name}: missing entry point: {required}")
-
-            for name in names:
-                if TEMPLATE_MARKER not in name or not name.endswith(".tmpl"):
-                    continue
-                try:
-                    data = archive.read(name)
-                except Exception as exc:
-                    errors.append(f"{archive_name}: unable to read template {name}: {exc}")
-                    continue
-                errors.extend(_check_template_text(archive_name, name, data))
-            return errors
+        archive = zipfile.ZipFile(path)
     except Exception as exc:
         return [f"{archive_name}: unable to open archive: {exc}"]
+    with archive:
+        names = archive.namelist()
+        name_set = set(names)
+        errors = _template_layout_errors(archive_name, names)
+        errors.extend(_compare_template_paths(
+            archive_name=archive_name,
+            actual=_template_relative_paths(names),
+            expected=expected_templates,
+        ))
+        errors.extend(_check_required_members(archive_name, name_set, suffix_match=False))
+
+        metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+        entry_point_names = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
+        if len(metadata_names) != 1:
+            errors.append(f"{archive_name}: expected exactly one METADATA member")
+        if len(entry_point_names) != 1:
+            errors.append(f"{archive_name}: expected exactly one entry_points.txt member")
+
+        if len(metadata_names) == 1:
+            try:
+                metadata = archive.read(metadata_names[0]).decode("utf-8")
+            except Exception as exc:
+                errors.append(f"{archive_name}: unable to read METADATA: {exc}")
+            else:
+                version_line = next(
+                    (line for line in metadata.splitlines() if line.startswith("Version:")),
+                    "",
+                )
+                if version_line != f"Version: {source_version}":
+                    errors.append(
+                        f"{archive_name}: METADATA version does not match VERSION "
+                        f"({version_line!r} != 'Version: {source_version}')"
+                    )
+
+        if len(entry_point_names) == 1:
+            try:
+                entry_points = archive.read(entry_point_names[0]).decode("utf-8")
+            except Exception as exc:
+                errors.append(f"{archive_name}: unable to read entry_points.txt: {exc}")
+            else:
+                for required in REQUIRED_ENTRY_POINTS:
+                    if required not in entry_points:
+                        errors.append(f"{archive_name}: missing entry point: {required}")
+
+        for name in names:
+            if TEMPLATE_MARKER not in name or not name.endswith(".tmpl"):
+                continue
+            try:
+                data = archive.read(name)
+            except Exception as exc:
+                errors.append(f"{archive_name}: unable to read template {name}: {exc}")
+                continue
+            errors.extend(_check_template_text(archive_name, name, data))
+        return errors
 
 
 def _check_sdist(path: Path, expected_templates: set[str], source_version: str) -> list[str]:
@@ -240,56 +241,57 @@ def _check_sdist(path: Path, expected_templates: set[str], source_version: str) 
     if not path.is_file():
         return [f"{archive_name}: file does not exist"]
     try:
-        with tarfile.open(path, "r:gz") as archive:
-            names = [
-                member.name + "/" if member.isdir() and not member.name.endswith("/") else member.name
-                for member in archive.getmembers()
-            ]
-            name_set = set(names)
-            errors = _template_layout_errors(archive_name, names)
-            errors.extend(_compare_template_paths(
-                archive_name=archive_name,
-                actual=_template_relative_paths(names),
-                expected=expected_templates,
-            ))
-            errors.extend(_check_required_members(archive_name, name_set, suffix_match=True))
-
-            pyproject_names = [name for name in names if name.endswith("/pyproject.toml") or name == "pyproject.toml"]
-            if len(pyproject_names) != 1:
-                errors.append(f"{archive_name}: expected exactly one pyproject.toml member")
-            if len(pyproject_names) == 1:
-                try:
-                    member = archive.getmember(pyproject_names[0])
-                    handle = archive.extractfile(member)
-                    if handle is None:
-                        raise OSError("member is not a regular file")
-                    pyproject = handle.read().decode("utf-8")
-                except Exception as exc:
-                    errors.append(f"{archive_name}: unable to read pyproject.toml: {exc}")
-                else:
-                    if f'version = "{source_version}"' not in pyproject:
-                        errors.append(f"{archive_name}: pyproject version does not match VERSION")
-                    for required in REQUIRED_ENTRY_POINTS:
-                        key, value = required.split(" = ", 1)
-                        if f'{key} = "{value}"' not in pyproject:
-                            errors.append(f"{archive_name}: missing entry point: {required}")
-
-            for name in names:
-                if TEMPLATE_MARKER not in name or not name.endswith(".tmpl"):
-                    continue
-                try:
-                    member = archive.getmember(name)
-                    handle = archive.extractfile(member)
-                    if handle is None:
-                        raise OSError("member is not a regular file")
-                    data = handle.read()
-                except Exception as exc:
-                    errors.append(f"{archive_name}: unable to read template {name}: {exc}")
-                    continue
-                errors.extend(_check_template_text(archive_name, name, data))
-            return errors
+        archive = tarfile.open(path, "r:gz")
     except Exception as exc:
         return [f"{archive_name}: unable to open archive: {exc}"]
+    with archive:
+        names = [
+            member.name + "/" if member.isdir() and not member.name.endswith("/") else member.name
+            for member in archive.getmembers()
+        ]
+        name_set = set(names)
+        errors = _template_layout_errors(archive_name, names)
+        errors.extend(_compare_template_paths(
+            archive_name=archive_name,
+            actual=_template_relative_paths(names),
+            expected=expected_templates,
+        ))
+        errors.extend(_check_required_members(archive_name, name_set, suffix_match=True))
+
+        pyproject_names = [name for name in names if name.endswith("/pyproject.toml") or name == "pyproject.toml"]
+        if len(pyproject_names) != 1:
+            errors.append(f"{archive_name}: expected exactly one pyproject.toml member")
+        if len(pyproject_names) == 1:
+            try:
+                member = archive.getmember(pyproject_names[0])
+                handle = archive.extractfile(member)
+                if handle is None:
+                    raise OSError("member is not a regular file")
+                pyproject = handle.read().decode("utf-8")
+            except Exception as exc:
+                errors.append(f"{archive_name}: unable to read pyproject.toml: {exc}")
+            else:
+                if f'version = "{source_version}"' not in pyproject:
+                    errors.append(f"{archive_name}: pyproject version does not match VERSION")
+                for required in REQUIRED_ENTRY_POINTS:
+                    key, value = required.split(" = ", 1)
+                    if f'{key} = "{value}"' not in pyproject:
+                        errors.append(f"{archive_name}: missing entry point: {required}")
+
+        for name in names:
+            if TEMPLATE_MARKER not in name or not name.endswith(".tmpl"):
+                continue
+            try:
+                member = archive.getmember(name)
+                handle = archive.extractfile(member)
+                if handle is None:
+                    raise OSError("member is not a regular file")
+                data = handle.read()
+            except Exception as exc:
+                errors.append(f"{archive_name}: unable to read template {name}: {exc}")
+                continue
+            errors.extend(_check_template_text(archive_name, name, data))
+        return errors
 
 
 def check_artifacts(*, wheel: Path, sdist: Path, source_root: Path) -> None:

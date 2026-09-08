@@ -267,6 +267,34 @@ def test_plan_only_install_template_failure_is_one_json_report(monkeypatch, tmp_
     assert payload["failed_assets"] == ["state/config/__INSTANCE__.state.json.tmpl"]
 
 
+def test_status_and_uninstall_apply_ignore_missing_templates(monkeypatch, tmp_path: Path, capsys) -> None:
+    template_root = _template_checkout_without_last_asset(tmp_path)
+    monkeypatch.setattr(planner, "TEMPLATE_ROOT", template_root)
+    monkeypatch.setattr("paulshaclaw.deploy.installer._disable_service_units", lambda plan: [])
+    monkeypatch.setattr("paulshaclaw.deploy.installer._stop_service_units", lambda plan: [])
+    monkeypatch.setattr("paulshaclaw.deploy.installer._run_daemon_reload", lambda: [])
+
+    from paulshaclaw.deploy.__main__ import main
+
+    home_dir = tmp_path / "home"
+    common_args = [
+        "--instance",
+        "demo-agent",
+        "--root-dir",
+        "/srv/paulshaclaw",
+        "--home-dir",
+        str(home_dir),
+    ]
+
+    assert main(["status", *common_args]) == 0
+    assert capsys.readouterr().out.strip() == "{}"
+
+    assert main(["uninstall", *common_args, "--apply"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "uninstall"
+    assert payload["status"] == "ok"
+
+
 def test_post_preflight_io_failure_reports_written_files_without_atomicity_claim(monkeypatch, tmp_path: Path) -> None:
     home_dir = tmp_path / "home"
     original_write_text = Path.write_text

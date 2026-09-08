@@ -21,3 +21,4 @@
 - [x] build-system 固定 setuptools>=62.3，source checker 只把真正沒有任何檔案的 template 目錄視為 empty，並補回歸測試
 - [x] plan-only failure report 重用 installer 共用 helper、installed-wheel 測試在 pip 安裝與執行階段清除 checkout PYTHONPATH，並由 planner 推導 applied_files，避免契約漂移
 - [x] 補齊本 change 的 proposal、design 與 Stage 7 spec delta；本 active change 只記錄 archive 前的實作與驗證工作
+- [x] pre-archive review repair：preflight 先檢查 build 並在 pip 失敗時給可操作訊息；禁止 `apply_install_plan` 靜默忽略 `python_exe`；補齊缺模板下 status／uninstall --apply 回歸測試；縮小 archive checker 開檔例外範圍；移除 CI 重複安裝 build

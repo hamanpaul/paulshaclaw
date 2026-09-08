@@ -298,6 +298,8 @@ def apply_install_plan(
     python_exe: str | None = None,
     prepared_templates: Mapping[str, str] | None = None,
 ) -> dict[str, list[str]]:
+    if python_exe is not None and prepared_templates is not None:
+        raise ValueError("python_exe and prepared_templates are mutually exclusive")
     written_files: list[str] = []
     skipped_existing: list[str] = []
     for asset in plan.templates:
