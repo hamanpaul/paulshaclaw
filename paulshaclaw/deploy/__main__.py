@@ -7,6 +7,8 @@ from typing import Sequence
 from .installer import (
     ArtifactVerificationError,
     TemplatePreflightError,
+    _record_template_preflight_failure,
+    preflight_templates,
     read_install_record,
     run_install,
     run_rollback,
@@ -155,26 +157,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if args.command in ("install", "upgrade"):
         try:
-            from .installer import preflight_templates
-
             prepared = preflight_templates(plan)
         except TemplatePreflightError as exc:
-            report = {
-                "command": args.command,
-                "instance_name": args.instance,
-                "root_dir": args.root_dir,
-                "status": "failed",
-                "error": str(exc),
-                "failed_assets": [failure["asset"] for failure in exc.failures],
-                "actionable_message": exc.actionable_message,
-                "template_preflight": {
+            report, exit_code = _record_template_preflight_failure(
+                {
+                    "command": args.command,
+                    "instance_name": args.instance,
+                    "root_dir": args.root_dir,
                     "status": "failed",
-                    "failed_assets": exc.failures,
-                    "message": exc.actionable_message,
                 },
-            }
+                exc,
+            )
             print(json.dumps(report, ensure_ascii=False, indent=2))
-            return 1
+            return exit_code
         plan_payload = plan.as_dict()
         plan_payload["template_preflight"] = {
             "status": "passed",

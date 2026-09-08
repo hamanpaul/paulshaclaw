@@ -21,5 +21,8 @@ fi
 
 # custom-skills 的測試不在 tests/ 底下，得明確列出。漏掉它等於讓
 # reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
+# deploy package acceptance tests invoke `python -m build`; keep the build
+# frontend in the same operator runtime before pytest starts.
+"$python_bin" -m pip install --quiet build
 exec env PYTHONPATH="$repo_root" "$python_bin" -m pytest \
   "$repo_root/tests/" "$repo_root/custom-skills/bro/tests/" -q

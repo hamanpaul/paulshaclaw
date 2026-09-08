@@ -18,6 +18,7 @@ import pytest
 
 from paulshaclaw.deploy import (
     build_command_plan,
+    resolve_install_path,
     run_install,
     run_upgrade,
 )
@@ -168,6 +169,23 @@ def test_shared_artifact_checker_fails_closed_for_missing_or_corrupt_archive(tmp
         checker.check_artifacts(wheel=corrupt, sdist=corrupt, source_root=REPO_ROOT)
 
 
+def test_source_checker_distinguishes_empty_dirs_from_non_template_files(tmp_path: Path) -> None:
+    checker = _load_artifact_checker()
+    source_root = tmp_path / "source"
+    shutil.copytree(REPO_ROOT / "paulshaclaw", source_root / "paulshaclaw")
+    shutil.copy(REPO_ROOT / "VERSION", source_root / "VERSION")
+    template_root = source_root / "paulshaclaw" / "deploy" / "templates"
+
+    notes_dir = template_root / "notes"
+    notes_dir.mkdir()
+    (notes_dir / "README.md").write_text("template notes\n", encoding="utf-8")
+    assert checker._source_template_paths(source_root)
+
+    (template_root / "empty").mkdir()
+    with pytest.raises(checker.ArtifactCheckError, match="empty"):
+        checker._source_template_paths(source_root)
+
+
 def _template_checkout_without_last_asset(tmp_path: Path) -> Path:
     template_root = tmp_path / "templates"
     source_root = REPO_ROOT / "paulshaclaw" / "deploy" / "templates"
@@ -287,10 +305,13 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     venv_dir = tmp_path / "venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
     venv_python = venv_dir / "bin" / "python"
+    clean_env = os.environ.copy()
+    clean_env.pop("PYTHONPATH", None)
     install = subprocess.run(
         [str(venv_python), "-m", "pip", "install", "--no-deps", str(wheel)],
         capture_output=True,
         text=True,
+        env=clean_env,
         check=False,
     )
     assert install.returncode == 0, install.stderr
@@ -298,8 +319,7 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     home_dir = tmp_path / "installed-home"
     no_host_tools = tmp_path / "no-host-tools"
     no_host_tools.mkdir()
-    env = os.environ.copy()
-    env.pop("PYTHONPATH", None)
+    env = clean_env.copy()
     env.update({"PATH": str(no_host_tools), "HOME": str(home_dir)})
     wheel_sha256 = hashlib.sha256(wheel.read_bytes()).hexdigest()
     completed = subprocess.run(
@@ -332,7 +352,13 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["status"] == "ok"
-    assert len(payload["applied_files"]) == 8
+    expected_plan = build_command_plan(
+        "install", instance_name="wheel-agent", root_dir="/srv/paulshaclaw"
+    )
+    expected_files = {
+        str(resolve_install_path(asset, home_dir=home_dir)) for asset in expected_plan.templates
+    }
+    assert set(payload["applied_files"]) == expected_files
     assert payload["artifact"]["sha256"] == wheel_sha256
     assert payload["verification"]["systemd"]["status"] == "on-host-only"
     assert payload["verification"]["systemd"].get("service_started") is not True

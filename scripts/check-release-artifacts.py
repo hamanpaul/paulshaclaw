@@ -53,7 +53,7 @@ def _source_template_paths(source_root: Path) -> set[str]:
     empty_directories = [
         path.relative_to(template_root).as_posix() or "."
         for path in template_root.rglob("*")
-        if path.is_dir() and not any(child.is_file() for child in path.rglob("*.tmpl"))
+        if path.is_dir() and not any(child.is_file() for child in path.rglob("*"))
     ]
     if empty_directories:
         raise ArtifactCheckError(

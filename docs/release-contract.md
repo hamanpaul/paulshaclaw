@@ -68,6 +68,12 @@
 6. **#265 history rewrite 裁決**：第一次穩定 tag 前 owner 須明確裁決；若要 force-push 改寫歷史，
    應先完成改寫再建立正式 tag。
 
+`tests.yml` 的 pytest step 會在執行測試前同一環境安裝 `pytest` 與 `build`；
+`scripts/preflight-tests.sh` 也會把 `build` 補進 resolved operator runtime。這是必要的
+測試工具，不是產品 runtime dependency，因為模板封裝與 installed-wheel acceptance 測試會
+直接執行 `python -m build`。`pyproject.toml` 的 build-system floor 固定為
+`setuptools>=62.3`，以保證遞迴 `templates/**/*.tmpl` package-data 規則在隔離建置中可用。
+
 ## 4. 失敗行為、重跑與撤銷（A）
 
 ### 4.1 fail-closed 原則
