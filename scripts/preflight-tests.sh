@@ -7,6 +7,12 @@ repo_root="$(cd -P "$script_dir/.." && pwd)"
 # shellcheck source=/dev/null
 source "$script_dir/start.sh" --source-only
 
+# Manager shells may carry PSC_REPO_ROOT for a different checkout (for example
+# the cortex runtime).  This gate validates the current checkout; retaining
+# that override makes paths.repo_root() escape the worktree even though the
+# test PYTHONPATH is correct.
+unset PSC_REPO_ROOT
+
 if ! python_bin="$(resolve_operator_python "$repo_root")"; then
   echo "找不到完整 operator runtime：請先依 README 建立並安裝 .venv（或設 PSC_PYTHON 指向具備完整 operator runtime 的 python）" >&2
   exit 2

@@ -17,7 +17,7 @@
 
 ## 4. pre-archive repair 與 gate 完整性
 
-- [x] tests.yml 與 scripts/preflight-tests.sh 在 pytest 前於同一 operator runtime 安裝 build frontend，補齊 wheel/sdist 與 installed-wheel acceptance 執行條件
+- [x] tests.yml 與 scripts/preflight-tests.sh 在 pytest 前於同一 operator runtime 安裝 build frontend，並清除跨 checkout 的 PSC_REPO_ROOT，補齊 wheel/sdist 與 installed-wheel acceptance 執行條件
 - [x] build-system 固定 setuptools>=62.3，source checker 只把真正沒有任何檔案的 template 目錄視為 empty，並補回歸測試
 - [x] plan-only failure report 重用 installer 共用 helper、installed-wheel 測試在 pip 安裝與執行階段清除 checkout PYTHONPATH，並由 planner 推導 applied_files，避免契約漂移
 - [x] 補齊本 change 的 proposal、design 與 Stage 7 spec delta；本 active change 只記錄 archive 前的實作與驗證工作
