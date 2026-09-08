@@ -84,6 +84,40 @@ resolve_operator_python() {
   return 1
 }
 
+# preflight only needs a Python that can execute the repository test suite.  It
+# must not require the optional operator shell runtime: a delivery checkout can
+# legitimately have no repo .venv or PSC_PYTHON while its system Python already
+# provides pytest.  The build frontend is checked and installed by
+# scripts/preflight-tests.sh after this resolver selects the interpreter.
+preflight_python_has_runtime() {
+  local python="${1:-}"
+  local repo="${2:?repo root is required}"
+  [[ -n "$python" && -x "$python" ]] || return 1
+  PYTHONPATH="$repo" "$python" -c 'import pytest' >/dev/null 2>&1
+}
+
+resolve_preflight_python() {
+  local repo="${1:?repo root is required}"
+  local cortex_python=""
+  local candidate
+  local -a candidates=()
+
+  cortex_python="$(cortex_console_python || true)"
+  candidates=(
+    "$(command -v "${PSC_PYTHON:-}" 2>/dev/null || true)"
+    "$repo/.venv/bin/python"
+    "$(command -v python3 2>/dev/null || true)"
+    "$cortex_python"
+  )
+  for candidate in "${candidates[@]}"; do
+    if preflight_python_has_runtime "$candidate" "$repo"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 ensure_xdg_runtime_dir() {
   # WSL 的非 login shell 常常沒有 XDG_RUNTIME_DIR，`systemctl --user` 因而
   # 「Failed to connect to bus」而被誤判成 systemd 不可用，於是重起一份已在

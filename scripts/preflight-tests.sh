@@ -13,8 +13,8 @@ source "$script_dir/start.sh" --source-only
 # test PYTHONPATH is correct.
 unset PSC_REPO_ROOT
 
-if ! python_bin="$(resolve_operator_python "$repo_root")"; then
-  echo "找不到完整 operator runtime：請先依 README 建立並安裝 .venv（或設 PSC_PYTHON 指向具備完整 operator runtime 的 python）" >&2
+if ! python_bin="$(resolve_preflight_python "$repo_root")"; then
+  echo "找不到可執行 preflight 的 Python：請確認 pytest 已安裝，或設 PSC_PYTHON 指向可用的 Python" >&2
   exit 2
 fi
 
