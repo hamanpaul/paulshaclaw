@@ -33,4 +33,4 @@
 
 保留兩 repo 原有未提交內容，沒有 stage/commit 其他工作。Cortex checkout 為新增 intake 文件開 feature/open-issues-dispatch-20260907 分支；實作 workers 使用 Manager 隔離 worktree。沒有發布 release、切換 bro runtime 或送 Telegram。
 
-此檔是時間點紀錄；最新狀態以 Cortex status/request、job logs 與 registry 唯讀投影為準。Logs 根：/home/paul_chen/.agents/coordinator-cortex/logs/workflow/。
+此檔是時間點紀錄；最新狀態以 Cortex status/request、job logs 與 registry 唯讀投影為準。Logs 根：~/.agents/coordinator-cortex/logs/workflow/。
