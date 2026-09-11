@@ -72,12 +72,25 @@ def _assert_footer_report(
     *,
     mode: str,
     fragments: tuple[str, ...],
+    expected_enabled: dict[str, object] | None = None,
 ) -> None:
     assert "detected_agents" in payload
+    detected = payload["detected_agents"]
+    assert isinstance(detected, list)
+    assert [entry["name"] for entry in detected] == ["codex", "claude", "copilot", "agy"]
+    for entry in detected:
+        assert set(entry) == {"name", "binary", "state_present"}
+        assert entry["binary"] is None or isinstance(entry["binary"], str)
+        assert isinstance(entry["state_present"], bool)
     assert "footer_selection" in payload
     selection = payload["footer_selection"]
     assert isinstance(selection, dict)
     assert selection.get("mode") == mode
+    enabled = selection.get("enabled")
+    assert isinstance(enabled, dict)
+    assert set(enabled) == {"codex", "claude", "copilot", "agy"}
+    if expected_enabled is not None:
+        assert enabled == expected_enabled
     selection_text = json.dumps(selection, ensure_ascii=False)
     for fragment in fragments:
         assert fragment in selection_text
@@ -312,10 +325,28 @@ def test_plan_only_install_template_failure_is_one_json_report(monkeypatch, tmp_
 
 
 @pytest.mark.parametrize(
-    ("footer", "expected_fragments"),
+    ("footer", "expected_fragments", "expected_enabled"),
     [
-        ("copilot:haman:arc", ("copilot", "haman", "arc")),
-        ("none", ("none",)),
+        (
+            "copilot:haman:arc",
+            ("copilot", "haman", "arc"),
+            {
+                "codex": False,
+                "claude": False,
+                "copilot": {"hamanpaul": True, "org-a": True},
+                "agy": False,
+            },
+        ),
+        (
+            "none",
+            ("none",),
+            {
+                "codex": False,
+                "claude": False,
+                "copilot": {"hamanpaul": False, "org-a": False},
+                "agy": False,
+            },
+        ),
     ],
 )
 def test_install_apply_reports_explicit_footer_selection(
@@ -323,6 +354,7 @@ def test_install_apply_reports_explicit_footer_selection(
     tmp_path: Path,
     footer: str,
     expected_fragments: tuple[str, ...],
+    expected_enabled: dict[str, object],
 ) -> None:
     _stub_install_side_effects(monkeypatch)
 
@@ -344,7 +376,12 @@ def test_install_apply_reports_explicit_footer_selection(
     assert exit_code == 0
     assert stderr == ""
     payload = json.loads(stdout)
-    _assert_footer_report(payload, mode="flag", fragments=expected_fragments)
+    _assert_footer_report(
+        payload,
+        mode="flag",
+        fragments=expected_fragments,
+        expected_enabled=expected_enabled,
+    )
 
 
 def test_install_apply_skips_footer_selection_without_tty(
@@ -371,7 +408,17 @@ def test_install_apply_skips_footer_selection_without_tty(
     assert exit_code == 0
     assert stderr == ""
     payload = json.loads(stdout)
-    _assert_footer_report(payload, mode="skipped", fragments=("no-tty",))
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("no-tty",),
+        expected_enabled={
+            "codex": True,
+            "claude": True,
+            "copilot": {"hamanpaul": True, "org-a": True},
+            "agy": False,
+        },
+    )
 
 
 def test_install_plan_only_reports_skipped_footer_selection() -> None:
@@ -388,7 +435,17 @@ def test_install_plan_only_reports_skipped_footer_selection() -> None:
     assert exit_code == 0
     assert stderr == ""
     payload = json.loads(stdout)
-    _assert_footer_report(payload, mode="skipped", fragments=("plan-only",))
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("plan-only",),
+        expected_enabled={
+            "codex": True,
+            "claude": True,
+            "copilot": {"hamanpaul": True, "org-a": True},
+            "agy": False,
+        },
+    )
 
 
 def test_status_and_uninstall_apply_ignore_missing_templates(monkeypatch, tmp_path: Path, capsys) -> None:

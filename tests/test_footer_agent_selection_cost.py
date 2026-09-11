@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 from datetime import datetime
 from pathlib import Path
 from textwrap import dedent
@@ -12,11 +14,13 @@ from paulshaclaw.cost.config import (
     CodexProviderConfig,
     CopilotAccountConfig,
     CostConfig,
+    SAMPLE_CONFIG_PATH,
     load_cost_config,
 )
 from paulshaclaw.cost.formatter import format_footer
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot
 from paulshaclaw.cost.providers import collect_agy, collect_all
+from paulshaclaw.cost.status import _build_degraded_snapshot
 
 
 def _write_config(tmp_path: Path, body: str) -> Path:
@@ -32,6 +36,21 @@ def _agy_snapshot(provider: ProviderSnapshot) -> CostSnapshot:
         cache_status="fresh",
         providers={"agy": provider},
     )
+
+
+def _write_agy_state(
+    tmp_path: Path,
+    payload: dict[str, object],
+    *,
+    stamp: datetime,
+) -> Path:
+    state_dir = tmp_path / "antigravity-cli"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "state.json"
+    state_path.write_text(json.dumps(payload), encoding="utf-8")
+    ts = stamp.timestamp()
+    os.utime(state_path, (ts, ts))
+    return state_dir
 
 
 def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
@@ -52,12 +71,10 @@ def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
                   enabled: false
             agy:
               enabled: true
-              source: probe
-              state_path: ~/.gemini/antigravity-cli/state.json
-              accounts:
-                - id: main
-                  label: primary
-                  enabled: true
+              label: primary
+              state_dir: ~/.gemini/antigravity-cli
+              max_age_seconds: 45
+              local_fallback: true
         """,
     )
 
@@ -66,41 +83,81 @@ def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
     assert config.claude.enabled is False
     assert config.copilot_accounts[0].enabled is False
     assert config.agy.enabled is True
-    assert config.agy.source == "probe"
-    assert config.agy.accounts[0].label == "primary"
+    assert config.agy.label == "primary"
+    assert config.agy.state_dir == Path("~/.gemini/antigravity-cli").expanduser()
+    assert config.agy.max_age_seconds == 45
+    assert config.agy.local_fallback is True
 
 
-@patch("paulshaclaw.cost.providers._read_json_file", return_value={"percent_used": 42})
-def test_collect_agy_parses_percent_usage(read_json_file) -> None:
+def test_collect_agy_parses_percent_usage(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    state_dir = _write_agy_state(tmp_path, {"percent_used": 42}, stamp=now)
     provider = collect_agy(
         AgyProviderConfig(
             enabled=True,
-            source="probe",
-            state_path=Path("unused.json"),
-        )
+            label="primary",
+            state_dir=state_dir,
+            local_fallback=True,
+        ),
+        now=now,
     )
 
     assert provider is not None
     assert provider.source_status == "fresh"
+    assert provider.accounts[0].label == "primary"
     assert provider.accounts[0].percent_used == 42
-    read_json_file.assert_called_once_with(Path("unused.json"))
 
 
-def test_collect_agy_parses_estimate_and_unlimited_shapes() -> None:
+def test_collect_agy_parses_estimate_and_unlimited_shapes(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))
     estimate = collect_agy(
-        AgyProviderConfig(enabled=True, source="probe"),
-        reader=lambda _path: {"remaining": 120},
+        AgyProviderConfig(
+            enabled=True,
+            state_dir=_write_agy_state(tmp_path / "estimate", {"remaining": 120}, stamp=now),
+            local_fallback=True,
+        ),
+        now=now,
     )
     unlimited = collect_agy(
-        AgyProviderConfig(enabled=True, source="probe"),
-        reader=lambda _path: {"unlimited": True},
+        AgyProviderConfig(
+            enabled=True,
+            state_dir=_write_agy_state(tmp_path / "unlimited", {"unlimited": True}, stamp=now),
+            local_fallback=True,
+        ),
+        now=now,
     )
-    unknown = collect_agy(AgyProviderConfig(enabled=True, source="unknown"))
+    unknown = collect_agy(
+        AgyProviderConfig(enabled=True, local_fallback=False),
+        now=now,
+    )
 
     assert estimate is not None and estimate.source_status == "estimated"
     assert estimate.accounts[0].used_requests == 120
     assert unlimited is not None and unlimited.accounts[0].unlimited is True
     assert unknown is not None and unknown.source_status == "unknown"
+
+
+def test_collect_agy_local_fallback_requires_fresh_state(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    state_dir = _write_agy_state(
+        tmp_path,
+        {"percent_used": 42},
+        stamp=datetime(2026, 9, 11, 11, 40, tzinfo=ZoneInfo("Asia/Taipei")),
+    )
+
+    provider = collect_agy(
+        AgyProviderConfig(
+            enabled=True,
+            state_dir=state_dir,
+            max_age_seconds=300,
+            local_fallback=True,
+        ),
+        now=now,
+    )
+
+    assert provider is not None
+    assert provider.source_status == "unknown"
+    assert provider.accounts == ()
 
 
 @patch("paulshaclaw.cost.providers.collect_claude")
@@ -174,3 +231,12 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
     assert "agy ~120" in format_footer(_agy_snapshot(estimate), use_tmux_style=False)
     assert "agy ?" in format_footer(_agy_snapshot(unknown), use_tmux_style=False)
     assert "agy ∞" in format_footer(_agy_snapshot(unlimited), use_tmux_style=False)
+
+
+def test_sample_yaml_footer_snapshot_matches_main_baseline() -> None:
+    config = load_cost_config(config_path=SAMPLE_CONFIG_PATH)
+    snapshot = _build_degraded_snapshot(config)
+
+    assert format_footer(snapshot, use_tmux_style=False) == (
+        "cdx 5h:-- wk:-- | cc 5h:-- wk:-- | cpt haman:-- arc:-- "
+    )

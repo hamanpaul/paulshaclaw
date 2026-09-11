@@ -6,7 +6,8 @@
 
 ## 2. builder recovery card（本 worktree）
 
-- [x] 2.1 agy footer scope：補上 `AgyProviderConfig` / `CostConfig.agy`、Claude provider `enabled`、Copilot account `enabled`；agy 用量來源依計畫保守落在 `source="unknown"` fallback。
+- [x] 2.1 agy footer scope：對齊 `AgyProviderConfig(enabled, state_dir, label, max_age_seconds, local_fallback)` 與 `collect_agy(config, *, now)`；Claude provider `enabled`、Copilot account `enabled` 仍由 config 控制。
+  - T1 調查結論：本 card 只把 `~/.gemini/antigravity-cli/state.json` 視為本地 fallback 候選，不把它綁成可釘 schema 的官方 quota endpoint，也不讀取任何 OAuth/帳號檔內容；因此預設維持 `local_fallback=false`，未提供可信來源時回報 `source="unknown"`／footer `agy ?`。
 - [x] 2.2 cost render/collect：實作 `collect_agy()` 與 footer `agy` 渲染，涵蓋 `N%` / `~N` / `?` / `∞`，並讓 disabled provider/account 不進最終 footer。
 - [x] 2.3 deploy footer plumbing：新增 `paulshaclaw/deploy/agents.py`，處理 `_NEVER_READ` 偵測、`copilot:label:label` / `codex,agy` / bare `copilot` 文法、structured report 與 config write-back。
 - [x] 2.4 SelectionList TUI：新增 `paulshaclaw/deploy/footer_select.py`，支援 toggle→enter 結構化回傳、esc 取消、未偵測項仍可勾選與即時 preview。

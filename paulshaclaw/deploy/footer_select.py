@@ -98,8 +98,6 @@ def _selection_raw(providers: dict[str, dict[str, object]]) -> str | None:
             elif labels:
                 tokens.append("copilot:" + ":".join(labels))
             continue
-        if provider == "agy" and details.get("labels"):
-            return None
         tokens.append(provider)
     return ",".join(tokens)
 
@@ -116,7 +114,7 @@ def selection_from_values(selected_values: set[str]) -> dict[str, object]:
             for value in selected_values
             if value.startswith(f"account:{provider}:")
         )
-        if provider in {"copilot", "agy"}:
+        if provider == "copilot":
             if provider_selected or labels:
                 details: dict[str, object] = {"enabled": True}
                 if labels:
@@ -180,14 +178,6 @@ def build_selection_options(
             value=_provider_value("agy"),
             selected=config.agy.enabled,
         )
-    )
-    options.extend(
-        FooterSelectionOption(
-            label=f"  └─ agy:{account.label}",
-            value=_account_value("agy", account.label),
-            selected=account.enabled,
-        )
-        for account in config.agy.accounts
     )
     return options
 

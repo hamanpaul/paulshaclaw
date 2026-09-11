@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import unittest
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from textwrap import dedent
@@ -10,7 +11,13 @@ from textwrap import dedent
 import yaml
 
 from paulshaclaw.deploy.__main__ import main as deploy_main
-from paulshaclaw.deploy.agents import _NEVER_READ, detect_agents, parse_footer_argument, write_footer_config
+from paulshaclaw.deploy.agents import (
+    _NEVER_READ,
+    detect_agents,
+    parse_footer_argument,
+    prepare_footer_selection,
+    write_footer_config,
+)
 from paulshaclaw.deploy.footer_select import FooterSelectionApp, FooterSelectionOption
 
 
@@ -90,10 +97,17 @@ def test_detect_agents_never_reads_guarded_paths(tmp_path: Path, monkeypatch) ->
     assert detected["claude"]["sidecar_exists"] is False
 
 
-def test_write_footer_config_creates_backup_and_only_mutates_enabled(tmp_path: Path) -> None:
+def test_write_footer_config_creates_backup_and_only_mutates_enabled(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
     home = tmp_path / "home"
     config_path = home / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
     config_path.parent.mkdir(parents=True)
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.agents._utc_now",
+        lambda: datetime(2026, 9, 11, 9, 30, tzinfo=timezone.utc),
+    )
     original_text = dedent(
         """
         workspaces:
@@ -117,11 +131,9 @@ def test_write_footer_config_creates_backup_and_only_mutates_enabled(tmp_path: P
                   monthly_allowance: 300
                   org: example-org
             agy:
-              source: unknown
-              accounts:
-                - id: primary
-                  label: main
-                  enabled: false
+              label: main
+              max_age_seconds: 45
+              local_fallback: false
         """
     ).strip() + "\n"
     config_path.write_text(original_text, encoding="utf-8")
@@ -140,13 +152,20 @@ def test_write_footer_config_creates_backup_and_only_mutates_enabled(tmp_path: P
     }
 
     assert result["status"] == "written"
+    assert backup_path.name == "paulshaclaw.yaml.bak-20260911T093000Z"
     assert backup_path.read_text(encoding="utf-8") == original_text
     assert _drop_enabled(after) == _drop_enabled(before)
     assert after["cost"]["providers"]["codex"]["enabled"] is True
     assert after["cost"]["providers"]["claude"]["enabled"] is True
     assert copilot_accounts == {"haman": True, "arc": False}
     assert after["cost"]["providers"]["agy"]["enabled"] is True
-    assert after["cost"]["providers"]["agy"]["accounts"][0]["enabled"] is True
+
+    written_text = config_path.read_text(encoding="utf-8")
+    second = write_footer_config(parse_footer_argument("none"), home_dir=home)
+    second_backup = Path(second["backup_path"])
+
+    assert second_backup.name == "paulshaclaw.yaml.bak-20260911T093000Z-1"
+    assert second_backup.read_text(encoding="utf-8") == written_text
 
 
 def test_write_footer_config_uses_sample_fallback_when_config_missing(tmp_path: Path) -> None:
@@ -170,6 +189,33 @@ def test_write_footer_config_uses_sample_fallback_when_config_missing(tmp_path: 
     assert payload["cost"]["providers"]["claude"]["enabled"] is False
     assert copilot_accounts == {"haman": True, "arc": True}
     assert payload["cost"]["providers"]["agy"]["enabled"] is True
+
+
+def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeypatch) -> None:
+    class Tty:
+        def isatty(self) -> bool:
+            return True
+
+    monkeypatch.setattr("paulshaclaw.deploy.footer_select.run_footer_selection", lambda **_: None)
+
+    detected, report, selection = prepare_footer_selection(
+        footer=None,
+        apply=True,
+        verify=False,
+        home_dir=tmp_path / "home",
+        stdin=Tty(),
+        stdout=Tty(),
+    )
+
+    assert selection is None
+    assert set(detected) == {"codex", "claude", "copilot", "agy"}
+    assert report["mode"] == "cancelled"
+    assert report["enabled"] == {
+        "codex": True,
+        "claude": True,
+        "copilot": {"hamanpaul": True, "org-a": True},
+        "agy": False,
+    }
 
 
 def test_install_apply_bare_copilot_flag_writes_all_sample_accounts(

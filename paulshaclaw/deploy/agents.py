@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping
 
@@ -130,6 +131,23 @@ def detect_agents(
     return detected
 
 
+def detected_agents_report(
+    detected_agents: Mapping[str, Mapping[str, object]],
+) -> list[dict[str, object]]:
+    report: list[dict[str, object]] = []
+    for provider in _FOOTER_PROVIDERS:
+        details = detected_agents.get(provider, {})
+        binary = details.get("cli_path")
+        report.append(
+            {
+                "name": provider,
+                "binary": binary if isinstance(binary, str) else None,
+                "state_present": bool(details.get("state_exists")),
+            }
+        )
+    return report
+
+
 def parse_footer_argument(raw: str) -> dict[str, object]:
     value = raw.strip()
     if not value:
@@ -167,18 +185,43 @@ def parse_footer_argument(raw: str) -> dict[str, object]:
     return {"raw": value, "disable_all": False, "providers": parsed}
 
 
-def _build_provider_report(selection: dict[str, object]) -> dict[str, object]:
-    report: dict[str, object] = {
-        "disable_all": bool(selection.get("disable_all", False)),
-        "providers": copy.deepcopy(selection.get("providers", {})),
-    }
-    if selection.get("raw") is not None:
-        report["requested"] = selection.get("raw")
-    return report
-
-
 def _account_enabled(account) -> bool:
     return bool(getattr(account, "enabled", True))
+
+
+def _missing_yaml_dependency(error: BaseException) -> bool:
+    return isinstance(error, ModuleNotFoundError) and error.name == "yaml"
+
+
+def _default_footer_enabled() -> dict[str, object]:
+    return {
+        "codex": True,
+        "claude": True,
+        "copilot": {},
+        "agy": False,
+    }
+
+
+def _selection_enabled_fallback(
+    selection: dict[str, object] | None,
+) -> dict[str, object]:
+    if selection is None:
+        return _default_footer_enabled()
+    selected = selection.get("providers")
+    selected = selected if isinstance(selected, dict) else {}
+    disable_all = bool(selection.get("disable_all", False))
+    copilot_enabled: dict[str, bool] = {}
+    copilot = selected.get("copilot")
+    if isinstance(copilot, dict) and not disable_all:
+        labels = copilot.get("labels")
+        if isinstance(labels, list):
+            copilot_enabled = {str(label): True for label in labels}
+    return {
+        "codex": bool(not disable_all and "codex" in selected),
+        "claude": bool(not disable_all and "claude" in selected),
+        "copilot": copilot_enabled,
+        "agy": bool(not disable_all and "agy" in selected),
+    }
 
 
 def _preview_providers(config: CostConfig) -> dict[str, ProviderSnapshot]:
@@ -273,6 +316,40 @@ def _set_account_enableds(
         )
 
 
+def resolve_footer_enabled(
+    *,
+    selection: dict[str, object] | None = None,
+    payload: dict[str, Any] | None = None,
+    home_dir: str | Path | None = None,
+    config_path: str | Path | None = None,
+) -> dict[str, object]:
+    from paulshaclaw.cost.config import parse_cost_config_payload
+
+    resolved_payload = payload
+    if resolved_payload is None:
+        try:
+            resolved_payload, _source, _target = load_footer_config_payload(
+                home_dir=home_dir,
+                config_path=config_path,
+            )
+        except ModuleNotFoundError as error:
+            if _missing_yaml_dependency(error):
+                return _selection_enabled_fallback(selection)
+            raise
+    if selection is not None:
+        resolved_payload = apply_footer_selection_payload(resolved_payload, selection)
+    config = parse_cost_config_payload(resolved_payload)
+    return {
+        "codex": config.codex.enabled,
+        "claude": config.claude.enabled,
+        "copilot": {
+            account.account_id: _account_enabled(account)
+            for account in config.copilot_accounts
+        },
+        "agy": config.agy.enabled,
+    }
+
+
 def apply_footer_selection_payload(
     payload: dict[str, Any],
     selection: dict[str, object],
@@ -305,20 +382,6 @@ def apply_footer_selection_payload(
         enabled=bool(not disable_all and copilot_selection),
         path="config.cost.providers.copilot.accounts",
     )
-
-    agy = _ensure_mapping(providers, "agy", path="config.cost.providers.agy")
-    agy_accounts = _ensure_accounts(
-        agy,
-        path="config.cost.providers.agy.accounts",
-    )
-    agy_selection = selected.get("agy") if isinstance(selected.get("agy"), dict) else {}
-    _set_account_enableds(
-        agy_accounts,
-        selection_labels=list(agy_selection.get("labels", [])),
-        enable_all=bool(agy_selection.get("all_accounts", False) or (agy_selection and not agy_selection.get("labels"))),
-        enabled=bool(not disable_all and agy_selection),
-        path="config.cost.providers.agy.accounts",
-    )
     return updated
 
 
@@ -349,18 +412,33 @@ def preview_footer_selection(
 def format_footer_selection_report(
     mode: str,
     *,
+    enabled: dict[str, object],
     selection: dict[str, object] | None = None,
     reason: str | None = None,
     preview: str | None = None,
 ) -> dict[str, Any]:
-    report: dict[str, Any] = {"mode": mode}
+    report: dict[str, Any] = {"mode": mode, "enabled": copy.deepcopy(enabled)}
     if reason is not None:
         report["reason"] = reason
-    if selection is not None:
-        report.update(_build_provider_report(selection))
+    if selection is not None and selection.get("raw") is not None:
+        report["requested"] = selection.get("raw")
     if preview is not None:
         report["preview"] = preview
     return report
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _next_backup_path(target_path: Path) -> Path:
+    stamp = _utc_now().strftime("%Y%m%dT%H%M%SZ")
+    candidate = target_path.parent / f"{target_path.name}.bak-{stamp}"
+    index = 1
+    while candidate.exists():
+        candidate = target_path.parent / f"{target_path.name}.bak-{stamp}-{index}"
+        index += 1
+    return candidate
 
 
 def prepare_footer_selection(
@@ -380,18 +458,32 @@ def prepare_footer_selection(
             preview = preview_footer_selection(footer, home_dir=home_dir)
         except Exception:
             preview = None
+        enabled = resolve_footer_enabled(
+            selection=footer,
+            home_dir=home_dir,
+            config_path=None,
+        )
         return detected, format_footer_selection_report(
             "flag",
+            enabled=enabled,
             selection=footer,
             preview=preview,
         ), footer
 
     if not apply:
         reason = "plan-only" if not verify else "no-apply"
-        return detected, {"mode": "skipped", "reason": reason}, None
+        return detected, format_footer_selection_report(
+            "skipped",
+            enabled=resolve_footer_enabled(home_dir=home_dir),
+            reason=reason,
+        ), None
 
     if not (_isatty(stdin) and _isatty(stdout)):
-        return detected, {"mode": "skipped", "reason": "no-tty"}, None
+        return detected, format_footer_selection_report(
+            "skipped",
+            enabled=resolve_footer_enabled(home_dir=home_dir),
+            reason="no-tty",
+        ), None
 
     from .footer_select import (
         build_selection_options,
@@ -402,6 +494,10 @@ def prepare_footer_selection(
 
     try:
         payload, _source, _target = load_footer_config_payload(home_dir=home_dir)
+    except ModuleNotFoundError as error:
+        if not _missing_yaml_dependency(error):
+            raise
+        payload = {}
     except Exception:
         payload = {}
     config = parse_cost_config_payload(payload)
@@ -414,10 +510,15 @@ def prepare_footer_selection(
         ),
     )
     if selection is None:
-        return detected, {"mode": "skipped", "reason": "cancelled"}, None
+        return detected, format_footer_selection_report(
+            "cancelled",
+            enabled=resolve_footer_enabled(payload=payload),
+        ), None
     preview = preview_footer_selection(selection, payload=payload)
+    enabled = resolve_footer_enabled(payload=payload, selection=selection)
     return detected, format_footer_selection_report(
-        "interactive",
+        "tui",
+        enabled=enabled,
         selection=selection,
         preview=preview,
     ), selection
@@ -443,8 +544,9 @@ def write_footer_config(
     target_path.parent.mkdir(parents=True, exist_ok=True)
     backup_path: Path | None = None
     if target_path.is_file():
-        backup_path = target_path.with_suffix(f"{target_path.suffix}.bak")
-        backup_path.write_text(target_path.read_text(encoding="utf-8"), encoding="utf-8")
+        original_text = target_path.read_text(encoding="utf-8")
+        backup_path = _next_backup_path(target_path)
+        backup_path.write_text(original_text, encoding="utf-8")
 
     dumped = yaml.safe_dump(updated, allow_unicode=True, sort_keys=False)
     target_path.write_text(dumped, encoding="utf-8")

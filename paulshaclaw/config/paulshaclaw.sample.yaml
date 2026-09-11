@@ -62,8 +62,10 @@ cost:
       enabled: true
       local_fallback: false
     agy:
-      # 本輪 footer-agent-selection 只交付 config / detect / rendering 骨架；
-      # 用量來源仍保守標成 unknown，啟用後會先顯示 agy ?。
+      # 本輪未綁定可釘 schema 的官方 quota endpoint；預設不讀本地 cache，
+      # 因此啟用後在可信來源缺席時會先顯示 agy ?。
       enabled: false
-      source: unknown
-      accounts: []
+      label: agy
+      state_dir: ~/.gemini/antigravity-cli
+      max_age_seconds: 300
+      local_fallback: false

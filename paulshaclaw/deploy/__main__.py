@@ -6,6 +6,7 @@ import sys
 from typing import Any, Sequence
 
 from .agents import (
+    detected_agents_report,
     detect_agents,
     parse_footer_argument,
     prepare_footer_selection,
@@ -26,13 +27,15 @@ from .planner import build_command_plan
 
 
 SUPPORTED_COMMANDS = ("install", "upgrade", "uninstall", "status", "rollback")
+
+
 def _attach_footer_metadata(
     payload: dict[str, object],
     *,
     detected_agents: dict[str, dict[str, object]],
     footer_selection: dict[str, Any],
 ) -> dict[str, object]:
-    payload["detected_agents"] = detected_agents
+    payload["detected_agents"] = detected_agents_report(detected_agents)
     payload["footer_selection"] = footer_selection
     return payload
 

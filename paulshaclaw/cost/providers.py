@@ -167,14 +167,9 @@ def _read_json_file(path: Path) -> dict[str, Any] | None:
 
 
 def _agy_account_config(config: AgyProviderConfig) -> CopilotAccountConfig:
-    for account in config.accounts:
-        if account.enabled:
-            return account
-    if config.accounts:
-        return config.accounts[0]
     return CopilotAccountConfig(
         account_id="agy",
-        label="agy",
+        label=config.label,
         kind="personal",
     )
 
@@ -185,6 +180,14 @@ def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
     except OSError:
         return False
     return time.time() - stat.st_mtime <= max_age_seconds
+
+
+def _file_is_fresh_at(path: Path, *, max_age_seconds: int, now: datetime) -> bool:
+    try:
+        stat = path.stat()
+    except OSError:
+        return False
+    return now.timestamp() - stat.st_mtime <= max_age_seconds
 
 
 def _file_in_current_token_window(path: Path, *, now: datetime) -> bool:
@@ -584,20 +587,32 @@ def collect_claude(
 def collect_agy(
     config: AgyProviderConfig,
     *,
+    now: datetime,
     reader: Callable[[Path], dict[str, Any] | None] | None = None,
 ) -> ProviderSnapshot | None:
     if not config.enabled:
         return None
 
-    source = str(config.source or "unknown").strip().lower()
-    if source == "unknown":
+    if not config.local_fallback:
         return ProviderSnapshot(
             source_status="unknown",
             accounts=(),
             note='source="unknown"',
         )
 
-    payload = (reader or _read_json_file)(config.state_path)
+    state_path = config.state_dir / "state.json"
+    if not _file_is_fresh_at(
+        state_path,
+        max_age_seconds=config.max_age_seconds,
+        now=now,
+    ):
+        return ProviderSnapshot(
+            source_status="unknown",
+            accounts=(),
+            note="agy quota unavailable",
+        )
+
+    payload = (reader or _read_json_file)(state_path)
     if not isinstance(payload, Mapping):
         return ProviderSnapshot(
             source_status="unknown",
@@ -619,7 +634,7 @@ def collect_agy(
             accounts=(
                 CopilotAccountUsage(
                     used_requests=None,
-                    source=str(source),
+                    source="local_state",
                     percent_used=None,
                     unlimited=True,
                     **base_usage,
@@ -639,7 +654,7 @@ def collect_agy(
             accounts=(
                 CopilotAccountUsage(
                     used_requests=None,
-                    source=str(source),
+                    source="local_state",
                     percent_used=min(100, percent_used),
                     unlimited=False,
                     **base_usage,
@@ -1091,7 +1106,7 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     copilot = collect_copilot(config)
     if copilot.accounts:
         providers["cpt"] = copilot
-    agy = collect_agy(config.agy)
+    agy = collect_agy(config.agy, now=_now_utc())
     if agy is not None:
         providers["agy"] = agy
     return providers

@@ -5,8 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from paulshaclaw.config import paths
 
 ENV_CONFIG_VAR = "PAULSHACLAW_CONFIG"
@@ -65,16 +63,17 @@ class CodexProviderConfig:
     local_fallback: bool = False
 
 
-def default_agy_state_path() -> Path:
-    return paths.home_path(".gemini", "antigravity-cli", "state.json")
+def default_agy_state_dir() -> Path:
+    return paths.home_path(".gemini", "antigravity-cli")
 
 
 @dataclass(frozen=True)
 class AgyProviderConfig:
     enabled: bool = False
-    source: str = "unknown"
-    state_path: Path = field(default_factory=default_agy_state_path)
-    accounts: tuple[CopilotAccountConfig, ...] = ()
+    state_dir: Path = field(default_factory=default_agy_state_dir)
+    label: str = "agy"
+    max_age_seconds: int = 300
+    local_fallback: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,6 +111,10 @@ def _load_payload(config_path: Path | None) -> dict[str, Any]:
         return {}
     if not resolved.exists():
         raise FileNotFoundError(f"設定檔不存在：{resolved}")
+    try:
+        import yaml
+    except ModuleNotFoundError as error:  # pragma: no cover - thin runtime path
+        raise ModuleNotFoundError("PyYAML is required to read paulshaclaw YAML config") from error
     try:
         payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as error:
@@ -218,21 +221,44 @@ def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
     )
 
 
+def _legacy_agy_label(raw: Any) -> str:
+    accounts = _parse_accounts(
+        raw,
+        name="config.cost.providers.agy.accounts",
+    )
+    if not accounts:
+        return "agy"
+    for account in accounts:
+        if account.enabled:
+            return account.label
+    return accounts[0].label
+
+
 def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
     item = _mapping(raw, "config.cost.providers.agy")
-    state_path = item.get("state_path")
-    source = item.get("source")
+    state_dir = item.get("state_dir")
+    legacy_state_path = item.get("state_path")
+    max_age = item.get("max_age_seconds")
+    legacy_source = item.get("source")
+    legacy_local_fallback = False
+    if isinstance(legacy_source, str) and legacy_source.strip():
+        legacy_local_fallback = legacy_source.strip().lower() != "unknown"
+    resolved_state_dir = default_agy_state_dir()
+    if state_dir:
+        resolved_state_dir = Path(str(state_dir)).expanduser()
+    elif legacy_state_path:
+        resolved_state_dir = Path(str(legacy_state_path)).expanduser()
+        if resolved_state_dir.suffix:
+            resolved_state_dir = resolved_state_dir.parent
+    label = item.get("label")
     return AgyProviderConfig(
         enabled=_bool_value(item.get("enabled"), default=False),
-        source=str(source) if source else "unknown",
-        state_path=(
-            Path(str(state_path)).expanduser()
-            if state_path
-            else default_agy_state_path()
-        ),
-        accounts=_parse_accounts(
-            item.get("accounts"),
-            name="config.cost.providers.agy.accounts",
+        state_dir=resolved_state_dir,
+        label=str(label) if label else _legacy_agy_label(item.get("accounts")),
+        max_age_seconds=int(max_age) if max_age is not None else 300,
+        local_fallback=_bool_value(
+            item.get("local_fallback"),
+            default=legacy_local_fallback,
         ),
     )
 
