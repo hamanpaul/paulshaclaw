@@ -3,9 +3,10 @@ from __future__ import annotations
 import argparse
 import copy
 import shutil
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Sequence
 
 from paulshaclaw.config import paths
 
@@ -20,6 +21,13 @@ _NEVER_READ = (
     ".gemini/antigravity-oauth-token",
     ".gemini/google_accounts.json",
 )
+
+
+@dataclass(frozen=True)
+class DetectedAgent:
+    name: str
+    binary: Path | None
+    state_present: bool
 
 
 def _isatty(stream: object) -> bool:
@@ -88,61 +96,44 @@ def _ensure_accounts(provider: dict[str, Any], *, path: str) -> list[dict[str, A
     return normalized
 
 
-def _state_paths(home: Path) -> dict[str, dict[str, Path]]:
+def _state_paths(home: Path) -> dict[str, Path]:
     return {
-        "codex": {
-            "state_path": home / ".codex" / "auth.json",
-        },
-        "claude": {
-            "state_path": home / ".claude",
-            "sidecar_path": home / ".agents" / "state" / "cost" / "claude_rate_limits.json",
-        },
-        "copilot": {
-            "state_path": home / ".config" / "github-copilot",
-        },
-        "agy": {
-            "state_path": home / ".gemini",
-        },
+        "codex": home / ".codex" / "auth.json",
+        "claude": home / ".claude",
+        "copilot": home / ".config" / "github-copilot",
+        "agy": home / ".gemini",
     }
 
 
 def detect_agents(
     *,
-    home_dir: str | Path | None = None,
-) -> dict[str, dict[str, object]]:
-    home = _resolve_home(home_dir)
-    state_paths = _state_paths(home)
-    detected: dict[str, dict[str, object]] = {}
+    which: Callable[[str], str | None] = shutil.which,
+    home: Path | None = None,
+) -> tuple[DetectedAgent, ...]:
+    state_paths = _state_paths(_resolve_home(home))
+    detected: list[DetectedAgent] = []
     for provider in _FOOTER_PROVIDERS:
-        cli_path = shutil.which(provider)
-        state_path = state_paths[provider]["state_path"]
-        state_exists = state_path.exists()
-        item: dict[str, object] = {
-            "detected": bool(cli_path) and state_exists,
-            "cli_path": cli_path,
-            "state_path": str(state_path),
-            "state_exists": state_exists,
-        }
-        sidecar_path = state_paths[provider].get("sidecar_path")
-        if sidecar_path is not None:
-            item["sidecar_path"] = str(sidecar_path)
-            item["sidecar_exists"] = sidecar_path.exists()
-        detected[provider] = item
-    return detected
+        cli_path = which(provider)
+        detected.append(
+            DetectedAgent(
+                name=provider,
+                binary=Path(cli_path) if cli_path else None,
+                state_present=state_paths[provider].exists(),
+            )
+        )
+    return tuple(detected)
 
 
 def detected_agents_report(
-    detected_agents: Mapping[str, Mapping[str, object]],
+    detected_agents: Sequence[DetectedAgent],
 ) -> list[dict[str, object]]:
     report: list[dict[str, object]] = []
-    for provider in _FOOTER_PROVIDERS:
-        details = detected_agents.get(provider, {})
-        binary = details.get("cli_path")
+    for agent in detected_agents:
         report.append(
             {
-                "name": provider,
-                "binary": binary if isinstance(binary, str) else None,
-                "state_present": bool(details.get("state_exists")),
+                "name": agent.name,
+                "binary": str(agent.binary) if agent.binary is not None else None,
+                "state_present": agent.state_present,
             }
         )
     return report
@@ -229,9 +220,9 @@ def _preview_providers(config: CostConfig) -> dict[str, ProviderSnapshot]:
 
     providers: dict[str, ProviderSnapshot] = {}
     if config.codex.enabled:
-        providers["cdx"] = ProviderSnapshot(source_status="unknown", windows={})
+        providers["cdx"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
     if config.claude.enabled:
-        providers["cc"] = ProviderSnapshot(source_status="unknown", windows={})
+        providers["cc"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
 
     copilot_accounts = tuple(
         CopilotAccountUsage(
@@ -246,10 +237,10 @@ def _preview_providers(config: CostConfig) -> dict[str, ProviderSnapshot]:
         if _account_enabled(account)
     )
     if copilot_accounts:
-        providers["cpt"] = ProviderSnapshot(source_status="unknown", accounts=copilot_accounts)
+        providers["cpt"] = ProviderSnapshot(source_status="unknown", source="unknown", accounts=copilot_accounts)
 
     if config.agy.enabled:
-        providers["agy"] = ProviderSnapshot(source_status="unknown", accounts=())
+        providers["agy"] = ProviderSnapshot(source_status="unknown", source="unknown", accounts=())
     return providers
 
 
@@ -443,45 +434,47 @@ def _next_backup_path(target_path: Path) -> Path:
 
 def prepare_footer_selection(
     *,
-    footer: dict[str, object] | None,
+    footer: str | dict[str, object] | None,
     apply: bool,
     verify: bool,
     home_dir: str | Path | None,
     stdin: object,
     stdout: object,
-) -> tuple[dict[str, dict[str, object]], dict[str, Any], dict[str, object] | None]:
-    detected = detect_agents(home_dir=home_dir)
+) -> tuple[tuple[DetectedAgent, ...], dict[str, Any], dict[str, object] | None]:
+    home = _resolve_home(home_dir)
+    detected = detect_agents(home=home)
+    resolved_footer = parse_footer_argument(footer) if isinstance(footer, str) else footer
 
-    if footer is not None:
+    if resolved_footer is not None:
         preview: str | None
         try:
-            preview = preview_footer_selection(footer, home_dir=home_dir)
+            preview = preview_footer_selection(resolved_footer, home_dir=home)
         except Exception:
             preview = None
         enabled = resolve_footer_enabled(
-            selection=footer,
-            home_dir=home_dir,
+            selection=resolved_footer,
+            home_dir=home,
             config_path=None,
         )
         return detected, format_footer_selection_report(
             "flag",
             enabled=enabled,
-            selection=footer,
+            selection=resolved_footer,
             preview=preview,
-        ), footer
+        ), resolved_footer
 
     if not apply:
         reason = "plan-only" if not verify else "no-apply"
         return detected, format_footer_selection_report(
             "skipped",
-            enabled=resolve_footer_enabled(home_dir=home_dir),
+            enabled=resolve_footer_enabled(home_dir=home),
             reason=reason,
         ), None
 
     if not (_isatty(stdin) and _isatty(stdout)):
         return detected, format_footer_selection_report(
             "skipped",
-            enabled=resolve_footer_enabled(home_dir=home_dir),
+            enabled=resolve_footer_enabled(home_dir=home),
             reason="no-tty",
         ), None
 
@@ -493,7 +486,7 @@ def prepare_footer_selection(
     from paulshaclaw.cost.config import parse_cost_config_payload
 
     try:
-        payload, _source, _target = load_footer_config_payload(home_dir=home_dir)
+        payload, _source, _target = load_footer_config_payload(home_dir=home)
     except ModuleNotFoundError as error:
         if not _missing_yaml_dependency(error):
             raise

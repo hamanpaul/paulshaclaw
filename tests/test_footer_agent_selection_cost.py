@@ -44,13 +44,13 @@ def _write_agy_state(
     *,
     stamp: datetime,
 ) -> Path:
-    state_dir = tmp_path / "antigravity-cli"
+    state_dir = tmp_path / ".gemini" / "antigravity-cli"
     state_dir.mkdir(parents=True)
     state_path = state_dir / "state.json"
     state_path.write_text(json.dumps(payload), encoding="utf-8")
     ts = stamp.timestamp()
     os.utime(state_path, (ts, ts))
-    return state_dir
+    return state_dir.parent
 
 
 def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
@@ -104,7 +104,26 @@ def test_collect_agy_parses_percent_usage(tmp_path: Path) -> None:
 
     assert provider is not None
     assert provider.source_status == "fresh"
+    assert provider.source == "local_observed"
     assert provider.accounts[0].label == "primary"
+    assert provider.accounts[0].percent_used == 42
+
+
+def test_collect_agy_allows_default_now_when_state_is_fresh(tmp_path: Path) -> None:
+    now = datetime(2026, 9, 11, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    state_dir = _write_agy_state(tmp_path, {"percent_used": 42}, stamp=now)
+
+    with patch("paulshaclaw.cost.providers._now_utc", return_value=now):
+        provider = collect_agy(
+            AgyProviderConfig(
+                enabled=True,
+                state_dir=state_dir,
+                local_fallback=True,
+            )
+        )
+
+    assert provider is not None
+    assert provider.source == "local_observed"
     assert provider.accounts[0].percent_used == 42
 
 
@@ -132,9 +151,12 @@ def test_collect_agy_parses_estimate_and_unlimited_shapes(tmp_path: Path) -> Non
     )
 
     assert estimate is not None and estimate.source_status == "estimated"
+    assert estimate.source == "local_observed"
     assert estimate.accounts[0].used_requests == 120
-    assert unlimited is not None and unlimited.accounts[0].unlimited is True
+    assert unlimited is not None and unlimited.source == "local_observed"
+    assert unlimited.accounts[0].unlimited is True
     assert unknown is not None and unknown.source_status == "unknown"
+    assert unknown.source == "unknown"
 
 
 def test_collect_agy_local_fallback_requires_fresh_state(tmp_path: Path) -> None:
@@ -157,6 +179,7 @@ def test_collect_agy_local_fallback_requires_fresh_state(tmp_path: Path) -> None
 
     assert provider is not None
     assert provider.source_status == "unknown"
+    assert provider.source == "unknown"
     assert provider.accounts == ()
 
 
@@ -186,6 +209,7 @@ def test_collect_all_omits_disabled_claude_copilot_and_agy(collect_claude_mock) 
 def test_format_footer_renders_agy_variants(_read_json_file) -> None:
     percent = ProviderSnapshot(
         source_status="fresh",
+        source="local_observed",
         accounts=(
             CopilotAccountUsage(
                 account_id="agy",
@@ -200,6 +224,7 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
     )
     estimate = ProviderSnapshot(
         source_status="estimated",
+        source="local_observed",
         accounts=(
             CopilotAccountUsage(
                 account_id="agy",
@@ -211,9 +236,10 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
             ),
         ),
     )
-    unknown = ProviderSnapshot(source_status="unknown", accounts=())
+    unknown = ProviderSnapshot(source_status="unknown", source="unknown", accounts=())
     unlimited = ProviderSnapshot(
         source_status="fresh",
+        source="local_observed",
         accounts=(
             CopilotAccountUsage(
                 account_id="agy",
@@ -231,6 +257,7 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
     assert "agy ~120" in format_footer(_agy_snapshot(estimate), use_tmux_style=False)
     assert "agy ?" in format_footer(_agy_snapshot(unknown), use_tmux_style=False)
     assert "agy ∞" in format_footer(_agy_snapshot(unlimited), use_tmux_style=False)
+    assert percent.to_jsonable()["source"] == "local_observed"
 
 
 def test_sample_yaml_footer_snapshot_matches_main_baseline() -> None:

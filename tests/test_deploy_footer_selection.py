@@ -10,15 +10,26 @@ from textwrap import dedent
 
 import yaml
 
+from paulshaclaw.cost.config import (
+    AgyProviderConfig,
+    ClaudeProviderConfig,
+    CopilotAccountConfig,
+    CostConfig,
+)
 from paulshaclaw.deploy.__main__ import main as deploy_main
 from paulshaclaw.deploy.agents import (
+    DetectedAgent,
     _NEVER_READ,
     detect_agents,
     parse_footer_argument,
     prepare_footer_selection,
     write_footer_config,
 )
-from paulshaclaw.deploy.footer_select import FooterSelectionApp, FooterSelectionOption
+from paulshaclaw.deploy.footer_select import (
+    FooterSelectionApp,
+    FooterSelectionOption,
+    build_selection_options,
+)
 
 
 def _run_deploy_main(argv: list[str]) -> tuple[int, str, str]:
@@ -86,15 +97,49 @@ def test_detect_agents_never_reads_guarded_paths(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(Path, "read_text", fail_read_text)
     monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
     monkeypatch.setattr(Path, "open", fail_open)
-    monkeypatch.setattr("paulshaclaw.deploy.agents.shutil.which", lambda name: f"/usr/bin/{name}")
+    detected = detect_agents(home=home, which=lambda name: f"/usr/bin/{name}")
+    detected_by_name = {agent.name: agent for agent in detected}
 
-    detected = detect_agents(home_dir=home)
+    assert tuple(agent.name for agent in detected) == ("codex", "claude", "copilot", "agy")
+    assert all(isinstance(agent, DetectedAgent) for agent in detected)
+    assert detected_by_name["codex"].binary == Path("/usr/bin/codex")
+    assert detected_by_name["claude"].binary == Path("/usr/bin/claude")
+    assert detected_by_name["copilot"].binary == Path("/usr/bin/copilot")
+    assert detected_by_name["agy"].binary == Path("/usr/bin/agy")
+    assert all(agent.state_present for agent in detected)
 
-    assert detected["codex"]["detected"] is True
-    assert detected["claude"]["detected"] is True
-    assert detected["copilot"]["detected"] is True
-    assert detected["agy"]["detected"] is True
-    assert detected["claude"]["sidecar_exists"] is False
+
+def test_build_selection_options_defaults_undetected_items_to_unchecked() -> None:
+    options = build_selection_options(
+        detected_agents=(
+            DetectedAgent("codex", Path("/usr/bin/codex"), True),
+            DetectedAgent("claude", None, False),
+            DetectedAgent("copilot", None, False),
+            DetectedAgent("agy", Path("/usr/bin/agy"), False),
+        ),
+        config=CostConfig(
+            claude=ClaudeProviderConfig(enabled=True),
+            copilot_accounts=(
+                CopilotAccountConfig(
+                    account_id="hamanpaul",
+                    label="haman",
+                    kind="personal",
+                    enabled=True,
+                ),
+            ),
+            agy=AgyProviderConfig(enabled=True),
+        ),
+    )
+    options_by_value = {option.value: option for option in options}
+
+    assert options_by_value["provider:codex"].selected is True
+    assert options_by_value["provider:claude"].label == "claude (未偵測)"
+    assert options_by_value["provider:claude"].selected is False
+    assert options_by_value["provider:copilot"].label == "copilot (未偵測)"
+    assert options_by_value["provider:copilot"].selected is False
+    assert options_by_value["account:copilot:haman"].selected is False
+    assert options_by_value["provider:agy"].label == "agy (未偵測)"
+    assert options_by_value["provider:agy"].selected is False
 
 
 def test_write_footer_config_creates_backup_and_only_mutates_enabled(
@@ -208,7 +253,7 @@ def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeyp
     )
 
     assert selection is None
-    assert set(detected) == {"codex", "claude", "copilot", "agy"}
+    assert {agent.name for agent in detected} == {"codex", "claude", "copilot", "agy"}
     assert report["mode"] == "cancelled"
     assert report["enabled"] == {
         "codex": True,
@@ -300,7 +345,7 @@ class FooterSelectionAppTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_undetected_item_can_still_be_checked(self) -> None:
         app = FooterSelectionApp(
-            options=[FooterSelectionOption("claude (not detected)", "provider:claude")],
+            options=[FooterSelectionOption("claude (未偵測)", "provider:claude")],
             preview_builder=lambda values: ",".join(sorted(values)) or "none",
         )
 

@@ -12,4 +12,5 @@
 - [x] 2.3 deploy footer plumbing：新增 `paulshaclaw/deploy/agents.py`，處理 `_NEVER_READ` 偵測、`copilot:label:label` / `codex,agy` / bare `copilot` 文法、structured report 與 config write-back。
 - [x] 2.4 SelectionList TUI：新增 `paulshaclaw/deploy/footer_select.py`，支援 toggle→enter 結構化回傳、esc 取消、未偵測項仍可勾選與即時 preview。
 - [x] 2.5 docs/tests：更新 README、sample config、changelog fragment，並新增 `tests/test_deploy_footer_selection.py` / `tests/test_footer_agent_selection_cost.py` focused coverage。
-- [ ] 2.6 archive / PR / ship：本 builder card 不執行 archive、policy/preflight、PR 或關 issue 流程。
+- [x] 2.6 repair follow-up：補齊 reviewer/Manager 指出的 Candidate 偏差：`--footer` parse／label 錯誤改為單一 JSON failure report 且不落盤、`detect_agents()` 對齊 `DetectedAgent(name,binary,state_present)` 契約、未偵測項改用 `"(未偵測)"` 並預設不勾選、`ProviderSnapshot.source` 與 `AgyProviderConfig.state_dir`／`collect_agy(..., now=None)` 對齊 spec。
+- [ ] 2.7 archive / PR / ship：本 builder card 不執行 archive、Manager 採信後的全套 preflight、PR 或關 issue 流程。

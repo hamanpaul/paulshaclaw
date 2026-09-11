@@ -52,12 +52,16 @@ class CopilotAccountUsage:
 @dataclass(frozen=True)
 class ProviderSnapshot:
     source_status: str
+    source: str = "unknown"
     windows: dict[str, UsageWindow] = field(default_factory=dict)
     accounts: tuple[CopilotAccountUsage, ...] = ()
     note: str | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
-        payload: dict[str, Any] = {"source_status": self.source_status}
+        payload: dict[str, Any] = {
+            "source_status": self.source_status,
+            "source": self.source,
+        }
         if self.windows:
             payload["windows"] = {
                 name: window.to_jsonable() for name, window in self.windows.items()

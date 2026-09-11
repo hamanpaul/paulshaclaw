@@ -3,12 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import Any, Sequence
 
 from .agents import (
     detected_agents_report,
     detect_agents,
-    parse_footer_argument,
     prepare_footer_selection,
     write_footer_config,
 )
@@ -32,12 +32,42 @@ SUPPORTED_COMMANDS = ("install", "upgrade", "uninstall", "status", "rollback")
 def _attach_footer_metadata(
     payload: dict[str, object],
     *,
-    detected_agents: dict[str, dict[str, object]],
+    detected_agents: Sequence[object],
     footer_selection: dict[str, Any],
 ) -> dict[str, object]:
     payload["detected_agents"] = detected_agents_report(detected_agents)
     payload["footer_selection"] = footer_selection
     return payload
+
+
+def _resolve_footer_home(home_dir: str | None) -> Path | None:
+    if home_dir is None:
+        return None
+    return Path(home_dir).expanduser()
+
+
+def _emit_footer_failure(
+    *,
+    command: str,
+    footer: str | None,
+    home_dir: str | None,
+    error: Exception,
+) -> int:
+    payload: dict[str, object] = {
+        "command": command,
+        "status": "failed",
+        "error": str(error),
+    }
+    selection: dict[str, Any] = {"mode": "flag"}
+    if footer is not None:
+        selection["requested"] = footer
+    _attach_footer_metadata(
+        payload,
+        detected_agents=detect_agents(home=_resolve_footer_home(home_dir)),
+        footer_selection=selection,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,7 +96,6 @@ def build_parser() -> argparse.ArgumentParser:
             )
             subparser.add_argument(
                 "--footer",
-                type=parse_footer_argument,
                 default=None,
                 help="footer 選擇；支援 codex,claude,copilot[:label...],agy,none",
             )
@@ -111,19 +140,29 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    footer_detected: dict[str, dict[str, object]] | None = None
+    footer_detected: tuple[object, ...] | None = None
     footer_selection: dict[str, Any] | None = None
     selected_footer: dict[str, object] | None = None
 
     if args.command in ("install", "upgrade"):
-        footer_detected, footer_selection, selected_footer = prepare_footer_selection(
-            footer=args.footer,
-            apply=bool(getattr(args, "apply", False)),
-            verify=bool(getattr(args, "verify", False)),
-            home_dir=args.home_dir,
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-        )
+        try:
+            footer_detected, footer_selection, selected_footer = prepare_footer_selection(
+                footer=args.footer,
+                apply=bool(getattr(args, "apply", False)),
+                verify=bool(getattr(args, "verify", False)),
+                home_dir=args.home_dir,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+            )
+        except (argparse.ArgumentTypeError, ValueError) as exc:
+            if args.footer is None:
+                raise
+            return _emit_footer_failure(
+                command=args.command,
+                footer=args.footer,
+                home_dir=args.home_dir,
+                error=exc,
+            )
 
     if args.command == "install" and (args.apply or args.verify):
         try:
@@ -261,7 +300,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 exc,
             )
             if footer_detected is None or footer_selection is None:
-                footer_detected = detect_agents(home_dir=args.home_dir)
+                footer_detected = detect_agents(home=_resolve_footer_home(args.home_dir))
                 footer_selection = {"mode": "skipped", "reason": "plan-only"}
             _attach_footer_metadata(
                 report,
@@ -276,7 +315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "checked_assets": sorted(prepared),
         }
         if footer_detected is None or footer_selection is None:
-            footer_detected = detect_agents(home_dir=args.home_dir)
+            footer_detected = detect_agents(home=_resolve_footer_home(args.home_dir))
             footer_selection = {"mode": "skipped", "reason": "plan-only"}
         _attach_footer_metadata(
             plan_payload,

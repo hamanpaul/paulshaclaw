@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Iterable, Sequence
+from typing import TYPE_CHECKING, Callable, Iterable, Sequence
 
 from paulshaclaw.cost.config import CostConfig
+
+if TYPE_CHECKING:  # pragma: no cover - annotations only
+    from .agents import DetectedAgent
 
 try:
     from textual.app import App, ComposeResult
@@ -82,6 +85,20 @@ def _account_value(provider: str, label: str) -> str:
     return f"account:{provider}:{label}"
 
 
+def _detected_lookup(
+    detected_agents: Sequence["DetectedAgent"],
+) -> dict[str, "DetectedAgent"]:
+    return {agent.name: agent for agent in detected_agents}
+
+
+def _agent_is_detected(agent: object | None) -> bool:
+    if agent is None:
+        return False
+    return getattr(agent, "binary", None) is not None and bool(
+        getattr(agent, "state_present", False)
+    )
+
+
 def _selection_raw(providers: dict[str, dict[str, object]]) -> str | None:
     if not providers:
         return "none"
@@ -133,50 +150,52 @@ def selection_from_values(selected_values: set[str]) -> dict[str, object]:
     }
 
 
-def _provider_suffix(provider: str, detected_agents: dict[str, dict[str, object]]) -> str:
-    details = detected_agents.get(provider, {})
-    if not details.get("detected"):
-        return " (not detected)"
-    if provider == "claude" and not details.get("sidecar_exists"):
-        return " (sidecar pending)"
+def _provider_suffix(provider: str, detected_agents: dict[str, object]) -> str:
+    if not _agent_is_detected(detected_agents.get(provider)):
+        return " (未偵測)"
     return ""
 
 
 def build_selection_options(
     *,
-    detected_agents: dict[str, dict[str, object]],
+    detected_agents: Sequence["DetectedAgent"],
     config: CostConfig,
 ) -> list[FooterSelectionOption]:
+    detected_by_name = _detected_lookup(detected_agents)
+    codex_detected = _agent_is_detected(detected_by_name.get("codex"))
+    claude_detected = _agent_is_detected(detected_by_name.get("claude"))
+    copilot_detected = _agent_is_detected(detected_by_name.get("copilot"))
+    agy_detected = _agent_is_detected(detected_by_name.get("agy"))
     options = [
         FooterSelectionOption(
-            label=f"codex{_provider_suffix('codex', detected_agents)}",
+            label=f"codex{_provider_suffix('codex', detected_by_name)}",
             value=_provider_value("codex"),
-            selected=config.codex.enabled,
+            selected=config.codex.enabled and codex_detected,
         ),
         FooterSelectionOption(
-            label=f"claude{_provider_suffix('claude', detected_agents)}",
+            label=f"claude{_provider_suffix('claude', detected_by_name)}",
             value=_provider_value("claude"),
-            selected=config.claude.enabled,
+            selected=config.claude.enabled and claude_detected,
         ),
         FooterSelectionOption(
-            label=f"copilot{_provider_suffix('copilot', detected_agents)}",
+            label=f"copilot{_provider_suffix('copilot', detected_by_name)}",
             value=_provider_value("copilot"),
-            selected=any(account.enabled for account in config.copilot_accounts),
+            selected=any(account.enabled for account in config.copilot_accounts) and copilot_detected,
         ),
     ]
     options.extend(
         FooterSelectionOption(
             label=f"  └─ copilot:{account.label}",
             value=_account_value("copilot", account.label),
-            selected=account.enabled,
+            selected=account.enabled and copilot_detected,
         )
         for account in config.copilot_accounts
     )
     options.append(
         FooterSelectionOption(
-            label=f"agy{_provider_suffix('agy', detected_agents)}",
+            label=f"agy{_provider_suffix('agy', detected_by_name)}",
             value=_provider_value("agy"),
-            selected=config.agy.enabled,
+            selected=config.agy.enabled and agy_detected,
         )
     )
     return options

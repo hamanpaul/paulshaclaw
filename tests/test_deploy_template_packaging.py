@@ -384,6 +384,66 @@ def test_install_apply_reports_explicit_footer_selection(
     )
 
 
+def test_install_apply_invalid_footer_flag_reports_single_json_failure(monkeypatch, tmp_path: Path) -> None:
+    def fail_run_install(*args, **kwargs):
+        raise AssertionError("run_install should not be called")
+
+    monkeypatch.setattr("paulshaclaw.deploy.__main__.run_install", fail_run_install)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            "copilot:",
+        ]
+    )
+
+    assert exit_code != 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "--footer 格式錯誤" in payload["error"]
+    assert payload["footer_selection"]["requested"] == "copilot:"
+    assert not (tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml").exists()
+
+
+def test_install_apply_unknown_footer_label_reports_single_json_failure(monkeypatch, tmp_path: Path) -> None:
+    def fail_run_install(*args, **kwargs):
+        raise AssertionError("run_install should not be called")
+
+    monkeypatch.setattr("paulshaclaw.deploy.__main__.run_install", fail_run_install)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            "copilot:missing",
+        ]
+    )
+
+    assert exit_code != 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "找不到已設定的 label/id：missing" in payload["error"]
+    assert payload["footer_selection"]["requested"] == "copilot:missing"
+    assert not (tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml").exists()
+
+
 def test_install_apply_skips_footer_selection_without_tty(
     monkeypatch,
     tmp_path: Path,

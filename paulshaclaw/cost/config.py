@@ -64,7 +64,7 @@ class CodexProviderConfig:
 
 
 def default_agy_state_dir() -> Path:
-    return paths.home_path(".gemini", "antigravity-cli")
+    return paths.home_path(".gemini")
 
 
 @dataclass(frozen=True)

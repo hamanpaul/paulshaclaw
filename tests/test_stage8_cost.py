@@ -63,6 +63,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
             providers={
                 "cdx": ProviderSnapshot(
                     source_status="fresh",
+                    source="api",
                     windows={
                         "five_hour": UsageWindow(
                             used_percent=18,
@@ -76,9 +77,10 @@ class Stage8ModelFormatterTests(unittest.TestCase):
                         ),
                     },
                 ),
-                "cc": ProviderSnapshot(source_status="unknown", windows={}),
+                "cc": ProviderSnapshot(source_status="unknown", source="unknown", windows={}),
                 "cpt": ProviderSnapshot(
                     source_status="fresh",
+                    source="api",
                     accounts=(
                         CopilotAccountUsage(
                             account_id="hamanpaul",
@@ -96,10 +98,13 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         payload = snapshot.to_jsonable()
         encoded = json.dumps(payload, ensure_ascii=False)
         decoded = json.loads(encoded)
+        reloaded = load_snapshot_payload(decoded)
 
         self.assertEqual(decoded["timezone"], "Asia/Taipei")
+        self.assertEqual(decoded["providers"]["cdx"]["source"], "api")
         self.assertEqual(decoded["providers"]["cdx"]["windows"]["five_hour"]["display_reset"], "15:21")
         self.assertEqual(decoded["providers"]["cpt"]["accounts"][0]["label"], "haman")
+        self.assertEqual(reloaded.providers["cdx"].source, "api")
 
     def test_footer_renders_balanced_format(self) -> None:
         snapshot = CostSnapshot(

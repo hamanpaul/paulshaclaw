@@ -37,6 +37,7 @@ _LOCAL_TOKEN_WINDOW_SECONDS = 5 * 60 * 60
 def _unknown_codex() -> ProviderSnapshot:
     return ProviderSnapshot(
         source_status="unknown",
+        source="unknown",
         windows={},
         note="trusted quota windows unavailable",
     )
@@ -495,7 +496,7 @@ def collect_codex(
     # the live usage endpoint is often 403 for non-OAuth/team plans.
     local_windows = _codex_local_rate_limits(codex_home or paths.codex_root(), resolved_now)
     if local_windows:
-        return ProviderSnapshot(source_status="fresh", windows=local_windows)
+        return ProviderSnapshot(source_status="fresh", source="api", windows=local_windows)
 
     try:
         if not _is_safe_codex_usage_url(usage_url):
@@ -520,6 +521,7 @@ def collect_codex(
             raise ValueError("missing Codex quota windows")
         return ProviderSnapshot(
             source_status="fresh",
+            source="api",
             windows={"five_hour": five_hour, "weekly": weekly},
         )
     except Exception:
@@ -533,6 +535,7 @@ def collect_codex(
         if tokens > 0:
             return ProviderSnapshot(
                 source_status="estimated",
+                source="local_observed",
                 windows={"five_hour": _estimated_window_from_tokens(tokens)},
                 note="local Codex token estimate",
             )
@@ -563,7 +566,7 @@ def collect_claude(
             if weekly is not None:
                 windows["weekly"] = weekly
             if windows:
-                return ProviderSnapshot(source_status="fresh", windows=windows)
+                return ProviderSnapshot(source_status="fresh", source="api", windows=windows)
 
     if local_fallback:
         tokens = _claude_local_token_total(
@@ -573,41 +576,52 @@ def collect_claude(
         if tokens > 0:
             return ProviderSnapshot(
                 source_status="estimated",
+                source="local_observed",
                 windows={"five_hour": _estimated_window_from_tokens(tokens)},
                 note="local Claude Code token estimate",
             )
 
     return ProviderSnapshot(
         source_status="unknown",
+        source="unknown",
         windows={},
         note="credentials or trusted quota source unavailable",
     )
 
 
+def _agy_state_path(state_dir: Path) -> Path:
+    if state_dir.name == "antigravity-cli":
+        return state_dir / "state.json"
+    return state_dir / "antigravity-cli" / "state.json"
+
+
 def collect_agy(
     config: AgyProviderConfig,
     *,
-    now: datetime,
+    now: datetime | None = None,
     reader: Callable[[Path], dict[str, Any] | None] | None = None,
 ) -> ProviderSnapshot | None:
     if not config.enabled:
         return None
+    resolved_now = now or _now_utc()
 
     if not config.local_fallback:
         return ProviderSnapshot(
             source_status="unknown",
+            source="unknown",
             accounts=(),
             note='source="unknown"',
         )
 
-    state_path = config.state_dir / "state.json"
+    state_path = _agy_state_path(config.state_dir)
     if not _file_is_fresh_at(
         state_path,
         max_age_seconds=config.max_age_seconds,
-        now=now,
+        now=resolved_now,
     ):
         return ProviderSnapshot(
             source_status="unknown",
+            source="unknown",
             accounts=(),
             note="agy quota unavailable",
         )
@@ -616,6 +630,7 @@ def collect_agy(
     if not isinstance(payload, Mapping):
         return ProviderSnapshot(
             source_status="unknown",
+            source="unknown",
             accounts=(),
             note="agy quota unavailable",
         )
@@ -631,6 +646,7 @@ def collect_agy(
     if bool(payload.get("unlimited")):
         return ProviderSnapshot(
             source_status="fresh",
+            source="local_observed",
             accounts=(
                 CopilotAccountUsage(
                     used_requests=None,
@@ -651,6 +667,7 @@ def collect_agy(
     if percent_used is not None:
         return ProviderSnapshot(
             source_status="fresh",
+            source="local_observed",
             accounts=(
                 CopilotAccountUsage(
                     used_requests=None,
@@ -671,6 +688,7 @@ def collect_agy(
     if approx_remaining is not None:
         return ProviderSnapshot(
             source_status="estimated",
+            source="local_observed",
             accounts=(
                 CopilotAccountUsage(
                     used_requests=approx_remaining,
@@ -685,6 +703,7 @@ def collect_agy(
 
     return ProviderSnapshot(
         source_status="unknown",
+        source="unknown",
         accounts=(),
         note="agy quota unavailable",
     )
@@ -1002,7 +1021,7 @@ def collect_copilot(
 ) -> ProviderSnapshot:
     enabled_accounts = tuple(account for account in config.copilot_accounts if account.enabled)
     if not enabled_accounts:
-        return ProviderSnapshot(source_status="unknown", accounts=())
+        return ProviderSnapshot(source_status="unknown", source="unknown", accounts=())
 
     accounts: list[CopilotAccountUsage] = []
     has_fresh = False
@@ -1081,8 +1100,13 @@ def collect_copilot(
         source_status = "estimated"
     else:
         source_status = "unknown"
+    provider_source = "api" if has_fresh else "local_observed" if has_estimated else "unknown"
 
-    return ProviderSnapshot(source_status=source_status, accounts=tuple(accounts))
+    return ProviderSnapshot(
+        source_status=source_status,
+        source=provider_source,
+        accounts=tuple(accounts),
+    )
 
 
 def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
@@ -1139,6 +1163,7 @@ def carry_forward_degraded(
         if old is not None and not _provider_has_data(provider) and _provider_has_data(old):
             result[name] = ProviderSnapshot(
                 source_status="stale",
+                source=old.source,
                 windows=dict(old.windows),
                 accounts=tuple(old.accounts),
                 note=old.note,
