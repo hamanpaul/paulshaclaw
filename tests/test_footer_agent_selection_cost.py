@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from datetime import datetime
+from io import StringIO
 from pathlib import Path
 from textwrap import dedent
 from unittest.mock import patch
@@ -20,7 +22,7 @@ from paulshaclaw.cost.config import (
 from paulshaclaw.cost.formatter import format_footer
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot
 from paulshaclaw.cost.providers import collect_agy, collect_all
-from paulshaclaw.cost.status import _build_degraded_snapshot
+from paulshaclaw.cost.status import _build_degraded_snapshot, main as status_main
 
 
 def _write_config(tmp_path: Path, body: str) -> Path:
@@ -291,6 +293,50 @@ def test_build_degraded_snapshot_omits_disabled_codex_provider() -> None:
 
     assert "cdx" not in snapshot.providers
     assert format_footer(snapshot, use_tmux_style=False) == "cc 5h:-- wk:-- "
+
+
+def test_status_main_omits_disabled_codex_from_cached_snapshot(tmp_path: Path) -> None:
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    config_path = _write_config(
+        tmp_path,
+        f"""
+        workspaces:
+          - path: /repo
+            name: repo
+        cost:
+          cache_dir: {cache_dir}
+          providers:
+            codex:
+              enabled: false
+            claude:
+              enabled: true
+        """,
+    )
+    (cache_dir / "snapshot.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-09-11T12:00:00+08:00",
+                "timezone": "Asia/Taipei",
+                "cache_status": "fresh",
+                "providers": {
+                    "cdx": {"source_status": "unknown", "source": "unknown", "windows": {}},
+                    "cc": {"source_status": "unknown", "source": "unknown", "windows": {}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    stdout = StringIO()
+    stderr = StringIO()
+
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        exit_code = status_main(["--plain", "--config", str(config_path)])
+
+    assert exit_code == 0
+    assert stderr.getvalue() == ""
+    assert stdout.getvalue().strip() == "cc 5h:-- wk:--"
+    assert "cdx" not in stdout.getvalue()
 
 
 def test_sample_yaml_footer_snapshot_matches_main_baseline() -> None:

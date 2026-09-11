@@ -85,6 +85,59 @@ def _build_degraded_snapshot(config) -> CostSnapshot:
     )
 
 
+def _filter_snapshot_by_enabled(snapshot: CostSnapshot, config) -> CostSnapshot:
+    providers = dict(snapshot.providers)
+    changed = False
+
+    if not getattr(getattr(config, "codex", None), "enabled", True) and "cdx" in providers:
+        providers.pop("cdx", None)
+        changed = True
+    if not getattr(getattr(config, "claude", None), "enabled", True) and "cc" in providers:
+        providers.pop("cc", None)
+        changed = True
+    if not getattr(getattr(config, "agy", None), "enabled", False) and "agy" in providers:
+        providers.pop("agy", None)
+        changed = True
+
+    copilot_provider = providers.get("cpt")
+    copilot_accounts = getattr(config, "copilot_accounts", None)
+    if copilot_provider is not None and copilot_accounts is not None:
+        enabled_account_ids = {
+            account.account_id
+            for account in copilot_accounts
+            if getattr(account, "enabled", True)
+        }
+        accounts = tuple(
+            account
+            for account in copilot_provider.accounts
+            if account.account_id in enabled_account_ids
+        )
+        if accounts != copilot_provider.accounts:
+            changed = True
+            if accounts:
+                providers["cpt"] = ProviderSnapshot(
+                    source_status=copilot_provider.source_status,
+                    source=copilot_provider.source,
+                    windows=dict(copilot_provider.windows),
+                    accounts=accounts,
+                    note=copilot_provider.note,
+                )
+            else:
+                providers.pop("cpt", None)
+        elif not accounts and not enabled_account_ids:
+            providers.pop("cpt", None)
+            changed = True
+
+    if not changed:
+        return snapshot
+    return CostSnapshot(
+        generated_at=snapshot.generated_at,
+        timezone=snapshot.timezone,
+        cache_status=snapshot.cache_status,
+        providers=providers,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config_path = Path(args.config) if args.config else None
@@ -138,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        print(format_footer(snapshot, use_tmux_style=not args.plain))
+        print(format_footer(_filter_snapshot_by_enabled(snapshot, config), use_tmux_style=not args.plain))
     except Exception as error:
         print(_FALLBACK_LINE)
         print(f"stage8 cost status degraded: {error}", file=sys.stderr)
