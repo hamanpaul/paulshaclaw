@@ -18,3 +18,4 @@
 - [x] 2.9 codex disable repair：對齊 R3，當 `config.cost.providers.codex.enabled=false` 時 `collect_all()` 不呼叫 `collect_codex()`、不輸出 `cdx` 段，並補 focused 測試確認 footer 與 TUI preview 同步省略 `cdx`；archive／PR／關 issue 仍由 Manager / operator 後續執行。
 - [x] 2.10 degraded cold-start repair：先重現 cold-start＋無 cache＋`codex.enabled=false` 仍渲染 `cdx 5h:-- wk:--` 的殘餘偏差，再修正 `_build_degraded_snapshot()` 只在 codex 啟用時 seed `cdx`，並補 focused 測試鎖定無 cache 的降級 footer 不顯示停用的 codex；archive／PR／關 issue 仍由 Manager / operator 後續執行。
 - [x] 2.11 cached render-gate repair：先重現舊 cache 含 `cdx`、但 `config.cost.providers.codex.enabled=false` 時 `status.py` 仍把 cache snapshot 直接送進 footer formatter 的殘餘偏差，再於渲染前依 config enabled 剔除停用 provider/account，並補 focused 測試鎖定 cache 命中時輸出不含 `cdx`；archive／PR／關 issue 仍由 Manager / operator 後續執行。
+- [x] 2.12 full-suite preflight rerun：重跑 worktree 的 repo-venv `pytest -q` 全套 889 passed，確認本卡候選已可在此環境直接觀測 deterministic gate；本卡不宣告 archive／merge／PR／關 issue，由 Manager / operator 後續執行。
