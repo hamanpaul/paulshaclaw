@@ -66,6 +66,6 @@ cost:
       # 因此啟用後在可信來源缺席時會先顯示 agy ?。
       enabled: false
       label: agy
-      state_dir: ~/.gemini/antigravity-cli
+      state_dir: ~/.gemini
       max_age_seconds: 300
       local_fallback: false

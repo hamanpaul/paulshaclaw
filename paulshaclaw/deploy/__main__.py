@@ -62,7 +62,15 @@ def _skipped_footer_reason(*, apply: bool, stdin: object, stdout: object) -> str
         return "plan-only"
     if not (_stream_isatty(stdin) and _stream_isatty(stdout)):
         return "no-tty"
-    return "plan-only"
+    return "config-invalid"
+
+
+def _footer_failure_mode(*, footer: str | None, reason: str | None) -> str:
+    if footer is not None:
+        return "flag"
+    if reason == "config-invalid":
+        return "tui"
+    return "skipped"
 
 
 def _emit_footer_failure(
@@ -78,7 +86,9 @@ def _emit_footer_failure(
         "status": "failed",
         "error": str(error),
     }
-    selection: dict[str, Any] = {"mode": "flag" if footer is not None else "skipped"}
+    selection: dict[str, Any] = {
+        "mode": _footer_failure_mode(footer=footer, reason=reason),
+    }
     if footer is not None:
         selection["requested"] = footer
     elif reason is not None:
@@ -221,6 +231,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             except Exception as exc:
                 report["status"] = "failed"
                 report["error"] = str(exc)
+                if (
+                    isinstance(exc, ValueError)
+                    and footer_selection.get("mode") == "tui"
+                    and footer_selection.get("config_warning") is not None
+                ):
+                    footer_selection["reason"] = "config-invalid"
                 footer_selection["config_write"] = {
                     "status": "failed",
                     "error": str(exc),
@@ -266,6 +282,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             except Exception as exc:
                 report["status"] = "failed"
                 report["error"] = str(exc)
+                if (
+                    isinstance(exc, ValueError)
+                    and footer_selection.get("mode") == "tui"
+                    and footer_selection.get("config_warning") is not None
+                ):
+                    footer_selection["reason"] = "config-invalid"
                 footer_selection["config_write"] = {
                     "status": "failed",
                     "error": str(exc),

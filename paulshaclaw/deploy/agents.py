@@ -407,12 +407,15 @@ def format_footer_selection_report(
     selection: dict[str, object] | None = None,
     reason: str | None = None,
     preview: str | None = None,
+    config_warning: str | None = None,
 ) -> dict[str, Any]:
     report: dict[str, Any] = {"mode": mode}
     if enabled is not None:
         report["enabled"] = copy.deepcopy(enabled)
     if reason is not None:
         report["reason"] = reason
+    if config_warning is not None:
+        report["config_warning"] = config_warning
     if selection is not None and selection.get("raw") is not None:
         report["requested"] = selection.get("raw")
     if preview is not None:
@@ -483,15 +486,20 @@ def prepare_footer_selection(
     )
     from paulshaclaw.cost.config import parse_cost_config_payload
 
+    config_warning: str | None = None
     try:
         payload, _source, _target = load_footer_config_payload(home_dir=home)
+        config = parse_cost_config_payload(payload)
     except ModuleNotFoundError as error:
         if not _missing_yaml_dependency(error):
             raise
         payload = {}
-    except Exception:
+        config_warning = str(error)
+        config = parse_cost_config_payload(payload)
+    except (OSError, ValueError) as error:
         payload = {}
-    config = parse_cost_config_payload(payload)
+        config_warning = str(error)
+        config = parse_cost_config_payload(payload)
     options = build_selection_options(detected_agents=detected, config=config)
     selection = run_footer_selection(
         options=options,
@@ -504,6 +512,7 @@ def prepare_footer_selection(
         return detected, format_footer_selection_report(
             "cancelled",
             enabled=resolve_footer_enabled(payload=payload),
+            config_warning=config_warning,
         ), None
     preview = preview_footer_selection(selection, payload=payload)
     enabled = resolve_footer_enabled(payload=payload, selection=selection)
@@ -512,6 +521,7 @@ def prepare_footer_selection(
         enabled=enabled,
         selection=selection,
         preview=preview,
+        config_warning=config_warning,
     ), selection
 
 
