@@ -222,6 +222,21 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
             ),
         ),
     )
+    api_percent = ProviderSnapshot(
+        source_status="fresh",
+        source="api",
+        accounts=(
+            CopilotAccountUsage(
+                account_id="agy",
+                label="agy",
+                kind="personal",
+                used_requests=None,
+                monthly_allowance=None,
+                source="api",
+                percent_used=17,
+            ),
+        ),
+    )
     estimate = ProviderSnapshot(
         source_status="estimated",
         source="local_observed",
@@ -254,6 +269,7 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
     )
 
     assert "agy ~42" in format_footer(_agy_snapshot(percent), use_tmux_style=False)
+    assert "agy 17%" in format_footer(_agy_snapshot(api_percent), use_tmux_style=False)
     assert "agy ~120" in format_footer(_agy_snapshot(estimate), use_tmux_style=False)
     assert "agy ?" in format_footer(_agy_snapshot(unknown), use_tmux_style=False)
     assert "agy ∞" in format_footer(_agy_snapshot(unlimited), use_tmux_style=False)

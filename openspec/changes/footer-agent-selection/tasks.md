@@ -14,3 +14,4 @@
 - [x] 2.5 docs/tests：更新 README、sample config、changelog fragment，並新增 `tests/test_deploy_footer_selection.py` / `tests/test_footer_agent_selection_cost.py` focused coverage。
 - [x] 2.6 repair follow-up：補齊 reviewer/Manager 指出的 Candidate 偏差：`--footer` parse／label 錯誤改為單一 JSON failure report 且不落盤、`detect_agents()` 對齊 `DetectedAgent(name,binary,state_present)` 契約、未偵測項改用 `"(未偵測)"` 並預設不勾選、`ProviderSnapshot.source` 與 `AgyProviderConfig.state_dir`／`collect_agy(..., now=None)` 對齊 spec。
 - [x] 2.7 final pre-archive repair：對齊 R2 字面，讓 `source="local_observed"` 的 agy footer 輸出 `agy ~N`（不是 `agy N%`），並更新 focused 測試；archive、全套 preflight、PR 與關 issue 仍由 Manager / operator 後續執行。
+- [x] 2.8 coverage-only follow-up：補 `tests/test_footer_agent_selection_cost.py` 的 `source="api"` + `percent_used` 直接斷言，讓 T3 的 `N%` / `~N` / `?` / `∞` 四種 agy 形態各有獨立測試；不變更 runtime 行為，archive／PR／關 issue 仍由 Manager / operator 後續執行。
