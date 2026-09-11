@@ -253,7 +253,7 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
         ),
     )
 
-    assert "agy 42%" in format_footer(_agy_snapshot(percent), use_tmux_style=False)
+    assert "agy ~42" in format_footer(_agy_snapshot(percent), use_tmux_style=False)
     assert "agy ~120" in format_footer(_agy_snapshot(estimate), use_tmux_style=False)
     assert "agy ?" in format_footer(_agy_snapshot(unknown), use_tmux_style=False)
     assert "agy ∞" in format_footer(_agy_snapshot(unlimited), use_tmux_style=False)

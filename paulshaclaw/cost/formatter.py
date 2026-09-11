@@ -139,6 +139,8 @@ def _format_agy_value(provider: ProviderSnapshot) -> tuple[str, str]:
         if account.unlimited:
             return "∞", "low"
         if account.percent_used is not None:
+            if provider.source == "local_observed":
+                return f"~{account.percent_used}", "estimated"
             level = "estimated" if provider.source_status == "estimated" else classify_usage(account.percent_used)
             return f"{account.percent_used}%", level
         if account.used_requests is not None:
