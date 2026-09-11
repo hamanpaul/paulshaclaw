@@ -58,7 +58,7 @@ def _emit_footer_failure(
         "status": "failed",
         "error": str(error),
     }
-    selection: dict[str, Any] = {"mode": "flag"}
+    selection: dict[str, Any] = {"mode": "flag" if footer is not None else "skipped"}
     if footer is not None:
         selection["requested"] = footer
     _attach_footer_metadata(
@@ -155,8 +155,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 stdout=sys.stdout,
             )
         except (argparse.ArgumentTypeError, ValueError) as exc:
-            if args.footer is None:
-                raise
             return _emit_footer_failure(
                 command=args.command,
                 footer=args.footer,

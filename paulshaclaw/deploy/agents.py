@@ -403,12 +403,14 @@ def preview_footer_selection(
 def format_footer_selection_report(
     mode: str,
     *,
-    enabled: dict[str, object],
+    enabled: dict[str, object] | None = None,
     selection: dict[str, object] | None = None,
     reason: str | None = None,
     preview: str | None = None,
 ) -> dict[str, Any]:
-    report: dict[str, Any] = {"mode": mode, "enabled": copy.deepcopy(enabled)}
+    report: dict[str, Any] = {"mode": mode}
+    if enabled is not None:
+        report["enabled"] = copy.deepcopy(enabled)
     if reason is not None:
         report["reason"] = reason
     if selection is not None and selection.get("raw") is not None:
@@ -464,17 +466,14 @@ def prepare_footer_selection(
         ), resolved_footer
 
     if not apply:
-        reason = "plan-only" if not verify else "no-apply"
         return detected, format_footer_selection_report(
             "skipped",
-            enabled=resolve_footer_enabled(home_dir=home),
-            reason=reason,
+            reason="plan-only",
         ), None
 
     if not (_isatty(stdin) and _isatty(stdout)):
         return detected, format_footer_selection_report(
             "skipped",
-            enabled=resolve_footer_enabled(home_dir=home),
             reason="no-tty",
         ), None
 

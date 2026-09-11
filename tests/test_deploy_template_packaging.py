@@ -30,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_VERSION = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 PACKAGE_ROOT = REPO_ROOT / "paulshaclaw"
 TEMPLATE_MARKER = "paulshaclaw/deploy/templates/"
+_MISSING = object()
 
 
 def _load_artifact_checker():
@@ -72,7 +73,7 @@ def _assert_footer_report(
     *,
     mode: str,
     fragments: tuple[str, ...],
-    expected_enabled: dict[str, object] | None = None,
+    expected_enabled: dict[str, object] | None | object = _MISSING,
 ) -> None:
     assert "detected_agents" in payload
     detected = payload["detected_agents"]
@@ -86,10 +87,13 @@ def _assert_footer_report(
     selection = payload["footer_selection"]
     assert isinstance(selection, dict)
     assert selection.get("mode") == mode
-    enabled = selection.get("enabled")
-    assert isinstance(enabled, dict)
-    assert set(enabled) == {"codex", "claude", "copilot", "agy"}
-    if expected_enabled is not None:
+    enabled = selection.get("enabled", _MISSING)
+    if expected_enabled is None:
+        assert "enabled" not in selection
+    else:
+        assert isinstance(enabled, dict)
+        assert set(enabled) == {"codex", "claude", "copilot", "agy"}
+    if expected_enabled not in (_MISSING, None):
         assert enabled == expected_enabled
     selection_text = json.dumps(selection, ensure_ascii=False)
     for fragment in fragments:
@@ -472,12 +476,7 @@ def test_install_apply_skips_footer_selection_without_tty(
         payload,
         mode="skipped",
         fragments=("no-tty",),
-        expected_enabled={
-            "codex": True,
-            "claude": True,
-            "copilot": {"hamanpaul": True, "org-a": True},
-            "agy": False,
-        },
+        expected_enabled=None,
     )
 
 
@@ -499,12 +498,79 @@ def test_install_plan_only_reports_skipped_footer_selection() -> None:
         payload,
         mode="skipped",
         fragments=("plan-only",),
-        expected_enabled={
-            "codex": True,
-            "claude": True,
-            "copilot": {"hamanpaul": True, "org-a": True},
-            "agy": False,
-        },
+        expected_enabled=None,
+    )
+
+
+def test_install_apply_skipped_footer_selection_ignores_invalid_config_without_tty(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _stub_install_side_effects(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    home_dir = tmp_path / "home"
+    config_path = home_dir / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
+    config_path.parent.mkdir(parents=True)
+    broken_yaml = "cost: [broken\n"
+    config_path.write_text(broken_yaml, encoding="utf-8")
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(home_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "ok"
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("no-tty",),
+        expected_enabled=None,
+    )
+    assert config_path.read_text(encoding="utf-8") == broken_yaml
+    assert not list(config_path.parent.glob("paulshaclaw.yaml.bak-*"))
+
+
+def test_install_verify_only_reports_plan_only_footer_selection(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__.run_install",
+        lambda *args, **kwargs: ({"command": "install", "status": "ok"}, 0),
+    )
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--verify",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "ok"
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("plan-only",),
+        expected_enabled=None,
     )
 
 
@@ -619,7 +685,7 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["status"] == "ok"
-    _assert_footer_report(payload, mode="skipped", fragments=())
+    _assert_footer_report(payload, mode="skipped", fragments=(), expected_enabled=None)
     expected_plan = build_command_plan(
         "install", instance_name="wheel-agent", root_dir="/srv/paulshaclaw"
     )
