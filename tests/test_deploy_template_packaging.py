@@ -26,6 +26,7 @@ from paulshaclaw.deploy import planner
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_VERSION = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 PACKAGE_ROOT = REPO_ROOT / "paulshaclaw"
 TEMPLATE_MARKER = "paulshaclaw/deploy/templates/"
 
@@ -364,8 +365,6 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
             "/srv/paulshaclaw",
             "--home-dir",
             str(home_dir),
-            "--version",
-            "0.2.7",
             "--artifact",
             str(wheel),
             "--artifact-sha256",
@@ -398,7 +397,7 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     assert stat.S_IMODE(secret_dir.stat().st_mode) == 0o700
     assert stat.S_IMODE((secret_dir / "wheel-agent.secret.env").stat().st_mode) == 0o600
     record = json.loads((state_dir / "wheel-agent.install-record.json").read_text(encoding="utf-8"))
-    assert record["version"] == "0.2.7"
+    assert record["version"] == REPO_VERSION
     assert record["artifact_sha256"] == wheel_sha256
 
     module = subprocess.run(
