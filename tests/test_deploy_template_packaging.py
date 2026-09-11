@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -38,6 +39,48 @@ def _load_artifact_checker():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _run_deploy_main(argv: list[str]) -> tuple[int, str, str]:
+    from io import StringIO
+
+    from paulshaclaw.deploy.__main__ import main
+
+    stdout = StringIO()
+    stderr = StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        try:
+            exit_code = main(argv)
+        except SystemExit as exc:
+            exit_code = exc.code if isinstance(exc.code, int) else 1
+    return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+def _stub_install_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.installer._ensure_linger_enabled",
+        lambda: "enabled",
+    )
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.installer._run_daemon_reload",
+        lambda: "ran",
+    )
+
+
+def _assert_footer_report(
+    payload: dict[str, object],
+    *,
+    mode: str,
+    fragments: tuple[str, ...],
+) -> None:
+    assert "detected_agents" in payload
+    assert "footer_selection" in payload
+    selection = payload["footer_selection"]
+    assert isinstance(selection, dict)
+    assert selection.get("mode") == mode
+    selection_text = json.dumps(selection, ensure_ascii=False)
+    for fragment in fragments:
+        assert fragment in selection_text
 
 
 def _run_build(source: Path, output_dir: Path, *build_targets: str) -> None:
@@ -268,6 +311,86 @@ def test_plan_only_install_template_failure_is_one_json_report(monkeypatch, tmp_
     assert payload["failed_assets"] == ["state/config/__INSTANCE__.state.json.tmpl"]
 
 
+@pytest.mark.parametrize(
+    ("footer", "expected_fragments"),
+    [
+        ("copilot:haman:arc", ("copilot", "haman", "arc")),
+        ("none", ("none",)),
+    ],
+)
+def test_install_apply_reports_explicit_footer_selection(
+    monkeypatch,
+    tmp_path: Path,
+    footer: str,
+    expected_fragments: tuple[str, ...],
+) -> None:
+    _stub_install_side_effects(monkeypatch)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            footer,
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    _assert_footer_report(payload, mode="flag", fragments=expected_fragments)
+
+
+def test_install_apply_skips_footer_selection_without_tty(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _stub_install_side_effects(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    _assert_footer_report(payload, mode="skipped", fragments=("no-tty",))
+
+
+def test_install_plan_only_reports_skipped_footer_selection() -> None:
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    _assert_footer_report(payload, mode="skipped", fragments=("plan-only",))
+
+
 def test_status_and_uninstall_apply_ignore_missing_templates(monkeypatch, tmp_path: Path, capsys) -> None:
     template_root = _template_checkout_without_last_asset(tmp_path)
     monkeypatch.setattr(planner, "TEMPLATE_ROOT", template_root)
@@ -379,6 +502,7 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["status"] == "ok"
+    _assert_footer_report(payload, mode="skipped", fragments=())
     expected_plan = build_command_plan(
         "install", instance_name="wheel-agent", root_dir="/srv/paulshaclaw"
     )
