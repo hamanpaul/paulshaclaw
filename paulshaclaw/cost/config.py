@@ -43,10 +43,12 @@ class CopilotAccountConfig:
     monthly_allowance: int | None = None
     org: str | None = None
     enterprise: str | None = None
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
 class ClaudeProviderConfig:
+    enabled: bool = True
     statusline_sidecar: Path = field(
         default_factory=default_claude_statusline_sidecar
     )
@@ -63,6 +65,18 @@ class CodexProviderConfig:
     local_fallback: bool = False
 
 
+def default_agy_state_path() -> Path:
+    return paths.home_path(".gemini", "antigravity-cli", "state.json")
+
+
+@dataclass(frozen=True)
+class AgyProviderConfig:
+    enabled: bool = False
+    source: str = "unknown"
+    state_path: Path = field(default_factory=default_agy_state_path)
+    accounts: tuple[CopilotAccountConfig, ...] = ()
+
+
 @dataclass(frozen=True)
 class CostConfig:
     timezone: str = "Asia/Taipei"
@@ -75,6 +89,7 @@ class CostConfig:
     log_path: Path = field(default_factory=default_cost_log_path)
     claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
     codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
+    agy: AgyProviderConfig = field(default_factory=AgyProviderConfig)
 
 
 def _resolve_config_source(config_path: Path | None) -> Path | None:
@@ -128,25 +143,28 @@ def _bool_value(value: Any, *, default: bool) -> bool:
     raise ValueError(f"布林設定值無法解析：{value}")
 
 
-def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
+def _parse_accounts(
+    raw: Any,
+    *,
+    name: str,
+) -> tuple[CopilotAccountConfig, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise ValueError("config.cost.providers.copilot.accounts 必須是清單")
+        raise ValueError(f"{name} 必須是清單")
 
     items: list[CopilotAccountConfig] = []
     for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
-            raise ValueError(f"config.cost.providers.copilot.accounts[{index}] 必須是 mapping")
+            raise ValueError(f"{name}[{index}] 必須是 mapping")
         account_id = entry.get("id")
         if not account_id:
-            raise ValueError(f"config.cost.providers.copilot.accounts[{index}].id 缺失")
+            raise ValueError(f"{name}[{index}].id 缺失")
         label = entry.get("label", account_id)
         kind = entry.get("kind", "personal")
         if kind not in {"personal", "company"}:
             raise ValueError(
-                "config.cost.providers.copilot.accounts"
-                f"[{index}].kind 必須是 'personal' 或 'company'"
+                f"{name}[{index}].kind 必須是 'personal' 或 'company'"
             )
 
         monthly_allowance = entry.get("monthly_allowance")
@@ -160,6 +178,7 @@ def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
                 enterprise=(
                     None if entry.get("enterprise") is None else str(entry.get("enterprise"))
                 ),
+                enabled=_bool_value(entry.get("enabled"), default=True),
             )
         )
     return tuple(items)
@@ -170,6 +189,7 @@ def _parse_claude_provider(raw: Any) -> ClaudeProviderConfig:
     sidecar = item.get("statusline_sidecar")
     max_age = item.get("max_age_seconds")
     return ClaudeProviderConfig(
+        enabled=_bool_value(item.get("enabled"), default=True),
         statusline_sidecar=(
             Path(str(sidecar)).expanduser()
             if sidecar
@@ -198,14 +218,37 @@ def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
     )
 
 
-def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
-    payload = _load_payload(config_path)
+def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
+    item = _mapping(raw, "config.cost.providers.agy")
+    state_path = item.get("state_path")
+    source = item.get("source")
+    return AgyProviderConfig(
+        enabled=_bool_value(item.get("enabled"), default=False),
+        source=str(source) if source else "unknown",
+        state_path=(
+            Path(str(state_path)).expanduser()
+            if state_path
+            else default_agy_state_path()
+        ),
+        accounts=_parse_accounts(
+            item.get("accounts"),
+            name="config.cost.providers.agy.accounts",
+        ),
+    )
+
+
+def parse_cost_config_payload(payload: dict[str, Any] | None) -> CostConfig:
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise ValueError("設定檔必須是 mapping")
 
     cost = _mapping(payload.get("cost"), "config.cost")
     providers = _mapping(cost.get("providers"), "config.cost.providers")
     copilot = _mapping(providers.get("copilot"), "config.cost.providers.copilot")
     claude = _mapping(providers.get("claude"), "config.cost.providers.claude")
     codex = _mapping(providers.get("codex"), "config.cost.providers.codex")
+    agy = _mapping(providers.get("agy"), "config.cost.providers.agy")
     colors = _mapping(cost.get("colors"), "config.cost.colors")
 
     cache_dir_raw = cost.get("cache_dir")
@@ -217,9 +260,13 @@ def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
         tmux_refresh_seconds=int(cost.get("tmux_refresh_seconds", 30)),
         warning_percent=int(colors.get("warning_percent", 70)),
         critical_percent=int(colors.get("critical_percent", 90)),
-        copilot_accounts=_parse_copilot_accounts(copilot.get("accounts")),
+        copilot_accounts=_parse_accounts(
+            copilot.get("accounts"),
+            name="config.cost.providers.copilot.accounts",
+        ),
         claude=_parse_claude_provider(claude),
         codex=_parse_codex_provider(codex),
+        agy=_parse_agy_provider(agy),
         cache_dir=(
             Path(str(cache_dir_raw)).expanduser()
             if cache_dir_raw
@@ -231,3 +278,8 @@ def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
             else default_cost_log_path()
         ),
     )
+
+
+def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
+    payload = _load_payload(config_path)
+    return parse_cost_config_payload(payload)

@@ -57,13 +57,21 @@ def _build_degraded_snapshot(config) -> CostSnapshot:
             source="unknown",
         )
         for account in getattr(config, "copilot_accounts", ())
+        if getattr(account, "enabled", True)
     )
-    providers = {
-        "cdx": ProviderSnapshot(source_status="unknown", windows={}),
-        "cc": ProviderSnapshot(source_status="unknown", windows={}),
-    }
+    providers = {"cdx": ProviderSnapshot(source_status="unknown", windows={})}
+    claude = getattr(config, "claude", None)
+    if getattr(claude, "enabled", True):
+        providers["cc"] = ProviderSnapshot(source_status="unknown", windows={})
     if copilot_accounts:
         providers["cpt"] = ProviderSnapshot(source_status="unknown", accounts=copilot_accounts)
+    agy = getattr(config, "agy", None)
+    if getattr(agy, "enabled", False):
+        providers["agy"] = ProviderSnapshot(
+            source_status="unknown",
+            accounts=(),
+            note='source="unknown"',
+        )
 
     return build_snapshot(
         timezone=getattr(config, "timezone", "Asia/Taipei"),

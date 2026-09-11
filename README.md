@@ -305,6 +305,13 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 > 所有命令皆可加 `--home-dir <dir>` 顯式隔離落點（預設走 `PSC_HOME_ROOT` / `$HOME`）；
 > 詳見 §8.7 的家目錄隔離防線。
 
+#### footer agent / account 選擇
+
+- `install` / `upgrade --apply` 在有 TTY 且未帶 `--footer` 時，會以 SelectionList TUI 勾選要顯示的 footer providers/accounts。
+- headless / CI / `--plan-only` 不會跳互動式 UI；JSON report 仍會帶 `detected_agents` 與 `footer_selection`。
+- 明確指定時可用 `--footer codex,claude,copilot:haman:arc,agy`、`--footer copilot`（啟用目前已設定的全部 copilot accounts）或 `--footer none`。
+- 寫回只更新 `cost.providers.*.enabled` 與 account 的 `enabled`，其餘 `label` / `monthly_allowance` / `org` 保留；若 `~/.config/paulshaclaw/paulshaclaw.yaml` 尚不存在，會以 bundled sample 建立。
+
 #### 查詢目前安裝版本
 
 ```bash

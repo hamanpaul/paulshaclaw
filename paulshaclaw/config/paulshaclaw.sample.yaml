@@ -33,12 +33,15 @@ cost:
           label: haman           # footer alias shown as cpt haman:...
           kind: personal
           monthly_allowance: 1500
+          enabled: true
         - id: org-a
           label: arc             # footer alias shown as cpt ... arc:...
           kind: company
           monthly_allowance: 300
           org: example-org
+          enabled: true
     claude:
+      enabled: true
       # Trusted source: a local sidecar JSON that you populate from Claude Code's
       # statusLine payload (it delivers the live 5h/weekly rate limits on stdin
       # each refresh). The footer reads exactly this shape:
@@ -58,3 +61,9 @@ cost:
       # ~/.codex/auth.json to query the ChatGPT Codex usage endpoint.
       enabled: true
       local_fallback: false
+    agy:
+      # 本輪 footer-agent-selection 只交付 config / detect / rendering 骨架；
+      # 用量來源仍保守標成 unknown，啟用後會先顯示 agy ?。
+      enabled: false
+      source: unknown
+      accounts: []

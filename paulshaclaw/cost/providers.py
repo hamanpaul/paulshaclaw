@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from paulshaclaw.config import paths
-from paulshaclaw.cost.config import CopilotAccountConfig, CostConfig
+from paulshaclaw.cost.config import AgyProviderConfig, CopilotAccountConfig, CostConfig
 from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
 
 CopilotFetcher = Callable[[CopilotAccountConfig], tuple[int, str]]
@@ -40,6 +40,20 @@ def _unknown_codex() -> ProviderSnapshot:
         windows={},
         note="trusted quota windows unavailable",
     )
+
+
+def _coerce_non_negative_int(*values: Any) -> int | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            number = int(round(float(value)))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if number < 0:
+            continue
+        return number
+    return None
 
 
 def _now_utc() -> datetime:
@@ -150,6 +164,19 @@ def _read_json_file(path: Path) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def _agy_account_config(config: AgyProviderConfig) -> CopilotAccountConfig:
+    for account in config.accounts:
+        if account.enabled:
+            return account
+    if config.accounts:
+        return config.accounts[0]
+    return CopilotAccountConfig(
+        account_id="agy",
+        label="agy",
+        kind="personal",
+    )
 
 
 def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
@@ -554,6 +581,100 @@ def collect_claude(
     )
 
 
+def collect_agy(
+    config: AgyProviderConfig,
+    *,
+    reader: Callable[[Path], dict[str, Any] | None] | None = None,
+) -> ProviderSnapshot | None:
+    if not config.enabled:
+        return None
+
+    source = str(config.source or "unknown").strip().lower()
+    if source == "unknown":
+        return ProviderSnapshot(
+            source_status="unknown",
+            accounts=(),
+            note='source="unknown"',
+        )
+
+    payload = (reader or _read_json_file)(config.state_path)
+    if not isinstance(payload, Mapping):
+        return ProviderSnapshot(
+            source_status="unknown",
+            accounts=(),
+            note="agy quota unavailable",
+        )
+
+    account = _agy_account_config(config)
+    base_usage = {
+        "account_id": account.account_id,
+        "label": account.label,
+        "kind": account.kind,
+        "monthly_allowance": account.monthly_allowance,
+    }
+
+    if bool(payload.get("unlimited")):
+        return ProviderSnapshot(
+            source_status="fresh",
+            accounts=(
+                CopilotAccountUsage(
+                    used_requests=None,
+                    source=str(source),
+                    percent_used=None,
+                    unlimited=True,
+                    **base_usage,
+                ),
+            ),
+            note="agy unlimited quota",
+        )
+
+    percent_used = _coerce_non_negative_int(
+        payload.get("percent_used"),
+        payload.get("used_percent"),
+        payload.get("used_percentage"),
+    )
+    if percent_used is not None:
+        return ProviderSnapshot(
+            source_status="fresh",
+            accounts=(
+                CopilotAccountUsage(
+                    used_requests=None,
+                    source=str(source),
+                    percent_used=min(100, percent_used),
+                    unlimited=False,
+                    **base_usage,
+                ),
+            ),
+        )
+
+    approx_remaining = _coerce_non_negative_int(
+        payload.get("approx_remaining"),
+        payload.get("remaining"),
+        payload.get("remaining_allowance"),
+        payload.get("quota_remaining"),
+    )
+    if approx_remaining is not None:
+        return ProviderSnapshot(
+            source_status="estimated",
+            accounts=(
+                CopilotAccountUsage(
+                    used_requests=approx_remaining,
+                    source="local_observed",
+                    percent_used=None,
+                    unlimited=False,
+                    **base_usage,
+                ),
+            ),
+            note="agy local estimate",
+        )
+
+    return ProviderSnapshot(
+        source_status="unknown",
+        accounts=(),
+        note="agy quota unavailable",
+    )
+
+
 def _unknown_account(account: CopilotAccountConfig) -> CopilotAccountUsage:
     return CopilotAccountUsage(
         account_id=account.account_id,
@@ -822,8 +943,22 @@ def _read_local_observed_aiu(year: int | None = None, month: int | None = None) 
 
 def _resolve_attribution_accounts(config: CostConfig) -> tuple[str | None, str | None]:
     """premium-request -> first kind=='personal' account id; AIU -> first kind=='company' account id."""
-    premium = next((a.account_id for a in config.copilot_accounts if a.kind == "personal"), None)
-    aiu = next((a.account_id for a in config.copilot_accounts if a.kind == "company"), None)
+    premium = next(
+        (
+            a.account_id
+            for a in config.copilot_accounts
+            if a.enabled and a.kind == "personal"
+        ),
+        None,
+    )
+    aiu = next(
+        (
+            a.account_id
+            for a in config.copilot_accounts
+            if a.enabled and a.kind == "company"
+        ),
+        None,
+    )
     return premium, aiu
 
 
@@ -850,16 +985,17 @@ def collect_copilot(
     fetcher: CopilotFetcher | None = None,
     local_observed: Mapping[str, int] | None = None,
 ) -> ProviderSnapshot:
-    if not config.copilot_accounts:
+    enabled_accounts = tuple(account for account in config.copilot_accounts if account.enabled)
+    if not enabled_accounts:
         return ProviderSnapshot(source_status="unknown", accounts=())
 
     accounts: list[CopilotAccountUsage] = []
     has_fresh = False
     has_estimated = False
     resolved_local_observed = local_observed
-    allowed_account_ids = {account.account_id for account in config.copilot_accounts}
+    allowed_account_ids = {account.account_id for account in enabled_accounts}
 
-    for account in config.copilot_accounts:
+    for account in enabled_accounts:
         # Primary (production): the plan-quota endpoint — the % the Copilot CLI
         # statusline shows, via one cheap HTTP GET and no local log scanning.
         # An injected `fetcher` (tests / legacy billing override) bypasses this.
@@ -944,16 +1080,20 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
             local_fallback=config.codex.local_fallback,
             timezone=config.timezone,
         ),
-        "cc": collect_claude(
+    }
+    if config.claude.enabled:
+        providers["cc"] = collect_claude(
             statusline_sidecar=config.claude.statusline_sidecar,
             max_age_seconds=config.claude.max_age_seconds,
             local_fallback=config.claude.local_fallback,
             timezone=config.timezone,
-        ),
-    }
+        )
     copilot = collect_copilot(config)
     if copilot.accounts:
         providers["cpt"] = copilot
+    agy = collect_agy(config.agy)
+    if agy is not None:
+        providers["agy"] = agy
     return providers
 
 
