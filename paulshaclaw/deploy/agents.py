@@ -438,7 +438,6 @@ def prepare_footer_selection(
     *,
     footer: str | dict[str, object] | None,
     apply: bool,
-    verify: bool,
     home_dir: str | Path | None,
     stdin: object,
     stdout: object,

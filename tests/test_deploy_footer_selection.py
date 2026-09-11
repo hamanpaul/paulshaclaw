@@ -254,7 +254,6 @@ def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeyp
     detected, report, selection = prepare_footer_selection(
         footer=None,
         apply=True,
-        verify=False,
         home_dir=tmp_path / "home",
         stdin=Tty(),
         stdout=Tty(),

@@ -46,12 +46,32 @@ def _resolve_footer_home(home_dir: str | None) -> Path | None:
     return Path(home_dir).expanduser()
 
 
+def _stream_isatty(stream: object) -> bool:
+    try:
+        isatty = getattr(stream, "isatty")
+    except Exception:
+        return False
+    try:
+        return bool(isatty())
+    except Exception:
+        return False
+
+
+def _skipped_footer_reason(*, apply: bool, stdin: object, stdout: object) -> str:
+    if not apply:
+        return "plan-only"
+    if not (_stream_isatty(stdin) and _stream_isatty(stdout)):
+        return "no-tty"
+    return "plan-only"
+
+
 def _emit_footer_failure(
     *,
     command: str,
     footer: str | None,
     home_dir: str | None,
     error: Exception,
+    reason: str | None = None,
 ) -> int:
     payload: dict[str, object] = {
         "command": command,
@@ -61,6 +81,8 @@ def _emit_footer_failure(
     selection: dict[str, Any] = {"mode": "flag" if footer is not None else "skipped"}
     if footer is not None:
         selection["requested"] = footer
+    elif reason is not None:
+        selection["reason"] = reason
     _attach_footer_metadata(
         payload,
         detected_agents=detect_agents(home=_resolve_footer_home(home_dir)),
@@ -149,7 +171,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             footer_detected, footer_selection, selected_footer = prepare_footer_selection(
                 footer=args.footer,
                 apply=bool(getattr(args, "apply", False)),
-                verify=bool(getattr(args, "verify", False)),
                 home_dir=args.home_dir,
                 stdin=sys.stdin,
                 stdout=sys.stdout,
@@ -160,6 +181,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 footer=args.footer,
                 home_dir=args.home_dir,
                 error=exc,
+                reason=_skipped_footer_reason(
+                    apply=bool(getattr(args, "apply", False)),
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                )
+                if args.footer is None
+                else None,
             )
 
     if args.command == "install" and (args.apply or args.verify):

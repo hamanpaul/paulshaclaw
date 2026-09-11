@@ -448,6 +448,66 @@ def test_install_apply_unknown_footer_label_reports_single_json_failure(monkeypa
     assert not (tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml").exists()
 
 
+@pytest.mark.parametrize(
+    ("argv", "tty", "expected_reason"),
+    [
+        (
+            [
+                "install",
+                "--apply",
+                "--instance",
+                "demo-agent",
+                "--root-dir",
+                "/srv/paulshaclaw",
+            ],
+            False,
+            "no-tty",
+        ),
+        (
+            [
+                "install",
+                "--verify",
+                "--instance",
+                "demo-agent",
+                "--root-dir",
+                "/srv/paulshaclaw",
+            ],
+            True,
+            "plan-only",
+        ),
+    ],
+)
+def test_install_footer_failure_without_explicit_footer_reports_skipped_reason(
+    monkeypatch,
+    argv: list[str],
+    tty: bool,
+    expected_reason: str,
+) -> None:
+    def fail_prepare_footer_selection(**kwargs):
+        raise ValueError("設定檔解析失敗：boom")
+
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__.prepare_footer_selection",
+        fail_prepare_footer_selection,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+
+    exit_code, stdout, stderr = _run_deploy_main(argv)
+
+    assert exit_code == 1
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "設定檔解析失敗：boom" in payload["error"]
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=(expected_reason,),
+        expected_enabled=None,
+    )
+
+
 def test_install_apply_skips_footer_selection_without_tty(
     monkeypatch,
     tmp_path: Path,
