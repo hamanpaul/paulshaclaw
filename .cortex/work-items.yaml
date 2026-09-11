@@ -1,0 +1,52 @@
+version: 1
+work_items:
+  deploy-testpilot-case:
+    title: 'deploy-testpilot-case'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#324'
+      - kind: path
+        ref: 'docs/superpowers/workstreams/deploy-testpilot-case/todo.md'
+    excludes: []
+  launcher-anywhere-startup:
+    title: 'launcher-anywhere-startup'
+    links: []
+    excludes:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#334'
+      - kind: path
+        ref: 'docs/superpowers/workstreams/launcher-anywhere-startup/todo.md'
+  launcher-anywhere-startup-v2:
+    title: 'launcher-anywhere-startup-v2'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#334'
+      - kind: path
+        ref: 'docs/superpowers/workstreams/launcher-anywhere-startup-v2/todo.md'
+    excludes: []
+  deploy-template-packaging:
+    title: 'deploy-template-packaging'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#326'
+      - kind: openspec
+        ref: 'deploy-template-packaging'
+    excludes: []
+  bro-canonical-source:
+    title: 'bro-canonical-source'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#296'
+    excludes: []
+  jobs-execution-identity:
+    title: 'jobs-execution-identity'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#328'
+    excludes: []
+  install-prerequisites:
+    title: 'install-prerequisites'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#325'
+    excludes: []
