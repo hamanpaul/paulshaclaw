@@ -10,6 +10,7 @@
 #
 # 環境變數：
 #   PSC_BUILD_OUTDIR  artifact 輸出目錄（預設 dist/）
+#   PSC_PYTHON        已建立且可安裝 build 的 Python（預設 repo .venv）
 #
 # 退出碼：0 通過；非零代表 build 或驗證失敗（fail-closed）。
 set -euo pipefail
@@ -32,8 +33,9 @@ for arg in "$@"; do
   esac
 done
 
-# 選擇直譯器：優先用 repo .venv（含完整 runtime closure），否則用系統 python3。
-python_bin="$repo_root/.venv/bin/python"
+# 選擇直譯器：優先用 PSC_PYTHON，再用 repo .venv，最後才探測系統 python3。
+# 系統 Python 可能受 PEP 668 保護；正式執行仍應使用已建立的 venv。
+python_bin="${PSC_PYTHON:-$repo_root/.venv/bin/python}"
 if [[ ! -x "$python_bin" ]]; then
   python_bin="$(command -v python3 || true)"
   if [[ -z "$python_bin" ]]; then
@@ -71,64 +73,14 @@ sdist="${sdists[0]}"
 echo "    wheel: $wheel"
 echo "    sdist: $sdist"
 
-# 3. metadata / package-content 檢查。
+# 3. metadata / package-content 檢查。local release 與 GitHub release
+# workflow 共用同一個 stdlib-only checker，避免兩條 release 入口漂移；
+# checker 同時守住 cockpit.tcss、paulshaclaw/core/commands.json 與 launcher。
 echo "==> package-content 檢查"
-# 3a. wheel 必須含 cockpit.tcss（CSS_PATH 於 wheel 安裝時才找得到）。
-if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/cockpit/cockpit.tcss"; then
-  echo "FAIL: wheel 未包含 cockpit/cockpit.tcss package data" >&2
-  exit 1
-fi
-echo "    cockpit.tcss 已包含於 wheel"
-
-# 3a2. #334: wheel 必須含 commands.json（core package data）。
-if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/core/commands.json"; then
-  echo "FAIL: wheel 未包含 paulshaclaw/core/commands.json package data" >&2
-  exit 1
-fi
-echo "    paulshaclaw/core/commands.json 已包含於 wheel"
-# 3b. METADATA version 必須等於 VERSION。
-# 每次解壓到獨立的暫存目錄：固定路徑會讓併發執行互相干擾，殘留的舊版
-# dist-info 也會讓下面的 glob 命中多個 METADATA。
-extract_dir="$(mktemp -d)"
-meta_version="$("$python_bin" -m zipfile -e "$wheel" "$extract_dir" >/dev/null 2>&1; \
-  grep -m1 '^Version:' "$extract_dir"/paulshaclaw-*.dist-info/METADATA | awk '{print $2}')"
-file_version="$(cat "$repo_root/VERSION")"
-if [[ "$meta_version" != "$file_version" ]]; then
-  echo "FAIL: wheel METADATA version($meta_version) != VERSION($file_version)" >&2
-  exit 1
-fi
-echo "    wheel METADATA version=$meta_version 與 VERSION 一致"
-
-# 3c. entry point psc 必須在 RECORD / entry_points。
-if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "entry_points.txt"; then
-  echo "FAIL: wheel 缺少 entry_points.txt（psc entry point）" >&2
-  exit 1
-fi
-echo "    entry_points.txt 已包含於 wheel"
-
-# 3d. #288：launcher 四模組必須入 wheel（release artifact 自足）。
-for mod in lock services supervisor cli; do
-  if ! "$python_bin" -m zipfile -l "$wheel" | grep -q "paulshaclaw/launcher/${mod}.py"; then
-    echo "FAIL: wheel 未包含 paulshaclaw/launcher/${mod}.py" >&2
-    exit 1
-  fi
-done
-echo "    launcher 模組（lock/services/supervisor/cli）已包含於 wheel"
-
-# 3e. #288：entry point paulshaclaw 必須指向 launcher.cli:main。
-if ! grep -q "paulshaclaw = paulshaclaw.launcher.cli:main" "$extract_dir"/paulshaclaw-*.dist-info/entry_points.txt; then
-  echo "FAIL: entry_points 缺 paulshaclaw console script（launcher.cli:main）" >&2
-  exit 1
-fi
-echo "    entry point paulshaclaw -> launcher.cli:main 確認"
-
-# 3f. #288：systemd 模板不得殘留 __ROOT_DIR__/scripts（release 不依賴 repo checkout）。
-if grep -R "__ROOT_DIR__/scripts" "$extract_dir/paulshaclaw/deploy/templates/" >/dev/null 2>&1; then
-  echo "FAIL: systemd 模板仍引用 __ROOT_DIR__/scripts" >&2
-  exit 1
-fi
-echo "    systemd 模板無 __ROOT_DIR__/scripts 殘留"
-rm -rf "$extract_dir"
+"$python_bin" "$repo_root/scripts/check-release-artifacts.py" \
+  --wheel "$wheel" \
+  --sdist "$sdist" \
+  --source-root "$repo_root"
 
 # 4. 乾淨 venv 安裝 smoke test。
 if [[ "$do_install" == "1" ]]; then

@@ -429,10 +429,10 @@ def test_service_scripts_share_operator_runtime_resolver() -> None:
         assert "pip install --user" not in src
 
 
-def test_preflight_script_shares_operator_runtime_resolver() -> None:
+def test_preflight_script_uses_test_runtime_resolver() -> None:
     src = PREFLIGHT_SH.read_text(encoding="utf-8")
     assert 'source "$script_dir/start.sh" --source-only' in src
-    assert 'resolve_operator_python "$repo_root"' in src
+    assert 'resolve_preflight_python "$repo_root"' in src
     assert 'exec env PYTHONPATH="$repo_root" "$python_bin" -m pytest' in src
 
 
@@ -452,7 +452,7 @@ def test_standalone_service_scripts_reuse_operator_resolver(tmp_path: Path) -> N
         assert completed.stdout.strip() == str(repo_python)
 
 
-def test_preflight_script_reuses_operator_resolver_in_worktree(tmp_path: Path) -> None:
+def test_preflight_script_reuses_test_runtime_resolver_in_worktree(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     scripts_dir = repo / "scripts"
     (repo / "tests").mkdir(parents=True)
@@ -466,6 +466,43 @@ def test_preflight_script_reuses_operator_resolver_in_worktree(tmp_path: Path) -
     _write_fake_preflight_python(python, log_path)
 
     completed = _run_preflight_script(repo, python)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+    assert log_path.read_text(encoding="utf-8") == (
+        f"PYTHONPATH={repo}\n"
+        f"ARGS=-m pytest {repo}/tests/ {repo}/custom-skills/bro/tests/ -q\n"
+    )
+
+
+def test_preflight_uses_system_python_when_worktree_has_no_operator_venv(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    scripts_dir = repo / "scripts"
+    (repo / "tests").mkdir(parents=True)
+    (repo / "custom-skills" / "bro" / "tests").mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "start.sh").symlink_to(START_SH)
+    (scripts_dir / "preflight-tests.sh").symlink_to(PREFLIGHT_SH)
+
+    log_path = tmp_path / "preflight-system.log"
+    _write_fake_preflight_python(bin_dir / "python3", log_path)
+    env = {
+        **os.environ,
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "EXPECTED_REPO": str(repo),
+    }
+    env.pop("PSC_PYTHON", None)
+    env.pop("PSC_REPO_ROOT", None)
+    completed = subprocess.run(
+        [str(repo / "scripts" / "preflight-tests.sh")],
+        cwd=repo,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == ""

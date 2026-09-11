@@ -4,9 +4,8 @@
 > 並裁決第一階段的 distribution authority。涵蓋 issue #280 的 A（release contract）
 > 與 D（distribution strategy）。
 >
-> E（artifact-driven deployment）依序須在 artifact 交付邊界建立後再做，不在本文範圍。
->
-> **補充（#280 E 節完成後）**：E 節實作見 §8「Artifact-driven deployment」。
+> E（artifact-driven deployment）已在 artifact 交付邊界建立後落地，實作與失敗契約見
+> §8「Artifact-driven deployment」。
 
 ## 1. 適用範圍
 
@@ -59,12 +58,21 @@
 
 1. **CI / policy / security gate**：`tests.yml`（pytest）+ `policy-check.yml`。
 2. **版本一致性 gate**：`scripts/check-release-consistency.py`（本機 preflight 與 release workflow 都會跑）。
-3. **本機 release dry-run**：`scripts/release-artifacts.sh`（build wheel+sdist、metadata/content
-   檢查、乾淨 venv 安裝 smoke test）。可加 `--no-install` 跳過乾淨 venv 安裝（離線環境）。
-4. **#270 de-identification gate**：第一次正式 public release 前必須完成，避免正式 artifact
+3. **artifact content gate**：`scripts/check-release-artifacts.py` 由本機 release script、
+   release workflow 與 PR `tests.yml` 共用；逐一比對 source / wheel / sdist 的 template 相對路徑，
+   並檢查 core registry、cockpit stylesheet、launcher、entry points、版本與禁用模板字串。
+4. **本機 release dry-run**：`scripts/release-artifacts.sh`（build wheel+sdist、共用
+   artifact content 檢查、乾淨 venv 安裝 smoke test）。可加 `--no-install` 跳過乾淨 venv 安裝（離線環境）。
+5. **#270 de-identification gate**：第一次正式 public release 前必須完成，避免正式 artifact
    將新識別資訊永久固化。
-5. **#265 history rewrite 裁決**：第一次穩定 tag 前 owner 須明確裁決；若要 force-push 改寫歷史，
+6. **#265 history rewrite 裁決**：第一次穩定 tag 前 owner 須明確裁決；若要 force-push 改寫歷史，
    應先完成改寫再建立正式 tag。
+
+`tests.yml` 的 pytest step 會在執行測試前同一環境安裝 `pytest` 與 `build`；
+`scripts/preflight-tests.sh` 也會把 `build` 補進 resolved operator runtime。這是必要的
+測試工具，不是產品 runtime dependency，因為模板封裝與 installed-wheel acceptance 測試會
+直接執行 `python -m build`。`pyproject.toml` 的 build-system floor 固定為
+`setuptools>=62.3`，以保證遞迴 `templates/**/*.tmpl` package-data 規則在隔離建置中可用。
 
 ## 4. 失敗行為、重跑與撤銷（A）
 
@@ -141,16 +149,13 @@ hippo/cortex 的 package publication，不在本 umbrella 內隱性擴張。
 3. 在目標 venv `pip install --force-reinstall <舊版 wheel>`。
 4. runtime 狀態（`~/.agents/`）**不隨 artifact 變動**，回滾 operator shell 不會動到 state/secret。
 
-> 完整的 artifact-driven `install --version` / `upgrade` / `rollback` 屬於 E 節，本次不實作。
->
-> **E 節已完成**：`install` / `upgrade` / `uninstall` / `rollback` / `status` 實作於
-> `paulshaclaw/deploy/`，詳見 §8。
 
 ## 7. 相關檔案
 
 | 角色 | 檔案 |
 |---|---|
 | 一致性 gate | `scripts/check-release-consistency.py` |
+| artifact content gate | `scripts/check-release-artifacts.py`（local release、release workflow、PR CI 共用） |
 | 本機 dry-run | `scripts/release-artifacts.sh` |
 | Release workflow | `.github/workflows/release.yml` |
 | 一致性測試 | `tests/test_release_consistency.py` |
@@ -331,6 +336,33 @@ rm -f ~/.config/paulshaclaw/demo-agent.secret.env \
 改寫成錯誤的 `PSC_REPO_ROOT`，以 paulsha-cortex checkout 下重新跑
 `python -m paulsha_cortex.cli install service` 導正（#285 問題 B 的 start.sh 側已加
 fail-closed 檢查，不會再覆寫指向別 repo 的 env）。
+
+### 8.9 template 預檢、失敗報告與 installed-wheel 邊界（#326）
+
+`install` 與 `upgrade` 在任何 host-side 寫入、checkpoint、`loginctl` 或
+`systemctl` 動作前，必須讀取並 render 該 command 所需的全部 template。預檢會以
+`__INSTANCE__`、`__ROOT_DIR__`、`__PYTHON__` 完成替換；缺檔、無法讀取或 render
+失敗時回傳 **exit 1** 與單一 JSON，包含 `instance_name`、`root_dir`、
+`failed_assets`、`template_preflight` 與可操作的 `actionable_message`，不建立部分
+部署檔、install record 或 systemd 互動。`--verify`／plan-only 的 install／upgrade
+也走同一預檢；`status`、`uninstall` 不因不需要的 template 讀取而失效。
+
+預檢完成後的一般檔案系統 I/O 仍可能在中途失敗。此時 report 必須列出已寫入的
+`applied_files`，明確標示 `mutation.atomic: false`，不得宣稱整體原子性；upgrade
+仍依 §8.4 的既有 checkpoint rollback 契約處理。artifact checksum 不符或指定的
+本地 artifact 不存在仍維持 **exit 2**。
+
+正式 deploy 指令必須使用**已安裝該 wheel 的 Python**（例如目標 venv 的
+`python -m paulshaclaw.deploy`），並從 checkout 外驗證模組載入位置；不可用 checkout
+中的 Python／`PYTHONPATH` 假定 source 可見。deploy 負責把 units、runtime config、
+state/secret template 產物寫入 host 的三平面路徑；`paulshaclaw`／`psc` CLI 的 PATH
+入口則由 `pip install <wheel>` 或 `pipx install <wheel>` 負責，不由 deploy 寫入。
+
+測試容器不得連接 host user bus；以無 `systemd` 的環境執行時，report 只能標示
+`systemd.status: on-host-only`（或 skip）而不能宣稱 service 已啟動或 restart 已驗證。
+`--home-dir` 只隔離檔案落點，並不足以隔離 `loginctl`／`systemctl` 的副作用；需要
+測試此邊界時必須另以 fake tools 或沒有這些 binaries 的 PATH 執行。
+
 ## 9. 啟動路徑契約（#288）
 
 > 實作：`paulshaclaw/launcher/`（`lock.py` / `services.py` / `supervisor.py` / `cli.py`）；

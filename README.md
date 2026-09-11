@@ -206,7 +206,7 @@ cd paulshaclaw
 # 2. 建立 repo 專用 venv，並依 pyproject 強制刷新完整 operator runtime
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade --force-reinstall -e .
-.venv/bin/python -m pip install pytest
+.venv/bin/python -m pip install pytest build
 .venv/bin/python -m pytest tests/ -q  # 確認同一 operator runtime 綠
 ./scripts/preflight-tests.sh  # preflight 同樣使用 repo operator runtime
 

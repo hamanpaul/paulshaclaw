@@ -6,6 +6,9 @@ from typing import Sequence
 
 from .installer import (
     ArtifactVerificationError,
+    TemplatePreflightError,
+    _record_template_preflight_failure,
+    preflight_templates,
     read_install_record,
     run_install,
     run_rollback,
@@ -152,6 +155,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         instance_name=args.instance,
         root_dir=args.root_dir,
     )
+    if args.command in ("install", "upgrade"):
+        try:
+            prepared = preflight_templates(plan)
+        except TemplatePreflightError as exc:
+            report, exit_code = _record_template_preflight_failure(
+                {
+                    "command": args.command,
+                    "instance_name": args.instance,
+                    "root_dir": args.root_dir,
+                    "status": "failed",
+                },
+                exc,
+            )
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return exit_code
+        plan_payload = plan.as_dict()
+        plan_payload["template_preflight"] = {
+            "status": "passed",
+            "checked_assets": sorted(prepared),
+        }
+        print(json.dumps(plan_payload, ensure_ascii=False, indent=2))
+        return 0
     print(json.dumps(plan.as_dict(), ensure_ascii=False, indent=2))
     return 0
 

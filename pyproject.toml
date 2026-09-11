@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=62.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -35,6 +35,8 @@ include = ["paulshaclaw*"]
 "paulshaclaw.cockpit" = ["*.tcss"]
 # core commands registry 定義檔需隨套件出貨（#334）
 "paulshaclaw.core" = ["*.json"]
+# deploy templates must be present in both wheel and sdist rebuilds
+"paulshaclaw.deploy" = ["templates/**/*.tmpl"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

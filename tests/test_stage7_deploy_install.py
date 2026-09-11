@@ -294,6 +294,25 @@ if __name__ == "__main__":
 class ApplyInstallPlanCreateOnlyTests(unittest.TestCase):
     """#219 對抗審查 F1：rerun 不得以 placeholder 覆寫使用者持有檔。"""
 
+    def test_prepared_templates_and_python_exe_cannot_be_combined(self) -> None:
+        from paulshaclaw.deploy.installer import apply_install_plan
+        from paulshaclaw.deploy.planner import build_command_plan
+
+        scratch = make_test_dir("stage7-install-prepared-python-conflict")
+        try:
+            plan = build_command_plan("install", instance_name="demo-agent", root_dir="/srv/paulshaclaw")
+            prepared = {asset.template_relpath: "rendered\n" for asset in plan.templates}
+
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                apply_install_plan(
+                    plan,
+                    home_dir=scratch / "home",
+                    python_exe="/opt/other-venv/bin/python",
+                    prepared_templates=prepared,
+                )
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+
     def test_rerun_preserves_state_secret_and_runtime_env_but_updates_units(self) -> None:
         from paulshaclaw.deploy.installer import apply_install_plan
         from paulshaclaw.deploy.planner import build_command_plan

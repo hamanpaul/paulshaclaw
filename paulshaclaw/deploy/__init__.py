@@ -1,11 +1,15 @@
 from .installer import (
     ArtifactVerificationError,
     DeploymentVerificationError,
+    InstallPlanApplyError,
+    TemplatePreflightError,
     apply_install_plan,
     detect_installed_version,
     latest_checkpoint,
     read_install_record,
     render_template,
+    prepare_template_renderings,
+    preflight_templates,
     resolve_install_path,
     restore_core_from_checkpoint,
     run_install,
@@ -13,6 +17,7 @@ from .installer import (
     run_uninstall,
     run_upgrade,
     snapshot_core_plane,
+    validate_template_assets,
     verify_install_plan,
 )
 from .planner import (
@@ -32,6 +37,7 @@ __all__ = [
     "ArtifactVerificationError",
     "CommandPlan",
     "DeploymentVerificationError",
+    "InstallPlanApplyError",
     "PermissionCheck",
     "SecretInstallStep",
     "TemplateAsset",
@@ -44,6 +50,8 @@ __all__ = [
     "list_template_assets",
     "read_install_record",
     "render_template",
+    "prepare_template_renderings",
+    "preflight_templates",
     "resolve_install_path",
     "resolve_template_target",
     "restore_core_from_checkpoint",
@@ -53,5 +61,7 @@ __all__ = [
     "run_upgrade",
     "snapshot_core_plane",
     "validate_plane_permissions",
+    "validate_template_assets",
+    "TemplatePreflightError",
     "verify_install_plan",
 ]

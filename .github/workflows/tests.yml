@@ -51,5 +51,22 @@ jobs:
         # 執行同 step）。custom-skills 的測試不在 tests/ 底下，得明確列出。
         # 漏掉它等於讓 reply_bridge 的 facade 漂移把關（#90）永遠不會執行。
         run: |
-          python -m pip install pytest
+          python -m pip install pytest build
           python -m pytest tests/ custom-skills/bro/tests/ -q
+
+      - name: Verify release artifact contents
+        run: |
+          rm -rf dist
+          python -m build --wheel --sdist --outdir dist .
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          sdists=(dist/*.tar.gz)
+          shopt -u nullglob
+          if [[ ${#wheels[@]} -ne 1 || ${#sdists[@]} -ne 1 ]]; then
+            echo "FAIL: expected exactly one wheel and one sdist" >&2
+            exit 1
+          fi
+          python scripts/check-release-artifacts.py \
+            --wheel "${wheels[0]}" \
+            --sdist "${sdists[0]}" \
+            --source-root .
