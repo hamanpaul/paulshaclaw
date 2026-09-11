@@ -16,3 +16,4 @@
 - [x] 2.7 final pre-archive repair：對齊 R2 字面，讓 `source="local_observed"` 的 agy footer 輸出 `agy ~N`（不是 `agy N%`），並更新 focused 測試；archive、全套 preflight、PR 與關 issue 仍由 Manager / operator 後續執行。
 - [x] 2.8 coverage-only follow-up：補 `tests/test_footer_agent_selection_cost.py` 的 `source="api"` + `percent_used` 直接斷言，讓 T3 的 `N%` / `~N` / `?` / `∞` 四種 agy 形態各有獨立測試；不變更 runtime 行為，archive／PR／關 issue 仍由 Manager / operator 後續執行。
 - [x] 2.9 codex disable repair：對齊 R3，當 `config.cost.providers.codex.enabled=false` 時 `collect_all()` 不呼叫 `collect_codex()`、不輸出 `cdx` 段，並補 focused 測試確認 footer 與 TUI preview 同步省略 `cdx`；archive／PR／關 issue 仍由 Manager / operator 後續執行。
+- [x] 2.10 degraded cold-start repair：先重現 cold-start＋無 cache＋`codex.enabled=false` 仍渲染 `cdx 5h:-- wk:--` 的殘餘偏差，再修正 `_build_degraded_snapshot()` 只在 codex 啟用時 seed `cdx`，並補 focused 測試鎖定無 cache 的降級 footer 不顯示停用的 codex；archive／PR／關 issue 仍由 Manager / operator 後續執行。

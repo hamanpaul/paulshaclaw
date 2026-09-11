@@ -281,6 +281,18 @@ def test_format_footer_renders_agy_variants(_read_json_file) -> None:
     assert percent.to_jsonable()["source"] == "local_observed"
 
 
+def test_build_degraded_snapshot_omits_disabled_codex_provider() -> None:
+    snapshot = _build_degraded_snapshot(
+        CostConfig(
+            codex=CodexProviderConfig(enabled=False),
+            claude=ClaudeProviderConfig(enabled=True),
+        )
+    )
+
+    assert "cdx" not in snapshot.providers
+    assert format_footer(snapshot, use_tmux_style=False) == "cc 5h:-- wk:-- "
+
+
 def test_sample_yaml_footer_snapshot_matches_main_baseline() -> None:
     config = load_cost_config(config_path=SAMPLE_CONFIG_PATH)
     snapshot = _build_degraded_snapshot(config)

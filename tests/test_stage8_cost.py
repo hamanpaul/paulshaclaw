@@ -2710,6 +2710,33 @@ class Stage8CliTests(unittest.TestCase):
         cache.lock.assert_not_called()
         build_current_snapshot.assert_not_called()
 
+    def test_status_main_no_refresh_degrades_without_cache_when_codex_disabled(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            codex=CodexProviderConfig(enabled=False),
+            claude=ClaudeProviderConfig(enabled=True),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain", "--no-refresh"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "cc 5h:-- wk:--")
+        self.assertNotIn("cdx", stdout.getvalue())
+        cache.lock.assert_not_called()
+        build_current_snapshot.assert_not_called()
+
     def test_status_main_uses_stale_cache_when_lock_unavailable(self) -> None:
         config = SimpleNamespace(cache_dir=Path("/ignored"), cache_ttl_seconds=120)
         stale_snapshot = self._snapshot(source_status="stale")

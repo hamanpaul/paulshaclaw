@@ -60,7 +60,10 @@ def _build_degraded_snapshot(config) -> CostSnapshot:
         for account in getattr(config, "copilot_accounts", ())
         if getattr(account, "enabled", True)
     )
-    providers = {"cdx": ProviderSnapshot(source_status="unknown", source="unknown", windows={})}
+    providers = {}
+    codex = getattr(config, "codex", None)
+    if getattr(codex, "enabled", True):
+        providers["cdx"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
     claude = getattr(config, "claude", None)
     if getattr(claude, "enabled", True):
         providers["cc"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
