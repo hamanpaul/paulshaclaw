@@ -1305,7 +1305,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers.collect_codex",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
-            ),
+            ) as codex,
             patch(
                 "paulshaclaw.cost.providers.collect_claude",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
@@ -1313,11 +1313,13 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers.collect_copilot",
                 return_value=ProviderSnapshot(source_status="unknown", accounts=()),
-            ),
+            ) as copilot,
         ):
             providers = collect_all(cfg)
 
-        self.assertEqual(set(providers), {"cdx", "cc"})
+        codex.assert_not_called()
+        copilot.assert_called_once_with(cfg)
+        self.assertEqual(set(providers), {"cc"})
 
     def test_collect_all_includes_copilot_when_accounts_are_configured(self) -> None:
         cfg = CostConfig(
@@ -1345,7 +1347,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers.collect_codex",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
-            ),
+            ) as codex,
             patch(
                 "paulshaclaw.cost.providers.collect_claude",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
@@ -1369,7 +1371,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         ):
             providers = collect_all(cfg)
 
-        self.assertEqual(set(providers), {"cdx", "cc", "cpt"})
+        codex.assert_not_called()
+        self.assertEqual(set(providers), {"cc", "cpt"})
         self.assertEqual(providers["cpt"].accounts[0].account_id, "fresh-user")
 
     def test_collect_all_passes_claude_and_codex_config(self) -> None:
@@ -1381,7 +1384,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                 local_fallback=True,
             ),
             codex=CodexProviderConfig(
-                enabled=False,
+                enabled=True,
                 auth_path=Path("/tmp/codex.json"),
                 usage_url="https://example.invalid/usage",
                 max_age_seconds=34,
@@ -1412,7 +1415,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             timezone="UTC",
         )
         codex.assert_called_once_with(
-            enabled=False,
+            enabled=True,
             auth_path=Path("/tmp/codex.json"),
             usage_url="https://example.invalid/usage",
             max_age_seconds=34,

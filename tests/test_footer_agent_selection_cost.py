@@ -183,8 +183,12 @@ def test_collect_agy_local_fallback_requires_fresh_state(tmp_path: Path) -> None
     assert provider.accounts == ()
 
 
+@patch("paulshaclaw.cost.providers.collect_codex")
 @patch("paulshaclaw.cost.providers.collect_claude")
-def test_collect_all_omits_disabled_claude_copilot_and_agy(collect_claude_mock) -> None:
+def test_collect_all_omits_disabled_codex_claude_copilot_and_agy(
+    collect_claude_mock,
+    collect_codex_mock,
+) -> None:
     providers = collect_all(
         CostConfig(
             codex=CodexProviderConfig(enabled=False),
@@ -201,8 +205,9 @@ def test_collect_all_omits_disabled_claude_copilot_and_agy(collect_claude_mock) 
         )
     )
 
+    collect_codex_mock.assert_not_called()
     collect_claude_mock.assert_not_called()
-    assert set(providers) == {"cdx"}
+    assert providers == {}
 
 
 @patch("paulshaclaw.cost.providers._read_json_file")

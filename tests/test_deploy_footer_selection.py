@@ -7,22 +7,30 @@ from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from textwrap import dedent
+from unittest.mock import patch
 
 import yaml
 
+from paulshaclaw.cost.cache import build_snapshot
 from paulshaclaw.cost.config import (
     AgyProviderConfig,
     ClaudeProviderConfig,
     CopilotAccountConfig,
     CostConfig,
+    parse_cost_config_payload,
 )
+from paulshaclaw.cost.formatter import format_footer
+from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot
+from paulshaclaw.cost.providers import collect_all
 from paulshaclaw.deploy.__main__ import main as deploy_main
 from paulshaclaw.deploy.agents import (
     DetectedAgent,
     _NEVER_READ,
+    apply_footer_selection_payload,
     detect_agents,
     parse_footer_argument,
     prepare_footer_selection,
+    preview_footer_selection,
     write_footer_config,
 )
 from paulshaclaw.deploy.footer_select import (
@@ -261,6 +269,66 @@ def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeyp
         "copilot": {"hamanpaul": True, "org-a": True},
         "agy": False,
     }
+
+
+def test_disabled_codex_footer_omits_cdx_and_matches_preview() -> None:
+    payload = {
+        "cost": {
+            "providers": {
+                "codex": {"enabled": False},
+                "claude": {"enabled": True},
+                "copilot": {
+                    "accounts": [
+                        {
+                            "id": "hamanpaul",
+                            "label": "haman",
+                            "enabled": True,
+                        }
+                    ]
+                },
+            }
+        }
+    }
+    selection = parse_footer_argument("claude,copilot:haman")
+    config = parse_cost_config_payload(apply_footer_selection_payload(payload, selection))
+
+    with (
+        patch(
+            "paulshaclaw.cost.providers.collect_codex",
+            side_effect=AssertionError("collect_codex should not run when disabled"),
+        ),
+        patch(
+            "paulshaclaw.cost.providers.collect_claude",
+            return_value=ProviderSnapshot(source_status="unknown", source="unknown", windows={}),
+        ),
+        patch(
+            "paulshaclaw.cost.providers.collect_copilot",
+            return_value=ProviderSnapshot(
+                source_status="unknown",
+                source="unknown",
+                accounts=(
+                    CopilotAccountUsage(
+                        account_id="hamanpaul",
+                        label="haman",
+                        kind="personal",
+                        used_requests=None,
+                        monthly_allowance=None,
+                        source="unknown",
+                    ),
+                ),
+            ),
+        ),
+    ):
+        footer = format_footer(
+            build_snapshot(timezone=config.timezone, providers=collect_all(config)),
+            use_tmux_style=False,
+        )
+
+    preview = preview_footer_selection(selection, payload=payload)
+
+    assert footer == "cc 5h:-- wk:-- | cpt haman:-- "
+    assert footer == preview
+    assert "cdx" not in footer
 
 
 def test_install_apply_bare_copilot_flag_writes_all_sample_accounts(

@@ -1110,16 +1110,16 @@ def collect_copilot(
 
 
 def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
-    providers = {
-        "cdx": collect_codex(
+    providers: dict[str, ProviderSnapshot] = {}
+    if config.codex.enabled:
+        providers["cdx"] = collect_codex(
             enabled=config.codex.enabled,
             auth_path=config.codex.auth_path,
             usage_url=config.codex.usage_url,
             max_age_seconds=config.codex.max_age_seconds,
             local_fallback=config.codex.local_fallback,
             timezone=config.timezone,
-        ),
-    }
+        )
     if config.claude.enabled:
         providers["cc"] = collect_claude(
             statusline_sidecar=config.claude.statusline_sidecar,
