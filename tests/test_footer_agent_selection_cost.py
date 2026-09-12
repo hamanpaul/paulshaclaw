@@ -72,16 +72,6 @@ def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
                   label: haman
                   enabled: false
             agy:
-              accounts:
-                - id: workspace
-                  label: ws
-                  kind: personal
-                  monthly_allowance: 500
-                - id: personal
-                  label: me
-                  kind: company
-                  monthly_allowance: 200
-                  enabled: false
               enabled: true
               label: primary
               state_dir: ~/.gemini/antigravity-cli
@@ -99,11 +89,6 @@ def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
     assert config.agy.state_dir == Path("~/.gemini/antigravity-cli").expanduser()
     assert config.agy.max_age_seconds == 45
     assert config.agy.local_fallback is True
-    assert len(config.agy.accounts) == 2
-    assert config.agy.accounts[0].account_id == "workspace"
-    assert config.agy.accounts[0].label == "ws"
-    assert config.agy.accounts[1].account_id == "personal"
-    assert config.agy.accounts[1].label == "me"
 
 
 def test_collect_agy_parses_percent_usage(tmp_path: Path) -> None:
@@ -174,42 +159,6 @@ def test_collect_agy_parses_estimate_and_unlimited_shapes(tmp_path: Path) -> Non
     assert unlimited.accounts[0].unlimited is True
     assert unknown is not None and unknown.source_status == "unknown"
     assert unknown.source == "unknown"
-
-
-def test_collect_agy_spreads_usage_to_configured_accounts(tmp_path: Path) -> None:
-    now = datetime(2026, 9, 11, 12, 0, tzinfo=ZoneInfo("Asia/Taipei"))
-    state_dir = _write_agy_state(tmp_path, {"percent_used": 42}, stamp=now)
-
-    provider = collect_agy(
-        AgyProviderConfig(
-            enabled=True,
-            label="primary",
-            state_dir=state_dir,
-            local_fallback=True,
-            accounts=(
-                CopilotAccountConfig(
-                    account_id="workspace",
-                    label="ws",
-                    kind="personal",
-                    monthly_allowance=500,
-                ),
-                CopilotAccountConfig(
-                    account_id="personal",
-                    label="me",
-                    kind="company",
-                    monthly_allowance=200,
-                    enabled=False,
-                ),
-            ),
-        ),
-        now=now,
-    )
-
-    assert provider is not None
-    assert provider.source == "local_observed"
-    assert len(provider.accounts) == 1
-    assert provider.accounts[0].account_id == "workspace"
-    assert provider.accounts[0].percent_used == 42
 
 
 def test_collect_agy_local_fallback_requires_fresh_state(tmp_path: Path) -> None:

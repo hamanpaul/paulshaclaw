@@ -55,7 +55,7 @@ accepted 僅表示規格可執行，不表示程式或驗收已完成。使用 C
 - TUI 只做選擇與寫 config；不啟動 daemon、不碰 systemd、不填 secret（`_SECRET_INSTALL_STEPS` 維持手動步驟）。
 
 ### R8 文件與變更紀錄
-- README §Install 新增 footer 選擇說明（TUI、`--footer` 語法、無 TTY 行為、註解不保留限制）；`paulshaclaw/config/paulshaclaw.sample.yaml` 新增 `providers.agy` 段與 `enabled` 範例；附 `changelog.d/footer-agent-selection.md`。
+- README §Install 新增 footer 選擇說明（TUI、`--footer` 語法、無 TTY 行為、註解不保留限制）；`paulshaclaw/config/paulshaclaw.sample.yaml` 新增 `providers.agy` 段與 `enabled` 範例；附 `changelog.d/341-footer-agent-selection.md`。
 
 ## Acceptance
 
