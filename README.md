@@ -317,7 +317,7 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 ##### agy 用量來源
 
 - `cost.providers.agy` 啟用後優先讀 agy 的 print-mode 唯讀 slash command（`agy -p "/usage" --output-format json`）：不起 agent turn、零 token、不讀任何 credential 檔（`~/.gemini/google_accounts.json`、`oauth_creds.json`、`antigravity-oauth-token` 一律不碰）。
-- 單次呼叫耗時約 2.5～4s，故以 `refresh_seconds`（預設 300s）節流：節流期內直接沿用 `~/.agents/state/cost/agy_usage.json` sidecar（owner-only，只存 `fetched_at`／`windows`，不存 CLI 原始輸出）；CLI 這輪失敗時若有舊 sidecar 先以 stale 供應，否則落到既有 `local_fallback`（讀本地 state.json）或 `unknown`。
+- 單次呼叫耗時約 2.5～4s，故以 `refresh_seconds`（預設 300s）節流：sidecar `~/.agents/state/cost/agy_usage.json`（owner-only，只存 `attempted_at`／`fetched_at`／`note`／`windows`，不存 CLI 原始輸出）拆兩個時間戳——`attempted_at`（每次嘗試都更新）只決定要不要節流，`fetched_at`（只在 CLI 成功取得視窗時更新）才決定 fresh／stale。CLI 這輪失敗（或成功但視窗未取得）時，若有舊值先以 `stale` 供應並保留失敗原因於 `note`；節流期內持續回報 `stale`，直到 CLI 再次成功取得視窗才轉回 `fresh`（過期視窗在 `stale` 狀態下不會被歸零）；無舊值時落到既有 `local_fallback`（讀本地 state.json）或 `unknown`。`note` 只標原因類別：timeout／nonzero／invalid-json／status-not-success／group-missing／group-unparsed。
 - `group`（預設 `gemini`，可設 `3p`）依 bucket id 前綴（`gemini-*` / `3p-*`）選取 five_hour／weekly 兩個視窗；`cli_path` 未指定時在 PATH 上找 `agy`。
 - footer／cockpit 呈現：有視窗資料時 agy 比照 `cdx`／`cc` 顯示 `agy 5h:N%(reset) wk:N%(reset)`；沒有時維持原本 `agy N%` / `agy ?` 呈現。
 

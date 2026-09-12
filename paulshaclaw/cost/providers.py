@@ -628,11 +628,18 @@ def _agy_finalize_window(
     used_percent: int,
     reset_at: datetime,
     now: datetime,
+    *,
+    roll_forward: bool = True,
 ) -> UsageWindow:
     # A reset already in the past means the window rolled over since the
     # reading was taken (CLI payload or a stale sidecar) — advance it and
     # report a fresh, unused window, mirroring `_codex_window`'s roll-forward.
-    if reset_at <= now:
+    # `roll_forward=False` (stale/throttled-and-expired data — #353 second-
+    # round review finding 1) skips this: zeroing a window we have no current
+    # read on would fabricate a `0%` the operator would mistake for real data,
+    # so a stale window is reported as-is (its last-known percent, past reset)
+    # instead.
+    if roll_forward and reset_at <= now:
         step = _AGY_WINDOW_STEP.get(window_key, timedelta())
         if step.total_seconds() > 0:
             while reset_at <= now:
@@ -746,20 +753,35 @@ def _call_agy_cli(
     return payload, None
 
 
-def _read_agy_sidecar(path: Path) -> tuple[datetime, Mapping[str, Any]] | None:
+def _read_agy_sidecar(
+    path: Path,
+) -> tuple[datetime, datetime | None, str | None, Mapping[str, Any]] | None:
+    """Returns (attempted_at, fetched_at, note, windows_raw), or None when the
+    file is missing/unparseable. `attempted_at` (#353 second-round review
+    finding 1) is the throttle anchor, updated on every attempt regardless of
+    outcome; `fetched_at` is only ever set on a successful fetch and may be
+    None (never throttle-blocking — only used to decide fresh vs stale). A
+    sidecar written before this field existed is read as if `attempted_at`
+    equalled its `fetched_at`, so it still throttles correctly once."""
     payload = _read_json_file(path)
     if payload is None:
         return None
     fetched_at = _parse_event_timestamp(payload.get("fetched_at"))
-    if fetched_at is None:
+    attempted_at = _parse_event_timestamp(payload.get("attempted_at")) or fetched_at
+    if attempted_at is None:
         return None
     windows_raw = payload.get("windows")
     if not isinstance(windows_raw, Mapping):
         return None
-    return fetched_at, windows_raw
+    note = payload.get("note")
+    if not isinstance(note, str):
+        note = None
+    return attempted_at, fetched_at, note, windows_raw
 
 
-def _agy_windows_from_sidecar(windows_raw: Mapping[str, Any], now: datetime) -> dict[str, UsageWindow]:
+def _agy_windows_from_sidecar(
+    windows_raw: Mapping[str, Any], now: datetime, *, roll_forward: bool = True
+) -> dict[str, UsageWindow]:
     windows: dict[str, UsageWindow] = {}
     for key in ("five_hour", "weekly"):
         entry = windows_raw.get(key)
@@ -772,24 +794,40 @@ def _agy_windows_from_sidecar(windows_raw: Mapping[str, Any], now: datetime) -> 
         reset_at = _parse_reset_value(entry.get("reset_at"), now.tzinfo or ZoneInfo("Asia/Taipei"))
         if reset_at is None:
             continue
-        windows[key] = _agy_finalize_window(key, used_percent, reset_at, now)
+        windows[key] = _agy_finalize_window(key, used_percent, reset_at, now, roll_forward=roll_forward)
     return windows
 
 
 def _write_agy_sidecar(
     path: Path,
     windows: Mapping[str, UsageWindow],
-    fetched_at: datetime,
+    attempted_at: datetime,
     *,
+    fetched_at: datetime | None,
+    note: str | None = None,
     existing_windows_raw: Mapping[str, Any] | None = None,
 ) -> None:
-    # Owner-only, atomic write; only fetched_at + the two windows are stored —
-    # never the CLI's raw stdout (no account identifiers to leak either way).
+    # Owner-only, atomic write; only attempted_at/fetched_at/note + the two
+    # windows are stored — never the CLI's raw stdout (no account identifiers
+    # to leak either way). `attempted_at` is the throttle anchor (updated on
+    # every attempt); `fetched_at` only advances on a successful fetch, so a
+    # run of failed/throttled cycles reports stale rather than silently
+    # re-reading as fresh (#353 second-round review finding 1). `note` mirrors
+    # this cycle's CLI failure reason (or the prior one, carried forward
+    # through a throttled cycle) so it survives into the next throttled read
+    # instead of disappearing (#353 second-round review finding 2).
     # `existing_windows_raw` (the previous sidecar's windows, if any) is merged
     # under the new values rather than discarded, so a cycle that only refreshes
     # one window (e.g. the other bucket failed to parse) doesn't wipe the other
-    # window's still-useful cached value (#353 review finding 5).
-    merged_windows: dict[str, Any] = dict(existing_windows_raw or {})
+    # window's still-useful cached value (#353 review finding 5). Only the two
+    # keys this schema recognises are carried forward — a stray/foreign key
+    # from an older or hand-edited sidecar is dropped rather than echoed back
+    # forever (#353 second-round review finding 3).
+    merged_windows: dict[str, Any] = {
+        key: value
+        for key, value in (existing_windows_raw or {}).items()
+        if key in _AGY_WINDOW_STEP
+    }
     merged_windows.update(
         {
             key: {
@@ -800,7 +838,9 @@ def _write_agy_sidecar(
         }
     )
     payload = {
-        "fetched_at": fetched_at.astimezone(timezone.utc).isoformat(),
+        "attempted_at": attempted_at.astimezone(timezone.utc).isoformat(),
+        "fetched_at": fetched_at.astimezone(timezone.utc).isoformat() if fetched_at else None,
+        "note": note,
         "windows": merged_windows,
     }
     try:
@@ -861,31 +901,51 @@ def collect_agy(
     resolved_sidecar_path = sidecar_path or _agy_sidecar_path()
     resolved_runner = runner or subprocess.run
 
-    # 1. Throttle: a sidecar fetched within refresh_seconds means no CLI call
-    #    at all this cycle — including when the cached windows themselves
-    #    didn't parse to anything usable. Throttling must not depend on the
-    #    cached windows being non-empty, or every failed/unmatched cycle would
-    #    re-invoke the (2.5-4s, ~180MB) CLI every call (#353 review findings
-    #    2/15).
+    # 1. Throttle: an attempt within refresh_seconds means no CLI call at all
+    #    this cycle — including when the cached windows themselves didn't
+    #    parse to anything usable. Throttling anchors on `attempted_at` (last
+    #    attempt, any outcome) so it must not depend on the cached windows
+    #    being non-empty, or every failed/unmatched cycle would re-invoke the
+    #    (2.5-4s, ~180MB) CLI every call (#353 review findings 2/15).
+    #    Freshness (fresh vs stale) is answered separately by `fetched_at`
+    #    (last *successful* fetch only) — otherwise a throttled read taken
+    #    during a run of CLI failures would keep reporting hours-old data as
+    #    "fresh" forever, and an already-past reset would roll forward to a
+    #    fabricated 0% (#353 second-round review finding 1).
     sidecar = _read_agy_sidecar(resolved_sidecar_path)
     sidecar_windows_raw: Mapping[str, Any] = {}
+    sidecar_fetched_at: datetime | None = None
+    cli_note: str | None = None
     throttled = False
     if sidecar is not None:
-        fetched_at, sidecar_windows_raw = sidecar
-        age_seconds = (resolved_now - fetched_at).total_seconds()
-        if 0 <= age_seconds < config.refresh_seconds:
+        sidecar_attempted_at, sidecar_fetched_at, sidecar_note, sidecar_windows_raw = sidecar
+        attempted_age_seconds = (resolved_now - sidecar_attempted_at).total_seconds()
+        if 0 <= attempted_age_seconds < config.refresh_seconds:
             throttled = True
-            fresh_windows = _agy_windows_from_sidecar(sidecar_windows_raw, resolved_now)
-            if fresh_windows:
-                return ProviderSnapshot(source_status="fresh", source="cli", windows=fresh_windows)
+            fetched_age_seconds = (
+                (resolved_now - sidecar_fetched_at).total_seconds()
+                if sidecar_fetched_at is not None
+                else None
+            )
+            if fetched_age_seconds is not None and 0 <= fetched_age_seconds < config.refresh_seconds:
+                fresh_windows = _agy_windows_from_sidecar(sidecar_windows_raw, resolved_now, roll_forward=True)
+                if fresh_windows:
+                    return ProviderSnapshot(source_status="fresh", source="cli", windows=fresh_windows)
+            # Not freshly fetched (or never successfully fetched) — fall
+            # through to the stale-serving step below, carrying this
+            # sidecar's last recorded failure reason forward instead of
+            # losing it now that no CLI attempt runs this cycle (finding 2).
+            cli_note = sidecar_note
 
     # 2. CLI attempt (source priority #1), skipped while throttled.
     #    `cli_path` resolves via PATH at call time when the config leaves it
-    #    unset. The sidecar's fetched_at is updated on *every* attempt —
-    #    success, failure, or an unmatched/unparsed group — merging any newly
-    #    parsed windows over the previous ones (finding 5) so a partial result
-    #    never wipes an otherwise-still-useful cached window.
-    cli_note: str | None = None
+    #    unset. `attempted_at` is updated on *every* attempt — success,
+    #    failure, or an unmatched/unparsed group — merging any newly parsed
+    #    windows over the previous ones (finding 5) so a partial result never
+    #    wipes an otherwise-still-useful cached window. `fetched_at` only
+    #    advances when the CLI actually yields at least one usable window; a
+    #    failed/unmatched/unparsed attempt preserves whatever `fetched_at` the
+    #    sidecar already had (finding 1).
     if not throttled:
         cli_path = config.cli_path or shutil.which("agy")
         if cli_path:
@@ -897,7 +957,12 @@ def collect_agy(
             if error is not None:
                 cli_note = error
                 _write_agy_sidecar(
-                    resolved_sidecar_path, {}, resolved_now, existing_windows_raw=sidecar_windows_raw
+                    resolved_sidecar_path,
+                    {},
+                    resolved_now,
+                    fetched_at=sidecar_fetched_at,
+                    note=cli_note,
+                    existing_windows_raw=sidecar_windows_raw,
                 )
             else:
                 cli_windows = _agy_windows_from_cli_payload(payload, config.group, resolved_now)
@@ -906,6 +971,8 @@ def collect_agy(
                         resolved_sidecar_path,
                         cli_windows,
                         resolved_now,
+                        fetched_at=resolved_now,
+                        note=None,
                         existing_windows_raw=sidecar_windows_raw,
                     )
                     return ProviderSnapshot(source_status="fresh", source="cli", windows=cli_windows)
@@ -915,14 +982,22 @@ def collect_agy(
                 # different operator-facing causes (#353 review finding 17).
                 cli_note = "group-missing" if cli_windows is None else "group-unparsed"
                 _write_agy_sidecar(
-                    resolved_sidecar_path, {}, resolved_now, existing_windows_raw=sidecar_windows_raw
+                    resolved_sidecar_path,
+                    {},
+                    resolved_now,
+                    fetched_at=sidecar_fetched_at,
+                    note=cli_note,
+                    existing_windows_raw=sidecar_windows_raw,
                 )
 
     # 3. CLI unavailable/failed/throttled this cycle — serve the sidecar's
     #    cached windows if any are still usable, rather than dropping straight
-    #    to local_fallback/unknown.
+    #    to local_fallback/unknown. Never rolls a window forward to a
+    #    fabricated 0% (`roll_forward=False`) — this data is stale precisely
+    #    because we have no current read on it (#353 second-round review
+    #    finding 1).
     if sidecar_windows_raw:
-        stale_windows = _agy_windows_from_sidecar(sidecar_windows_raw, resolved_now)
+        stale_windows = _agy_windows_from_sidecar(sidecar_windows_raw, resolved_now, roll_forward=False)
         if stale_windows:
             return ProviderSnapshot(
                 source_status="stale",
