@@ -26,3 +26,4 @@
 - [x] 2.17 changelog fragment 命名對齊：將 `changelog.d/341-footer-agent-selection.md` 改為 `changelog.d/footer-agent-selection.md`，供 ship archive 門檻檢查。
 - [x] 2.18 builder 後修補：`footer_select.py` 僅捕捉 `ImportError`、`collect_all()` 以 `config.agy.enabled` 作 guard、`agy local_observed+percent_used` 僅在 `source_status != estimated` 時沿用 `classify_usage`（保留 `~` 前綴）。
 - [x] 2.19 guarded-path repair：補 `~/.gemini/antigravity-cli/antigravity-oauth-token` 到 deploy footer `_NEVER_READ`，並更新 focused regression 明確覆蓋 home-relative zero-read guard。
+- [x] 2.20 adversarial follow-up：在 `tests/test_deploy_footer_selection.py` 新增字面斷言，直接鎖定 `_NEVER_READ` 必含 spec R1 列出的四條 Gemini home-relative guarded paths，避免 guard 清單與測試同時漂移。

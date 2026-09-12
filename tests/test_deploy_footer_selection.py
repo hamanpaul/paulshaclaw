@@ -71,6 +71,13 @@ def test_parse_footer_argument_supports_multi_provider_and_bare_copilot() -> Non
     assert none["disable_all"] is True
 
 
+def test_never_read_declares_required_home_relative_gemini_paths() -> None:
+    assert ".gemini/oauth_creds.json" in _NEVER_READ
+    assert ".gemini/antigravity-oauth-token" in _NEVER_READ
+    assert ".gemini/antigravity-cli/antigravity-oauth-token" in _NEVER_READ
+    assert ".gemini/google_accounts.json" in _NEVER_READ
+
+
 def test_detect_agents_never_reads_guarded_paths(tmp_path: Path, monkeypatch) -> None:
     home = tmp_path / "home"
     (home / ".codex").mkdir(parents=True)
