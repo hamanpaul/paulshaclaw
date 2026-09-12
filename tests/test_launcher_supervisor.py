@@ -183,3 +183,216 @@ def test_supervisor_ensure_cortex_skips_when_legacy_flat_lock_is_held(
             sup.shutdown()
     finally:
         holder.close()
+
+
+class _FakePopen:
+    """假 Popen：模擬 spawn 後已經退出的子程序（#346）。"""
+
+    def __init__(self, *, exit_code: int | None = 1, pid: int = 4242) -> None:
+        self.pid = pid
+        self.returncode = exit_code
+        self._exit_code = exit_code
+        self.terminated = False
+        self.killed = False
+
+    def poll(self) -> int | None:
+        return self._exit_code
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        return self._exit_code
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_ensure_cortex_degrades_when_fallback_manager_exits_before_startup(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346: fallback manager 起了就死，ensure_cortex 不得 raise，改記 degraded。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+    monkeypatch.setattr(supervisor, "_monitor_is_running", lambda: True)
+    monkeypatch.setattr(supervisor, "_manager_lock_is_held", lambda: False)
+
+    def fake_spawn(self, name, cmd, *, log_name, extra_env=None):
+        return _FakePopen()
+
+    monkeypatch.setattr(supervisor.Supervisor, "_spawn_service", fake_spawn)
+
+    sup = supervisor.Supervisor()
+    sup.ensure_cortex()
+
+    assert any(
+        "cortex fallback manager daemon exited before startup" in msg for msg in sup.degraded
+    )
+    err = capsys.readouterr().err
+    assert "cortex fallback manager daemon exited before startup" in err
+    assert "cortex-manager.log" in err
+
+
+def test_ensure_cortex_degrades_when_fallback_monitor_exits_before_startup(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346: fallback monitor 起了就死，ensure_cortex 不得 raise，改記 degraded。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+    monkeypatch.setattr(supervisor, "_monitor_is_running", lambda: False)
+    monkeypatch.setattr(supervisor, "_manager_lock_is_held", lambda: True)
+
+    def fake_spawn(self, name, cmd, *, log_name, extra_env=None):
+        return _FakePopen()
+
+    monkeypatch.setattr(supervisor.Supervisor, "_spawn_service", fake_spawn)
+
+    sup = supervisor.Supervisor()
+    sup.ensure_cortex()
+
+    assert any("cortex fallback monitor exited before startup" in msg for msg in sup.degraded)
+    err = capsys.readouterr().err
+    assert "cortex fallback monitor exited before startup" in err
+    assert "cortex-monitor.log" in err
+
+
+def test_verify_cortex_fallback_alive_degrades_instead_of_raising(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346: cockpit 前把關發現 fallback manager 已死，改記 degraded、不 raise。"""
+    agents_root = tmp_path / "agents"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+
+    sup = supervisor.Supervisor()
+    sup.manager = _FakePopen()
+
+    sup.verify_cortex_fallback_alive()
+
+    assert any("cortex fallback manager exited before cockpit start" in msg for msg in sup.degraded)
+    err = capsys.readouterr().err
+    assert "cortex fallback manager exited before cockpit start" in err
+    assert "cortex-manager.log" in err
+
+
+def test_run_still_launches_cockpit_when_fallback_manager_died(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346: fallback manager 啟動前就死，run() 仍要起 cockpit（degraded 而非 fail-closed）。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+
+    monkeypatch.setattr(supervisor, "ensure_xdg_runtime_dir", lambda: None)
+    monkeypatch.setattr(supervisor.Supervisor, "acquire_start_lock", lambda self: None)
+    monkeypatch.setattr(supervisor, "load_default_telegram_env", lambda: None)
+    monkeypatch.setattr(supervisor, "telegram_gate", lambda: False)
+    monkeypatch.setattr(supervisor, "apply_stage8_footer", lambda: None)
+    monkeypatch.setattr(supervisor.Supervisor, "start_cost_loop", lambda self: None)
+    monkeypatch.setattr(supervisor.Supervisor, "start_dream", lambda self: None)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda *_args, **_kwargs: None)
+
+    def fake_ensure_cortex(self) -> None:
+        self.manager = _FakePopen()
+
+    monkeypatch.setattr(supervisor.Supervisor, "ensure_cortex", fake_ensure_cortex)
+
+    cockpit_calls: list[bool] = []
+
+    def fake_run_cockpit(self) -> int:
+        cockpit_calls.append(True)
+        return 0
+
+    monkeypatch.setattr(supervisor.Supervisor, "run_cockpit", fake_run_cockpit)
+
+    exit_code = supervisor.run()
+
+    assert exit_code == 0
+    assert cockpit_calls == [True]
+    err = capsys.readouterr().err
+    assert "exited before cockpit start" in err
+    assert "degraded" in err
+
+
+def test_run_prints_degraded_summary_when_cockpit_is_terminated(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346: SIGTERM 接管時 run_cockpit 走 SystemExit(143)，degraded 摘要仍要印出來。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+
+    monkeypatch.setattr(supervisor, "ensure_xdg_runtime_dir", lambda: None)
+    monkeypatch.setattr(supervisor.Supervisor, "acquire_start_lock", lambda self: None)
+    monkeypatch.setattr(supervisor, "load_default_telegram_env", lambda: None)
+    monkeypatch.setattr(supervisor, "telegram_gate", lambda: False)
+    monkeypatch.setattr(supervisor, "apply_stage8_footer", lambda: None)
+    monkeypatch.setattr(supervisor.Supervisor, "start_cost_loop", lambda self: None)
+    monkeypatch.setattr(supervisor.Supervisor, "start_dream", lambda self: None)
+    monkeypatch.setattr(supervisor.time, "sleep", lambda *_args, **_kwargs: None)
+
+    def fake_ensure_cortex(self) -> None:
+        self.manager = _FakePopen()
+
+    monkeypatch.setattr(supervisor.Supervisor, "ensure_cortex", fake_ensure_cortex)
+
+    def fake_run_cockpit(self) -> int:
+        raise SystemExit(143)
+
+    monkeypatch.setattr(supervisor.Supervisor, "run_cockpit", fake_run_cockpit)
+
+    exit_code = supervisor.run()
+
+    assert exit_code == 143
+    err = capsys.readouterr().err
+    assert "本次為 degraded 啟動" in err
+    assert "exited before cockpit start" in err
+
+
+def test_ensure_cortex_then_verify_does_not_double_count_dead_fallback(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346 對抗審查 MINOR2：ensure_cortex 已記過的死 fallback，verify 不得再記一次。"""
+    agents_root = tmp_path / "agents"
+    control_root = agents_root / "control"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+    monkeypatch.setenv("PSC_CONTROL_ROOT", str(control_root))
+    monkeypatch.setattr(supervisor, "_monitor_is_running", lambda: False)
+    monkeypatch.setattr(supervisor, "_manager_lock_is_held", lambda: False)
+
+    def fake_spawn(self, name, cmd, *, log_name, extra_env=None):
+        child = _FakePopen()
+        self.children[name] = child
+        return child
+
+    monkeypatch.setattr(supervisor.Supervisor, "_spawn_service", fake_spawn)
+
+    sup = supervisor.Supervisor()
+    sup.ensure_cortex()
+    assert len(sup.degraded) == 2  # monitor + manager 各記一次
+
+    sup.verify_cortex_fallback_alive()
+
+    assert len(sup.degraded) == 2  # 不得再重覆記錄同一組死掉的 fallback
+    assert sup.children.get("cortex-monitor") is None
+    assert sup.manager is None
+
+
+def test_note_degraded_message_reflects_no_cockpit_mode(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """#346 對抗審查 MINOR3：--no-cockpit 下訊息不得宣稱 cockpit 仍會啟動。"""
+    agents_root = tmp_path / "agents"
+    monkeypatch.setenv("PSC_AGENTS_ROOT", str(agents_root))
+
+    sup = supervisor.Supervisor(no_cockpit=True)
+    sup._note_degraded("test message", log_name="cortex-manager.log")
+
+    err = capsys.readouterr().err
+    assert "--no-cockpit" in err
+    assert "cockpit 仍照常啟動" not in err
