@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -1568,17 +1568,30 @@ def _provider_has_data(provider: ProviderSnapshot) -> bool:
 def carry_forward_degraded(
     new_providers: dict[str, ProviderSnapshot],
     old_providers: Mapping[str, ProviderSnapshot],
+    *,
+    skip: Iterable[str] = (),
 ) -> dict[str, ProviderSnapshot]:
     """Keep showing the previous values when a provider returns nothing usable.
 
     When a fetch fails this cycle (e.g. Claude sidecar gone stale, Copilot quota
     network blip), reuse the previous snapshot's values — marked ``stale`` so the
     footer tints them — instead of dropping to ``--``. Fresh data the next cycle
-    replaces them and clears the stale marker."""
+    replaces them and clears the stale marker.
+
+    Providers named in ``skip`` manage their own stale supply and are passed
+    through untouched: agy keeps a throttled sidecar with ``stale_max_age_seconds``
+    (#353), so resurrecting its cached windows here would bypass that age cap and
+    the ``exp`` rendering, showing a frozen reset clock indefinitely."""
+    skipped = set(skip)
     result: dict[str, ProviderSnapshot] = {}
     for name, provider in new_providers.items():
         old = old_providers.get(name)
-        if old is not None and not _provider_has_data(provider) and _provider_has_data(old):
+        if (
+            name not in skipped
+            and old is not None
+            and not _provider_has_data(provider)
+            and _provider_has_data(old)
+        ):
             result[name] = ProviderSnapshot(
                 source_status="stale",
                 source=old.source,
