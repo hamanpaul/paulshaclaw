@@ -439,3 +439,12 @@ lock 檔：`paulshaclaw-start.lock`，路徑解析順序 `PSC_START_LOCK` >
 - dev 路徑 `scripts/start.sh`＋`service-*.sh` 定位不變；start.sh 偵測到既有
   實例由「拒絕啟動」改為呼叫共用模組 `-m paulshaclaw.launcher.lock takeover`
   接管後重取鎖。
+- **僅 `paulshaclaw` 指令（release 路徑）**：cortex fallback（monitor／
+  manager）起不來、或啟動前就退出＝degraded 啟動（#346）：記錄警告並於
+  stderr 印出訊息與對應 log 路徑，cockpit 退出後再印一次摘要，cockpit（或
+  `--no-cockpit` 下常駐前景的 operator shell）仍照常啟動；不再 fail-closed。
+  **dev 路徑 `scripts/start.sh` 未變**：`verify_cortex_fallback_alive` 仍
+  fail-closed（`start.sh:578 verify_cortex_fallback_alive || exit 1`，
+  `tests/test_start_sh_cortex_fallback.py` 釘住 rc=1）。release 路徑其他
+  fail-closed 條款（start lock 接管、telegram 半套設定、`run_cockpit` 缺
+  TMUX_PANE）不變。

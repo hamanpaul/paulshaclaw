@@ -195,6 +195,7 @@ pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`�
 
 - **二擇一、後起的為主**：兩者共用同一把 start lock，新啟動的那套會先停掉既有的（process 持有者送 SIGTERM、systemd 持有者走 `systemctl --user stop`），**停不掉即 fail-closed** 明確報告、絕不兩套並存。接管邊界僅及操作面自身行程與 units，不波及 cortex / hippo 常駐服務。
 - 與 `psc` 的區隔：`psc` 是轉發 coordinator/deck/monitor 給 cortex 的 **dispatcher**，`paulshaclaw` 是 operator shell 的**啟動入口**，語意不同、不要混用。
+- **僅 `paulshaclaw` 指令（release 路徑）**：cortex fallback 起不來時（#346）cockpit 仍會照常啟動，並在 stderr 印出 degraded 警告與對應 log 路徑，不再 fail-closed 擋下整個啟動；`scripts/start.sh`（開發路徑）未變，fallback 起不來仍會 fail-closed 直接退出。
 
 ### B. 開發安裝（clone + editable install）
 

@@ -12,6 +12,9 @@ flock 探測＋monitor pgrep），缺者以本 venv 起 local fallback。
 
 版本 pin：全程使用 `sys.executable` 與安裝 venv 內的套件，不讀 repo 工作樹。
 subprocess 預設 close_fds=True，子程序不繼承 lock fd。
+
+cortex fallback（monitor／manager）啟動失敗或啟動前即退出＝degraded 啟動：
+記錄警告並繼續起 cockpit，不再 fail-closed（#346）。
 """
 from __future__ import annotations
 
@@ -164,7 +167,19 @@ class Supervisor:
         self.children: dict[str, subprocess.Popen] = {}
         self.manager: subprocess.Popen | None = None
         self.held_lock: lock_mod.HeldLock | None = None
+        self.degraded: list[str] = []
         self._shutdown_done = False
+
+    def _note_degraded(self, message: str, *, log_name: str) -> None:
+        """記一筆 degraded 啟動警告：不 fail-closed，印出訊息與對應 log 路徑（#346）。"""
+        self.degraded.append(message)
+        log_path = paths.log_root() / log_name
+        continuation = (
+            "operator shell 仍常駐前景（--no-cockpit）"
+            if self.no_cockpit
+            else "cockpit 仍照常啟動"
+        )
+        print(f"{message}（{continuation}；詳見 {log_path}）", file=sys.stderr)
 
     # -- 啟動步驟 -----------------------------------------------------------
 
@@ -233,7 +248,11 @@ class Supervisor:
                 log_name="cortex-monitor.log",
             )
             if child.poll() is not None:
-                raise SupervisorError("cortex fallback monitor exited before startup")
+                self._note_degraded(
+                    "cortex fallback monitor exited before startup",
+                    log_name="cortex-monitor.log",
+                )
+                self.children.pop("cortex-monitor", None)
 
         if _manager_lock_is_held():
             print(
@@ -259,9 +278,11 @@ class Supervisor:
             self.manager = manager
             self.children.pop("cortex-manager", None)
             if manager.poll() is not None:
-                raise SupervisorError(
-                    "cortex fallback manager daemon exited before startup"
+                self._note_degraded(
+                    "cortex fallback manager daemon exited before startup",
+                    log_name="cortex-manager.log",
                 )
+                self.manager = None
 
     def start_dream(self) -> None:
         self._spawn_service(
@@ -299,12 +320,24 @@ class Supervisor:
         print(f"telegram pid={child.pid}")
 
     def verify_cortex_fallback_alive(self) -> None:
-        """cockpit 前最後把關：只檢查本輪 fallback 自己起的（鏡射 start.sh:170-184）。"""
+        """cockpit 前最後把關：只檢查本輪 fallback 自己起的。
+
+        對應 `scripts/start.sh` 的 `verify_cortex_fallback_alive`
+        （start.sh:208-222，呼叫處 start.sh:578）；release 路徑（本函式）
+        刻意改為記錄 degraded 不中止（#346），dev 路徑 `start.sh` 未變、
+        仍 `verify_cortex_fallback_alive || exit 1` fail-closed。
+        """
         monitor = self.children.get("cortex-monitor")
         if monitor is not None and monitor.poll() is not None:
-            raise SupervisorError("cortex fallback monitor exited before cockpit start")
+            self._note_degraded(
+                "cortex fallback monitor exited before cockpit start",
+                log_name="cortex-monitor.log",
+            )
         if self.manager is not None and self.manager.poll() is not None:
-            raise SupervisorError("cortex fallback manager exited before cockpit start")
+            self._note_degraded(
+                "cortex fallback manager exited before cockpit start",
+                log_name="cortex-manager.log",
+            )
 
     def run_cockpit(self) -> int:
         pane = os.environ.get("TMUX_PANE", "")
@@ -366,6 +399,19 @@ class Supervisor:
             self.held_lock = None
 
 
+def _print_degraded_summary(supervisor: Supervisor) -> None:
+    """收尾摘要：cockpit 全螢幕 TUI 會蓋掉啟動時印過的警告，結束後再印一次（#346）。
+
+    涵蓋正常 `q` 離開、SIGTERM 接管（SystemExit）、degrade 之後才發生的
+    SupervisorError 三種結束路徑——故放在 `run()` 的 `finally`。
+    """
+    if not supervisor.degraded:
+        return
+    print("本次為 degraded 啟動（cortex fallback 未就緒）：", file=sys.stderr)
+    for message in supervisor.degraded:
+        print(f"- {message}", file=sys.stderr)
+
+
 def run(*, no_cockpit: bool = False) -> int:
     supervisor = Supervisor(no_cockpit=no_cockpit)
 
@@ -404,3 +450,4 @@ def run(*, no_cockpit: bool = False) -> int:
         return code
     finally:
         supervisor.shutdown()
+        _print_degraded_summary(supervisor)
