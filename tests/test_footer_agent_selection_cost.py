@@ -220,11 +220,13 @@ def test_load_cost_config_parses_agy_and_enabled_flags(tmp_path: Path) -> None:
     assert config.agy.state_dir == Path("~/.gemini/antigravity-cli").expanduser()
     assert config.agy.max_age_seconds == 45
     assert config.agy.local_fallback is True
-    # #353: group/refresh_seconds/timeout_seconds/cli_path default when unset.
+    # #353: group/refresh_seconds/timeout_seconds/cli_path/stale_max_age_seconds
+    # default when unset.
     assert config.agy.group == "gemini"
     assert config.agy.refresh_seconds == 300
     assert config.agy.timeout_seconds == 20
     assert config.agy.cli_path is None
+    assert config.agy.stale_max_age_seconds == 3600
 
 
 def test_load_cost_config_parses_agy_cli_fields(tmp_path: Path) -> None:
@@ -242,6 +244,7 @@ def test_load_cost_config_parses_agy_cli_fields(tmp_path: Path) -> None:
               refresh_seconds: 120
               timeout_seconds: 5
               cli_path: /opt/testing/fake-agy
+              stale_max_age_seconds: 1800
         """,
     )
 
@@ -251,6 +254,7 @@ def test_load_cost_config_parses_agy_cli_fields(tmp_path: Path) -> None:
     assert config.agy.refresh_seconds == 120
     assert config.agy.timeout_seconds == 5
     assert config.agy.cli_path == "/opt/testing/fake-agy"
+    assert config.agy.stale_max_age_seconds == 1800
 
 
 def test_collect_agy_parses_percent_usage(tmp_path: Path) -> None:
@@ -450,7 +454,7 @@ def test_collect_agy_display_reset_uses_configured_timezone_not_utc(tmp_path: Pa
     with patch("paulshaclaw.cost.providers._now_utc", return_value=fixed_utc_now):
         provider = collect_agy(
             AgyProviderConfig(enabled=True, cli_path=_FAKE_AGY_CLI_PATH),
-            timezone="Asia/Taipei",
+            timezone_name="Asia/Taipei",
             runner=_fixed_cli_runner(_agy_cli_payload(reset_iso=reset_iso)),
             sidecar_path=tmp_path / "agy_usage.json",
         )
@@ -480,6 +484,104 @@ def test_collect_agy_cli_expired_reset_rolls_forward_like_codex(tmp_path: Path) 
     assert five_hour.reset_at == datetime(2026, 9, 12, 16, 50, tzinfo=timezone.utc)
     assert weekly.used_percent == 0
     assert weekly.reset_at == datetime(2026, 9, 19, 11, 50, tzinfo=timezone.utc)
+
+
+def test_collect_agy_expired_reset_stored_raw_then_failure_shows_exp_not_zero(tmp_path: Path) -> None:
+    # #353 fourth-round rewrite (spec A/D/G): the sidecar always stores the
+    # CLI's *raw* parsed values — roll-forward is a presentation-only step
+    # (5), applied only while fresh. Cycle 1: the CLI answers with an
+    # already-expired reset; the rendered snapshot rolls it forward to a
+    # fresh 0%, but the on-disk `windows` block keeps the original
+    # (expired) `reset_at`/`used_percent` untouched. Cycle 2: a later CLI
+    # failure leaves that raw value in place and renders it as stale — back
+    # to the *original* used_percent (not the fabricated 0%) with
+    # `display_reset` reading "(exp)".
+    sidecar_path = tmp_path / "agy_usage.json"
+    reset_iso = "2026-09-12T11:50:00Z"  # 10 minutes before _AGY_CLI_NOW -> expired
+    original_reset_at = datetime(2026, 9, 12, 11, 50, tzinfo=timezone.utc)
+
+    first = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=_AGY_CLI_NOW,
+        runner=_fixed_cli_runner(_agy_cli_payload(gemini_5h=0.05, gemini_weekly=0.05, reset_iso=reset_iso)),
+        sidecar_path=sidecar_path,
+    )
+    assert first is not None
+    assert first.source_status == "fresh"
+    # Rendered: rolled forward to a fresh, unused window.
+    assert first.windows["five_hour"].used_percent == 0
+    assert first.windows["five_hour"].reset_at != original_reset_at
+
+    raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    # Stored: the CLI's raw reading — expired reset, 95% used — untouched.
+    assert raw["windows"]["five_hour"]["used_percent"] == 95
+    assert raw["windows"]["five_hour"]["reset_at"] == original_reset_at.isoformat()
+
+    second = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=_AGY_CLI_NOW + timedelta(seconds=301),
+        runner=_fixed_cli_runner("", returncode=1),
+        sidecar_path=sidecar_path,
+    )
+    assert second is not None
+    assert second.source_status == "stale"
+    assert second.note == "nonzero"
+    # Back to the raw, never-fabricated value — not the 0% cycle 1 rendered.
+    assert second.windows["five_hour"].used_percent == 95
+    assert second.windows["five_hour"].reset_at == original_reset_at
+    assert second.windows["five_hour"].display_reset == "exp"
+
+
+def test_collect_agy_stale_beyond_stale_max_age_drops_windows_but_keeps_note(tmp_path: Path) -> None:
+    # #353 fourth-round rewrite (spec E): once `fetched_at` is older than
+    # `stale_max_age_seconds`, the cached windows stop being rendered at all
+    # (falling through to local_fallback/unknown) — the sidecar file itself
+    # is untouched, and the last failure reason survives in `note`.
+    sidecar_path = tmp_path / "agy_usage.json"
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "attempted_at": (_AGY_CLI_NOW - timedelta(seconds=60)).isoformat(),
+                "fetched_at": (_AGY_CLI_NOW - timedelta(hours=2)).isoformat(),
+                "note": "nonzero",
+                "windows": {
+                    "five_hour": {
+                        "used_percent": 33,
+                        "reset_at": (_AGY_CLI_NOW + timedelta(hours=2)).isoformat(),
+                    },
+                    "weekly": {
+                        "used_percent": 60,
+                        "reset_at": (_AGY_CLI_NOW + timedelta(days=2)).isoformat(),
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    provider = collect_agy(
+        AgyProviderConfig(
+            enabled=True,
+            refresh_seconds=300,
+            stale_max_age_seconds=3600,
+            local_fallback=False,
+            cli_path=_FAKE_AGY_CLI_PATH,
+        ),
+        now=_AGY_CLI_NOW,
+        # attempted_at is 60s old -> throttled, no CLI call this round.
+        runner=Mock(side_effect=AssertionError("must not run CLI while throttled")),
+        sidecar_path=sidecar_path,
+    )
+
+    assert provider is not None
+    assert provider.source_status == "unknown"
+    assert provider.windows == {}
+    assert provider.note == "nonzero"
+
+    # The sidecar file itself is left exactly as it was — only the render
+    # path drops the windows, not the on-disk cache.
+    raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert set(raw["windows"].keys()) == {"five_hour", "weekly"}
 
 
 def test_collect_agy_cli_group_3p_reads_3p_buckets(tmp_path: Path) -> None:
@@ -515,8 +617,9 @@ def test_collect_agy_cli_group_missing_falls_back_with_note(tmp_path: Path) -> N
 
 
 def test_collect_agy_cli_group_matched_but_unparseable_uses_distinct_note(tmp_path: Path) -> None:
-    # #353 review finding 17: a bucket whose `id` matches the configured group
-    # but whose fields don't parse (unknown `window`, here) is a different
+    # #353 review finding 17 (renamed "window-unparsed" in the fourth-round
+    # rewrite, spec B): a bucket whose `id` matches the configured group but
+    # whose fields don't parse (unknown `window`, here) is a different
     # operator-facing cause than "no bucket matched the group at all" — the
     # former means the CLI's schema changed, the latter means `group` is
     # misconfigured. Conflating them under "group-missing" sends operators to
@@ -551,7 +654,7 @@ def test_collect_agy_cli_group_matched_but_unparseable_uses_distinct_note(tmp_pa
     )
 
     assert provider is not None
-    assert provider.note == "group-unparsed"
+    assert provider.note == "window-unparsed"
     assert provider.note != "group-missing"
 
 
@@ -783,16 +886,14 @@ def test_collect_agy_cli_group_missing_throttles_subsequent_calls(tmp_path: Path
     assert runner.call_count == 1
 
 
-def test_collect_agy_cli_partial_parse_merges_not_overwrites_sidecar(tmp_path: Path) -> None:
-    # #353 review finding 5: a cycle that only manages to parse one of the two
-    # windows must not wipe the other window's still-cached value out of the
-    # sidecar — merge, don't overwrite. #353 third-round review findings C/D:
-    # the returned snapshot always renders the *merged* windows (never just
-    # this round's freshly-parsed subset, or the untouched bucket would
-    # flicker out of the footer), and is "fresh" only when every present
-    # window's own `fetched_at` is within `refresh_seconds` — a cycle that
-    # renews just one bucket reports the whole snapshot "stale" instead of
-    # silently promoting the other, untouched bucket too.
+def test_collect_agy_cli_partial_parse_is_treated_as_failed_attempt(tmp_path: Path) -> None:
+    # #353 fourth-round rewrite (spec B/G): a cycle that only manages to
+    # parse one of the two windows is a *failed* attempt now, not a partial
+    # success to merge — `windows_raw`/`fetched_at` stay exactly what they
+    # were before this cycle (cycle 1's values), and `note` records
+    # "window-unparsed". This replaces the third round's per-window
+    # merge/eviction behaviour (review finding 5), which the final design
+    # deliberately drops to cut the number of moving parts.
     sidecar_path = tmp_path / "agy_usage.json"
 
     first = collect_agy(
@@ -806,7 +907,8 @@ def test_collect_agy_cli_partial_parse_merges_not_overwrites_sidecar(tmp_path: P
     assert first.windows["weekly"].used_percent == 50
 
     # Cycle 2 (past refresh_seconds=1, so the CLI runs again): the weekly
-    # bucket is missing `reset_time` this time, so only five_hour parses.
+    # bucket is missing `reset_time` this time, so only five_hour parses —
+    # a failed attempt as a whole.
     partial_payload = json.dumps(
         {
             "status": "SUCCESS",
@@ -840,16 +942,17 @@ def test_collect_agy_cli_partial_parse_merges_not_overwrites_sidecar(tmp_path: P
         sidecar_path=sidecar_path,
     )
     assert second is not None
-    # Merged, not just this round's subset (finding C): weekly is still
-    # present, carrying cycle 1's cached value. Stale overall (finding D)
-    # because weekly's own `fetched_at` (cycle 1) is now 5s old against
-    # refresh_seconds=1, even though five_hour was just refreshed.
+    assert second.note == "window-unparsed"
+    # Failed attempt: windows are byte-for-byte cycle 1's — five_hour is
+    # NOT updated to this round's freshly-parsed 40%, and stays stale
+    # because cycle 1's `fetched_at` is now 5s old against refresh_seconds=1.
     assert second.source_status == "stale"
-    assert second.windows["five_hour"].used_percent == 40
+    assert second.windows["five_hour"].used_percent == 10
     assert second.windows["weekly"].used_percent == 50
 
-    # Cycle 3, throttled (within refresh_seconds of cycle 2's write): the
-    # merged sidecar must still carry cycle 1's weekly value.
+    # Cycle 3, throttled (within refresh_seconds of cycle 2's attempt): the
+    # sidecar still carries cycle 1's untouched values and (since fetched_at
+    # is only 6s old against this call's refresh_seconds=300) renders fresh.
     third = collect_agy(
         AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
         now=_AGY_CLI_NOW + timedelta(seconds=6),
@@ -857,7 +960,8 @@ def test_collect_agy_cli_partial_parse_merges_not_overwrites_sidecar(tmp_path: P
         sidecar_path=sidecar_path,
     )
     assert third is not None
-    assert third.windows["five_hour"].used_percent == 40
+    assert third.source_status == "fresh"
+    assert third.windows["five_hour"].used_percent == 10
     assert third.windows["weekly"].used_percent == 50
 
 
@@ -980,34 +1084,14 @@ def test_collect_agy_stale_windows_do_not_roll_forward_past_reset(tmp_path: Path
     assert provider.windows["five_hour"].reset_at == past_reset
 
 
-def test_write_agy_sidecar_merge_drops_unrecognized_window_keys(tmp_path: Path) -> None:
-    # #353 second-round review finding 3: `existing_windows_raw` from an
-    # older/foreign sidecar must not be echoed back verbatim — only the two
-    # window keys this schema recognises survive the merge.
-    sidecar_path = tmp_path / "agy_usage.json"
-    _write_agy_sidecar(
-        sidecar_path,
-        {"five_hour": UsageWindow(used_percent=10, reset_at=_AGY_CLI_NOW, display_reset="1h")},
-        _AGY_CLI_NOW,
-        fetched_at=_AGY_CLI_NOW,
-        existing_windows_raw={
-            "five_hour": {"used_percent": 5, "reset_at": _AGY_CLI_NOW.isoformat()},
-            "weekly": {"used_percent": 20, "reset_at": _AGY_CLI_NOW.isoformat()},
-            "monthly": {"used_percent": 99, "reset_at": _AGY_CLI_NOW.isoformat()},
-        },
-    )
-
-    raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    assert set(raw["windows"].keys()) == {"five_hour", "weekly"}
-    assert raw["windows"]["five_hour"]["used_percent"] == 10
-    assert raw["windows"]["weekly"]["used_percent"] == 20
-
-
 def test_collect_agy_cli_remaining_fraction_overflow_bucket_is_skipped_not_raised(tmp_path: Path) -> None:
     # #353 second-round review finding 5: an out-of-range numeric literal in
     # the CLI payload (a >1000-digit integer, which raises OverflowError from
     # `float()`) must be skipped like any other unparseable bucket instead of
-    # raising out of collect_agy().
+    # raising out of collect_agy() — the overflowing bucket just never makes
+    # it into `cli_windows`. Under the fourth-round semantics (spec B) that
+    # leaves only one of the two required windows parsed, so the whole
+    # attempt is a failure ("window-unparsed"), not a partial success.
     payload = {
         "status": "SUCCESS",
         "command": {
@@ -1042,9 +1126,9 @@ def test_collect_agy_cli_remaining_fraction_overflow_bucket_is_skipped_not_raise
     )
 
     assert provider is not None
-    assert provider.source_status == "fresh"
-    assert "five_hour" not in provider.windows
-    assert provider.windows["weekly"].used_percent == 50
+    assert provider.source_status == "unknown"
+    assert provider.note == "window-unparsed"
+    assert provider.windows == {}
 
 
 def test_collect_agy_sidecar_used_percent_overflow_entry_is_skipped_not_raised(tmp_path: Path) -> None:
@@ -1086,15 +1170,14 @@ def test_collect_agy_sidecar_used_percent_overflow_entry_is_skipped_not_raised(t
     assert provider.windows["weekly"].used_percent == 30
 
 
-def test_collect_agy_sidecar_file_has_attempted_at_note_and_windows(tmp_path: Path) -> None:
-    # #353 third-round review finding A/required-test 5: the sidecar's
-    # top-level shape is exactly attempted_at/note/windows — no more
-    # provider-level `fetched_at`. `attempted_at` (throttle anchor) and each
-    # window's own `fetched_at` (freshness anchor, success-only) are stored
-    # separately (originally #353 second-round review finding 1, now
-    # per-window rather than per-provider), alongside `note` (finding 2). A
-    # successful cycle writes every window's `fetched_at` equal to
-    # `attempted_at` and a null note.
+def test_collect_agy_sidecar_file_has_attempted_at_fetched_at_note_and_windows(tmp_path: Path) -> None:
+    # #353 fourth-round rewrite (spec A/B): the sidecar's top-level shape is
+    # exactly attempted_at/fetched_at/note/windows — one provider-level
+    # `fetched_at` again (not per-window, spec A collapses the third round's
+    # per-window schema). A successful cycle sets `fetched_at` equal to
+    # `attempted_at`, clears `note`, and each window entry stores only the
+    # CLI's raw parsed value (`used_percent`/`reset_at` — no per-window
+    # `fetched_at` any more).
     sidecar_path = tmp_path / "agy_usage.json"
 
     collect_agy(
@@ -1105,12 +1188,12 @@ def test_collect_agy_sidecar_file_has_attempted_at_note_and_windows(tmp_path: Pa
     )
 
     raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    assert set(raw.keys()) == {"attempted_at", "note", "windows"}
+    assert set(raw.keys()) == {"attempted_at", "fetched_at", "note", "windows"}
     assert raw["note"] is None
+    assert raw["fetched_at"] == raw["attempted_at"]
     assert set(raw["windows"].keys()) == {"five_hour", "weekly"}
     for entry in raw["windows"].values():
-        assert set(entry.keys()) == {"used_percent", "reset_at", "fetched_at"}
-        assert entry["fetched_at"] == raw["attempted_at"]
+        assert set(entry.keys()) == {"used_percent", "reset_at"}
     assert (sidecar_path.stat().st_mode & 0o777) == 0o600
 
 
@@ -1152,9 +1235,10 @@ def test_write_agy_sidecar_temp_file_never_world_or_group_readable(
     sidecar_path = tmp_path / "agy_usage.json"
     _write_agy_sidecar(
         sidecar_path,
-        {"five_hour": UsageWindow(used_percent=10, reset_at=_AGY_CLI_NOW, display_reset="1h")},
-        _AGY_CLI_NOW,
+        attempted_at=_AGY_CLI_NOW,
         fetched_at=_AGY_CLI_NOW,
+        note=None,
+        windows_raw={"five_hour": {"used_percent": 10, "reset_at": _AGY_CLI_NOW.isoformat()}},
     )
 
     assert observed_modes == [0o600]
@@ -1195,31 +1279,44 @@ def test_collect_agy_sidecar_round_trip_preserves_reset_at(tmp_path: Path) -> No
     assert second.windows["weekly"].used_percent == first.windows["weekly"].used_percent
 
 
-def test_collect_agy_partial_cli_success_reports_stale_merge_without_flicker(tmp_path: Path) -> None:
-    # #353 third-round review findings C/D/E (required test 1): t0 both
-    # windows fetch fine (weekly 68%). At t+3d the CLI succeeds again but the
-    # weekly bucket is unparseable (no `reset_time`) while five_hour parses a
-    # brand-new value. Both the CLI round and the throttled round right after
-    # it must report the *merge* — weekly's stale 68% kept (not zeroed), its
-    # `display_reset` reading "exp" (its cached reset has long since passed),
-    # and five_hour showing this round's fresh value — with an identical
-    # window key set across both rounds (no flicker).
+def test_collect_agy_cli_partial_success_after_full_success_keeps_previous_windows_stale(
+    tmp_path: Path,
+) -> None:
+    # #353 fourth-round rewrite (spec B/D/G, replaces the third round's
+    # merge-based "no flicker" test): t0 both windows fetch fine (five_hour
+    # 10%, weekly 68%). At t+3d the CLI succeeds again but the weekly bucket
+    # is unparseable (no `reset_time`) — under the final design that's a
+    # *failed* attempt as a whole (note "window-unparsed"), so `windows_raw`
+    # stays byte-for-byte t0's values (five_hour does NOT pick up this
+    # round's fresh 20%). Both rounds report the identical stale window set
+    # (no flicker) with both resets now read as "(exp)" since they expired
+    # long before t+3d and stale windows never roll forward. A generous
+    # `stale_max_age_seconds` keeps spec E's separate age cap (its own
+    # dedicated test) from kicking in here — this test is only about B/D/G.
     sidecar_path = tmp_path / "agy_usage.json"
     t0 = _AGY_CLI_NOW
+    lenient_age_cap = 30 * 24 * 3600
 
     first = collect_agy(
-        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        AgyProviderConfig(
+            enabled=True,
+            refresh_seconds=300,
+            stale_max_age_seconds=lenient_age_cap,
+            cli_path=_FAKE_AGY_CLI_PATH,
+        ),
         now=t0,
         runner=_fixed_cli_runner(_agy_cli_payload(gemini_weekly=0.32, gemini_5h=0.9)),
         sidecar_path=sidecar_path,
     )
     assert first is not None
+    assert first.windows["five_hour"].used_percent == 10
     assert first.windows["weekly"].used_percent == 68
+    five_hour_reset_at = first.windows["five_hour"].reset_at
     weekly_reset_at = first.windows["weekly"].reset_at
-    assert weekly_reset_at is not None
+    assert five_hour_reset_at is not None and weekly_reset_at is not None
 
     t_plus_3d = t0 + timedelta(days=3)
-    assert weekly_reset_at <= t_plus_3d  # the cached weekly reset is already past by t+3d
+    assert weekly_reset_at <= t_plus_3d  # both cached resets are already past by t+3d
 
     partial_payload = json.dumps(
         {
@@ -1249,39 +1346,53 @@ def test_collect_agy_partial_cli_success_reports_stale_merge_without_flicker(tmp
         }
     )
     second = collect_agy(
-        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        AgyProviderConfig(
+            enabled=True,
+            refresh_seconds=300,
+            stale_max_age_seconds=lenient_age_cap,
+            cli_path=_FAKE_AGY_CLI_PATH,
+        ),
         now=t_plus_3d,
         runner=_fixed_cli_runner(partial_payload),
         sidecar_path=sidecar_path,
     )
     assert second is not None
+    assert second.note == "window-unparsed"
     assert second.source_status == "stale"
-    assert second.windows["five_hour"].used_percent == 20
+    assert second.windows["five_hour"].used_percent == 10
     assert second.windows["weekly"].used_percent == 68
+    assert second.windows["five_hour"].reset_at == five_hour_reset_at
     assert second.windows["weekly"].reset_at == weekly_reset_at
+    assert second.windows["five_hour"].display_reset == "exp"
     assert second.windows["weekly"].display_reset == "exp"
     assert set(second.windows) == {"five_hour", "weekly"}
 
     third = collect_agy(
-        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        AgyProviderConfig(
+            enabled=True,
+            refresh_seconds=300,
+            stale_max_age_seconds=lenient_age_cap,
+            cli_path=_FAKE_AGY_CLI_PATH,
+        ),
         now=t_plus_3d + timedelta(seconds=30),
         runner=Mock(side_effect=AssertionError("must not run CLI while throttled")),
         sidecar_path=sidecar_path,
     )
     assert third is not None
     assert third.source_status == "stale"
-    assert third.windows["five_hour"].used_percent == 20
+    assert third.windows["five_hour"].used_percent == 10
     assert third.windows["weekly"].used_percent == 68
     assert third.windows["weekly"].display_reset == "exp"
     assert set(third.windows) == set(second.windows)
 
 
-def test_collect_agy_legacy_sidecar_upgrades_to_per_window_fetched_at(tmp_path: Path) -> None:
-    # #353 third-round review finding A (required test 3): a sidecar written
-    # before per-window `fetched_at` existed (one top-level `fetched_at`, no
-    # `attempted_at`, no per-window `fetched_at`) must still throttle and
-    # judge freshness exactly as a new-format sidecar would; the next cycle
-    # that actually writes upgrades the file to the new per-window schema.
+def test_collect_agy_legacy_top_level_only_sidecar_still_throttles_and_upgrades(tmp_path: Path) -> None:
+    # #353 fourth-round rewrite (spec G): a first/second-round sidecar (one
+    # top-level `fetched_at`, no `attempted_at`, no `windows` schema change
+    # at all — its shape is a strict subset of this round's) must still
+    # throttle and judge freshness exactly as a new-format sidecar would;
+    # the next cycle that actually writes upgrades the file to the current
+    # attempted_at/fetched_at/note/windows shape.
     sidecar_path = tmp_path / "agy_usage.json"
     legacy_fetched_at = _AGY_CLI_NOW - timedelta(seconds=30)
     sidecar_path.write_text(
@@ -1329,10 +1440,80 @@ def test_collect_agy_legacy_sidecar_upgrades_to_per_window_fetched_at(tmp_path: 
     assert second.source_status == "fresh"
 
     raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    assert set(raw.keys()) == {"attempted_at", "note", "windows"}
+    assert set(raw.keys()) == {"attempted_at", "fetched_at", "note", "windows"}
+    assert raw["fetched_at"] == raw["attempted_at"]
     for entry in raw["windows"].values():
-        assert set(entry.keys()) == {"used_percent", "reset_at", "fetched_at"}
-        assert entry["fetched_at"] == raw["attempted_at"]
+        assert set(entry.keys()) == {"used_percent", "reset_at"}
+
+
+def test_collect_agy_legacy_per_window_fetched_at_sidecar_still_throttles_and_upgrades(
+    tmp_path: Path,
+) -> None:
+    # #353 fourth-round rewrite (spec G): a third-round sidecar has no
+    # top-level `fetched_at` at all — freshness lived per-window back then.
+    # Reading it must not raise, must pick the *oldest* of the two windows'
+    # `fetched_at` values as the legacy provider-level `fetched_at` (the
+    # more conservative reading — a run of throttled cycles can advance
+    # `attempted_at` far past either window's actual last-fetch time), and
+    # must still throttle/judge freshness correctly on this very read; the
+    # next cycle that actually writes upgrades the file to the current
+    # schema (no more per-window `fetched_at`).
+    sidecar_path = tmp_path / "agy_usage.json"
+    older_fetched_at = _AGY_CLI_NOW - timedelta(seconds=350)  # older than refresh_seconds=300
+    newer_fetched_at = _AGY_CLI_NOW - timedelta(seconds=30)
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "attempted_at": newer_fetched_at.isoformat(),
+                "note": None,
+                "windows": {
+                    "five_hour": {
+                        "used_percent": 12,
+                        "reset_at": (_AGY_CLI_NOW + timedelta(hours=4)).isoformat(),
+                        "fetched_at": newer_fetched_at.isoformat(),
+                    },
+                    "weekly": {
+                        "used_percent": 44,
+                        "reset_at": (_AGY_CLI_NOW + timedelta(days=6)).isoformat(),
+                        "fetched_at": older_fetched_at.isoformat(),
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Round A: `attempted_at` (30s old) is within refresh_seconds=300, so
+    # this round throttles (no CLI call). The legacy `fetched_at` derived
+    # from the windows must be the *older* of the two (350s old) — picking
+    # the newer one instead would wrongly report "fresh" here.
+    first = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=_AGY_CLI_NOW,
+        runner=Mock(side_effect=AssertionError("must not run CLI while throttled")),
+        sidecar_path=sidecar_path,
+    )
+    assert first is not None
+    assert first.source_status == "stale"
+    assert first.windows["five_hour"].used_percent == 12
+    assert first.windows["weekly"].used_percent == 44
+
+    # Round B: past refresh_seconds of `attempted_at` -> the CLI actually
+    # runs and writes the upgraded, single-`fetched_at` schema.
+    second = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=_AGY_CLI_NOW + timedelta(seconds=301),
+        runner=_fixed_cli_runner(_agy_cli_payload()),
+        sidecar_path=sidecar_path,
+    )
+    assert second is not None
+    assert second.source_status == "fresh"
+
+    raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert set(raw.keys()) == {"attempted_at", "fetched_at", "note", "windows"}
+    assert raw["fetched_at"] == raw["attempted_at"]
+    for entry in raw["windows"].values():
+        assert set(entry.keys()) == {"used_percent", "reset_at"}
 
 
 def test_collect_agy_cli_missing_from_path_is_treated_as_failed_attempt(
@@ -1433,7 +1614,7 @@ def test_collect_all_passes_config_timezone_to_agy(collect_agy_mock) -> None:
 
     collect_all(cfg)
 
-    collect_agy_mock.assert_called_once_with(cfg.agy, timezone="UTC")
+    collect_agy_mock.assert_called_once_with(cfg.agy, timezone_name="UTC")
 
 
 @patch("paulshaclaw.cost.providers._read_json_file")

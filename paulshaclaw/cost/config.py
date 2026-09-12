@@ -82,6 +82,11 @@ class AgyProviderConfig:
     refresh_seconds: int = 300
     timeout_seconds: int = 20
     cli_path: str | None = None
+    # Age cap (#353 fourth-round review finding E): once the sidecar's
+    # `fetched_at` is older than this, its cached windows stop being
+    # rendered at all (falling through to local_fallback/unknown) rather
+    # than showing arbitrarily stale numbers forever.
+    stale_max_age_seconds: int = 3600
 
 
 @dataclass(frozen=True)
@@ -263,6 +268,7 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
     refresh_seconds = item.get("refresh_seconds")
     timeout_seconds = item.get("timeout_seconds")
     cli_path = item.get("cli_path")
+    stale_max_age = item.get("stale_max_age_seconds")
     return AgyProviderConfig(
         enabled=_bool_value(item.get("enabled"), default=False),
         state_dir=resolved_state_dir,
@@ -276,6 +282,7 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
         refresh_seconds=int(refresh_seconds) if refresh_seconds is not None else 300,
         timeout_seconds=int(timeout_seconds) if timeout_seconds is not None else 20,
         cli_path=str(cli_path) if cli_path else None,
+        stale_max_age_seconds=int(stale_max_age) if stale_max_age is not None else 3600,
     )
 
 
