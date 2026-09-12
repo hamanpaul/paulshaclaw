@@ -118,9 +118,11 @@
 direct reference：
 
 ```
-Requires-Dist: paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@eb2ccb86...
-Requires-Dist: paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@3dfea79f...
+Requires-Dist: paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@<40 字元 SHA>
+Requires-Dist: paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@<40 字元 SHA>
 ```
+
+（SHA 以 `pyproject.toml` 當下的 pin 為準，本節只說明 direct-reference 的形式，不重複記錄會隨升 pin 過期的值。）
 
 實測（`python -m build` 產出 wheel 後檢視 `*.dist-info/METADATA`）確認 built artifact 的
 metadata 確實帶有 direct URL `Requires-Dist`。PyPI 上傳政策**不接受 direct URL 參照**
