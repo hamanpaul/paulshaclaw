@@ -80,6 +80,11 @@ def test_detect_agents_never_reads_guarded_paths(tmp_path: Path, monkeypatch) ->
     (home / ".gemini").mkdir(parents=True)
     (home / ".gemini" / "oauth_creds.json").write_text("{}", encoding="utf-8")
     (home / ".gemini" / "antigravity-oauth-token").write_text("token", encoding="utf-8")
+    (home / ".gemini" / "antigravity-cli").mkdir(parents=True)
+    (home / ".gemini" / "antigravity-cli" / "antigravity-oauth-token").write_text(
+        "token",
+        encoding="utf-8",
+    )
     (home / ".gemini" / "google_accounts.json").write_text("[]", encoding="utf-8")
 
     guarded = {(home / relative).resolve() for relative in _NEVER_READ}

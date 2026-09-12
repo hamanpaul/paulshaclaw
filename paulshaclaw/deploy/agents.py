@@ -19,6 +19,7 @@ _NEVER_READ = (
     ".codex/auth.json",
     ".gemini/oauth_creds.json",
     ".gemini/antigravity-oauth-token",
+    ".gemini/antigravity-cli/antigravity-oauth-token",
     ".gemini/google_accounts.json",
 )
 

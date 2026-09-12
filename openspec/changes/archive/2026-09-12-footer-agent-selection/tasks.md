@@ -25,3 +25,4 @@
 - [x] 2.16 config-invalid TUI repair：對齊 code-review-408，讓互動式 footer 選擇遇到結構錯誤的 config 時以預設 payload 繼續並在 report 帶 `config_warning`，若後續寫回因原 config 無效而失敗則以單一 JSON failure report 回報 `mode="tui"`、`reason="config-invalid"`，並將 sample yaml 的 agy `state_dir` 改回 `~/.gemini`；archive／PR／關 issue 仍由 Manager / operator 後續執行。
 - [x] 2.17 changelog fragment 命名對齊：將 `changelog.d/341-footer-agent-selection.md` 改為 `changelog.d/footer-agent-selection.md`，供 ship archive 門檻檢查。
 - [x] 2.18 builder 後修補：`footer_select.py` 僅捕捉 `ImportError`、`collect_all()` 以 `config.agy.enabled` 作 guard、`agy local_observed+percent_used` 僅在 `source_status != estimated` 時沿用 `classify_usage`（保留 `~` 前綴）。
+- [x] 2.19 guarded-path repair：補 `~/.gemini/antigravity-cli/antigravity-oauth-token` 到 deploy footer `_NEVER_READ`，並更新 focused regression 明確覆蓋 home-relative zero-read guard。
