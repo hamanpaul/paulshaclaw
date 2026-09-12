@@ -12,7 +12,7 @@ try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.widgets import Footer, Header, SelectionList, Static
-except ImportError:  # pragma: no cover - textual is a runtime dependency, keep importable in thin envs
+except Exception:  # pragma: no cover - textual is a runtime dependency, keep importable in thin envs
     from typing import Any, Generic, TypeVar
 
     T = TypeVar("T")

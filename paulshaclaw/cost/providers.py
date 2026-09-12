@@ -167,10 +167,12 @@ def _read_json_file(path: Path) -> dict[str, Any] | None:
     return payload
 
 
-def _agy_accounts(config: AgyProviderConfig) -> tuple[CopilotAccountConfig, ...]:
-    if config.accounts:
-        return tuple(account for account in config.accounts if account.enabled)
-    return (CopilotAccountConfig(account_id="agy", label=config.label, kind="personal"),)
+def _agy_account_config(config: AgyProviderConfig) -> CopilotAccountConfig:
+    return CopilotAccountConfig(
+        account_id="agy",
+        label=config.label,
+        kind="personal",
+    )
 
 
 def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
@@ -633,34 +635,27 @@ def collect_agy(
             note="agy quota unavailable",
         )
 
-    accounts = _agy_accounts(config)
-    if not accounts:
-        return ProviderSnapshot(
-            source_status="unknown",
-            source="unknown",
-            accounts=(),
-            note="agy accounts disabled",
-        )
+    account = _agy_account_config(config)
+    base_usage = {
+        "account_id": account.account_id,
+        "label": account.label,
+        "kind": account.kind,
+        "monthly_allowance": account.monthly_allowance,
+    }
 
     if bool(payload.get("unlimited")):
-        account_usages: list[CopilotAccountUsage] = []
-        for account in accounts:
-            account_usages.append(
+        return ProviderSnapshot(
+            source_status="fresh",
+            source="local_observed",
+            accounts=(
                 CopilotAccountUsage(
                     used_requests=None,
                     source="local_state",
                     percent_used=None,
                     unlimited=True,
-                    account_id=account.account_id,
-                    label=account.label,
-                    kind=account.kind,
-                    monthly_allowance=account.monthly_allowance,
-                )
-            )
-        return ProviderSnapshot(
-            source_status="fresh",
-            source="local_observed",
-            accounts=tuple(account_usages),
+                    **base_usage,
+                ),
+            ),
             note="agy unlimited quota",
         )
 
@@ -673,18 +668,14 @@ def collect_agy(
         return ProviderSnapshot(
             source_status="fresh",
             source="local_observed",
-            accounts=tuple(
+            accounts=(
                 CopilotAccountUsage(
                     used_requests=None,
                     source="local_state",
                     percent_used=min(100, percent_used),
                     unlimited=False,
-                    account_id=account.account_id,
-                    label=account.label,
-                    kind=account.kind,
-                    monthly_allowance=account.monthly_allowance,
-                )
-                for account in accounts
+                    **base_usage,
+                ),
             ),
         )
 
@@ -698,18 +689,14 @@ def collect_agy(
         return ProviderSnapshot(
             source_status="estimated",
             source="local_observed",
-            accounts=tuple(
+            accounts=(
                 CopilotAccountUsage(
                     used_requests=approx_remaining,
                     source="local_observed",
                     percent_used=None,
                     unlimited=False,
-                    account_id=account.account_id,
-                    label=account.label,
-                    kind=account.kind,
-                    monthly_allowance=account.monthly_allowance,
-                )
-                for account in accounts
+                    **base_usage,
+                ),
             ),
             note="agy local estimate",
         )
@@ -1143,10 +1130,9 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     copilot = collect_copilot(config)
     if copilot.accounts:
         providers["cpt"] = copilot
-    if config.agy.enabled:
-        agy = collect_agy(config.agy, now=_now_utc())
-        if agy is not None and (agy.accounts or not config.agy.accounts):
-            providers["agy"] = agy
+    agy = collect_agy(config.agy, now=_now_utc())
+    if agy is not None:
+        providers["agy"] = agy
     return providers
 
 
