@@ -72,6 +72,7 @@ class AgyProviderConfig:
     enabled: bool = False
     state_dir: Path = field(default_factory=default_agy_state_dir)
     label: str = "agy"
+    accounts: tuple[CopilotAccountConfig, ...] = ()
     max_age_seconds: int = 300
     local_fallback: bool = False
 
@@ -221,11 +222,7 @@ def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
     )
 
 
-def _legacy_agy_label(raw: Any) -> str:
-    accounts = _parse_accounts(
-        raw,
-        name="config.cost.providers.agy.accounts",
-    )
+def _legacy_agy_label(accounts: tuple[CopilotAccountConfig, ...]) -> str:
     if not accounts:
         return "agy"
     for account in accounts:
@@ -240,6 +237,10 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
     legacy_state_path = item.get("state_path")
     max_age = item.get("max_age_seconds")
     legacy_source = item.get("source")
+    accounts = _parse_accounts(
+        item.get("accounts"),
+        name="config.cost.providers.agy.accounts",
+    )
     legacy_local_fallback = False
     if isinstance(legacy_source, str) and legacy_source.strip():
         legacy_local_fallback = legacy_source.strip().lower() != "unknown"
@@ -254,7 +255,8 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
     return AgyProviderConfig(
         enabled=_bool_value(item.get("enabled"), default=False),
         state_dir=resolved_state_dir,
-        label=str(label) if label else _legacy_agy_label(item.get("accounts")),
+        accounts=accounts,
+        label=str(label) if label else _legacy_agy_label(accounts),
         max_age_seconds=int(max_age) if max_age is not None else 300,
         local_fallback=_bool_value(
             item.get("local_fallback"),

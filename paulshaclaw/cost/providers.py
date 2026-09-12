@@ -167,12 +167,19 @@ def _read_json_file(path: Path) -> dict[str, Any] | None:
     return payload
 
 
-def _agy_account_config(config: AgyProviderConfig) -> CopilotAccountConfig:
-    return CopilotAccountConfig(
-        account_id="agy",
-        label=config.label,
-        kind="personal",
-    )
+def _agy_accounts(config: AgyProviderConfig) -> tuple[CopilotAccountConfig, ...]:
+    configured = tuple(account for account in config.accounts if account.enabled)
+    if not config.accounts:
+        return (
+            CopilotAccountConfig(
+                account_id="agy",
+                label=config.label,
+                kind="personal",
+            ),
+        )
+    if configured:
+        return configured
+    return ()
 
 
 def _file_is_fresh(path: Path, max_age_seconds: int) -> bool:
@@ -604,12 +611,14 @@ def collect_agy(
     if not config.enabled:
         return None
     resolved_now = now or _now_utc()
+    accounts = _agy_accounts(config)
+    base_accounts = tuple(_unknown_account(account) for account in accounts)
 
     if not config.local_fallback:
         return ProviderSnapshot(
             source_status="unknown",
             source="unknown",
-            accounts=(),
+            accounts=base_accounts,
             note='source="unknown"',
         )
 
@@ -631,30 +640,33 @@ def collect_agy(
         return ProviderSnapshot(
             source_status="unknown",
             source="unknown",
-            accounts=(),
+            accounts=base_accounts,
             note="agy quota unavailable",
         )
 
-    account = _agy_account_config(config)
-    base_usage = {
-        "account_id": account.account_id,
-        "label": account.label,
-        "kind": account.kind,
-        "monthly_allowance": account.monthly_allowance,
-    }
+    base_usages = [
+        {
+            "account_id": account.account_id,
+            "label": account.label,
+            "kind": account.kind,
+            "monthly_allowance": account.monthly_allowance,
+        }
+        for account in accounts
+    ]
 
     if bool(payload.get("unlimited")):
         return ProviderSnapshot(
             source_status="fresh",
             source="local_observed",
-            accounts=(
+            accounts=tuple(
                 CopilotAccountUsage(
                     used_requests=None,
                     source="local_state",
                     percent_used=None,
                     unlimited=True,
                     **base_usage,
-                ),
+                )
+                for base_usage in base_usages
             ),
             note="agy unlimited quota",
         )
@@ -668,14 +680,15 @@ def collect_agy(
         return ProviderSnapshot(
             source_status="fresh",
             source="local_observed",
-            accounts=(
+            accounts=tuple(
                 CopilotAccountUsage(
                     used_requests=None,
                     source="local_state",
                     percent_used=min(100, percent_used),
                     unlimited=False,
                     **base_usage,
-                ),
+                )
+                for base_usage in base_usages
             ),
         )
 
@@ -689,14 +702,15 @@ def collect_agy(
         return ProviderSnapshot(
             source_status="estimated",
             source="local_observed",
-            accounts=(
+            accounts=tuple(
                 CopilotAccountUsage(
                     used_requests=approx_remaining,
                     source="local_observed",
                     percent_used=None,
                     unlimited=False,
                     **base_usage,
-                ),
+                )
+                for base_usage in base_usages
             ),
             note="agy local estimate",
         )
@@ -704,7 +718,7 @@ def collect_agy(
     return ProviderSnapshot(
         source_status="unknown",
         source="unknown",
-        accounts=(),
+        accounts=base_accounts,
         note="agy quota unavailable",
     )
 
