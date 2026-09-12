@@ -187,7 +187,9 @@ def test_collect_agy_local_fallback_requires_fresh_state(tmp_path: Path) -> None
 
 @patch("paulshaclaw.cost.providers.collect_codex")
 @patch("paulshaclaw.cost.providers.collect_claude")
+@patch("paulshaclaw.cost.providers.collect_agy")
 def test_collect_all_omits_disabled_codex_claude_copilot_and_agy(
+    collect_agy_mock,
     collect_claude_mock,
     collect_codex_mock,
 ) -> None:
@@ -209,6 +211,7 @@ def test_collect_all_omits_disabled_codex_claude_copilot_and_agy(
 
     collect_codex_mock.assert_not_called()
     collect_claude_mock.assert_not_called()
+    collect_agy_mock.assert_not_called()
     assert providers == {}
 
 

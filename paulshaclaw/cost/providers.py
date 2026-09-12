@@ -1130,9 +1130,10 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     copilot = collect_copilot(config)
     if copilot.accounts:
         providers["cpt"] = copilot
-    agy = collect_agy(config.agy, now=_now_utc())
-    if agy is not None:
-        providers["agy"] = agy
+    if config.agy.enabled:
+        agy = collect_agy(config.agy, now=_now_utc())
+        if agy is not None:
+            providers["agy"] = agy
     return providers
 
 

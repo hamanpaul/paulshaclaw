@@ -202,6 +202,62 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertIn("#[fg=magenta]91%#[default]#[fg=colour245](1h)#[default]", footer)
         self.assertNotIn("#[fg=red]91%#[default]", footer)
 
+    def test_footer_uses_warning_color_for_local_observed_agy(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "agy": ProviderSnapshot(
+                    source_status="fresh",
+                    source="local_observed",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "agy",
+                            "agy",
+                            "personal",
+                            used_requests=None,
+                            monthly_allowance=None,
+                            source="local_observed",
+                            percent_used=70,
+                        ),
+                    ),
+                )
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("agy #[fg=colour208]~70#[default]", footer)
+
+    def test_footer_uses_estimated_color_for_local_observed_agy(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "agy": ProviderSnapshot(
+                    source_status="estimated",
+                    source="local_observed",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "agy",
+                            "agy",
+                            "personal",
+                            used_requests=None,
+                            monthly_allowance=None,
+                            source="local_observed",
+                            percent_used=70,
+                        ),
+                    ),
+                )
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("agy #[fg=magenta]~70#[default]", footer)
+
     def test_footer_uses_estimated_tmux_style_for_copilot_account(self) -> None:
         snapshot = CostSnapshot(
             generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
