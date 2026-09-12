@@ -33,12 +33,15 @@ cost:
           label: haman           # footer alias shown as cpt haman:...
           kind: personal
           monthly_allowance: 1500
+          enabled: true
         - id: org-a
           label: arc             # footer alias shown as cpt ... arc:...
           kind: company
           monthly_allowance: 300
           org: example-org
+          enabled: true
     claude:
+      enabled: true
       # Trusted source: a local sidecar JSON that you populate from Claude Code's
       # statusLine payload (it delivers the live 5h/weekly rate limits on stdin
       # each refresh). The footer reads exactly this shape:
@@ -57,4 +60,12 @@ cost:
       # Trusted source is enabled by default and uses your Codex CLI auth at
       # ~/.codex/auth.json to query the ChatGPT Codex usage endpoint.
       enabled: true
+      local_fallback: false
+    agy:
+      # 本輪未綁定可釘 schema 的官方 quota endpoint；預設不讀本地 cache，
+      # 因此啟用後在可信來源缺席時會先顯示 agy ?。
+      enabled: false
+      label: agy
+      state_dir: ~/.gemini
+      max_age_seconds: 300
       local_fallback: false

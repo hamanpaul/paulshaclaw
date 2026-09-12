@@ -32,6 +32,7 @@ def _mark_snapshot_stale(snapshot: CostSnapshot) -> CostSnapshot:
     providers = {
         name: ProviderSnapshot(
             source_status="stale" if provider.source_status == "fresh" else provider.source_status,
+            source=provider.source,
             windows=dict(provider.windows),
             accounts=tuple(provider.accounts),
             note=provider.note,
@@ -57,17 +58,82 @@ def _build_degraded_snapshot(config) -> CostSnapshot:
             source="unknown",
         )
         for account in getattr(config, "copilot_accounts", ())
+        if getattr(account, "enabled", True)
     )
-    providers = {
-        "cdx": ProviderSnapshot(source_status="unknown", windows={}),
-        "cc": ProviderSnapshot(source_status="unknown", windows={}),
-    }
+    providers = {}
+    codex = getattr(config, "codex", None)
+    if getattr(codex, "enabled", True):
+        providers["cdx"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
+    claude = getattr(config, "claude", None)
+    if getattr(claude, "enabled", True):
+        providers["cc"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
     if copilot_accounts:
-        providers["cpt"] = ProviderSnapshot(source_status="unknown", accounts=copilot_accounts)
+        providers["cpt"] = ProviderSnapshot(source_status="unknown", source="unknown", accounts=copilot_accounts)
+    agy = getattr(config, "agy", None)
+    if getattr(agy, "enabled", False):
+        providers["agy"] = ProviderSnapshot(
+            source_status="unknown",
+            source="unknown",
+            accounts=(),
+            note='source="unknown"',
+        )
 
     return build_snapshot(
         timezone=getattr(config, "timezone", "Asia/Taipei"),
         cache_status="stale",
+        providers=providers,
+    )
+
+
+def _filter_snapshot_by_enabled(snapshot: CostSnapshot, config) -> CostSnapshot:
+    providers = dict(snapshot.providers)
+    changed = False
+
+    if not getattr(getattr(config, "codex", None), "enabled", True) and "cdx" in providers:
+        providers.pop("cdx", None)
+        changed = True
+    if not getattr(getattr(config, "claude", None), "enabled", True) and "cc" in providers:
+        providers.pop("cc", None)
+        changed = True
+    if not getattr(getattr(config, "agy", None), "enabled", False) and "agy" in providers:
+        providers.pop("agy", None)
+        changed = True
+
+    copilot_provider = providers.get("cpt")
+    copilot_accounts = getattr(config, "copilot_accounts", None)
+    if copilot_provider is not None and copilot_accounts is not None:
+        enabled_account_ids = {
+            account.account_id
+            for account in copilot_accounts
+            if getattr(account, "enabled", True)
+        }
+        accounts = tuple(
+            account
+            for account in copilot_provider.accounts
+            if account.account_id in enabled_account_ids
+        )
+        if accounts != copilot_provider.accounts:
+            changed = True
+            if accounts:
+                providers["cpt"] = ProviderSnapshot(
+                    source_status=copilot_provider.source_status,
+                    source=copilot_provider.source,
+                    windows=dict(copilot_provider.windows),
+                    accounts=accounts,
+                    note=copilot_provider.note,
+                )
+            else:
+                providers.pop("cpt", None)
+        elif not accounts and not enabled_account_ids:
+            providers.pop("cpt", None)
+            changed = True
+
+    if not changed:
+        return snapshot
+    return CostSnapshot(
+        generated_at=snapshot.generated_at,
+        timezone=snapshot.timezone,
+        cache_status=snapshot.cache_status,
         providers=providers,
     )
 
@@ -125,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     try:
-        print(format_footer(snapshot, use_tmux_style=not args.plain))
+        print(format_footer(_filter_snapshot_by_enabled(snapshot, config), use_tmux_style=not args.plain))
     except Exception as error:
         print(_FALLBACK_LINE)
         print(f"stage8 cost status degraded: {error}", file=sys.stderr)

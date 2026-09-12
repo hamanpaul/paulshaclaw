@@ -29,6 +29,7 @@ import pytest
 _DEPLOY_TEST_PREFIXES = (
     "test_stage7_deploy",
     "test_home_isolation",
+    "test_deploy_footer_selection",
     "test_deploy_template_packaging",
 )
 

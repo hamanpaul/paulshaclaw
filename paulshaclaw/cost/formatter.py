@@ -133,6 +133,38 @@ def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_sty
     return " ".join(parts)
 
 
+def _format_agy_value(provider: ProviderSnapshot) -> tuple[str, str]:
+    if provider.accounts:
+        account = provider.accounts[0]
+        if account.unlimited:
+            return "∞", "low"
+        if account.percent_used is not None:
+            if provider.source == "local_observed":
+                level = (
+                    "estimated"
+                    if provider.source_status == "estimated"
+                    else classify_usage(account.percent_used)
+                )
+                return f"~{account.percent_used}", level
+            level = "estimated" if provider.source_status == "estimated" else classify_usage(account.percent_used)
+            return f"{account.percent_used}%", level
+        if account.used_requests is not None:
+            return f"~{_abbrev_count(account.used_requests)}", "estimated"
+    return "?", "neutral"
+
+
+def _format_agy_provider(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
+    stale = provider.source_status == "stale"
+    raw_value, level = _format_agy_value(provider)
+    value = _wrap(
+        raw_value,
+        level,
+        use_tmux_style,
+        stale=stale,
+    )
+    return f"agy {value}"
+
+
 def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str:
     segments: list[str] = []
     for name in ("cdx", "cc"):
@@ -143,6 +175,10 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
     provider = snapshot.providers.get("cpt")
     if provider is not None and provider.accounts:
         segments.append(_format_copilot_provider("cpt", provider, use_tmux_style))
+
+    agy = snapshot.providers.get("agy")
+    if agy is not None:
+        segments.append(_format_agy_provider(agy, use_tmux_style))
 
     # Divider between cdx / cc / cpt so the segments don't blur together, plus a
     # trailing space so the line doesn't sit flush against the terminal edge.
@@ -238,6 +274,9 @@ def format_cockpit_rest(snapshot: CostSnapshot) -> str:
     cpt = snapshot.providers.get("cpt")
     if cpt is not None:
         segments.append(_format_cockpit_cpt(cpt))
+    agy = snapshot.providers.get("agy")
+    if agy is not None:
+        segments.append(_format_agy_provider(agy, True))
     return _join_cockpit_segments(segments)
 
 

@@ -2,8 +2,16 @@ from __future__ import annotations
 
 import argparse
 import json
-from typing import Sequence
+import sys
+from pathlib import Path
+from typing import Any, Sequence
 
+from .agents import (
+    detected_agents_report,
+    detect_agents,
+    prepare_footer_selection,
+    write_footer_config,
+)
 from .installer import (
     ArtifactVerificationError,
     TemplatePreflightError,
@@ -19,6 +27,79 @@ from .planner import build_command_plan
 
 
 SUPPORTED_COMMANDS = ("install", "upgrade", "uninstall", "status", "rollback")
+
+
+def _attach_footer_metadata(
+    payload: dict[str, object],
+    *,
+    detected_agents: Sequence[object],
+    footer_selection: dict[str, Any],
+) -> dict[str, object]:
+    payload["detected_agents"] = detected_agents_report(detected_agents)
+    payload["footer_selection"] = footer_selection
+    return payload
+
+
+def _resolve_footer_home(home_dir: str | None) -> Path | None:
+    if home_dir is None:
+        return None
+    return Path(home_dir).expanduser()
+
+
+def _stream_isatty(stream: object) -> bool:
+    try:
+        isatty = getattr(stream, "isatty")
+    except Exception:
+        return False
+    try:
+        return bool(isatty())
+    except Exception:
+        return False
+
+
+def _skipped_footer_reason(*, apply: bool, stdin: object, stdout: object) -> str:
+    if not apply:
+        return "plan-only"
+    if not (_stream_isatty(stdin) and _stream_isatty(stdout)):
+        return "no-tty"
+    return "config-invalid"
+
+
+def _footer_failure_mode(*, footer: str | None, reason: str | None) -> str:
+    if footer is not None:
+        return "flag"
+    if reason == "config-invalid":
+        return "tui"
+    return "skipped"
+
+
+def _emit_footer_failure(
+    *,
+    command: str,
+    footer: str | None,
+    home_dir: str | None,
+    error: Exception,
+    reason: str | None = None,
+) -> int:
+    payload: dict[str, object] = {
+        "command": command,
+        "status": "failed",
+        "error": str(error),
+    }
+    selection: dict[str, Any] = {
+        "mode": _footer_failure_mode(footer=footer, reason=reason),
+    }
+    if footer is not None:
+        selection["requested"] = footer
+    elif reason is not None:
+        selection["reason"] = reason
+    _attach_footer_metadata(
+        payload,
+        detected_agents=detect_agents(home=_resolve_footer_home(home_dir)),
+        footer_selection=selection,
+    )
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 1
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -44,6 +125,11 @@ def build_parser() -> argparse.ArgumentParser:
                 "--artifact-sha256",
                 default=None,
                 help="期望的 artifact SHA-256；指定後不符即 fail-closed",
+            )
+            subparser.add_argument(
+                "--footer",
+                default=None,
+                help="footer 選擇；支援 codex,claude,copilot[:label...],agy,none",
             )
         if command == "uninstall":
             subparser.add_argument(
@@ -86,6 +172,33 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    footer_detected: tuple[object, ...] | None = None
+    footer_selection: dict[str, Any] | None = None
+    selected_footer: dict[str, object] | None = None
+
+    if args.command in ("install", "upgrade"):
+        try:
+            footer_detected, footer_selection, selected_footer = prepare_footer_selection(
+                footer=args.footer,
+                apply=bool(getattr(args, "apply", False)),
+                home_dir=args.home_dir,
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+            )
+        except (argparse.ArgumentTypeError, ValueError) as exc:
+            return _emit_footer_failure(
+                command=args.command,
+                footer=args.footer,
+                home_dir=args.home_dir,
+                error=exc,
+                reason=_skipped_footer_reason(
+                    apply=bool(getattr(args, "apply", False)),
+                    stdin=sys.stdin,
+                    stdout=sys.stdout,
+                )
+                if args.footer is None
+                else None,
+            )
 
     if args.command == "install" and (args.apply or args.verify):
         try:
@@ -100,8 +213,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact_sha256=args.artifact_sha256,
             )
         except ArtifactVerificationError as exc:
-            print(json.dumps({"command": "install", "status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2))
+            payload = {"command": "install", "status": "failed", "error": str(exc)}
+            if footer_detected is not None and footer_selection is not None:
+                _attach_footer_metadata(
+                    payload,
+                    detected_agents=footer_detected,
+                    footer_selection=footer_selection,
+                )
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 2
+        if exit_code == 0 and args.apply and selected_footer is not None:
+            try:
+                footer_selection["config_write"] = write_footer_config(
+                    selected_footer,
+                    home_dir=args.home_dir,
+                )
+            except Exception as exc:
+                report["status"] = "failed"
+                report["error"] = str(exc)
+                if (
+                    isinstance(exc, ValueError)
+                    and footer_selection.get("mode") == "tui"
+                    and footer_selection.get("config_warning") is not None
+                ):
+                    footer_selection["reason"] = "config-invalid"
+                footer_selection["config_write"] = {
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                exit_code = 1
+        if footer_detected is not None and footer_selection is not None:
+            _attach_footer_metadata(
+                report,
+                detected_agents=footer_detected,
+                footer_selection=footer_selection,
+            )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return exit_code
 
@@ -118,8 +264,41 @@ def main(argv: Sequence[str] | None = None) -> int:
                 artifact_sha256=args.artifact_sha256,
             )
         except ArtifactVerificationError as exc:
-            print(json.dumps({"command": "upgrade", "status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2))
+            payload = {"command": "upgrade", "status": "failed", "error": str(exc)}
+            if footer_detected is not None and footer_selection is not None:
+                _attach_footer_metadata(
+                    payload,
+                    detected_agents=footer_detected,
+                    footer_selection=footer_selection,
+                )
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
             return 2
+        if exit_code == 0 and args.apply and selected_footer is not None:
+            try:
+                footer_selection["config_write"] = write_footer_config(
+                    selected_footer,
+                    home_dir=args.home_dir,
+                )
+            except Exception as exc:
+                report["status"] = "failed"
+                report["error"] = str(exc)
+                if (
+                    isinstance(exc, ValueError)
+                    and footer_selection.get("mode") == "tui"
+                    and footer_selection.get("config_warning") is not None
+                ):
+                    footer_selection["reason"] = "config-invalid"
+                footer_selection["config_write"] = {
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                exit_code = 1
+        if footer_detected is not None and footer_selection is not None:
+            _attach_footer_metadata(
+                report,
+                detected_agents=footer_detected,
+                footer_selection=footer_selection,
+            )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return exit_code
 
@@ -168,6 +347,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 },
                 exc,
             )
+            if footer_detected is None or footer_selection is None:
+                footer_detected = detect_agents(home=_resolve_footer_home(args.home_dir))
+                footer_selection = {"mode": "skipped", "reason": "plan-only"}
+            _attach_footer_metadata(
+                report,
+                detected_agents=footer_detected,
+                footer_selection=footer_selection,
+            )
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return exit_code
         plan_payload = plan.as_dict()
@@ -175,6 +362,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "status": "passed",
             "checked_assets": sorted(prepared),
         }
+        if footer_detected is None or footer_selection is None:
+            footer_detected = detect_agents(home=_resolve_footer_home(args.home_dir))
+            footer_selection = {"mode": "skipped", "reason": "plan-only"}
+        _attach_footer_metadata(
+            plan_payload,
+            detected_agents=footer_detected,
+            footer_selection=footer_selection,
+        )
         print(json.dumps(plan_payload, ensure_ascii=False, indent=2))
         return 0
     print(json.dumps(plan.as_dict(), ensure_ascii=False, indent=2))

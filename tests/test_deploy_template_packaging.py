@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -29,6 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_VERSION = (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 PACKAGE_ROOT = REPO_ROOT / "paulshaclaw"
 TEMPLATE_MARKER = "paulshaclaw/deploy/templates/"
+_MISSING = object()
 
 
 def _load_artifact_checker():
@@ -38,6 +40,64 @@ def _load_artifact_checker():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _run_deploy_main(argv: list[str]) -> tuple[int, str, str]:
+    from io import StringIO
+
+    from paulshaclaw.deploy.__main__ import main
+
+    stdout = StringIO()
+    stderr = StringIO()
+    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        try:
+            exit_code = main(argv)
+        except SystemExit as exc:
+            exit_code = exc.code if isinstance(exc.code, int) else 1
+    return exit_code, stdout.getvalue(), stderr.getvalue()
+
+
+def _stub_install_side_effects(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.installer._ensure_linger_enabled",
+        lambda: "enabled",
+    )
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.installer._run_daemon_reload",
+        lambda: "ran",
+    )
+
+
+def _assert_footer_report(
+    payload: dict[str, object],
+    *,
+    mode: str,
+    fragments: tuple[str, ...],
+    expected_enabled: dict[str, object] | None | object = _MISSING,
+) -> None:
+    assert "detected_agents" in payload
+    detected = payload["detected_agents"]
+    assert isinstance(detected, list)
+    assert [entry["name"] for entry in detected] == ["codex", "claude", "copilot", "agy"]
+    for entry in detected:
+        assert set(entry) == {"name", "binary", "state_present"}
+        assert entry["binary"] is None or isinstance(entry["binary"], str)
+        assert isinstance(entry["state_present"], bool)
+    assert "footer_selection" in payload
+    selection = payload["footer_selection"]
+    assert isinstance(selection, dict)
+    assert selection.get("mode") == mode
+    enabled = selection.get("enabled", _MISSING)
+    if expected_enabled is None:
+        assert "enabled" not in selection
+    else:
+        assert isinstance(enabled, dict)
+        assert set(enabled) == {"codex", "claude", "copilot", "agy"}
+    if expected_enabled not in (_MISSING, None):
+        assert enabled == expected_enabled
+    selection_text = json.dumps(selection, ensure_ascii=False)
+    for fragment in fragments:
+        assert fragment in selection_text
 
 
 def _run_build(source: Path, output_dir: Path, *build_targets: str) -> None:
@@ -268,6 +328,410 @@ def test_plan_only_install_template_failure_is_one_json_report(monkeypatch, tmp_
     assert payload["failed_assets"] == ["state/config/__INSTANCE__.state.json.tmpl"]
 
 
+@pytest.mark.parametrize(
+    ("footer", "expected_fragments", "expected_enabled"),
+    [
+        (
+            "copilot:haman:arc",
+            ("copilot", "haman", "arc"),
+            {
+                "codex": False,
+                "claude": False,
+                "copilot": {"hamanpaul": True, "org-a": True},
+                "agy": False,
+            },
+        ),
+        (
+            "none",
+            ("none",),
+            {
+                "codex": False,
+                "claude": False,
+                "copilot": {"hamanpaul": False, "org-a": False},
+                "agy": False,
+            },
+        ),
+    ],
+)
+def test_install_apply_reports_explicit_footer_selection(
+    monkeypatch,
+    tmp_path: Path,
+    footer: str,
+    expected_fragments: tuple[str, ...],
+    expected_enabled: dict[str, object],
+) -> None:
+    _stub_install_side_effects(monkeypatch)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            footer,
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    _assert_footer_report(
+        payload,
+        mode="flag",
+        fragments=expected_fragments,
+        expected_enabled=expected_enabled,
+    )
+
+
+def test_install_apply_invalid_footer_flag_reports_single_json_failure(monkeypatch, tmp_path: Path) -> None:
+    def fail_run_install(*args, **kwargs):
+        raise AssertionError("run_install should not be called")
+
+    monkeypatch.setattr("paulshaclaw.deploy.__main__.run_install", fail_run_install)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            "copilot:",
+        ]
+    )
+
+    assert exit_code != 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "--footer 格式錯誤" in payload["error"]
+    assert payload["footer_selection"]["requested"] == "copilot:"
+    assert not (tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml").exists()
+
+
+def test_install_apply_unknown_footer_label_reports_single_json_failure(monkeypatch, tmp_path: Path) -> None:
+    def fail_run_install(*args, **kwargs):
+        raise AssertionError("run_install should not be called")
+
+    monkeypatch.setattr("paulshaclaw.deploy.__main__.run_install", fail_run_install)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            "copilot:missing",
+        ]
+    )
+
+    assert exit_code != 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "找不到已設定的 label/id：missing" in payload["error"]
+    assert payload["footer_selection"]["requested"] == "copilot:missing"
+    assert not (tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    ("argv", "tty", "expected_reason"),
+    [
+        (
+            [
+                "install",
+                "--apply",
+                "--instance",
+                "demo-agent",
+                "--root-dir",
+                "/srv/paulshaclaw",
+            ],
+            False,
+            "no-tty",
+        ),
+        (
+            [
+                "install",
+                "--verify",
+                "--instance",
+                "demo-agent",
+                "--root-dir",
+                "/srv/paulshaclaw",
+            ],
+            True,
+            "plan-only",
+        ),
+    ],
+)
+def test_install_footer_failure_without_explicit_footer_reports_reason(
+    monkeypatch,
+    argv: list[str],
+    tty: bool,
+    expected_reason: str,
+) -> None:
+    def fail_prepare_footer_selection(**kwargs):
+        raise ValueError("設定檔解析失敗：boom")
+
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__.prepare_footer_selection",
+        fail_prepare_footer_selection,
+    )
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: tty)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: tty)
+
+    exit_code, stdout, stderr = _run_deploy_main(argv)
+
+    assert exit_code == 1
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "設定檔解析失敗：boom" in payload["error"]
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=(expected_reason,),
+        expected_enabled=None,
+    )
+
+
+def test_install_footer_failure_with_apply_tty_reports_tui_reason(monkeypatch) -> None:
+    def fail_prepare_footer_selection(**kwargs):
+        raise ValueError("設定檔解析失敗：boom")
+
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__.prepare_footer_selection",
+        fail_prepare_footer_selection,
+    )
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__._stream_isatty",
+        lambda stream: True,
+    )
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+        ]
+    )
+
+    assert exit_code == 1
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert "設定檔解析失敗：boom" in payload["error"]
+    _assert_footer_report(
+        payload,
+        mode="tui",
+        fragments=("config-invalid",),
+        expected_enabled=None,
+    )
+
+
+def test_install_apply_skips_footer_selection_without_tty(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _stub_install_side_effects(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("no-tty",),
+        expected_enabled=None,
+    )
+
+
+def test_install_plan_only_reports_skipped_footer_selection() -> None:
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("plan-only",),
+        expected_enabled=None,
+    )
+
+
+def test_install_apply_skipped_footer_selection_ignores_invalid_config_without_tty(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    _stub_install_side_effects(monkeypatch)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+
+    home_dir = tmp_path / "home"
+    config_path = home_dir / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
+    config_path.parent.mkdir(parents=True)
+    broken_yaml = "cost: [broken\n"
+    config_path.write_text(broken_yaml, encoding="utf-8")
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(home_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "ok"
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("no-tty",),
+        expected_enabled=None,
+    )
+    assert config_path.read_text(encoding="utf-8") == broken_yaml
+    assert not list(config_path.parent.glob("paulshaclaw.yaml.bak-*"))
+
+
+def test_install_verify_only_reports_plan_only_footer_selection(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__.run_install",
+        lambda *args, **kwargs: ({"command": "install", "status": "ok"}, 0),
+    )
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--verify",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "ok"
+    _assert_footer_report(
+        payload,
+        mode="skipped",
+        fragments=("plan-only",),
+        expected_enabled=None,
+    )
+
+
+def test_install_apply_tui_invalid_config_reports_config_invalid(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr("paulshaclaw.deploy.agents._isatty", lambda stream: True)
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.footer_select.run_footer_selection",
+        lambda **_: {
+            "raw": "codex",
+            "disable_all": False,
+            "providers": {"codex": {"enabled": True}},
+        },
+    )
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.__main__.run_install",
+        lambda *args, **kwargs: ({"command": "install", "status": "ok"}, 0),
+    )
+
+    home_dir = tmp_path / "home"
+    config_path = home_dir / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("cost: 5\n", encoding="utf-8")
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(home_dir),
+        ]
+    )
+
+    assert exit_code == 1
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["status"] == "failed"
+    assert payload["error"] == "config.cost 必須是 mapping"
+    _assert_footer_report(
+        payload,
+        mode="tui",
+        fragments=("config-invalid", "config.cost 必須是 mapping"),
+        expected_enabled={
+            "codex": True,
+            "claude": False,
+            "copilot": {},
+            "agy": False,
+        },
+    )
+    assert payload["footer_selection"]["config_warning"] == "config.cost 必須是 mapping"
+    assert payload["footer_selection"]["config_write"] == {
+        "status": "failed",
+        "error": "config.cost 必須是 mapping",
+    }
+    assert config_path.read_text(encoding="utf-8") == "cost: 5\n"
+    assert not list(config_path.parent.glob("paulshaclaw.yaml.bak-*"))
+
+
 def test_status_and_uninstall_apply_ignore_missing_templates(monkeypatch, tmp_path: Path, capsys) -> None:
     template_root = _template_checkout_without_last_asset(tmp_path)
     monkeypatch.setattr(planner, "TEMPLATE_ROOT", template_root)
@@ -379,6 +843,7 @@ def test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout(tmp_path: 
     assert completed.returncode == 0, completed.stderr
     payload = json.loads(completed.stdout)
     assert payload["status"] == "ok"
+    _assert_footer_report(payload, mode="skipped", fragments=(), expected_enabled=None)
     expected_plan = build_command_plan(
         "install", instance_name="wheel-agent", root_dir="/srv/paulshaclaw"
     )

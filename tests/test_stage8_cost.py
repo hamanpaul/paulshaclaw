@@ -63,6 +63,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
             providers={
                 "cdx": ProviderSnapshot(
                     source_status="fresh",
+                    source="api",
                     windows={
                         "five_hour": UsageWindow(
                             used_percent=18,
@@ -76,9 +77,10 @@ class Stage8ModelFormatterTests(unittest.TestCase):
                         ),
                     },
                 ),
-                "cc": ProviderSnapshot(source_status="unknown", windows={}),
+                "cc": ProviderSnapshot(source_status="unknown", source="unknown", windows={}),
                 "cpt": ProviderSnapshot(
                     source_status="fresh",
+                    source="api",
                     accounts=(
                         CopilotAccountUsage(
                             account_id="hamanpaul",
@@ -96,10 +98,13 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         payload = snapshot.to_jsonable()
         encoded = json.dumps(payload, ensure_ascii=False)
         decoded = json.loads(encoded)
+        reloaded = load_snapshot_payload(decoded)
 
         self.assertEqual(decoded["timezone"], "Asia/Taipei")
+        self.assertEqual(decoded["providers"]["cdx"]["source"], "api")
         self.assertEqual(decoded["providers"]["cdx"]["windows"]["five_hour"]["display_reset"], "15:21")
         self.assertEqual(decoded["providers"]["cpt"]["accounts"][0]["label"], "haman")
+        self.assertEqual(reloaded.providers["cdx"].source, "api")
 
     def test_footer_renders_balanced_format(self) -> None:
         snapshot = CostSnapshot(
@@ -196,6 +201,62 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertIn("cdx?", footer)
         self.assertIn("#[fg=magenta]91%#[default]#[fg=colour245](1h)#[default]", footer)
         self.assertNotIn("#[fg=red]91%#[default]", footer)
+
+    def test_footer_uses_warning_color_for_local_observed_agy(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "agy": ProviderSnapshot(
+                    source_status="fresh",
+                    source="local_observed",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "agy",
+                            "agy",
+                            "personal",
+                            used_requests=None,
+                            monthly_allowance=None,
+                            source="local_observed",
+                            percent_used=70,
+                        ),
+                    ),
+                )
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("agy #[fg=colour208]~70#[default]", footer)
+
+    def test_footer_uses_estimated_color_for_local_observed_agy(self) -> None:
+        snapshot = CostSnapshot(
+            generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
+            timezone="Asia/Taipei",
+            cache_status="fresh",
+            providers={
+                "agy": ProviderSnapshot(
+                    source_status="estimated",
+                    source="local_observed",
+                    accounts=(
+                        CopilotAccountUsage(
+                            "agy",
+                            "agy",
+                            "personal",
+                            used_requests=None,
+                            monthly_allowance=None,
+                            source="local_observed",
+                            percent_used=70,
+                        ),
+                    ),
+                )
+            },
+        )
+
+        footer = format_footer(snapshot)
+
+        self.assertIn("agy #[fg=magenta]~70#[default]", footer)
 
     def test_footer_uses_estimated_tmux_style_for_copilot_account(self) -> None:
         snapshot = CostSnapshot(
@@ -1300,7 +1361,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers.collect_codex",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
-            ),
+            ) as codex,
             patch(
                 "paulshaclaw.cost.providers.collect_claude",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
@@ -1308,11 +1369,13 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers.collect_copilot",
                 return_value=ProviderSnapshot(source_status="unknown", accounts=()),
-            ),
+            ) as copilot,
         ):
             providers = collect_all(cfg)
 
-        self.assertEqual(set(providers), {"cdx", "cc"})
+        codex.assert_not_called()
+        copilot.assert_called_once_with(cfg)
+        self.assertEqual(set(providers), {"cc"})
 
     def test_collect_all_includes_copilot_when_accounts_are_configured(self) -> None:
         cfg = CostConfig(
@@ -1340,7 +1403,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             patch(
                 "paulshaclaw.cost.providers.collect_codex",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
-            ),
+            ) as codex,
             patch(
                 "paulshaclaw.cost.providers.collect_claude",
                 return_value=ProviderSnapshot(source_status="unknown", windows={}),
@@ -1364,7 +1427,8 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         ):
             providers = collect_all(cfg)
 
-        self.assertEqual(set(providers), {"cdx", "cc", "cpt"})
+        codex.assert_not_called()
+        self.assertEqual(set(providers), {"cc", "cpt"})
         self.assertEqual(providers["cpt"].accounts[0].account_id, "fresh-user")
 
     def test_collect_all_passes_claude_and_codex_config(self) -> None:
@@ -1376,7 +1440,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                 local_fallback=True,
             ),
             codex=CodexProviderConfig(
-                enabled=False,
+                enabled=True,
                 auth_path=Path("/tmp/codex.json"),
                 usage_url="https://example.invalid/usage",
                 max_age_seconds=34,
@@ -1407,7 +1471,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             timezone="UTC",
         )
         codex.assert_called_once_with(
-            enabled=False,
+            enabled=True,
             auth_path=Path("/tmp/codex.json"),
             usage_url="https://example.invalid/usage",
             max_age_seconds=34,
@@ -2699,6 +2763,33 @@ class Stage8CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("cpt haman:--", stdout.getvalue())
+        cache.lock.assert_not_called()
+        build_current_snapshot.assert_not_called()
+
+    def test_status_main_no_refresh_degrades_without_cache_when_codex_disabled(self) -> None:
+        config = CostConfig(
+            cache_dir=Path("/ignored"),
+            cache_ttl_seconds=120,
+            codex=CodexProviderConfig(enabled=False),
+            claude=ClaudeProviderConfig(enabled=True),
+        )
+        cache = Mock()
+        cache.read_if_fresh.return_value = None
+        cache.read_stale.return_value = None
+        stdout = StringIO()
+
+        with (
+            patch.object(cost_status_cli, "load_cost_config", return_value=config),
+            patch.object(cost_status_cli, "SnapshotCache", return_value=cache),
+            patch.object(cost_status_cli, "format_footer", wraps=format_footer),
+            patch.object(cost_status_cli, "build_current_snapshot") as build_current_snapshot,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = cost_status_cli.main(["--plain", "--no-refresh"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue().strip(), "cc 5h:-- wk:--")
+        self.assertNotIn("cdx", stdout.getvalue())
         cache.lock.assert_not_called()
         build_current_snapshot.assert_not_called()
 

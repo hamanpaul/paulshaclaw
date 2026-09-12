@@ -138,6 +138,9 @@ def _load_provider(raw: Any) -> ProviderSnapshot:
     source_status = raw.get("source_status")
     if not isinstance(source_status, str) or not source_status:
         source_status = "unknown"
+    source = raw.get("source")
+    if not isinstance(source, str) or not source:
+        source = "unknown"
 
     windows_raw = raw.get("windows")
     windows: dict[str, UsageWindow] = {}
@@ -156,6 +159,7 @@ def _load_provider(raw: Any) -> ProviderSnapshot:
 
     return ProviderSnapshot(
         source_status=source_status,
+        source=source,
         windows=windows,
         accounts=tuple(accounts),
         note=raw.get("note") if isinstance(raw.get("note"), str) else None,

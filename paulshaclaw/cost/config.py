@@ -5,8 +5,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import yaml
-
 from paulshaclaw.config import paths
 
 ENV_CONFIG_VAR = "PAULSHACLAW_CONFIG"
@@ -43,10 +41,12 @@ class CopilotAccountConfig:
     monthly_allowance: int | None = None
     org: str | None = None
     enterprise: str | None = None
+    enabled: bool = True
 
 
 @dataclass(frozen=True)
 class ClaudeProviderConfig:
+    enabled: bool = True
     statusline_sidecar: Path = field(
         default_factory=default_claude_statusline_sidecar
     )
@@ -63,6 +63,19 @@ class CodexProviderConfig:
     local_fallback: bool = False
 
 
+def default_agy_state_dir() -> Path:
+    return paths.home_path(".gemini")
+
+
+@dataclass(frozen=True)
+class AgyProviderConfig:
+    enabled: bool = False
+    state_dir: Path = field(default_factory=default_agy_state_dir)
+    label: str = "agy"
+    max_age_seconds: int = 300
+    local_fallback: bool = False
+
+
 @dataclass(frozen=True)
 class CostConfig:
     timezone: str = "Asia/Taipei"
@@ -75,6 +88,7 @@ class CostConfig:
     log_path: Path = field(default_factory=default_cost_log_path)
     claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
     codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
+    agy: AgyProviderConfig = field(default_factory=AgyProviderConfig)
 
 
 def _resolve_config_source(config_path: Path | None) -> Path | None:
@@ -97,6 +111,10 @@ def _load_payload(config_path: Path | None) -> dict[str, Any]:
         return {}
     if not resolved.exists():
         raise FileNotFoundError(f"設定檔不存在：{resolved}")
+    try:
+        import yaml
+    except ModuleNotFoundError as error:  # pragma: no cover - thin runtime path
+        raise ModuleNotFoundError("PyYAML is required to read paulshaclaw YAML config") from error
     try:
         payload = yaml.safe_load(resolved.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as error:
@@ -128,25 +146,28 @@ def _bool_value(value: Any, *, default: bool) -> bool:
     raise ValueError(f"布林設定值無法解析：{value}")
 
 
-def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
+def _parse_accounts(
+    raw: Any,
+    *,
+    name: str,
+) -> tuple[CopilotAccountConfig, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list):
-        raise ValueError("config.cost.providers.copilot.accounts 必須是清單")
+        raise ValueError(f"{name} 必須是清單")
 
     items: list[CopilotAccountConfig] = []
     for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
-            raise ValueError(f"config.cost.providers.copilot.accounts[{index}] 必須是 mapping")
+            raise ValueError(f"{name}[{index}] 必須是 mapping")
         account_id = entry.get("id")
         if not account_id:
-            raise ValueError(f"config.cost.providers.copilot.accounts[{index}].id 缺失")
+            raise ValueError(f"{name}[{index}].id 缺失")
         label = entry.get("label", account_id)
         kind = entry.get("kind", "personal")
         if kind not in {"personal", "company"}:
             raise ValueError(
-                "config.cost.providers.copilot.accounts"
-                f"[{index}].kind 必須是 'personal' 或 'company'"
+                f"{name}[{index}].kind 必須是 'personal' 或 'company'"
             )
 
         monthly_allowance = entry.get("monthly_allowance")
@@ -160,6 +181,7 @@ def _parse_copilot_accounts(raw: Any) -> tuple[CopilotAccountConfig, ...]:
                 enterprise=(
                     None if entry.get("enterprise") is None else str(entry.get("enterprise"))
                 ),
+                enabled=_bool_value(entry.get("enabled"), default=True),
             )
         )
     return tuple(items)
@@ -170,6 +192,7 @@ def _parse_claude_provider(raw: Any) -> ClaudeProviderConfig:
     sidecar = item.get("statusline_sidecar")
     max_age = item.get("max_age_seconds")
     return ClaudeProviderConfig(
+        enabled=_bool_value(item.get("enabled"), default=True),
         statusline_sidecar=(
             Path(str(sidecar)).expanduser()
             if sidecar
@@ -198,14 +221,60 @@ def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
     )
 
 
-def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
-    payload = _load_payload(config_path)
+def _legacy_agy_label(raw: Any) -> str:
+    accounts = _parse_accounts(
+        raw,
+        name="config.cost.providers.agy.accounts",
+    )
+    if not accounts:
+        return "agy"
+    for account in accounts:
+        if account.enabled:
+            return account.label
+    return accounts[0].label
+
+
+def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
+    item = _mapping(raw, "config.cost.providers.agy")
+    state_dir = item.get("state_dir")
+    legacy_state_path = item.get("state_path")
+    max_age = item.get("max_age_seconds")
+    legacy_source = item.get("source")
+    legacy_local_fallback = False
+    if isinstance(legacy_source, str) and legacy_source.strip():
+        legacy_local_fallback = legacy_source.strip().lower() != "unknown"
+    resolved_state_dir = default_agy_state_dir()
+    if state_dir:
+        resolved_state_dir = Path(str(state_dir)).expanduser()
+    elif legacy_state_path:
+        resolved_state_dir = Path(str(legacy_state_path)).expanduser()
+        if resolved_state_dir.suffix:
+            resolved_state_dir = resolved_state_dir.parent
+    label = item.get("label")
+    return AgyProviderConfig(
+        enabled=_bool_value(item.get("enabled"), default=False),
+        state_dir=resolved_state_dir,
+        label=str(label) if label else _legacy_agy_label(item.get("accounts")),
+        max_age_seconds=int(max_age) if max_age is not None else 300,
+        local_fallback=_bool_value(
+            item.get("local_fallback"),
+            default=legacy_local_fallback,
+        ),
+    )
+
+
+def parse_cost_config_payload(payload: dict[str, Any] | None) -> CostConfig:
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise ValueError("設定檔必須是 mapping")
 
     cost = _mapping(payload.get("cost"), "config.cost")
     providers = _mapping(cost.get("providers"), "config.cost.providers")
     copilot = _mapping(providers.get("copilot"), "config.cost.providers.copilot")
     claude = _mapping(providers.get("claude"), "config.cost.providers.claude")
     codex = _mapping(providers.get("codex"), "config.cost.providers.codex")
+    agy = _mapping(providers.get("agy"), "config.cost.providers.agy")
     colors = _mapping(cost.get("colors"), "config.cost.colors")
 
     cache_dir_raw = cost.get("cache_dir")
@@ -217,9 +286,13 @@ def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
         tmux_refresh_seconds=int(cost.get("tmux_refresh_seconds", 30)),
         warning_percent=int(colors.get("warning_percent", 70)),
         critical_percent=int(colors.get("critical_percent", 90)),
-        copilot_accounts=_parse_copilot_accounts(copilot.get("accounts")),
+        copilot_accounts=_parse_accounts(
+            copilot.get("accounts"),
+            name="config.cost.providers.copilot.accounts",
+        ),
         claude=_parse_claude_provider(claude),
         codex=_parse_codex_provider(codex),
+        agy=_parse_agy_provider(agy),
         cache_dir=(
             Path(str(cache_dir_raw)).expanduser()
             if cache_dir_raw
@@ -231,3 +304,8 @@ def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
             else default_cost_log_path()
         ),
     )
+
+
+def load_cost_config(*, config_path: Path | None = None) -> CostConfig:
+    payload = _load_payload(config_path)
+    return parse_cost_config_payload(payload)
