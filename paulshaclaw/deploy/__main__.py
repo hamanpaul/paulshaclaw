@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
             subparser.add_argument(
                 "--footer",
                 default=None,
-                help="footer 選擇；支援 codex,claude,copilot[:label...],agy,none",
+                help="footer 選擇；支援 codex,claude,copilot[:label...],agy[:label...],none",
             )
         if command == "uninstall":
             subparser.add_argument(

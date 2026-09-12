@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+import yaml
 
 from paulshaclaw.deploy import (
     build_command_plan,
@@ -386,6 +387,96 @@ def test_install_apply_reports_explicit_footer_selection(
         fragments=expected_fragments,
         expected_enabled=expected_enabled,
     )
+
+
+def test_install_apply_footer_agy_label_enables_only_matching_declared_account(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """#343 e2e: pre-declared agy accounts[], `--footer agy:me` enables only
+    the matching account and leaves the other declared one disabled."""
+    _stub_install_side_effects(monkeypatch)
+    home = tmp_path / "home"
+    config_path = home / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "cost": {
+                    "providers": {
+                        "agy": {
+                            "enabled": False,
+                            "accounts": [
+                                {"id": "me", "label": "me", "enabled": False},
+                                {"id": "work", "label": "work", "enabled": False},
+                            ],
+                        }
+                    }
+                }
+            },
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(home),
+            "--footer",
+            "agy:me",
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["footer_selection"]["enabled"]["agy"] == {"me": True, "work": False}
+
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    accounts = {account["id"]: account["enabled"] for account in written["cost"]["providers"]["agy"]["accounts"]}
+    assert accounts == {"me": True, "work": False}
+
+
+def test_install_apply_footer_agy_new_label_bootstraps_account_against_sample_fallback(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """#343 e2e: bundled sample has no agy accounts[] declared, so
+    `--footer agy:new` bootstraps a brand-new entry (D-A) instead of failing
+    the way an undeclared copilot label would."""
+    _stub_install_side_effects(monkeypatch)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            "/srv/paulshaclaw",
+            "--home-dir",
+            str(tmp_path / "home"),
+            "--footer",
+            "agy:new",
+        ]
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    payload = json.loads(stdout)
+    assert payload["footer_selection"]["enabled"]["agy"] == {"new": True}
+
+    config_path = tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
+    written = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    accounts = {account["id"]: account for account in written["cost"]["providers"]["agy"]["accounts"]}
+    assert accounts["new"] == {"id": "new", "label": "new", "enabled": True}
 
 
 def test_install_apply_invalid_footer_flag_reports_single_json_failure(monkeypatch, tmp_path: Path) -> None:

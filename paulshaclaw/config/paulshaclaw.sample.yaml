@@ -90,3 +90,12 @@ cost:
       state_dir: ~/.gemini
       max_age_seconds: 300
       local_fallback: false
+      # 多帳號（#343，選用；預設不設定，不自動枚舉/讀取 ~/.gemini/google_accounts.json
+      # 等任何帳號檔——accounts[] 只來自你在這裡手動宣告，或 `--footer agy:<label>`）：
+      # accounts:
+      #   - id: me
+      #     label: me
+      #     enabled: true
+      #   - id: work
+      #     label: work
+      #     enabled: false

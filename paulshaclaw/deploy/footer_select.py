@@ -108,12 +108,12 @@ def _selection_raw(providers: dict[str, dict[str, object]]) -> str | None:
         details = providers.get(provider)
         if not isinstance(details, dict):
             continue
-        if provider == "copilot":
+        if provider in ("copilot", "agy"):
             labels = list(details.get("labels", []))
             if details.get("all_accounts"):
-                tokens.append("copilot")
+                tokens.append(provider)
             elif labels:
-                tokens.append("copilot:" + ":".join(labels))
+                tokens.append(provider + ":" + ":".join(labels))
             continue
         tokens.append(provider)
     return ",".join(tokens)
@@ -131,7 +131,7 @@ def selection_from_values(selected_values: set[str]) -> dict[str, object]:
             for value in selected_values
             if value.startswith(f"account:{provider}:")
         )
-        if provider == "copilot":
+        if provider in ("copilot", "agy"):
             if provider_selected or labels:
                 details: dict[str, object] = {"enabled": True}
                 if labels:
@@ -195,8 +195,16 @@ def build_selection_options(
         FooterSelectionOption(
             label=f"agy{_provider_suffix('agy', detected_by_name)}",
             value=_provider_value("agy"),
-            selected=config.agy.enabled and agy_detected,
+            selected=config.agy.effective_enabled and agy_detected,
         )
+    )
+    options.extend(
+        FooterSelectionOption(
+            label=f"  └─ agy:{account.label}",
+            value=_account_value("agy", account.label),
+            selected=account.enabled and agy_detected,
+        )
+        for account in config.agy.accounts
     )
     return options
 

@@ -69,6 +69,9 @@ def test_parse_footer_argument_supports_multi_provider_and_bare_copilot() -> Non
     assert parsed["providers"]["copilot"]["all_accounts"] is False
     assert bare_copilot["providers"]["copilot"]["all_accounts"] is True
     assert none["disable_all"] is True
+    # #343: bare "agy" token now returns the same {enabled,labels,all_accounts}
+    # shape as copilot instead of the old plain {"enabled": True}.
+    assert parsed["providers"]["agy"] == {"enabled": True, "labels": [], "all_accounts": True}
 
 
 def test_never_read_declares_required_home_relative_gemini_paths() -> None:

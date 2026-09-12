@@ -157,12 +157,16 @@ def _load_provider(raw: Any) -> ProviderSnapshot:
             if account is not None:
                 accounts.append(account)
 
+    label_raw = raw.get("label")
+    label = label_raw if isinstance(label_raw, str) and label_raw else None
+
     return ProviderSnapshot(
         source_status=source_status,
         source=source,
         windows=windows,
         accounts=tuple(accounts),
         note=raw.get("note") if isinstance(raw.get("note"), str) else None,
+        label=label,
     )
 
 

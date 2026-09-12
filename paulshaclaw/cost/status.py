@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 from pathlib import Path
 
@@ -36,6 +37,7 @@ def _mark_snapshot_stale(snapshot: CostSnapshot) -> CostSnapshot:
             windows=dict(provider.windows),
             accounts=tuple(provider.accounts),
             note=provider.note,
+            label=provider.label,
         )
         for name, provider in snapshot.providers.items()
     }
@@ -70,12 +72,14 @@ def _build_degraded_snapshot(config) -> CostSnapshot:
     if copilot_accounts:
         providers["cpt"] = ProviderSnapshot(source_status="unknown", source="unknown", accounts=copilot_accounts)
     agy = getattr(config, "agy", None)
-    if getattr(agy, "enabled", False):
+    if getattr(agy, "effective_enabled", False):
+        active = getattr(agy, "active_account", None)
         providers["agy"] = ProviderSnapshot(
             source_status="unknown",
             source="unknown",
             accounts=(),
             note='source="unknown"',
+            label=active.label if active is not None else None,
         )
 
     return build_snapshot(
@@ -95,9 +99,17 @@ def _filter_snapshot_by_enabled(snapshot: CostSnapshot, config) -> CostSnapshot:
     if not getattr(getattr(config, "claude", None), "enabled", True) and "cc" in providers:
         providers.pop("cc", None)
         changed = True
-    if not getattr(getattr(config, "agy", None), "enabled", False) and "agy" in providers:
+    agy_config = getattr(config, "agy", None)
+    if not getattr(agy_config, "effective_enabled", False) and "agy" in providers:
         providers.pop("agy", None)
         changed = True
+    elif "agy" in providers and agy_config is not None:
+        active = getattr(agy_config, "active_account", None)
+        active_label = active.label if active is not None else None
+        agy_provider = providers["agy"]
+        if agy_provider.label != active_label:
+            providers["agy"] = dataclasses.replace(agy_provider, label=active_label)
+            changed = True
 
     copilot_provider = providers.get("cpt")
     copilot_accounts = getattr(config, "copilot_accounts", None)
@@ -121,6 +133,7 @@ def _filter_snapshot_by_enabled(snapshot: CostSnapshot, config) -> CostSnapshot:
                     windows=dict(copilot_provider.windows),
                     accounts=accounts,
                     note=copilot_provider.note,
+                    label=copilot_provider.label,
                 )
             else:
                 providers.pop("cpt", None)

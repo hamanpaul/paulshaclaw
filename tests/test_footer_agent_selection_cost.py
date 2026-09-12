@@ -278,6 +278,8 @@ def test_collect_agy_parses_percent_usage(tmp_path: Path) -> None:
     assert provider.source == "local_observed"
     assert provider.accounts[0].label == "primary"
     assert provider.accounts[0].percent_used == 42
+    # #343: no accounts[] declared -> no multi-account label attached.
+    assert provider.label is None
 
 
 def test_collect_agy_allows_default_now_when_state_is_fresh(tmp_path: Path) -> None:

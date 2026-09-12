@@ -68,6 +68,13 @@ def default_agy_state_dir() -> Path:
 
 
 @dataclass(frozen=True)
+class AgyAccountConfig:
+    account_id: str
+    label: str
+    enabled: bool = True
+
+
+@dataclass(frozen=True)
 class AgyProviderConfig:
     enabled: bool = False
     state_dir: Path = field(default_factory=default_agy_state_dir)
@@ -87,6 +94,22 @@ class AgyProviderConfig:
     # rendered at all (falling through to local_fallback/unknown) rather
     # than showing arbitrarily stale numbers forever.
     stale_max_age_seconds: int = 3600
+    # #343: only ever populated from explicit user declaration (yaml or
+    # `--footer agy:<label>`) — never auto-enumerated from
+    # `~/.gemini/google_accounts.json` (that would break the #341 R4
+    # zero-read guard on PII-bearing account-identity files).
+    accounts: tuple[AgyAccountConfig, ...] = ()
+
+    @property
+    def active_account(self) -> AgyAccountConfig | None:
+        for account in self.accounts:
+            if account.enabled:
+                return account
+        return None
+
+    @property
+    def effective_enabled(self) -> bool:
+        return self.enabled and (not self.accounts or self.active_account is not None)
 
 
 @dataclass(frozen=True)
@@ -234,11 +257,35 @@ def _parse_codex_provider(raw: Any) -> CodexProviderConfig:
     )
 
 
-def _legacy_agy_label(raw: Any) -> str:
-    accounts = _parse_accounts(
-        raw,
-        name="config.cost.providers.agy.accounts",
-    )
+def _parse_agy_accounts(
+    raw: Any,
+    *,
+    name: str,
+) -> tuple[AgyAccountConfig, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{name} 必須是清單")
+
+    items: list[AgyAccountConfig] = []
+    for index, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{name}[{index}] 必須是 mapping")
+        account_id = entry.get("id")
+        if not account_id:
+            raise ValueError(f"{name}[{index}].id 缺失")
+        label = entry.get("label", account_id)
+        items.append(
+            AgyAccountConfig(
+                account_id=str(account_id),
+                label=str(label),
+                enabled=_bool_value(entry.get("enabled"), default=True),
+            )
+        )
+    return tuple(items)
+
+
+def _agy_label_from_accounts(accounts: tuple[AgyAccountConfig, ...]) -> str:
     if not accounts:
         return "agy"
     for account in accounts:
@@ -269,10 +316,14 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
     timeout_seconds = item.get("timeout_seconds")
     cli_path = item.get("cli_path")
     stale_max_age = item.get("stale_max_age_seconds")
+    accounts = _parse_agy_accounts(
+        item.get("accounts"),
+        name="config.cost.providers.agy.accounts",
+    )
     return AgyProviderConfig(
         enabled=_bool_value(item.get("enabled"), default=False),
         state_dir=resolved_state_dir,
-        label=str(label) if label else _legacy_agy_label(item.get("accounts")),
+        label=str(label) if label else _agy_label_from_accounts(accounts),
         max_age_seconds=int(max_age) if max_age is not None else 300,
         local_fallback=_bool_value(
             item.get("local_fallback"),
@@ -283,6 +334,7 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
         timeout_seconds=int(timeout_seconds) if timeout_seconds is not None else 20,
         cli_path=str(cli_path) if cli_path else None,
         stale_max_age_seconds=int(stale_max_age) if stale_max_age is not None else 3600,
+        accounts=accounts,
     )
 
 
