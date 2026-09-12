@@ -1198,6 +1198,65 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(merged["cc"].source_status, "stale")
         self.assertEqual(merged["cc"].windows["five_hour"].used_percent, 61)
 
+    def test_carry_forward_degraded_skips_self_managed_providers(self) -> None:
+        """#353: agy 自管 stale（sidecar 年齡上限），快取不得把它的舊視窗復活。"""
+        old = {
+            "agy": ProviderSnapshot(
+                source_status="fresh",
+                source="cli",
+                windows={"five_hour": UsageWindow(used_percent=10, reset_at=None, display_reset="7h")},
+            ),
+            "cc": ProviderSnapshot(
+                source_status="fresh",
+                source="statusline",
+                windows={"five_hour": UsageWindow(used_percent=20, reset_at=None, display_reset="1h")},
+            ),
+        }
+        new = {
+            "agy": ProviderSnapshot(source_status="unknown", source="unknown", windows={}, note="agy cli:nonzero"),
+            "cc": ProviderSnapshot(source_status="unknown", source="unknown", windows={}),
+        }
+
+        merged = carry_forward_degraded(new, old, skip=("agy",))
+
+        assert merged["agy"] is new["agy"]
+        assert merged["agy"].windows == {}
+        assert merged["cc"].source_status == "stale"
+        assert merged["cc"].windows["five_hour"].used_percent == 20
+
+    def test_build_current_snapshot_skips_agy_in_carry_forward(self) -> None:
+        """#353: cost __main__ 呼叫 carry_forward_degraded 時必須把 agy 列入 skip。"""
+        from unittest import mock
+
+        from paulshaclaw.cost import __main__ as cost_main
+
+        captured: dict[str, object] = {}
+
+        def fake_carry(new, old, **kwargs):
+            captured.update(kwargs)
+            return new
+
+        class _Cache:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def read_stale(self):
+                return type("Prev", (), {"providers": {}})()
+
+            def write(self, snapshot):
+                captured["written"] = snapshot
+
+        config = load_cost_config(config_path=None)
+        with (
+            mock.patch.object(cost_main, "load_cost_config", lambda config_path=None: config),
+            mock.patch.object(cost_main, "collect_all", lambda cfg: {}),
+            mock.patch.object(cost_main, "SnapshotCache", _Cache),
+            mock.patch.object(cost_main, "carry_forward_degraded", fake_carry),
+        ):
+            cost_main.build_current_snapshot(None)
+
+        assert captured.get("skip") == ("agy",)
+
     def test_carry_forward_degraded_prefers_fresh_data_when_available(self) -> None:
         old = {
             "cc": ProviderSnapshot(

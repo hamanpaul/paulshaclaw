@@ -62,10 +62,31 @@ cost:
       enabled: true
       local_fallback: false
     agy:
-      # 本輪未綁定可釘 schema 的官方 quota endpoint；預設不讀本地 cache，
-      # 因此啟用後在可信來源缺席時會先顯示 agy ?。
+      # Trusted source: agy 的 print-mode 唯讀 slash command，不起 agent turn、
+      # 不耗額度、不讀任何 credential 檔：
+      #   agy -p "/usage" --output-format json
+      # 回傳 command.data.groups[].buckets[]（id/window/remaining_fraction/
+      # reset_time）；group 依 bucket id 前綴比對（"gemini-*" 或 "3p-*"）取
+      # five_hour/weekly 兩個視窗。單次呼叫耗時 2.5～4s，故以 refresh_seconds
+      # 節流：sidecar ~/.agents/state/cost/agy_usage.json（只存
+      # attempted_at/fetched_at/note/windows，不存 CLI 原始輸出；windows 只存
+      # CLI 的原始解析值，絕不在寫入前 roll-forward）。一輪只有兩種結果：兩個
+      # 視窗都解析成功 -> 整塊替換 windows/fetched_at=now/note=null；其餘任何
+      # 情況（timeout/nonzero/invalid-json/status-not-success/group-missing/
+      # window-unparsed/cli-missing，PATH 找不到 agy 也算一次失敗嘗試）-> 只更
+      # 新 attempted_at/note，windows/fetched_at 原樣不動（不 merge）。
+      # attempted_at 只決定要不要節流；fresh/stale 只看 fetched_at 是否落在
+      # refresh_seconds 內。過期視窗只在 fresh 時才於呈現層 roll-forward（不
+      # 影響 sidecar 內容）；stale 時過期視窗不歸零、改印 (exp)。
+      # stale_max_age_seconds：fetched_at 比它更舊時該輪不輸出視窗（sidecar
+      # 檔仍保留），落到 local_fallback／unknown，note 保留最後失敗原因。
       enabled: false
       label: agy
+      group: gemini            # 或 "3p"（Claude and GPT models 那組 bucket）
+      refresh_seconds: 300      # CLI 最小重跑間隔（節流 sidecar 的 TTL）
+      timeout_seconds: 20       # CLI 逾時秒數
+      cli_path: null            # 預設在 PATH 上尋找 agy；可顯式指定絕對路徑
+      stale_max_age_seconds: 3600  # fetched_at 逾此秒數即不輸出視窗
       state_dir: ~/.gemini
       max_age_seconds: 300
       local_fallback: false

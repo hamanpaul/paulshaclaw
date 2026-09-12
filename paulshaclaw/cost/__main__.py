@@ -26,9 +26,11 @@ def build_current_snapshot(config_path: Path | None = None):
     cache = SnapshotCache(config.cache_dir, ttl_seconds=config.cache_ttl_seconds)
     # Carry the previous values forward for any provider that came back empty,
     # so a transient fetch failure shows kept (stale) numbers instead of `--`.
+    # agy is skipped: its sidecar already serves stale windows with an age cap
+    # (#353); resurrecting cache here would keep a frozen reset clock forever.
     previous = cache.read_stale()
     if previous is not None:
-        providers = carry_forward_degraded(providers, previous.providers)
+        providers = carry_forward_degraded(providers, previous.providers, skip=("agy",))
     snapshot = build_snapshot(timezone=config.timezone, providers=providers)
     cache.write(snapshot)
     return snapshot

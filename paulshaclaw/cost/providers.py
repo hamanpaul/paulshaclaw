@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -595,22 +597,436 @@ def _agy_state_path(state_dir: Path) -> Path:
     return state_dir / "antigravity-cli" / "state.json"
 
 
+# --- agy print-mode `/usage` CLI source (#353) ------------------------------
+# `agy -p "/usage" --output-format json` answers a read-only slash command: no
+# agent turn, no quota spent, no credential file read. It costs 2.5-4s though,
+# so a throttle sidecar (attempted_at/fetched_at/note/windows — never the raw
+# CLI stdout) caches the parsed result between calls.
+#
+# `collect_agy` is a straight line (#353 fourth-round review collapses the
+# third round's per-window `fetched_at`/merge/eviction machinery down to
+# this):
+#   1. read the sidecar -> throttle on `attempted_at`
+#   2. (unless throttled) run the CLI: full success (both windows parsed)
+#      replaces `windows_raw`/`fetched_at` wholesale; anything else is a
+#      failed attempt that only updates `attempted_at`/`note`, leaving
+#      `windows_raw`/`fetched_at` exactly as they were — never merged
+#   3. age cap: a `fetched_at` older than `stale_max_age_seconds` renders as
+#      no windows at all (the sidecar file itself is untouched)
+#   4. fresh iff `fetched_at` is within `refresh_seconds` of now, else stale
+#   5. presentation only: a fresh window's already-past reset rolls forward
+#      (zeroed, like `_codex_window`); a stale window's past reset instead
+#      reads "(exp)" rather than rolling forward or showing a dead clock time
+_AGY_WINDOW_STEP = {
+    "five_hour": timedelta(hours=5),
+    "weekly": timedelta(days=7),
+}
+
+
+def _agy_sidecar_path() -> Path:
+    return paths.state_path("cost", "agy_usage.json")
+
+
+def _agy_window_key(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if normalized in {"5h", "five_hour", "5hour"}:
+        return "five_hour"
+    if normalized in {"weekly", "week", "7d"}:
+        return "weekly"
+    return None
+
+
+def _agy_parse_bucket(bucket: Mapping[str, Any], now: datetime) -> tuple[str, int, datetime] | None:
+    """Parse one CLI bucket into its raw `(window_key, used_percent,
+    reset_at)` — no roll-forward, no `display_reset`; those are
+    presentation-layer concerns applied only when rendering (step 5), never
+    before a write (spec A)."""
+    window_key = _agy_window_key(bucket.get("window"))
+    if window_key is None:
+        return None
+    try:
+        remaining = float(bucket.get("remaining_fraction"))
+    except (TypeError, ValueError, OverflowError):
+        return None
+    remaining = max(0.0, min(1.0, remaining))
+    used_percent = max(0, min(100, round((1 - remaining) * 100)))
+    reset_at = _parse_reset_value(bucket.get("reset_time"), now.tzinfo or ZoneInfo("Asia/Taipei"))
+    if reset_at is None:
+        return None
+    return window_key, used_percent, reset_at
+
+
+def _agy_windows_from_cli_payload(
+    payload: Mapping[str, Any],
+    group: str,
+    now: datetime,
+) -> dict[str, tuple[int, datetime]] | None:
+    """Flatten every group's buckets and keep the ones whose `id` starts with
+    `<group>-` (e.g. group="gemini" matches "gemini-5h"/"gemini-weekly").
+    Returns `None` only when no bucket matched the group at all (note:
+    "group-missing"); otherwise a dict of whichever of the two recognised
+    windows parsed — 0, 1 or 2 entries. `collect_agy` treats anything short
+    of both keys as a failed attempt (note: "window-unparsed"); it never
+    merges a partial result into the sidecar (spec B)."""
+    command = payload.get("command")
+    data = command.get("data") if isinstance(command, Mapping) else None
+    groups = data.get("groups") if isinstance(data, Mapping) else None
+    if not isinstance(groups, list):
+        return None
+
+    prefix = f"{group}-"
+    windows: dict[str, tuple[int, datetime]] = {}
+    matched = False
+    for entry in groups:
+        if not isinstance(entry, Mapping):
+            continue
+        buckets = entry.get("buckets")
+        if not isinstance(buckets, list):
+            continue
+        for bucket in buckets:
+            if not isinstance(bucket, Mapping):
+                continue
+            bucket_id = bucket.get("id")
+            if not isinstance(bucket_id, str) or not bucket_id.startswith(prefix):
+                continue
+            matched = True
+            parsed = _agy_parse_bucket(bucket, now)
+            if parsed is not None:
+                key, used_percent, reset_at = parsed
+                windows[key] = (used_percent, reset_at)
+    if not matched:
+        return None
+    return windows
+
+
+def _agy_cli_command(cli_path: str) -> list[str]:
+    return [cli_path, "-p", "/usage", "--output-format", "json"]
+
+
+def _call_agy_cli(
+    cli_path: str,
+    *,
+    timeout_seconds: int,
+    runner: Callable[..., Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run the agy print-mode usage command. Returns (payload, error_category);
+    error_category is one of timeout/nonzero/invalid-json/status-not-success,
+    never the raw stdout (so a caller's note never leaks CLI output)."""
+    try:
+        result = runner(
+            _agy_cli_command(cli_path),
+            capture_output=True,
+            timeout=timeout_seconds,
+            cwd=paths.home_root(),
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except OSError:
+        return None, "nonzero"
+
+    if getattr(result, "returncode", None) != 0:
+        return None, "nonzero"
+
+    stdout = getattr(result, "stdout", None)
+    if not isinstance(stdout, str) or not stdout.strip():
+        return None, "invalid-json"
+    try:
+        payload = json.loads(stdout)
+    except (TypeError, ValueError):
+        return None, "invalid-json"
+    if not isinstance(payload, dict):
+        return None, "invalid-json"
+    if payload.get("status") != "SUCCESS":
+        return None, "status-not-success"
+    return payload, None
+
+
+def _agy_windows_to_raw(windows: Mapping[str, tuple[int, datetime]]) -> dict[str, dict[str, Any]]:
+    return {
+        key: {
+            "used_percent": used_percent,
+            "reset_at": reset_at.isoformat() if reset_at else None,
+        }
+        for key, (used_percent, reset_at) in windows.items()
+    }
+
+
+def _read_agy_sidecar(
+    path: Path,
+) -> tuple[datetime, datetime | None, str | None, Mapping[str, Any]] | None:
+    """Returns `(attempted_at, fetched_at, note, windows_raw)`, or `None`
+    when the file is missing/unparseable. `windows_raw` holds the CLI's raw
+    parsed values verbatim — never rolled forward before a write (spec A).
+
+    Reads an older sidecar without raising (spec G): a file still on the
+    third round's per-window-`fetched_at` schema has no top-level
+    `fetched_at` of its own — the oldest of its windows' individual
+    `fetched_at` values stands in for it (the more conservative, staler
+    reading). An even older (first/second round) file already used the same
+    top-level key name `fetched_at` for its single provider-wide timestamp,
+    so it is picked up by the same `payload.get("fetched_at")` read with no
+    extra handling. A file with no recoverable timestamp at all reads as
+    `fetched_at=None` (never successfully fetched)."""
+    payload = _read_json_file(path)
+    if payload is None:
+        return None
+    windows_raw = payload.get("windows")
+    if not isinstance(windows_raw, Mapping):
+        return None
+
+    fetched_at = _parse_event_timestamp(payload.get("fetched_at"))
+    if fetched_at is None:
+        legacy_stamps = [
+            stamp
+            for stamp in (
+                _parse_event_timestamp(entry.get("fetched_at"))
+                for entry in windows_raw.values()
+                if isinstance(entry, Mapping)
+            )
+            if stamp is not None
+        ]
+        if legacy_stamps:
+            fetched_at = min(legacy_stamps)
+
+    attempted_at = _parse_event_timestamp(payload.get("attempted_at")) or fetched_at
+    if attempted_at is None:
+        return None
+
+    note = payload.get("note")
+    if not isinstance(note, str):
+        note = None
+
+    return attempted_at, fetched_at, note, windows_raw
+
+
+def _agy_render_window(
+    window_key: str,
+    used_percent: int,
+    reset_at: datetime,
+    now: datetime,
+    *,
+    roll_forward: bool,
+) -> UsageWindow:
+    """Presentation layer only (step 5): turns a sidecar's *raw* values into
+    a displayable `UsageWindow`. A fresh window (`roll_forward=True`) whose
+    reset has already passed is advanced to the next window and reported as
+    a fresh, unused 0% — mirroring `_codex_window`'s roll-forward. A stale
+    window is never rolled forward — that would fabricate a `0%` the
+    operator would mistake for real data — so its `display_reset` reads
+    "exp" instead of a past clock time when its reset has passed, letting
+    the stale styling on the percent/reset pair carry the "not trustworthy"
+    signal instead."""
+    if roll_forward and reset_at <= now:
+        step = _AGY_WINDOW_STEP.get(window_key, timedelta())
+        if step.total_seconds() > 0:
+            while reset_at <= now:
+                reset_at += step
+            used_percent = 0
+    if not roll_forward and reset_at <= now:
+        display_reset = "exp"
+    else:
+        display_reset = _display_reset(reset_at, now)
+    return UsageWindow(
+        used_percent=used_percent,
+        reset_at=reset_at,
+        display_reset=display_reset,
+    )
+
+
+def _agy_windows_from_sidecar(
+    windows_raw: Mapping[str, Any], now: datetime, *, roll_forward: bool
+) -> dict[str, UsageWindow]:
+    windows: dict[str, UsageWindow] = {}
+    for key in ("five_hour", "weekly"):
+        entry = windows_raw.get(key)
+        if not isinstance(entry, Mapping):
+            continue
+        try:
+            used_percent = int(entry.get("used_percent"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        reset_at = _parse_reset_value(entry.get("reset_at"), now.tzinfo or ZoneInfo("Asia/Taipei"))
+        if reset_at is None:
+            continue
+        windows[key] = _agy_render_window(key, used_percent, reset_at, now, roll_forward=roll_forward)
+    return windows
+
+
+def _write_agy_sidecar(
+    path: Path,
+    *,
+    attempted_at: datetime,
+    fetched_at: datetime | None,
+    note: str | None,
+    windows_raw: Mapping[str, Any],
+) -> None:
+    """Owner-only, atomic write of the sidecar's exact on-disk shape —
+    `attempted_at`/`fetched_at`/`note`/`windows`. Writes `fetched_at` and
+    `windows_raw` byte-for-byte as given; this function never merges or
+    evicts anything itself — the caller decides beforehand whether this
+    round replaces them wholesale (full success, spec B(i)) or carries the
+    previously-read values through untouched (any other outcome, spec
+    B(ii))."""
+    payload = {
+        "attempted_at": attempted_at.astimezone(timezone.utc).isoformat(),
+        "fetched_at": fetched_at.astimezone(timezone.utc).isoformat() if fetched_at else None,
+        "note": note,
+        "windows": dict(windows_raw),
+    }
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            os.chmod(path.parent, 0o700)
+        except OSError:
+            pass
+        temp_path = path.parent / f"{path.name}.{os.getpid()}.tmp"
+        # Create the temp file already owner-only (0600) instead of relying on
+        # the umask default + a post-replace chmod: `os.replace` preserves the
+        # source inode's mode, so there is no window where the sidecar is
+        # briefly group/world-readable, and a failing chmod below can no
+        # longer leave it permanently over-permissioned (#353 review finding 4).
+        fd = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            os.replace(temp_path, path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
+def _agy_fallback_note(note: str | None, cli_note: str | None) -> str | None:
+    """Thread this cycle's CLI failure reason (if any) into a local_fallback /
+    unknown note, so an operator looking at the JSON note can tell *why* the
+    trusted CLI source wasn't used instead of only seeing the fallback's own
+    generic text (#353 review finding 16)."""
+    if cli_note is None:
+        return note
+    if note is None:
+        return f"agy cli:{cli_note}"
+    return f"{note} (agy cli:{cli_note})"
+
+
 def collect_agy(
     config: AgyProviderConfig,
     *,
     now: datetime | None = None,
+    timezone_name: str = "Asia/Taipei",
     reader: Callable[[Path], dict[str, Any] | None] | None = None,
+    runner: Callable[..., Any] | None = None,
+    sidecar_path: Path | None = None,
 ) -> ProviderSnapshot | None:
     if not config.enabled:
         return None
-    resolved_now = now or _now_utc()
+    # Mirror collect_codex/collect_claude: display_reset renders in the wall
+    # clock of `timezone_name` (config.timezone), not raw UTC — otherwise
+    # agy's reset time in the footer reads hours off from cdx/cc (#353 review
+    # findings 1/14).
+    resolved_now = now or _now_utc().astimezone(_display_zone(timezone_name))
+    resolved_sidecar_path = sidecar_path or _agy_sidecar_path()
+    resolved_runner = runner or subprocess.run
 
+    # 1. Read the sidecar and throttle on `attempted_at` (last attempt, any
+    #    outcome) — never on whether it produced usable windows, or every
+    #    failed/unmatched cycle would re-invoke the 2.5-4s/~180MB CLI every
+    #    call (#353 review findings 2/15).
+    sidecar = _read_agy_sidecar(resolved_sidecar_path)
+    fetched_at: datetime | None = None
+    note: str | None = None
+    windows_raw: Mapping[str, Any] = {}
+    throttled = False
+    if sidecar is not None:
+        attempted_at, fetched_at, note, windows_raw = sidecar
+        attempted_age_seconds = (resolved_now - attempted_at).total_seconds()
+        if 0 <= attempted_age_seconds < config.refresh_seconds:
+            throttled = True
+
+    # 2. CLI attempt, skipped while throttled. Exactly two outcomes (spec B):
+    #    both windows parse -> replace `windows_raw`/`fetched_at` wholesale
+    #    and clear `note`; anything else is a failed attempt that leaves
+    #    `windows_raw`/`fetched_at` exactly as read and only updates `note`
+    #    — never a merge. A missing `cli_path` (unset in config and not on
+    #    PATH) counts as one such failed attempt too, with its own note
+    #    ("cli-missing") — it still stamps `attempted_at` so a repeat PATH
+    #    lookup doesn't happen every call (#353 third-round review finding F).
+    if not throttled:
+        cli_path = config.cli_path or shutil.which("agy")
+        if not cli_path:
+            note = "cli-missing"
+        else:
+            payload, error = _call_agy_cli(
+                cli_path,
+                timeout_seconds=config.timeout_seconds,
+                runner=resolved_runner,
+            )
+            if error is not None:
+                note = error
+            else:
+                cli_windows = _agy_windows_from_cli_payload(payload, config.group, resolved_now)
+                if cli_windows is None:
+                    note = "group-missing"
+                elif set(cli_windows) != set(_AGY_WINDOW_STEP):
+                    # Matched the group but didn't parse *both* recognised
+                    # windows — a partial result is a failed attempt, not a
+                    # partial success (spec B): the previously-read
+                    # `windows_raw`/`fetched_at` are kept exactly as they
+                    # were rather than merged with this round's subset.
+                    note = "window-unparsed"
+                else:
+                    note = None
+                    windows_raw = _agy_windows_to_raw(cli_windows)
+                    fetched_at = resolved_now
+        _write_agy_sidecar(
+            resolved_sidecar_path,
+            attempted_at=resolved_now,
+            fetched_at=fetched_at,
+            note=note,
+            windows_raw=windows_raw,
+        )
+
+    # 3. Age cap (spec E): a `fetched_at` older than `stale_max_age_seconds`
+    #    (or a clock-skewed future one) renders as no windows at all — the
+    #    sidecar file itself is untouched, but continuing to show hours-old
+    #    numbers as this provider's only signal would be more misleading
+    #    than falling through to local_fallback/unknown below, which still
+    #    carries `note` forward.
+    if fetched_at is not None and windows_raw:
+        age_seconds = (resolved_now - fetched_at).total_seconds()
+        if not (0 <= age_seconds < config.stale_max_age_seconds):
+            windows_raw = {}
+
+    # 4. Render straight from the sidecar's windows (spec D) — the same code
+    #    path for a CLI-run cycle and a throttled one alike, so there is no
+    #    flicker between "this round's subset" and "the cached windows".
+    #    Fresh iff `fetched_at` itself is within `refresh_seconds` of now; a
+    #    fresh window's expired reset rolls forward, a stale one instead
+    #    reads "(exp)" (step 5, in `_agy_render_window`).
+    if windows_raw:
+        fresh = fetched_at is not None and 0 <= (resolved_now - fetched_at).total_seconds() < config.refresh_seconds
+        rendered = _agy_windows_from_sidecar(windows_raw, resolved_now, roll_forward=fresh)
+        if rendered:
+            return ProviderSnapshot(
+                source_status="fresh" if fresh else "stale",
+                source="cli",
+                windows=rendered,
+                note=None if fresh else note,
+            )
+
+    # 5. Existing local_fallback / unknown flow (source priority #2/#3).
     if not config.local_fallback:
         return ProviderSnapshot(
             source_status="unknown",
             source="unknown",
             accounts=(),
-            note='source="unknown"',
+            note=note or 'source="unknown"',
         )
 
     state_path = _agy_state_path(config.state_dir)
@@ -623,7 +1039,7 @@ def collect_agy(
             source_status="unknown",
             source="unknown",
             accounts=(),
-            note="agy quota unavailable",
+            note=_agy_fallback_note("agy quota unavailable", note),
         )
 
     payload = (reader or _read_json_file)(state_path)
@@ -632,7 +1048,7 @@ def collect_agy(
             source_status="unknown",
             source="unknown",
             accounts=(),
-            note="agy quota unavailable",
+            note=_agy_fallback_note("agy quota unavailable", note),
         )
 
     account = _agy_account_config(config)
@@ -656,7 +1072,7 @@ def collect_agy(
                     **base_usage,
                 ),
             ),
-            note="agy unlimited quota",
+            note=_agy_fallback_note("agy unlimited quota", note),
         )
 
     percent_used = _coerce_non_negative_int(
@@ -677,6 +1093,7 @@ def collect_agy(
                     **base_usage,
                 ),
             ),
+            note=_agy_fallback_note(None, note),
         )
 
     approx_remaining = _coerce_non_negative_int(
@@ -698,14 +1115,14 @@ def collect_agy(
                     **base_usage,
                 ),
             ),
-            note="agy local estimate",
+            note=_agy_fallback_note("agy local estimate", note),
         )
 
     return ProviderSnapshot(
         source_status="unknown",
         source="unknown",
         accounts=(),
-        note="agy quota unavailable",
+        note=_agy_fallback_note("agy quota unavailable", note),
     )
 
 
@@ -1131,7 +1548,7 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     if copilot.accounts:
         providers["cpt"] = copilot
     if config.agy.enabled:
-        agy = collect_agy(config.agy, now=_now_utc())
+        agy = collect_agy(config.agy, timezone_name=config.timezone)
         if agy is not None:
             providers["agy"] = agy
     return providers
@@ -1151,17 +1568,30 @@ def _provider_has_data(provider: ProviderSnapshot) -> bool:
 def carry_forward_degraded(
     new_providers: dict[str, ProviderSnapshot],
     old_providers: Mapping[str, ProviderSnapshot],
+    *,
+    skip: Iterable[str] = (),
 ) -> dict[str, ProviderSnapshot]:
     """Keep showing the previous values when a provider returns nothing usable.
 
     When a fetch fails this cycle (e.g. Claude sidecar gone stale, Copilot quota
     network blip), reuse the previous snapshot's values — marked ``stale`` so the
     footer tints them — instead of dropping to ``--``. Fresh data the next cycle
-    replaces them and clears the stale marker."""
+    replaces them and clears the stale marker.
+
+    Providers named in ``skip`` manage their own stale supply and are passed
+    through untouched: agy keeps a throttled sidecar with ``stale_max_age_seconds``
+    (#353), so resurrecting its cached windows here would bypass that age cap and
+    the ``exp`` rendering, showing a frozen reset clock indefinitely."""
+    skipped = set(skip)
     result: dict[str, ProviderSnapshot] = {}
     for name, provider in new_providers.items():
         old = old_providers.get(name)
-        if old is not None and not _provider_has_data(provider) and _provider_has_data(old):
+        if (
+            name not in skipped
+            and old is not None
+            and not _provider_has_data(provider)
+            and _provider_has_data(old)
+        ):
             result[name] = ProviderSnapshot(
                 source_status="stale",
                 source=old.source,
