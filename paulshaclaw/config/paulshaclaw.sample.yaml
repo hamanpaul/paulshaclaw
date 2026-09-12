@@ -62,10 +62,21 @@ cost:
       enabled: true
       local_fallback: false
     agy:
-      # 本輪未綁定可釘 schema 的官方 quota endpoint；預設不讀本地 cache，
-      # 因此啟用後在可信來源缺席時會先顯示 agy ?。
+      # Trusted source: agy 的 print-mode 唯讀 slash command，不起 agent turn、
+      # 不耗額度、不讀任何 credential 檔：
+      #   agy -p "/usage" --output-format json
+      # 回傳 command.data.groups[].buckets[]（id/window/remaining_fraction/
+      # reset_time）；group 依 bucket id 前綴比對（"gemini-*" 或 "3p-*"）取
+      # five_hour/weekly 兩個視窗。單次呼叫耗時 2.5～4s，故以 refresh_seconds
+      # 節流：節流期內直接沿用 ~/.agents/state/cost/agy_usage.json sidecar
+      # （只存 fetched_at/windows，不存 CLI 原始輸出）；CLI 失敗時若有舊值先以
+      # stale 供應，否則落到 local_fallback／unknown。
       enabled: false
       label: agy
+      group: gemini            # 或 "3p"（Claude and GPT models 那組 bucket）
+      refresh_seconds: 300      # CLI 最小重跑間隔（節流 sidecar 的 TTL）
+      timeout_seconds: 20       # CLI 逾時秒數
+      cli_path: null            # 預設在 PATH 上尋找 agy；可顯式指定絕對路徑
       state_dir: ~/.gemini
       max_age_seconds: 300
       local_fallback: false

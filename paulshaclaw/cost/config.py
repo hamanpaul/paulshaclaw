@@ -74,6 +74,14 @@ class AgyProviderConfig:
     label: str = "agy"
     max_age_seconds: int = 300
     local_fallback: bool = False
+    # print-mode `/usage` CLI source (#353): which bucket-id prefix group to
+    # read ("gemini" or "3p"), how often to re-run the CLI (throttle sidecar),
+    # the subprocess timeout, and an explicit binary path (None resolves via
+    # `shutil.which("agy")` at call time).
+    group: str = "gemini"
+    refresh_seconds: int = 300
+    timeout_seconds: int = 20
+    cli_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -251,6 +259,10 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
         if resolved_state_dir.suffix:
             resolved_state_dir = resolved_state_dir.parent
     label = item.get("label")
+    group = item.get("group")
+    refresh_seconds = item.get("refresh_seconds")
+    timeout_seconds = item.get("timeout_seconds")
+    cli_path = item.get("cli_path")
     return AgyProviderConfig(
         enabled=_bool_value(item.get("enabled"), default=False),
         state_dir=resolved_state_dir,
@@ -260,6 +272,10 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
             item.get("local_fallback"),
             default=legacy_local_fallback,
         ),
+        group=str(group) if group else "gemini",
+        refresh_seconds=int(refresh_seconds) if refresh_seconds is not None else 300,
+        timeout_seconds=int(timeout_seconds) if timeout_seconds is not None else 20,
+        cli_path=str(cli_path) if cli_path else None,
     )
 
 

@@ -314,6 +314,13 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 寫回只更新 `cost.providers.*.enabled` 與 account 的 `enabled`，其餘 `label` / `monthly_allowance` / `org` 保留；若 `~/.config/paulshaclaw/paulshaclaw.yaml` 尚不存在，會以 bundled sample 建立。
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
 
+##### agy 用量來源
+
+- `cost.providers.agy` 啟用後優先讀 agy 的 print-mode 唯讀 slash command（`agy -p "/usage" --output-format json`）：不起 agent turn、零 token、不讀任何 credential 檔（`~/.gemini/google_accounts.json`、`oauth_creds.json`、`antigravity-oauth-token` 一律不碰）。
+- 單次呼叫耗時約 2.5～4s，故以 `refresh_seconds`（預設 300s）節流：節流期內直接沿用 `~/.agents/state/cost/agy_usage.json` sidecar（owner-only，只存 `fetched_at`／`windows`，不存 CLI 原始輸出）；CLI 這輪失敗時若有舊 sidecar 先以 stale 供應，否則落到既有 `local_fallback`（讀本地 state.json）或 `unknown`。
+- `group`（預設 `gemini`，可設 `3p`）依 bucket id 前綴（`gemini-*` / `3p-*`）選取 five_hour／weekly 兩個視窗；`cli_path` 未指定時在 PATH 上找 `agy`。
+- footer／cockpit 呈現：有視窗資料時 agy 比照 `cdx`／`cc` 顯示 `agy 5h:N%(reset) wk:N%(reset)`；沒有時維持原本 `agy N%` / `agy ?` 呈現。
+
 #### 查詢目前安裝版本
 
 ```bash

@@ -178,7 +178,10 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
 
     agy = snapshot.providers.get("agy")
     if agy is not None:
-        segments.append(_format_agy_provider(agy, use_tmux_style))
+        if agy.windows:
+            segments.append(_format_window_provider("agy", agy, use_tmux_style))
+        else:
+            segments.append(_format_agy_provider(agy, use_tmux_style))
 
     # Divider between cdx / cc / cpt so the segments don't blur together, plus a
     # trailing space so the line doesn't sit flush against the terminal edge.
@@ -276,7 +279,10 @@ def format_cockpit_rest(snapshot: CostSnapshot) -> str:
         segments.append(_format_cockpit_cpt(cpt))
     agy = snapshot.providers.get("agy")
     if agy is not None:
-        segments.append(_format_agy_provider(agy, True))
+        if agy.windows:
+            segments.append(_format_window_provider("agy", agy, True))
+        else:
+            segments.append(_format_agy_provider(agy, True))
     return _join_cockpit_segments(segments)
 
 

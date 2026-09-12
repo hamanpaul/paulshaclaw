@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import time
 from collections.abc import Mapping
@@ -595,22 +597,279 @@ def _agy_state_path(state_dir: Path) -> Path:
     return state_dir / "antigravity-cli" / "state.json"
 
 
+# --- agy print-mode `/usage` CLI source (#353) ------------------------------
+# `agy -p "/usage" --output-format json` answers a read-only slash command: no
+# agent turn, no quota spent, no credential file read. It costs 2.5-4s though,
+# so a throttle sidecar (fetched_at + windows only — never the raw CLI stdout)
+# caches the parsed result between calls.
+_AGY_WINDOW_STEP = {
+    "five_hour": timedelta(hours=5),
+    "weekly": timedelta(days=7),
+}
+
+
+def _agy_sidecar_path() -> Path:
+    return paths.state_path("cost", "agy_usage.json")
+
+
+def _agy_window_key(raw: Any) -> str | None:
+    if not isinstance(raw, str):
+        return None
+    normalized = raw.strip().lower()
+    if normalized in {"5h", "five_hour", "5hour"}:
+        return "five_hour"
+    if normalized in {"weekly", "week", "7d"}:
+        return "weekly"
+    return None
+
+
+def _agy_finalize_window(
+    window_key: str,
+    used_percent: int,
+    reset_at: datetime,
+    now: datetime,
+) -> UsageWindow:
+    # A reset already in the past means the window rolled over since the
+    # reading was taken (CLI payload or a stale sidecar) — advance it and
+    # report a fresh, unused window, mirroring `_codex_window`'s roll-forward.
+    if reset_at <= now:
+        step = _AGY_WINDOW_STEP.get(window_key, timedelta())
+        if step.total_seconds() > 0:
+            while reset_at <= now:
+                reset_at += step
+            used_percent = 0
+    return UsageWindow(
+        used_percent=used_percent,
+        reset_at=reset_at,
+        display_reset=_display_reset(reset_at, now),
+    )
+
+
+def _agy_window_from_bucket(
+    bucket: Mapping[str, Any],
+    now: datetime,
+) -> tuple[str, UsageWindow] | None:
+    window_key = _agy_window_key(bucket.get("window"))
+    if window_key is None:
+        return None
+    try:
+        remaining = float(bucket.get("remaining_fraction"))
+    except (TypeError, ValueError):
+        return None
+    remaining = max(0.0, min(1.0, remaining))
+    used_percent = max(0, min(100, round((1 - remaining) * 100)))
+    reset_at = _parse_reset_value(bucket.get("reset_time"), now.tzinfo or ZoneInfo("Asia/Taipei"))
+    if reset_at is None:
+        return None
+    return window_key, _agy_finalize_window(window_key, used_percent, reset_at, now)
+
+
+def _agy_windows_from_cli_payload(
+    payload: Mapping[str, Any],
+    group: str,
+    now: datetime,
+) -> dict[str, UsageWindow] | None:
+    """Flatten every group's buckets and keep the ones whose `id` starts with
+    `<group>-` (e.g. group="gemini" matches "gemini-5h"/"gemini-weekly").
+    Returns None only when no bucket matched the group at all."""
+    command = payload.get("command")
+    data = command.get("data") if isinstance(command, Mapping) else None
+    groups = data.get("groups") if isinstance(data, Mapping) else None
+    if not isinstance(groups, list):
+        return None
+
+    prefix = f"{group}-"
+    windows: dict[str, UsageWindow] = {}
+    matched = False
+    for entry in groups:
+        if not isinstance(entry, Mapping):
+            continue
+        buckets = entry.get("buckets")
+        if not isinstance(buckets, list):
+            continue
+        for bucket in buckets:
+            if not isinstance(bucket, Mapping):
+                continue
+            bucket_id = bucket.get("id")
+            if not isinstance(bucket_id, str) or not bucket_id.startswith(prefix):
+                continue
+            matched = True
+            parsed = _agy_window_from_bucket(bucket, now)
+            if parsed is not None:
+                key, window = parsed
+                windows[key] = window
+    if not matched:
+        return None
+    return windows
+
+
+def _agy_cli_command(cli_path: str) -> list[str]:
+    return [cli_path, "-p", "/usage", "--output-format", "json"]
+
+
+def _call_agy_cli(
+    cli_path: str,
+    *,
+    timeout_seconds: int,
+    runner: Callable[..., Any],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Run the agy print-mode usage command. Returns (payload, error_category);
+    error_category is one of timeout/nonzero/invalid-json/status-not-success,
+    never the raw stdout (so a caller's note never leaks CLI output)."""
+    try:
+        result = runner(
+            _agy_cli_command(cli_path),
+            capture_output=True,
+            timeout=timeout_seconds,
+            cwd=paths.home_root(),
+            text=True,
+        )
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    except OSError:
+        return None, "nonzero"
+
+    if getattr(result, "returncode", None) != 0:
+        return None, "nonzero"
+
+    stdout = getattr(result, "stdout", None)
+    if not isinstance(stdout, str) or not stdout.strip():
+        return None, "invalid-json"
+    try:
+        payload = json.loads(stdout)
+    except (TypeError, ValueError):
+        return None, "invalid-json"
+    if not isinstance(payload, dict):
+        return None, "invalid-json"
+    if payload.get("status") != "SUCCESS":
+        return None, "status-not-success"
+    return payload, None
+
+
+def _read_agy_sidecar(path: Path) -> tuple[datetime, Mapping[str, Any]] | None:
+    payload = _read_json_file(path)
+    if payload is None:
+        return None
+    fetched_at = _parse_event_timestamp(payload.get("fetched_at"))
+    if fetched_at is None:
+        return None
+    windows_raw = payload.get("windows")
+    if not isinstance(windows_raw, Mapping):
+        return None
+    return fetched_at, windows_raw
+
+
+def _agy_windows_from_sidecar(windows_raw: Mapping[str, Any], now: datetime) -> dict[str, UsageWindow]:
+    windows: dict[str, UsageWindow] = {}
+    for key in ("five_hour", "weekly"):
+        entry = windows_raw.get(key)
+        if not isinstance(entry, Mapping):
+            continue
+        try:
+            used_percent = int(entry.get("used_percent"))
+        except (TypeError, ValueError):
+            continue
+        reset_at = _parse_reset_value(entry.get("reset_at"), now.tzinfo or ZoneInfo("Asia/Taipei"))
+        if reset_at is None:
+            continue
+        windows[key] = _agy_finalize_window(key, used_percent, reset_at, now)
+    return windows
+
+
+def _write_agy_sidecar(path: Path, windows: Mapping[str, UsageWindow], fetched_at: datetime) -> None:
+    # Owner-only, atomic write; only fetched_at + the two windows are stored —
+    # never the CLI's raw stdout (no account identifiers to leak either way).
+    payload = {
+        "fetched_at": fetched_at.astimezone(timezone.utc).isoformat(),
+        "windows": {
+            key: {
+                "used_percent": window.used_percent,
+                "reset_at": window.reset_at.isoformat() if window.reset_at else None,
+            }
+            for key, window in windows.items()
+        },
+    }
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            os.chmod(path.parent, 0o700)
+        except OSError:
+            pass
+        temp_path = path.parent / f"{path.name}.{os.getpid()}.tmp"
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(temp_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    except OSError:
+        pass
+
+
 def collect_agy(
     config: AgyProviderConfig,
     *,
     now: datetime | None = None,
     reader: Callable[[Path], dict[str, Any] | None] | None = None,
+    runner: Callable[..., Any] | None = None,
+    sidecar_path: Path | None = None,
 ) -> ProviderSnapshot | None:
     if not config.enabled:
         return None
     resolved_now = now or _now_utc()
+    resolved_sidecar_path = sidecar_path or _agy_sidecar_path()
+    resolved_runner = runner or subprocess.run
 
+    # 1. Throttle: a sidecar fetched within refresh_seconds is used as-is,
+    #    with no CLI call at all.
+    sidecar = _read_agy_sidecar(resolved_sidecar_path)
+    if sidecar is not None:
+        fetched_at, windows_raw = sidecar
+        age_seconds = (resolved_now - fetched_at).total_seconds()
+        if 0 <= age_seconds < config.refresh_seconds:
+            fresh_windows = _agy_windows_from_sidecar(windows_raw, resolved_now)
+            if fresh_windows:
+                return ProviderSnapshot(source_status="fresh", source="cli", windows=fresh_windows)
+
+    # 2. CLI attempt (source priority #1). `cli_path` resolves via PATH at
+    #    call time when the config leaves it unset.
+    cli_path = config.cli_path or shutil.which("agy")
+    cli_note: str | None = None
+    if cli_path:
+        payload, error = _call_agy_cli(
+            cli_path,
+            timeout_seconds=config.timeout_seconds,
+            runner=resolved_runner,
+        )
+        if error is not None:
+            cli_note = error
+        else:
+            cli_windows = _agy_windows_from_cli_payload(payload, config.group, resolved_now)
+            if cli_windows:
+                _write_agy_sidecar(resolved_sidecar_path, cli_windows, resolved_now)
+                return ProviderSnapshot(source_status="fresh", source="cli", windows=cli_windows)
+            cli_note = "group-missing"
+
+    # 3. CLI unavailable/failed this cycle — serve a stale sidecar if one
+    #    exists rather than dropping straight to local_fallback/unknown.
+    if sidecar is not None:
+        _, windows_raw = sidecar
+        stale_windows = _agy_windows_from_sidecar(windows_raw, resolved_now)
+        if stale_windows:
+            return ProviderSnapshot(
+                source_status="stale",
+                source="cli",
+                windows=stale_windows,
+                note=cli_note,
+            )
+
+    # 4. Existing local_fallback / unknown flow (source priority #2/#3).
     if not config.local_fallback:
         return ProviderSnapshot(
             source_status="unknown",
             source="unknown",
             accounts=(),
-            note='source="unknown"',
+            note=cli_note or 'source="unknown"',
         )
 
     state_path = _agy_state_path(config.state_dir)
