@@ -69,11 +69,13 @@ cost:
       # reset_time）；group 依 bucket id 前綴比對（"gemini-*" 或 "3p-*"）取
       # five_hour/weekly 兩個視窗。單次呼叫耗時 2.5～4s，故以 refresh_seconds
       # 節流：sidecar ~/.agents/state/cost/agy_usage.json（只存
-      # attempted_at/fetched_at/note/windows，不存 CLI 原始輸出）拆兩個時間戳
-      # ——attempted_at 每次嘗試都更新，只決定要不要節流；fetched_at 只在 CLI
-      # 成功取得視窗時更新，決定 fresh／stale。CLI 失敗時若有舊值先以 stale
-      # 供應並保留原因於 note，節流期內持續 stale 直到 CLI 再次成功；無舊值時
-      # 落到 local_fallback／unknown。
+      # attempted_at/note/windows，不存 CLI 原始輸出）——attempted_at 每次嘗試
+      # （含 PATH 找不到 agy）都更新，只決定要不要節流；新鮮度改成每個視窗自己
+      # 一份 fetched_at，只在該視窗這輪真的被解析出來時更新。回傳的 windows
+      # 一律是 sidecar 合併後的完整視窗（不再只回本輪子集，避免視窗閃爍消
+      # 失）；只有所有現存視窗的 fetched_at 都在 refresh_seconds 內才整份判
+      # fresh，否則整份 stale 並保留失敗原因於 note，過期視窗此時不歸零、改
+      # 印 (exp)。無舊值時落到 local_fallback／unknown。
       enabled: false
       label: agy
       group: gemini            # 或 "3p"（Claude and GPT models 那組 bucket）

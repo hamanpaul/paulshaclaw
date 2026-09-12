@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import subprocess
 from datetime import datetime, timedelta, timezone
 from io import StringIO
@@ -785,7 +786,13 @@ def test_collect_agy_cli_group_missing_throttles_subsequent_calls(tmp_path: Path
 def test_collect_agy_cli_partial_parse_merges_not_overwrites_sidecar(tmp_path: Path) -> None:
     # #353 review finding 5: a cycle that only manages to parse one of the two
     # windows must not wipe the other window's still-cached value out of the
-    # sidecar — merge, don't overwrite.
+    # sidecar — merge, don't overwrite. #353 third-round review findings C/D:
+    # the returned snapshot always renders the *merged* windows (never just
+    # this round's freshly-parsed subset, or the untouched bucket would
+    # flicker out of the footer), and is "fresh" only when every present
+    # window's own `fetched_at` is within `refresh_seconds` — a cycle that
+    # renews just one bucket reports the whole snapshot "stale" instead of
+    # silently promoting the other, untouched bucket too.
     sidecar_path = tmp_path / "agy_usage.json"
 
     first = collect_agy(
@@ -833,9 +840,13 @@ def test_collect_agy_cli_partial_parse_merges_not_overwrites_sidecar(tmp_path: P
         sidecar_path=sidecar_path,
     )
     assert second is not None
-    assert second.source_status == "fresh"
+    # Merged, not just this round's subset (finding C): weekly is still
+    # present, carrying cycle 1's cached value. Stale overall (finding D)
+    # because weekly's own `fetched_at` (cycle 1) is now 5s old against
+    # refresh_seconds=1, even though five_hour was just refreshed.
+    assert second.source_status == "stale"
     assert second.windows["five_hour"].used_percent == 40
-    assert "weekly" not in second.windows
+    assert second.windows["weekly"].used_percent == 50
 
     # Cycle 3, throttled (within refresh_seconds of cycle 2's write): the
     # merged sidecar must still carry cycle 1's weekly value.
@@ -1075,11 +1086,15 @@ def test_collect_agy_sidecar_used_percent_overflow_entry_is_skipped_not_raised(t
     assert provider.windows["weekly"].used_percent == 30
 
 
-def test_collect_agy_sidecar_file_has_attempted_at_fetched_at_note_and_windows(tmp_path: Path) -> None:
-    # #353 second-round review finding 1: `attempted_at` (throttle anchor) and
-    # `fetched_at` (freshness anchor, success-only) are now stored separately,
-    # alongside `note` (finding 2). A successful cycle writes both timestamps
-    # equal and a null note.
+def test_collect_agy_sidecar_file_has_attempted_at_note_and_windows(tmp_path: Path) -> None:
+    # #353 third-round review finding A/required-test 5: the sidecar's
+    # top-level shape is exactly attempted_at/note/windows — no more
+    # provider-level `fetched_at`. `attempted_at` (throttle anchor) and each
+    # window's own `fetched_at` (freshness anchor, success-only) are stored
+    # separately (originally #353 second-round review finding 1, now
+    # per-window rather than per-provider), alongside `note` (finding 2). A
+    # successful cycle writes every window's `fetched_at` equal to
+    # `attempted_at` and a null note.
     sidecar_path = tmp_path / "agy_usage.json"
 
     collect_agy(
@@ -1090,12 +1105,12 @@ def test_collect_agy_sidecar_file_has_attempted_at_fetched_at_note_and_windows(t
     )
 
     raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
-    assert set(raw.keys()) == {"attempted_at", "fetched_at", "note", "windows"}
-    assert raw["attempted_at"] == raw["fetched_at"]
+    assert set(raw.keys()) == {"attempted_at", "note", "windows"}
     assert raw["note"] is None
     assert set(raw["windows"].keys()) == {"five_hour", "weekly"}
     for entry in raw["windows"].values():
-        assert set(entry.keys()) == {"used_percent", "reset_at"}
+        assert set(entry.keys()) == {"used_percent", "reset_at", "fetched_at"}
+        assert entry["fetched_at"] == raw["attempted_at"]
     assert (sidecar_path.stat().st_mode & 0o777) == 0o600
 
 
@@ -1178,6 +1193,192 @@ def test_collect_agy_sidecar_round_trip_preserves_reset_at(tmp_path: Path) -> No
     assert second.windows["weekly"].reset_at == expected_weekly_reset
     assert second.windows["five_hour"].used_percent == first.windows["five_hour"].used_percent
     assert second.windows["weekly"].used_percent == first.windows["weekly"].used_percent
+
+
+def test_collect_agy_partial_cli_success_reports_stale_merge_without_flicker(tmp_path: Path) -> None:
+    # #353 third-round review findings C/D/E (required test 1): t0 both
+    # windows fetch fine (weekly 68%). At t+3d the CLI succeeds again but the
+    # weekly bucket is unparseable (no `reset_time`) while five_hour parses a
+    # brand-new value. Both the CLI round and the throttled round right after
+    # it must report the *merge* — weekly's stale 68% kept (not zeroed), its
+    # `display_reset` reading "exp" (its cached reset has long since passed),
+    # and five_hour showing this round's fresh value — with an identical
+    # window key set across both rounds (no flicker).
+    sidecar_path = tmp_path / "agy_usage.json"
+    t0 = _AGY_CLI_NOW
+
+    first = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=t0,
+        runner=_fixed_cli_runner(_agy_cli_payload(gemini_weekly=0.32, gemini_5h=0.9)),
+        sidecar_path=sidecar_path,
+    )
+    assert first is not None
+    assert first.windows["weekly"].used_percent == 68
+    weekly_reset_at = first.windows["weekly"].reset_at
+    assert weekly_reset_at is not None
+
+    t_plus_3d = t0 + timedelta(days=3)
+    assert weekly_reset_at <= t_plus_3d  # the cached weekly reset is already past by t+3d
+
+    partial_payload = json.dumps(
+        {
+            "status": "SUCCESS",
+            "command": {
+                "data": {
+                    "groups": [
+                        {
+                            "buckets": [
+                                {
+                                    "id": "gemini-5h",
+                                    "window": "5h",
+                                    "remaining_fraction": 0.8,
+                                    "reset_time": "2026-09-19T12:00:00Z",
+                                },
+                                {
+                                    # Matches the group, but no `reset_time` -> unparseable.
+                                    "id": "gemini-weekly",
+                                    "window": "weekly",
+                                    "remaining_fraction": 0.1,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+        }
+    )
+    second = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=t_plus_3d,
+        runner=_fixed_cli_runner(partial_payload),
+        sidecar_path=sidecar_path,
+    )
+    assert second is not None
+    assert second.source_status == "stale"
+    assert second.windows["five_hour"].used_percent == 20
+    assert second.windows["weekly"].used_percent == 68
+    assert second.windows["weekly"].reset_at == weekly_reset_at
+    assert second.windows["weekly"].display_reset == "exp"
+    assert set(second.windows) == {"five_hour", "weekly"}
+
+    third = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=t_plus_3d + timedelta(seconds=30),
+        runner=Mock(side_effect=AssertionError("must not run CLI while throttled")),
+        sidecar_path=sidecar_path,
+    )
+    assert third is not None
+    assert third.source_status == "stale"
+    assert third.windows["five_hour"].used_percent == 20
+    assert third.windows["weekly"].used_percent == 68
+    assert third.windows["weekly"].display_reset == "exp"
+    assert set(third.windows) == set(second.windows)
+
+
+def test_collect_agy_legacy_sidecar_upgrades_to_per_window_fetched_at(tmp_path: Path) -> None:
+    # #353 third-round review finding A (required test 3): a sidecar written
+    # before per-window `fetched_at` existed (one top-level `fetched_at`, no
+    # `attempted_at`, no per-window `fetched_at`) must still throttle and
+    # judge freshness exactly as a new-format sidecar would; the next cycle
+    # that actually writes upgrades the file to the new per-window schema.
+    sidecar_path = tmp_path / "agy_usage.json"
+    legacy_fetched_at = _AGY_CLI_NOW - timedelta(seconds=30)
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "fetched_at": legacy_fetched_at.isoformat(),
+                "windows": {
+                    "five_hour": {
+                        "used_percent": 12,
+                        "reset_at": (_AGY_CLI_NOW + timedelta(hours=4)).isoformat(),
+                    },
+                    "weekly": {
+                        "used_percent": 44,
+                        "reset_at": (_AGY_CLI_NOW + timedelta(days=6)).isoformat(),
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # Round A: within refresh_seconds of the legacy `fetched_at` (used as the
+    # throttle anchor too, absent a real `attempted_at`) -> throttled, and
+    # judged fresh exactly as a new-format sidecar would be.
+    first = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=_AGY_CLI_NOW,
+        runner=Mock(side_effect=AssertionError("must not run CLI while throttled")),
+        sidecar_path=sidecar_path,
+    )
+    assert first is not None
+    assert first.source_status == "fresh"
+    assert first.windows["five_hour"].used_percent == 12
+    assert first.windows["weekly"].used_percent == 44
+
+    # Round B: past refresh_seconds of that same anchor -> the CLI actually
+    # runs and writes the upgraded, per-window schema.
+    second = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, cli_path=_FAKE_AGY_CLI_PATH),
+        now=_AGY_CLI_NOW + timedelta(seconds=301),
+        runner=_fixed_cli_runner(_agy_cli_payload()),
+        sidecar_path=sidecar_path,
+    )
+    assert second is not None
+    assert second.source_status == "fresh"
+
+    raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert set(raw.keys()) == {"attempted_at", "note", "windows"}
+    for entry in raw["windows"].values():
+        assert set(entry.keys()) == {"used_percent", "reset_at", "fetched_at"}
+        assert entry["fetched_at"] == raw["attempted_at"]
+
+
+def test_collect_agy_cli_missing_from_path_is_treated_as_failed_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # #353 third-round review finding F (required test 4): `cli_path` unset
+    # in config AND not found on PATH counts as one failed attempt — it must
+    # still stamp `attempted_at` (so the throttle actually engages, verified
+    # here by `shutil.which` not being called a second time) and record a
+    # distinguishable `note` ("cli-missing") instead of silently skipping
+    # straight to local_fallback/unknown on every single cycle.
+    sidecar_path = tmp_path / "agy_usage.json"
+    which_calls: list[str] = []
+
+    def _fake_which(name: str) -> str | None:
+        which_calls.append(name)
+        return None
+
+    monkeypatch.setattr(shutil, "which", _fake_which)
+
+    first = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, local_fallback=False, cli_path=None),
+        now=_AGY_CLI_NOW,
+        runner=Mock(side_effect=AssertionError("cli_path is None — nothing to run")),
+        sidecar_path=sidecar_path,
+    )
+    assert first is not None
+    assert first.source_status == "unknown"
+    assert first.note == "cli-missing"
+    assert which_calls == ["agy"]
+
+    raw = json.loads(sidecar_path.read_text(encoding="utf-8"))
+    assert raw["note"] == "cli-missing"
+    assert "attempted_at" in raw
+
+    second = collect_agy(
+        AgyProviderConfig(enabled=True, refresh_seconds=300, local_fallback=False, cli_path=None),
+        now=_AGY_CLI_NOW + timedelta(seconds=30),
+        runner=Mock(side_effect=AssertionError("must not run CLI while throttled")),
+        sidecar_path=sidecar_path,
+    )
+    assert second is not None
+    assert second.note == "cli-missing"
+    # Still just the one `which` call from round A — throttled rounds must
+    # not repeat the PATH lookup either.
+    assert which_calls == ["agy"]
 
 
 def test_agy_sidecar_path_matches_state_cost_agy_usage_json() -> None:
