@@ -34,7 +34,7 @@ accepted 僅表示規格可執行，不表示程式或驗收已完成。使用 C
 - 偵測只允許 `which()` 與 `Path.exists()/is_dir()/is_file()`；測試以 monkeypatch 讓上述路徑的 `open`／`read_text`／`read_bytes` 拋例外，證明偵測路徑零讀取。
 
 ### R5 `paulshaclaw deploy install` 的 footer 選擇
-- 新旗標 `--footer <spec>`：`spec` 為逗號分隔的 `codex | claude | copilot[:label[:label…]] | agy`，或 `none`。`copilot` 未帶 label 時等於「既有 accounts 全開」。
+- 新旗標 `--footer <spec>`：`spec` 為逗號分隔的 `codex | claude | copilot[:label[:label…]] | agy[:label[:label…]]`，或 `none`。`copilot`／`agy` 未帶 label 時等於「既有 accounts 全開」；`agy` 遇未宣告的 label 會新建條目（#343）。
 - 決策矩陣：
   | 條件 | 行為 | report `footer_selection.mode` |
   |---|---|---|
@@ -46,7 +46,7 @@ accepted 僅表示規格可執行，不表示程式或驗收已完成。使用 C
 
 ### R6 設定寫回
 - 目標檔為 `--home-dir` 解析出的 `~/.config/paulshaclaw/paulshaclaw.yaml`；不存在時以 sample 為底。
-- 寫回前先備份 `paulshaclaw.yaml.bak-<UTC timestamp>`；只改 `cost.providers.{codex,claude,agy}.enabled` 與 `cost.providers.copilot.accounts[].enabled`，其他 key／value 全數保留（deep-merge），既有 `label`／`monthly_allowance`／`org` 不得被洗掉。YAML 註解不保證保留，此限制寫進 README。
+- 寫回前先備份 `paulshaclaw.yaml.bak-<UTC timestamp>`；只改 `cost.providers.{codex,claude,agy}.enabled` 與 `cost.providers.{copilot,agy}.accounts[].enabled`（agy 未宣告的 label 會新建 `accounts[]` 條目，#343），其他 key／value 全數保留（deep-merge），既有 `label`／`monthly_allowance`／`org` 不得被洗掉。YAML 註解不保證保留，此限制寫進 README。
 - 重跑 install 時，TUI 與 `--footer` 的預設勾選狀態來自既有 config 的 `enabled` 值；未偵測到的 agent 預設不勾但可強制勾選。
 
 ### R7 TUI

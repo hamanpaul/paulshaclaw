@@ -313,7 +313,7 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 明確指定時可用 `--footer codex,claude,copilot:haman:arc,agy`、`--footer copilot`（啟用目前已設定的全部 copilot accounts）或 `--footer none`。agy 比照 copilot 支援 `--footer agy:<label>[:<label>...]`（多帳號子集）與裸 `agy`（啟用目前已設定的全部 agy accounts）；與 copilot 不同的是，agy 遇到**尚未在 yaml 宣告**的 label 會直接新建一筆 `{id, label, enabled: true}` 條目而非報錯 —— accounts[] 一律只來自這裡的顯式宣告或 TUI／`--footer` 操作，不會主動枚舉或讀取 `~/.gemini/google_accounts.json` 等任何帳號檔。install TUI 有 `accounts[]` 時會在 `agy` 父列下展開各帳號子列可個別勾選，但 TUI 本身只能 toggle 既有條目、不會新建。label 含 `:` 或 `,` 無法經 `--footer` 正確表達（會被切成多個 label，可能新建非預期的垃圾條目）：這類 label 只能用 yaml 直接宣告 `accounts[]`，勿經 `--footer`。
 - 寫回只更新 `cost.providers.*.enabled` 與 account 的 `enabled`，其餘 `label` / `monthly_allowance` / `org` 保留；若 `~/.config/paulshaclaw/paulshaclaw.yaml` 尚不存在，會以 bundled sample 建立。agy 例外：`--footer agy:<label>` 遇到未宣告的 label 會新建 `accounts` 條目（`accounts` 鍵原本不存在時也會一併新建），不是純粹的「只更新 enabled」。
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
-- JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。
+- JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。 例外：宿主沒有 PyYAML（無法讀 yaml、拿不到 account_id）的降級路徑只能以 `--footer` 給的 label 當 key（裸 `agy` 仍回 bool）。
 
 ##### agy 用量來源
 
