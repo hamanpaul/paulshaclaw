@@ -56,12 +56,19 @@ class ProviderSnapshot:
     windows: dict[str, UsageWindow] = field(default_factory=dict)
     accounts: tuple[CopilotAccountUsage, ...] = ()
     note: str | None = None
+    # #343: display alias for a multi-account provider (currently only agy),
+    # e.g. the active account's label so the footer can render `agy/<label>`.
+    # None keeps the provider's bare name, unchanged from before this field
+    # existed.
+    label: str | None = None
 
     def to_jsonable(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "source_status": self.source_status,
             "source": self.source,
         }
+        if self.label is not None:
+            payload["label"] = self.label
         if self.windows:
             payload["windows"] = {
                 name: window.to_jsonable() for name, window in self.windows.items()

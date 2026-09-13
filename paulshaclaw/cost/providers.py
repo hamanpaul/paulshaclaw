@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -170,6 +171,17 @@ def _read_json_file(path: Path) -> dict[str, Any] | None:
 
 
 def _agy_account_config(config: AgyProviderConfig) -> CopilotAccountConfig:
+    # #343: in accounts[] mode, attach usage to the active (first enabled)
+    # declared account's identity rather than the synthetic "agy" id — the
+    # `/usage` CLI answer itself carries no account identity, so this is only
+    # ever the label/id the user declared, never anything read off disk.
+    active = config.active_account
+    if active is not None:
+        return CopilotAccountConfig(
+            account_id=active.account_id,
+            label=active.label,
+            kind="personal",
+        )
     return CopilotAccountConfig(
         account_id="agy",
         label=config.label,
@@ -915,7 +927,7 @@ def _agy_fallback_note(note: str | None, cli_note: str | None) -> str | None:
     return f"{note} (agy cli:{cli_note})"
 
 
-def collect_agy(
+def _collect_agy_usage(
     config: AgyProviderConfig,
     *,
     now: datetime | None = None,
@@ -924,8 +936,6 @@ def collect_agy(
     runner: Callable[..., Any] | None = None,
     sidecar_path: Path | None = None,
 ) -> ProviderSnapshot | None:
-    if not config.enabled:
-        return None
     # Mirror collect_codex/collect_claude: display_reset renders in the wall
     # clock of `timezone_name` (config.timezone), not raw UTC — otherwise
     # agy's reset time in the footer reads hours off from cdx/cc (#353 review
@@ -1124,6 +1134,36 @@ def collect_agy(
         accounts=(),
         note=_agy_fallback_note("agy quota unavailable", note),
     )
+
+
+def collect_agy(
+    config: AgyProviderConfig,
+    *,
+    now: datetime | None = None,
+    timezone_name: str = "Asia/Taipei",
+    reader: Callable[[Path], dict[str, Any] | None] | None = None,
+    runner: Callable[..., Any] | None = None,
+    sidecar_path: Path | None = None,
+) -> ProviderSnapshot | None:
+    """#343 entry point: gate on `effective_enabled` (top-level `enabled` AND,
+    when accounts[] is declared, at least one of them enabled), delegate to
+    `_collect_agy_usage` for the actual CLI/local-fallback/unknown flow, then
+    stamp the result with the active account's label (or `None` when no
+    accounts are declared, leaving the footer's bare `agy` name unchanged)."""
+    if not config.effective_enabled:
+        return None
+    snapshot = _collect_agy_usage(
+        config,
+        now=now,
+        timezone_name=timezone_name,
+        reader=reader,
+        runner=runner,
+        sidecar_path=sidecar_path,
+    )
+    if snapshot is None:
+        return None
+    active = config.active_account
+    return dataclasses.replace(snapshot, label=active.label if active is not None else None)
 
 
 def _unknown_account(account: CopilotAccountConfig) -> CopilotAccountUsage:
@@ -1547,7 +1587,7 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     copilot = collect_copilot(config)
     if copilot.accounts:
         providers["cpt"] = copilot
-    if config.agy.enabled:
+    if config.agy.effective_enabled:
         agy = collect_agy(config.agy, timezone_name=config.timezone)
         if agy is not None:
             providers["agy"] = agy
@@ -1598,6 +1638,7 @@ def carry_forward_degraded(
                 windows=dict(old.windows),
                 accounts=tuple(old.accounts),
                 note=old.note,
+                label=old.label,
             )
         else:
             result[name] = provider

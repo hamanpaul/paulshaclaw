@@ -94,6 +94,11 @@ def _ensure_accounts(provider: dict[str, Any], *, path: str) -> list[dict[str, A
         if not isinstance(entry, dict):
             raise ValueError(f"{path}[{index}] 必須是 mapping")
         normalized.append(entry)
+    # #343: rebind `provider["accounts"]` to this same list object — a caller
+    # appending a newly-declared account (`_declare_agy_accounts`) onto the
+    # returned list must have that mutation actually land in `provider`,
+    # which it wouldn't if `normalized` stayed a detached copy.
+    provider["accounts"] = normalized
     return normalized
 
 
@@ -163,7 +168,12 @@ def parse_footer_argument(raw: str) -> dict[str, object]:
             raise argparse.ArgumentTypeError(f"--footer 僅支援 {allowed}")
         if provider in parsed:
             raise argparse.ArgumentTypeError(f"--footer 不可重複指定 {provider}")
-        if provider == "copilot":
+        if provider in ("copilot", "agy"):
+            # #343: agy follows the same `<provider>[:<label>...]` grammar as
+            # copilot — bare means "all declared accounts", explicit labels
+            # select a subset (and, unlike copilot, a not-yet-declared label
+            # gets bootstrapped as a new account entry — see
+            # `_declare_agy_accounts`).
             parsed[provider] = {
                 "enabled": True,
                 "labels": labels,
@@ -208,11 +218,22 @@ def _selection_enabled_fallback(
         labels = copilot.get("labels")
         if isinstance(labels, list):
             copilot_enabled = {str(label): True for label in labels}
+    # #343: without yaml we can't know the pre-existing agy accounts[] shape,
+    # but an explicit `--footer agy:<label>...` request tells us the result
+    # will have accounts (labels get bootstrapped as new entries), so mirror
+    # that as a dict; otherwise fall back to the bool shape (matches the no
+    # accounts[] case).
+    agy_enabled: dict[str, bool] | bool = bool(not disable_all and "agy" in selected)
+    agy = selected.get("agy")
+    if isinstance(agy, dict) and not disable_all:
+        labels = agy.get("labels")
+        if isinstance(labels, list) and labels:
+            agy_enabled = {str(label): True for label in labels}
     return {
         "codex": bool(not disable_all and "codex" in selected),
         "claude": bool(not disable_all and "claude" in selected),
         "copilot": copilot_enabled,
-        "agy": bool(not disable_all and "agy" in selected),
+        "agy": agy_enabled,
     }
 
 
@@ -240,8 +261,14 @@ def _preview_providers(config: CostConfig) -> dict[str, ProviderSnapshot]:
     if copilot_accounts:
         providers["cpt"] = ProviderSnapshot(source_status="unknown", source="unknown", accounts=copilot_accounts)
 
-    if config.agy.enabled:
-        providers["agy"] = ProviderSnapshot(source_status="unknown", source="unknown", accounts=())
+    if config.agy.effective_enabled:
+        active = config.agy.active_account
+        providers["agy"] = ProviderSnapshot(
+            source_status="unknown",
+            source="unknown",
+            accounts=(),
+            label=active.label if active is not None else None,
+        )
     return providers
 
 
@@ -308,6 +335,31 @@ def _set_account_enableds(
         )
 
 
+def _declare_agy_accounts(
+    accounts: list[dict[str, Any]],
+    *,
+    labels: list[str],
+) -> None:
+    """#343 D-A: `--footer agy:<label>` bootstraps a new `{id, label,
+    enabled}` entry for any requested label that isn't already declared —
+    unlike copilot, which requires every label to be pre-declared and raises
+    otherwise. Existing entries (and their other keys) are left untouched;
+    `_set_account_enableds` handles toggling `enabled` afterwards."""
+    known: set[str] = set()
+    for account in accounts:
+        existing_label = _matching_label(account)
+        if existing_label is not None:
+            known.add(existing_label)
+        account_id = account.get("id")
+        if isinstance(account_id, str) and account_id:
+            known.add(account_id)
+    for label in labels:
+        if label in known:
+            continue
+        accounts.append({"id": label, "label": label, "enabled": True})
+        known.add(label)
+
+
 def resolve_footer_enabled(
     *,
     selection: dict[str, object] | None = None,
@@ -338,7 +390,16 @@ def resolve_footer_enabled(
             account.account_id: _account_enabled(account)
             for account in config.copilot_accounts
         },
-        "agy": config.agy.enabled,
+        # #343: dict per declared account once accounts[] exists (mirrors
+        # copilot); plain bool (unchanged) while agy has no accounts[].
+        "agy": (
+            {
+                account.account_id: config.agy.enabled and _account_enabled(account)
+                for account in config.agy.accounts
+            }
+            if config.agy.accounts
+            else config.agy.enabled
+        ),
     }
 
 
@@ -353,13 +414,32 @@ def apply_footer_selection_payload(
     selected = selected if isinstance(selected, dict) else {}
     disable_all = bool(selection.get("disable_all", False))
 
-    for provider_name in ("codex", "claude", "agy"):
+    for provider_name in ("codex", "claude"):
         provider = _ensure_mapping(
             providers,
             provider_name,
             path=f"config.cost.providers.{provider_name}",
         )
         provider["enabled"] = bool(not disable_all and provider_name in selected)
+
+    agy = _ensure_mapping(providers, "agy", path="config.cost.providers.agy")
+    agy["enabled"] = bool(not disable_all and "agy" in selected)
+    agy_selection = selected.get("agy") if isinstance(selected.get("agy"), dict) else {}
+    agy_labels_raw = agy_selection.get("labels")
+    agy_labels = [str(label) for label in agy_labels_raw] if isinstance(agy_labels_raw, list) else []
+    # Only touch `accounts` when there's a reason to (already declared, or
+    # this request names labels) — otherwise a bare `--footer agy` against a
+    # fresh install would write an empty `accounts: []` for nothing.
+    if agy_labels or "accounts" in agy:
+        agy_accounts = _ensure_accounts(agy, path="config.cost.providers.agy.accounts")
+        _declare_agy_accounts(agy_accounts, labels=agy_labels)
+        _set_account_enableds(
+            agy_accounts,
+            selection_labels=agy_labels,
+            enable_all=bool(agy_selection.get("all_accounts", False)),
+            enabled=bool(not disable_all and agy_selection),
+            path="config.cost.providers.agy.accounts",
+        )
 
     copilot = _ensure_mapping(providers, "copilot", path="config.cost.providers.copilot")
     copilot_accounts = _ensure_accounts(

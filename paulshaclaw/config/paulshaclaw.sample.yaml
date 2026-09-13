@@ -81,7 +81,9 @@ cost:
       # stale_max_age_seconds：fetched_at 比它更舊時該輪不輸出視窗（sidecar
       # 檔仍保留），落到 local_fallback／unknown，note 保留最後失敗原因。
       enabled: false
-      label: agy
+      label: agy                # 優先序：宣告 accounts 後一律取第一個 enabled
+                                 # 帳號的 label 顯示，這裡的頂層 label 只在無
+                                 # accounts 時生效
       group: gemini            # 或 "3p"（Claude and GPT models 那組 bucket）
       refresh_seconds: 300      # CLI 最小重跑間隔（節流 sidecar 的 TTL）
       timeout_seconds: 20       # CLI 逾時秒數
@@ -90,3 +92,12 @@ cost:
       state_dir: ~/.gemini
       max_age_seconds: 300
       local_fallback: false
+      # 多帳號（#343，選用；預設不設定，不自動枚舉/讀取 ~/.gemini/google_accounts.json
+      # 等任何帳號檔——accounts[] 只來自你在這裡手動宣告，或 `--footer agy:<label>`）：
+      # accounts:
+      #   - id: me
+      #     label: me
+      #     enabled: true
+      #   - id: work
+      #     label: work
+      #     enabled: false

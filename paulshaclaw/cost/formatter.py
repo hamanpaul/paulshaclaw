@@ -153,7 +153,13 @@ def _format_agy_value(provider: ProviderSnapshot) -> tuple[str, str]:
     return "?", "neutral"
 
 
-def _format_agy_provider(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
+def _agy_name(provider: ProviderSnapshot) -> str:
+    """#343: `agy/<label>` once a multi-account label is attached, else the
+    bare `agy` literal unchanged from before accounts[] existed."""
+    return f"agy/{provider.label}" if provider.label else "agy"
+
+
+def _format_agy_provider(provider: ProviderSnapshot, use_tmux_style: bool, *, name: str = "agy") -> str:
     stale = provider.source_status == "stale"
     raw_value, level = _format_agy_value(provider)
     value = _wrap(
@@ -162,7 +168,7 @@ def _format_agy_provider(provider: ProviderSnapshot, use_tmux_style: bool) -> st
         use_tmux_style,
         stale=stale,
     )
-    return f"agy {value}"
+    return f"{name} {value}"
 
 
 def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str:
@@ -178,10 +184,11 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
 
     agy = snapshot.providers.get("agy")
     if agy is not None:
+        agy_name = _agy_name(agy)
         if agy.windows:
-            segments.append(_format_window_provider("agy", agy, use_tmux_style))
+            segments.append(_format_window_provider(agy_name, agy, use_tmux_style))
         else:
-            segments.append(_format_agy_provider(agy, use_tmux_style))
+            segments.append(_format_agy_provider(agy, use_tmux_style, name=agy_name))
 
     # Divider between cdx / cc / cpt so the segments don't blur together, plus a
     # trailing space so the line doesn't sit flush against the terminal edge.
@@ -279,10 +286,11 @@ def format_cockpit_rest(snapshot: CostSnapshot) -> str:
         segments.append(_format_cockpit_cpt(cpt))
     agy = snapshot.providers.get("agy")
     if agy is not None:
+        agy_name = _agy_name(agy)
         if agy.windows:
-            segments.append(_format_window_provider("agy", agy, True))
+            segments.append(_format_window_provider(agy_name, agy, True))
         else:
-            segments.append(_format_agy_provider(agy, True))
+            segments.append(_format_agy_provider(agy, True, name=agy_name))
     return _join_cockpit_segments(segments)
 
 

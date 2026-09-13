@@ -15,9 +15,9 @@ accepted 僅表示規格可執行，不表示程式或驗收已完成。使用 C
 
 ### R1 agy provider
 - `paulshaclaw/cost/config.py` 新增 `AgyProviderConfig(enabled: bool = False, state_dir: Path = ~/.gemini, label: str = "agy", max_age_seconds: int = 300, local_fallback: bool = False)`，掛在 `CostConfig.agy`；設定路徑 `cost.providers.agy`。缺 key 時使用預設值。
-- `paulshaclaw/cost/providers.py` 新增 `collect_agy(config: AgyProviderConfig, *, now: datetime | None = None) -> ProviderSnapshot`。`ProviderSnapshot` 必須帶 `source ∈ {"api", "local_observed", "unknown"}`。
+- `paulshaclaw/cost/providers.py` 新增 `collect_agy(config: AgyProviderConfig, *, now: datetime | None = None) -> ProviderSnapshot`。`ProviderSnapshot` 必須帶 `source ∈ {"api", "cli", "local_observed", "unknown"}`。
 - 可信來源（`source="api"`）只在 T1 研究確認存在「不需額外 OAuth scope、不會觸發 rate limit、schema 可釘」的端點或本機檔時實作；找不到即實作 `source="unknown"`，並在 tasks.md 記錄調查過的候選與結論。`local_observed` 只在 `local_fallback: true` 且有穩定本機 schema 時啟用。
-- **禁止讀取**：`~/.gemini/oauth_creds.json`、`~/.gemini/antigravity-cli/antigravity-oauth-token`、`~/.gemini/google_accounts.json` 的內容；本輪 agy 視為單一帳號、以 `label` 顯示，多帳號另開票。
+- **禁止讀取**：`~/.gemini/oauth_creds.json`、`~/.gemini/antigravity-cli/antigravity-oauth-token`、`~/.gemini/google_accounts.json` 的內容；accounts[] 由使用者宣告、用量附掛第一個 enabled 帳號（#343）。
 
 ### R2 formatter
 - `paulshaclaw/cost/formatter.py` 新增 `agy` 段：`source="api"` → `agy N%`；`local_observed` → `agy ~N`；`unknown` → `agy ?`；`unlimited` → `agy ∞`。warning／critical 著色與 reset 顯示沿用 `cdx`／`cc`／`cpt` 的既有邏輯。
@@ -34,19 +34,19 @@ accepted 僅表示規格可執行，不表示程式或驗收已完成。使用 C
 - 偵測只允許 `which()` 與 `Path.exists()/is_dir()/is_file()`；測試以 monkeypatch 讓上述路徑的 `open`／`read_text`／`read_bytes` 拋例外，證明偵測路徑零讀取。
 
 ### R5 `paulshaclaw deploy install` 的 footer 選擇
-- 新旗標 `--footer <spec>`：`spec` 為逗號分隔的 `codex | claude | copilot[:label[:label…]] | agy`，或 `none`。`copilot` 未帶 label 時等於「既有 accounts 全開」。
+- 新旗標 `--footer <spec>`：`spec` 為逗號分隔的 `codex | claude | copilot[:label[:label…]] | agy[:label[:label…]]`，或 `none`。`copilot`／`agy` 未帶 label 時等於「既有 accounts 全開」；`agy` 遇未宣告的 label 會新建條目（#343）。
 - 決策矩陣：
   | 條件 | 行為 | report `footer_selection.mode` |
   |---|---|---|
   | 有 `--footer` | 不進 TUI，依 spec 寫回 | `flag` |
   | 無 `--footer`，stdin 與 stdout 皆為 TTY，且非 `--plan-only` | 進 TUI | `tui`（取消時 `cancelled`，config 不動） |
   | 無 `--footer`，任一非 TTY 或 `--plan-only` | 不進 TUI、config 不動 | `skipped`，`reason: "no-tty"` 或 `"plan-only"` |
-- report 新增 `detected_agents: [{name, binary, state_present}]`（一律輸出，與是否進 TUI 無關）與 `footer_selection: {mode, enabled: {codex: bool, claude: bool, copilot: {<account_id>: bool}, agy: bool}}`。report 仍為單一 JSON；`--plan-only`／`--verify` 路徑輸出形狀不變。
+- report 新增 `detected_agents: [{name, binary, state_present}]`（一律輸出，與是否進 TUI 無關）與 `footer_selection: {mode, enabled: {codex: bool, claude: bool, copilot: {<account_id>: bool}, agy: bool（無 accounts[]）｜{<account_id>: bool}（有 accounts[]，#343）}}`。report 仍為單一 JSON；`--plan-only`／`--verify` 路徑輸出形狀不變。
 - `tests/test_deploy_template_packaging.py::test_clean_venv_runs_deploy_from_installed_wheel_outside_checkout` 在不加旗標、無 TTY 下必須維持通過，且 report 含 `footer_selection.mode == "skipped"`。
 
 ### R6 設定寫回
 - 目標檔為 `--home-dir` 解析出的 `~/.config/paulshaclaw/paulshaclaw.yaml`；不存在時以 sample 為底。
-- 寫回前先備份 `paulshaclaw.yaml.bak-<UTC timestamp>`；只改 `cost.providers.{codex,claude,agy}.enabled` 與 `cost.providers.copilot.accounts[].enabled`，其他 key／value 全數保留（deep-merge），既有 `label`／`monthly_allowance`／`org` 不得被洗掉。YAML 註解不保證保留，此限制寫進 README。
+- 寫回前先備份 `paulshaclaw.yaml.bak-<UTC timestamp>`；只改 `cost.providers.{codex,claude,agy}.enabled` 與 `cost.providers.{copilot,agy}.accounts[].enabled`（agy 未宣告的 label 會新建 `accounts[]` 條目，#343），其他 key／value 全數保留（deep-merge），既有 `label`／`monthly_allowance`／`org` 不得被洗掉。YAML 註解不保證保留，此限制寫進 README。
 - 重跑 install 時，TUI 與 `--footer` 的預設勾選狀態來自既有 config 的 `enabled` 值；未偵測到的 agent 預設不勾但可強制勾選。
 
 ### R7 TUI
