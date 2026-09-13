@@ -202,7 +202,7 @@ def build_selection_options(
         FooterSelectionOption(
             label=f"  └─ agy:{account.label}",
             value=_account_value("agy", account.label),
-            selected=account.enabled and agy_detected,
+            selected=config.agy.enabled and account.enabled and agy_detected,
         )
         for account in config.agy.accounts
     )

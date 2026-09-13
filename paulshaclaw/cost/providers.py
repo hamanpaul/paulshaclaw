@@ -1595,12 +1595,14 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
 
 
 def _provider_has_data(provider: ProviderSnapshot) -> bool:
-    has_account_data = any(
-        account.percent_used is not None or account.used_requests is not None or account.unlimited
-        for account in provider.accounts
-    )
-    has_window_data = any(window.used_percent is not None for window in provider.windows.values())
-    return has_account_data or has_window_data
+    if provider.accounts:
+        return any(
+            account.percent_used is not None
+            or account.used_requests is not None
+            or account.unlimited
+            for account in provider.accounts
+        )
+    return any(window.used_percent is not None for window in provider.windows.values())
 
 
 def carry_forward_degraded(

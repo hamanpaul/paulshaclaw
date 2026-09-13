@@ -31,7 +31,6 @@ from paulshaclaw.cost.config import (
 from paulshaclaw.cost.formatter import _agy_name, format_cockpit_rest, format_footer
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot, UsageWindow
 from paulshaclaw.cost.providers import (
-    _provider_has_data,
     carry_forward_degraded,
     collect_agy,
     collect_all,
@@ -67,6 +66,18 @@ def _guard_against_real_agy_cli(monkeypatch: pytest.MonkeyPatch) -> None:
         return real_run(args, *a, **kw)
 
     monkeypatch.setattr(subprocess, "run", _guarded_run)
+
+
+@pytest.fixture(autouse=True)
+def _guard_against_real_agy_sidecar(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """與上面的 CLI 守衛同款：即使某個測試忘了帶 `sidecar_path=`，
+    `_collect_agy_usage` 的 `sidecar_path or _agy_sidecar_path()` 也不會落到
+    開發者機器上真正的 `~/.agents/state/cost/agy_usage.json`。"""
+
+    monkeypatch.setattr(
+        "paulshaclaw.cost.providers._agy_sidecar_path",
+        lambda: tmp_path / "_autouse-guard-agy_usage.json",
+    )
 
 
 def _agy_cli_success_payload(
@@ -301,19 +312,54 @@ def test_collect_agy_accounts_mode_never_reads_guarded_gemini_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    guarded_names = {"oauth_creds.json", "antigravity-oauth-token", "google_accounts.json"}
+    """比照 tests/test_deploy_footer_selection.py 的
+    test_detect_agents_never_reads_guarded_paths（#343 R4 審查發現 2）：只
+    patch `Path.read_text` 會漏掉 `read_bytes`／`open`，且用檔名比對（而非
+    resolved 絕對路徑）在別的測試也建立同名檔案時會有偽陽性/偽陰性——這裡改
+    成三個方法都 patch，且守護集合是 resolved 過的絕對路徑。"""
+    home = tmp_path / "home"
+    gemini_dir = home / ".gemini"
+    (gemini_dir / "antigravity-cli").mkdir(parents=True)
+    gemini_dir.joinpath("oauth_creds.json").write_text("{}", encoding="utf-8")
+    gemini_dir.joinpath("antigravity-oauth-token").write_text("token", encoding="utf-8")
+    (gemini_dir / "antigravity-cli" / "antigravity-oauth-token").write_text(
+        "token", encoding="utf-8"
+    )
+    gemini_dir.joinpath("google_accounts.json").write_text("[]", encoding="utf-8")
+
+    guarded = {
+        (gemini_dir / "oauth_creds.json").resolve(),
+        (gemini_dir / "antigravity-oauth-token").resolve(),
+        (gemini_dir / "antigravity-cli" / "antigravity-oauth-token").resolve(),
+        (gemini_dir / "google_accounts.json").resolve(),
+    }
     original_read_text = Path.read_text
+    original_read_bytes = Path.read_bytes
+    original_open = Path.open
 
     def fail_read_text(path: Path, *args, **kwargs):
-        if path.name in guarded_names:
+        if path.resolve() in guarded:
             raise AssertionError(f"guarded read_text: {path}")
         return original_read_text(path, *args, **kwargs)
 
+    def fail_read_bytes(path: Path, *args, **kwargs):
+        if path.resolve() in guarded:
+            raise AssertionError(f"guarded read_bytes: {path}")
+        return original_read_bytes(path, *args, **kwargs)
+
+    def fail_open(path: Path, *args, **kwargs):
+        if path.resolve() in guarded:
+            raise AssertionError(f"guarded open: {path}")
+        return original_open(path, *args, **kwargs)
+
     monkeypatch.setattr(Path, "read_text", fail_read_text)
+    monkeypatch.setattr(Path, "read_bytes", fail_read_bytes)
+    monkeypatch.setattr(Path, "open", fail_open)
 
     config = AgyProviderConfig(
         enabled=True,
         cli_path=_FAKE_AGY_CLI_PATH,
+        state_dir=gemini_dir,
         accounts=(
             AgyAccountConfig(account_id="me", label="me", enabled=True),
             AgyAccountConfig(account_id="work", label="work", enabled=False),
@@ -327,55 +373,6 @@ def test_collect_agy_accounts_mode_never_reads_guarded_gemini_paths(
     )
     assert provider is not None
     assert provider.label == "me"
-
-
-def test_provider_has_data_checks_windows_even_when_accounts_present_but_empty() -> None:
-    # 舊版 `if provider.accounts: ... else windows` 在 accounts 非空但無可用值
-    # 時會直接回 False，完全忽略 windows —— 這是本票要改成 OR 語意要堵的洞。
-    mixed = ProviderSnapshot(
-        source_status="fresh",
-        source="cli",
-        windows={"five_hour": UsageWindow(used_percent=5, reset_at=None, display_reset="1h")},
-        accounts=(
-            CopilotAccountUsage(
-                account_id="a",
-                label="a",
-                kind="personal",
-                used_requests=None,
-                monthly_allowance=None,
-                source="unknown",
-            ),
-        ),
-    )
-    assert _provider_has_data(mixed) is True
-
-
-def test_provider_has_data_or_semantics_basic_cases() -> None:
-    only_windows = ProviderSnapshot(
-        source_status="fresh",
-        source="cli",
-        windows={"five_hour": UsageWindow(used_percent=10, reset_at=None, display_reset="1h")},
-    )
-    only_accounts = ProviderSnapshot(
-        source_status="fresh",
-        source="local_observed",
-        accounts=(
-            CopilotAccountUsage(
-                account_id="a",
-                label="a",
-                kind="personal",
-                used_requests=None,
-                monthly_allowance=None,
-                source="local_state",
-                percent_used=40,
-            ),
-        ),
-    )
-    neither = ProviderSnapshot(source_status="unknown", source="unknown")
-
-    assert _provider_has_data(only_windows) is True
-    assert _provider_has_data(only_accounts) is True
-    assert _provider_has_data(neither) is False
 
 
 def test_carry_forward_degraded_preserves_label_in_general_path() -> None:
@@ -503,6 +500,16 @@ def test_format_footer_agy_label_stale_window_gets_tilde_suffix() -> None:
 def test_format_cockpit_rest_includes_labeled_agy_segment() -> None:
     rest = format_cockpit_rest(_cost_snapshot(_labeled_window_snapshot(label="work")))
     assert "agy/work" in rest
+
+
+def test_format_cockpit_rest_no_windows_branch_passes_through_label() -> None:
+    # #343 審查發現 6：確認 format_cockpit_rest 的無 windows 分支（走
+    # `_format_agy_provider`）真的把 label 透傳進 segment 名稱，而不只是
+    # `format_footer` 有做——整串比對含 ANSI 前景色轉換的最終輸出。
+    rest = format_cockpit_rest(
+        _cost_snapshot(ProviderSnapshot(source_status="unknown", label="work"))
+    )
+    assert rest == "agy/work \033[38;5;245m?\033[0m"
 
 
 # --- 6. status：degraded snapshot 帶 label、全停用不 seed、filter 重標 --------
