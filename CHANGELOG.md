@@ -7,6 +7,30 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-09-13
+
+### Added
+- Stage 8 cost footer 的 agy 用量來源改讀 print-mode 唯讀 slash command（`agy -p "/usage" --output-format json`）：不起 agent turn、零 token、不讀任何 credential 檔，比 `local_fallback` 讀 `~/.gemini/antigravity-cli/state.json`（agy 1.2.0 已不存在）更可信。
+- 單次呼叫耗時 2.5～4s，故以 `cost.providers.agy.refresh_seconds`（預設 300s）節流：owner-only sidecar `~/.agents/state/cost/agy_usage.json`（只存 `attempted_at`／`fetched_at`／`note`／`windows`，不存 CLI 原始輸出；`windows` 只存 CLI 的原始解析值，絕不在寫入前 roll-forward）。一輪只有兩種結果：兩個視窗都解析成功 → 整塊替換 `windows`／`fetched_at`＝now／`note`＝null；其餘任何情況（timeout／nonzero／invalid-json／status-not-success／group-missing／window-unparsed／cli-missing，PATH 上找不到 `agy` 也算一次失敗嘗試）→ 只更新 `attempted_at`／`note`，`windows`／`fetched_at` 原樣不動——不再 merge、不再有 per-window `fetched_at`（收斂第三輪逐視窗新鮮度設計，減少活動零件）。`attempted_at` 只決定要不要節流；`fresh`／`stale` 只看 `fetched_at` 是否落在 `refresh_seconds` 內。過期視窗只在 `fresh` 時才於呈現層 roll-forward（不影響 sidecar 內容），避免連續失敗數小時後誤報「已重置」；`stale` 的過期視窗改印 `(exp)` 而非過去的時鐘時間或假造的 `0%`。新增 `stale_max_age_seconds`（預設 3600）：`fetched_at` 比它更舊時該輪不輸出視窗（sidecar 檔仍保留），落到既有 `local_fallback` 或 `unknown`，`note` 保留最後失敗原因。讀到升級前的舊格式 sidecar（第三輪的 per-window `fetched_at`，或更早只有單一頂層 `fetched_at` 的版本）不會炸：取可得的最舊 `fetched_at`（或視為無 `fetched_at`），下一次實際寫入即升級為現行格式。
+- 新增 `group`（預設 `gemini`，可設 `3p`）依 bucket id 前綴選取 5h／weekly 視窗、`timeout_seconds`、`cli_path`、`stale_max_age_seconds` 設定欄，並補上 `paulshaclaw.sample.yaml` 與 README 說明。
+- formatter：`windows` 非空時 agy 比照 `cdx`／`cc` 走 `_format_window_provider`（tmux footer 與 cockpit 皆是），呈現 `agy 5h:N%(reset) wk:N%(reset)`；無視窗資料時維持原本 accounts 型 `agy N%`／`?` 呈現。
+### Changed
+- JOBS 面板補齊 #322 的交付說明：workflow-run 條目現在會正確顯示 project／stage／persona 三軸資訊，`recent_done` 仍留在對應 repo 群底下，單列 detail 預設收合以保住 12 行視野。
+- `cost.providers.agy.accounts[]` 比照 copilot 開放多帳號宣告（`{id, label, enabled}`），但只承接使用者的顯式宣告（yaml 或 `--footer agy:<label>[:<label>...]`）——絕不主動枚舉或讀取 `~/.gemini/google_accounts.json` 等任何帳號檔，#341 R4 零讀取守衛不變。`agy -p "/usage"` 本身不含帳號識別，故多帳號模式下的用量一律附掛到第一個 enabled 帳號（`active_account`）；`accounts[]` 非空但全部 disabled 時 agy 視為未生效，不 collect、不出現在 footer，即使頂層 `enabled: true`。footer／cockpit 呈現：宣告 `accounts[]` 後 segment 名稱從 `agy` 換成 `agy/<active 帳號 label>`，未宣告時逐字元不變仍是 `agy`。install TUI 與 `--footer agy:<label>` 對齊 copilot 語法，但與 copilot 不同的是——遇到尚未宣告的 label 會直接新建一筆 `{id, label, enabled: true}` 條目而非報錯；TUI 本身在 `agy` 父列下展開既有帳號子列，只能 toggle、不會新建。JSON report 的 `footer_selection.enabled.agy`：`accounts[]` 非空時改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀），未宣告時維持既有的 bool 不變。
+- `paulsha-cortex` pin 由 7ced8df（v0.1.9，2026-08-26）升到 739cde17（v0.1.10+78，origin/main 2026-09-10）：舊 pin 讀不了現行 cortex runtime 寫出的 `coordinator-cortex/jobs.json`（`next_step_hint` 等新欄位，fail-closed），`paulshaclaw` release 路徑的 cortex local fallback manager／monitor 一起就死；升版後可正常載入現行狀態檔。operator-shell 實際 import／spawn 的 cortex 介面（`control/`、`cli.py`、`persona/contract.py`、`config/paths.py`、`deck/schema.py`＋`cards.yaml`、`coordinator/{workflow,manager_daemon,registry}.py`、`monitor/`、`trust_root/selfcheck.py`）自 7ced8df 以來零變動；唯一相關的行為變動是 manager status 多輸出 `next_step_hint` 鍵，cockpit 早已容錯讀取。
+- `docs/release-contract.md` §5.2 實測依據的 `Requires-Dist` 範例不再綁具體 pin SHA（原值 hippo eb2ccb86／cortex 3dfea79f 早已過期），改為 `<40 字元 SHA>` 佔位並註明以 `pyproject.toml` 為準。
+- 補齊 Stage 11 JOBS 三軸 closeout 的 docs-only bookkeeping artifacts：回寫 Stage 11 todo 記錄 PR #329 已合併與 issue #322 已關閉，補齊 `openspec/changes/archive/2026-08-29-cockpit-jobs-three-axis-closeout/` 的 archive metadata 與 closeout changelog fragment；原始 implementation 維持不變，#330 會在 closeout PR 以 `Closes #330` merge 後由 GitHub 自動關閉。
+- 正式化 `cockpit-jobs-three-axis` 的 pre-archive 交付：補上與 change slug 同名的 changelog fragment，並保留既有 `322-cockpit-jobs-three-axis.md` 作為已核准的 #322 JOBS 三軸交付紀錄。
+- deploy install / upgrade 新增 footer agent/account 選擇：支援 `--footer codex,claude,copilot[:label...],agy,none`、SelectionList TUI、`detected_agents` / `footer_selection` JSON report，以及只改 `enabled` 的 config write-back / backup / sample fallback。
+- Stage 8 cost footer 新增 agy provider 骨架與 `enabled` flags：`cost.providers.agy`、Claude provider `enabled`、Copilot account `enabled` 均可由 config 控制，agy 啟用後會依 snapshot 顯示 `N%` / `~N` / `?` / `∞`。
+- policy engine 從 1.0.15 升版至 1.0.17（`.project-policy.yml`、`.github/workflows/policy-check.yml` 的 `uses:`／`policy_engine_ref` 雙鎖定 SHA 改為 `9e7fabbf0b5eea9ad933fa6798764b723934a0b7`、四份 agent 慣例檔 `CLAUDE.md`/`AGENTS.md`/`GEMINI.md`/`.github/copilot-instructions.md` 同步、內容位元組相同）。1.0.16／1.0.17 對下游 repo 未新增或變更任何規則，純為上游引擎自身的 distribution identity、runtime bundle 與 release workflow 修正；其中 1.0.16 引入的引擎版本 gate（執行中引擎版本與 repo 宣告的 `policy_version` 不符即 fail-loud）要求 pin SHA 與 `policy_version` 必須同 PR 原子更新，是本次同步的實益所在——版本對齊後，本機 `policy_check` 預檢才能與 CI 判定一致。本 repo `tests.yml` 已無條件執行 pytest（無 R-19 條件式 detect skeleton 需移除），故本次未涉及 workflow gate 結構調整。
+- 模板打包 e2e 測試不再對 installer 硬編碼 `--version 0.2.7`，改讓乾淨 venv 內的 `detect_installed_version()` 自動偵測並斷言 install record 的版本等於 checkout 的 `VERSION`，補上 checkout 之外靠 `importlib.metadata` 取版本這條路徑的覆蓋。
+### Fixed
+- deploy templates now pass one shared source/wheel/sdist artifact gate; install and upgrade preflight and render all templates before host-side writes, with single-JSON template failures and honest partial-I/O reports.
+- packaging acceptance tests now install the `build` frontend before pytest; recursive template data requires `setuptools>=62.3`, and the source checker distinguishes truly empty directories from non-template files.
+- 修復 pipx release wheel 未包含 `core/commands.json`、launcher 未辨識 Cortex nested manager lock，以及頂層 `paulshaclaw --no-cockpit` 參數不相容，並補齊 installed runtime 從非 repo 目錄啟動與乾淨停止的驗證證據。
+- `paulshaclaw` 指令（release 啟動路徑）的 cortex fallback（monitor／manager）若起不來、或啟動前就退出，不再 fail-closed 擋下整個 cockpit：改為記錄 degraded 啟動、於 stderr 印出警告與對應 log 路徑（`cortex-monitor.log`／`cortex-manager.log`），cockpit 退出後再印一次摘要（避免被 TUI 全螢幕蓋掉），cockpit（或 `--no-cockpit` 下常駐前景的 operator shell）仍照常啟動。僅限 release 路徑：dev 路徑 `scripts/start.sh` 的 `verify_cortex_fallback_alive` 未變、仍 fail-closed。release 路徑其他 fail-closed 條款（start lock 接管、telegram 半套設定、`run_cockpit` 缺 TMUX_PANE）不變。
+
 ## [0.2.7] - 2026-08-12
 
 ### Fixed
