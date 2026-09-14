@@ -12,8 +12,14 @@ try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
     from textual.widgets import Footer, Header, SelectionList, Static
+
+    _TEXTUAL_AVAILABLE = True
 except ImportError:  # pragma: no cover - textual is a runtime dependency, keep importable in thin envs
     from typing import Any, Generic, TypeVar
+
+    # #345: 缺 textual 時 stub App.run() 只會回 None，呼叫端不得拿它猜「使用者取消」；
+    # 改以此旗標在進 TUI 前明確判斷。
+    _TEXTUAL_AVAILABLE = False
 
     T = TypeVar("T")
     ComposeResult = Iterable[Any]
@@ -68,6 +74,11 @@ except ImportError:  # pragma: no cover - textual is a runtime dependency, keep 
             pass
 
 _PROVIDER_ORDER = ("codex", "claude", "copilot", "agy")
+
+
+def textual_available() -> bool:
+    """回報 textual 是否可用（缺套件時 TUI 只是 noop stub，不能拿來互動）。"""
+    return _TEXTUAL_AVAILABLE
 
 
 @dataclass(frozen=True)
