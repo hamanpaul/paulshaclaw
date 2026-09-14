@@ -14,7 +14,7 @@ source "$script_dir/start.sh" --source-only
 unset PSC_REPO_ROOT
 
 if ! python_bin="$(resolve_preflight_python "$repo_root")"; then
-  echo "找不到可執行 preflight 的 Python：請確認 pytest 已安裝，或設 PSC_PYTHON 指向可用的 Python" >&2
+  echo "找不到可執行 preflight 的 Python（需 import ${PREFLIGHT_RUNTIME_MODULES[*]}，缺模組與試過的路徑見上方）：請設 VIRTUAL_ENV 或 PSC_PYTHON 指向含完整 runtime 的 Python" >&2
   exit 2
 fi
 

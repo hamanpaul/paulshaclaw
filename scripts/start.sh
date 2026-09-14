@@ -84,37 +84,74 @@ resolve_operator_python() {
   return 1
 }
 
-# preflight only needs a Python that can execute the repository test suite.  It
-# must not require the optional operator shell runtime: a delivery checkout can
-# legitimately have no repo .venv or PSC_PYTHON while its system Python already
-# provides pytest.  The build frontend is checked and installed by
-# scripts/preflight-tests.sh after this resolver selects the interpreter.
+# preflight needs a Python that can execute the repository test suite, which
+# imports the repo runtime (paulsha_cortex, textual) on collection.  A system
+# python3 that only provides pytest must be rejected here: accepting it turns a
+# missing runtime into a wall of collection errors (#344).  The build frontend is
+# checked and installed by scripts/preflight-tests.sh after this resolver
+# selects the interpreter.
+PREFLIGHT_RUNTIME_MODULES=(pytest paulsha_cortex textual)
+
 preflight_python_has_runtime() {
   local python="${1:-}"
   local repo="${2:?repo root is required}"
+  local probe
   [[ -n "$python" && -x "$python" ]] || return 1
-  PYTHONPATH="$repo" "$python" -c 'import pytest' >/dev/null 2>&1
+  probe="$(printf '%s, ' "${PREFLIGHT_RUNTIME_MODULES[@]}")"
+  probe="import ${probe%, }"
+  PYTHONPATH="$repo" "$python" -c "$probe" >/dev/null 2>&1
+}
+
+# Report why one candidate was rejected: "缺 <modules>" or "不存在或不可執行".
+preflight_python_reject_reason() {
+  local python="${1:-}"
+  local repo="${2:?repo root is required}"
+  local module
+  local -a missing=()
+  [[ -n "$python" && -x "$python" ]] || { printf '不存在或不可執行'; return; }
+  for module in "${PREFLIGHT_RUNTIME_MODULES[@]}"; do
+    PYTHONPATH="$repo" "$python" -c "import $module" >/dev/null 2>&1 || missing+=("$module")
+  done
+  printf '缺 %s' "${missing[*]:-（probe 失敗）}"
 }
 
 resolve_preflight_python() {
   local repo="${1:?repo root is required}"
   local cortex_python=""
-  local candidate
-  local -a candidates=()
+  local candidate label i
+  local -a candidates=() labels=()
 
   cortex_python="$(cortex_console_python || true)"
+  # VIRTUAL_ENV sits before the repo .venv because governance engines run
+  # preflight in a sanitized env that only forwards VIRTUAL_ENV (not PSC_PYTHON);
+  # exporting it is how the manager points a bare worktree at its runtime.
   candidates=(
     "$(command -v "${PSC_PYTHON:-}" 2>/dev/null || true)"
+    "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}"
     "$repo/.venv/bin/python"
     "$(command -v python3 2>/dev/null || true)"
     "$cortex_python"
   )
+  labels=(PSC_PYTHON VIRTUAL_ENV "repo .venv" "PATH python3" "cortex console")
   for candidate in "${candidates[@]}"; do
     if preflight_python_has_runtime "$candidate" "$repo"; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
+  {
+    printf 'preflight Python 需能 import %s；已試過的候選：\n' "${PREFLIGHT_RUNTIME_MODULES[*]}"
+    for i in "${!candidates[@]}"; do
+      label="${labels[$i]}"
+      candidate="${candidates[$i]}"
+      if [[ -z "$candidate" ]]; then
+        printf '  %s：未設定\n' "$label"
+      else
+        printf '  %s：%s（%s）\n' "$label" "$candidate" "$(preflight_python_reject_reason "$candidate" "$repo")"
+      fi
+    done
+    printf '請設 VIRTUAL_ENV 指向含上述模組的 venv，或設 PSC_PYTHON 指向可用的 Python 後重跑 preflight\n'
+  } >&2
   return 1
 }
 
