@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -564,8 +565,21 @@ def prepare_footer_selection(
         build_selection_options,
         run_footer_selection,
         selection_from_values,
+        textual_available,
     )
     from paulshaclaw.cost.config import parse_cost_config_payload
+
+    if not textual_available():
+        # #345: 缺 textual 時 stub TUI 的 run() 只會回 None，若往下走會被誤判成使用者 esc
+        # 而「默默取消」；改為明確 skipped 並提示替代路徑，install 本身不算失敗。
+        print(
+            "footer 選擇已略過：缺少 textual 套件，請安裝 textual 或改用 --footer <spec>",
+            file=sys.stderr,
+        )
+        return detected, format_footer_selection_report(
+            "skipped",
+            reason="textual-missing",
+        ), None
 
     config_warning: str | None = None
     try:

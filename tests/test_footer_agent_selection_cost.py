@@ -1619,8 +1619,7 @@ def test_collect_all_passes_config_timezone_to_agy(collect_agy_mock) -> None:
     collect_agy_mock.assert_called_once_with(cfg.agy, timezone_name="UTC")
 
 
-@patch("paulshaclaw.cost.providers._read_json_file")
-def test_format_footer_renders_agy_variants(_read_json_file) -> None:
+def test_format_footer_renders_agy_variants() -> None:
     percent = ProviderSnapshot(
         source_status="fresh",
         source="local_observed",

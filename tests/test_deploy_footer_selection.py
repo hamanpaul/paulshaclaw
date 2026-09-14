@@ -285,6 +285,78 @@ def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeyp
     }
 
 
+def test_prepare_footer_selection_skips_when_textual_missing(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    # #345: textual 匯入失敗時不得靠 stub App.run() 回 None 被誤判成使用者 esc，
+    # 要在進 TUI 前就依模組旗標明確回報 skipped/textual-missing。
+    class Tty:
+        def isatty(self) -> bool:
+            return True
+
+    def _must_not_run(**_):
+        raise AssertionError("run_footer_selection 不應在缺 textual 時被呼叫")
+
+    monkeypatch.setattr("paulshaclaw.deploy.footer_select._TEXTUAL_AVAILABLE", False)
+    monkeypatch.setattr("paulshaclaw.deploy.footer_select.run_footer_selection", _must_not_run)
+
+    detected, report, selection = prepare_footer_selection(
+        footer=None,
+        apply=True,
+        home_dir=tmp_path / "home",
+        stdin=Tty(),
+        stdout=Tty(),
+    )
+
+    captured = capsys.readouterr()
+    assert selection is None
+    assert {agent.name for agent in detected} == {"codex", "claude", "copilot", "agy"}
+    assert report == {"mode": "skipped", "reason": "textual-missing"}
+    assert captured.out == ""
+    assert "textual" in captured.err
+    assert "--footer <spec>" in captured.err
+
+
+def test_install_apply_without_textual_reports_skipped_and_leaves_config_untouched(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # #345: install --apply 互動路徑在缺 textual 的環境要明確 skipped、exit 0、config 不動。
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.installer._ensure_linger_enabled",
+        lambda: "enabled",
+    )
+    monkeypatch.setattr(
+        "paulshaclaw.deploy.installer._run_daemon_reload",
+        lambda: "ran",
+    )
+    monkeypatch.setattr("paulshaclaw.deploy.agents._isatty", lambda _stream: True)
+    monkeypatch.setattr("paulshaclaw.deploy.footer_select._TEXTUAL_AVAILABLE", False)
+
+    exit_code, stdout, stderr = _run_deploy_main(
+        [
+            "install",
+            "--apply",
+            "--instance",
+            "demo-agent",
+            "--root-dir",
+            str(tmp_path / "root"),
+            "--home-dir",
+            str(tmp_path / "home"),
+        ]
+    )
+
+    payload = json.loads(stdout)
+    config_path = tmp_path / "home" / ".config" / "paulshaclaw" / "paulshaclaw.yaml"
+
+    assert exit_code == 0
+    assert payload["footer_selection"] == {"mode": "skipped", "reason": "textual-missing"}
+    assert "config_write" not in payload["footer_selection"]
+    assert not config_path.exists()
+    assert "textual" in stderr
+    assert "--footer <spec>" in stderr
+
+
 def test_disabled_codex_footer_omits_cdx_and_matches_preview() -> None:
     payload = {
         "cost": {
