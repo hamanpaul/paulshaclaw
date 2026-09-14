@@ -121,16 +121,19 @@ def _account_value(account: CopilotAccountUsage) -> str:
     return _abbrev_count(account.used_requests)
 
 
+def _primary_account_value(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
+    """cpt 收斂規則（footer 與 cockpit 共用）：只取第一個帳號的值，不列帳號名、
+    不列其餘帳號。呼叫端須先確認 ``provider.accounts`` 非空。"""
+    account = provider.accounts[0]
+    value = _account_value(account)
+    # Colour only the value; the label stays default. `∞` (no limit) is blue
+    # like a healthy usage level, to stand out from the dim reset times.
+    level = "low" if account.unlimited else _account_level(provider, account)
+    return _wrap(value, level, use_tmux_style, stale=provider.source_status == "stale")
+
+
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
-    stale = provider.source_status == "stale"
-    parts = [_provider_label(name, provider)]
-    for account in provider.accounts:
-        value = _account_value(account)
-        # Colour only the value; the label stays default. `∞` (no limit) is blue
-        # like a healthy usage level, to stand out from the dim reset times.
-        level = "low" if account.unlimited else _account_level(provider, account)
-        parts.append(f"{account.label}:{_wrap(value, level, use_tmux_style, stale=stale)}")
-    return " ".join(parts)
+    return f"{_provider_label(name, provider)} {_primary_account_value(provider, use_tmux_style)}"
 
 
 def _format_agy_value(provider: ProviderSnapshot) -> tuple[str, str]:
@@ -250,10 +253,7 @@ def _format_cockpit_cpt(provider: ProviderSnapshot) -> str:
     不列帳號名、也不列其餘帳號（如 arc）。無帳號回空字串。"""
     if not provider.accounts:
         return ""
-    account = provider.accounts[0]
-    value = _account_value(account)
-    level = "low" if account.unlimited else _account_level(provider, account)
-    return f"cpt: {_wrap(value, level, True)}"
+    return f"cpt: {_primary_account_value(provider, True)}"
 
 
 def _join_cockpit_segments(segments: list[str]) -> str:

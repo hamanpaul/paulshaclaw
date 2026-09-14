@@ -30,12 +30,12 @@ cost:
     copilot:
       accounts:
         - id: hamanpaul
-          label: haman           # footer alias shown as cpt haman:...
+          label: haman           # first enabled account: footer/cockpit show its value only (cpt N%)
           kind: personal
           monthly_allowance: 1500
           enabled: true
         - id: org-a
-          label: arc             # footer alias shown as cpt ... arc:...
+          label: arc             # further accounts are collected but not rendered in the footer
           kind: company
           monthly_allowance: 300
           org: example-org
