@@ -50,3 +50,15 @@ work_items:
       - kind: github_issue
         ref: 'hamanpaul/paulshaclaw#325'
     excludes: []
+  cockpit-jobs-three-axis:
+    title: 'cockpit-jobs-three-axis'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#322'
+    excludes: []
+  footer-agent-selection:
+    title: 'footer-agent-selection'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#341'
+    excludes: []
