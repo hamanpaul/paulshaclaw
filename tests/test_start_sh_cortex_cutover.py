@@ -89,6 +89,27 @@ exit 0
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def _write_fake_preflight_runtime_python(path: Path, *, cortex: bool) -> None:
+    """preflight 候選用的假 python：`import pytest` 一律成功，含 paulsha_cortex 的 probe 依 cortex 旗標決定。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""#!/usr/bin/env bash
+if [[ "${{1:-}}" != "-c" ]]; then
+  exit 90
+fi
+if [[ -n "${{EXPECTED_REPO:-}}" && "${{PYTHONPATH:-}}" != "$EXPECTED_REPO" ]]; then
+  exit 91
+fi
+if [[ "${{2:-}}" == *"paulsha_cortex"* && "{int(cortex)}" != "1" ]]; then
+  exit 1
+fi
+exit 0
+""",
+        encoding="utf-8",
+    )
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
 def _write_fake_systemctl(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -182,6 +203,34 @@ def _run_resolver(repo: Path, bin_dir: Path, *, psc_python: Path | None = None) 
             "/usr/bin/bash",
             "-c",
             'source "$1" --source-only; resolve_operator_python "$2"',
+            "bash",
+            str(START_SH),
+            str(repo),
+        ],
+        cwd=REPO_ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _run_preflight_resolver(
+    repo: Path, bin_dir: Path, *, virtual_env: Path | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = os.environ.copy()
+    env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+    env["EXPECTED_REPO"] = str(repo)
+    env.pop("PSC_PYTHON", None)
+    if virtual_env is None:
+        env.pop("VIRTUAL_ENV", None)
+    else:
+        env["VIRTUAL_ENV"] = str(virtual_env)
+    return subprocess.run(
+        [
+            "/usr/bin/bash",
+            "-c",
+            'source "$1" --source-only; resolve_preflight_python "$2"',
             "bash",
             str(START_SH),
             str(repo),
@@ -434,6 +483,42 @@ def test_preflight_script_uses_test_runtime_resolver() -> None:
     assert 'source "$script_dir/start.sh" --source-only' in src
     assert 'resolve_preflight_python "$repo_root"' in src
     assert 'exec env PYTHONPATH="$repo_root" "$python_bin" -m pytest' in src
+
+
+def test_preflight_python_rejects_pytest_only_system_python_with_actionable_error(tmp_path: Path) -> None:
+    # #344：無 .venv、無 PSC_PYTHON 的 checkout 只有一支「有 pytest 但缺
+    # paulsha_cortex」的系統 python3；resolver 必須拒絕它並說明缺什麼、試過什麼。
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    repo.mkdir()
+    system_python = bin_dir / "python3"
+    _write_fake_preflight_runtime_python(system_python, cortex=False)
+
+    completed = _run_preflight_resolver(repo, bin_dir)
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert str(system_python) in completed.stderr
+    assert "paulsha_cortex" in completed.stderr
+    assert "VIRTUAL_ENV" in completed.stderr
+    assert "PSC_PYTHON" in completed.stderr
+
+
+def test_preflight_python_prefers_virtual_env_over_repo_venv_and_system_python(tmp_path: Path) -> None:
+    # #344：治理引擎 sanitized env 只放行 VIRTUAL_ENV，manager 設它就要選到 operator runtime。
+    repo = tmp_path / "repo"
+    bin_dir = tmp_path / "bin"
+    venv = tmp_path / "operator-venv"
+    venv_python = venv / "bin" / "python"
+    _write_fake_preflight_runtime_python(bin_dir / "python3", cortex=False)
+    _write_fake_preflight_runtime_python(repo / ".venv/bin/python", cortex=True)
+    _write_fake_preflight_runtime_python(venv_python, cortex=True)
+
+    completed = _run_preflight_resolver(repo, bin_dir, virtual_env=venv)
+
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == str(venv_python)
+    assert completed.stderr == ""
 
 
 def test_standalone_service_scripts_reuse_operator_resolver(tmp_path: Path) -> None:
