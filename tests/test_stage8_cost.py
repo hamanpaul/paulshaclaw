@@ -142,7 +142,9 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cdx 5h:18%(15:21) wk:41%(3d)", footer)
         self.assertIn("cc 5h:-- wk:--", footer)
-        self.assertIn("cpt haman:724 arc:127", footer)
+        self.assertIn("cpt 724", footer)
+        self.assertNotIn("haman", footer)
+        self.assertNotIn("arc", footer)
 
     def test_footer_marks_stale_provider(self) -> None:
         snapshot = CostSnapshot(
@@ -282,9 +284,9 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("cpt?", footer)
-        self.assertIn("haman:#[fg=magenta]724#[default]", footer)
-        self.assertNotIn("haman:#[fg=colour33]724#[default]", footer)
+        self.assertIn("cpt? #[fg=magenta]724#[default]", footer)
+        self.assertNotIn("haman", footer)
+        self.assertNotIn("#[fg=colour33]724#[default]", footer)
 
     def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
         snapshot = CostSnapshot(
@@ -318,10 +320,10 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("cpt?", footer)
-        self.assertIn("fresh:#[fg=colour33]42#[default]", footer)
-        self.assertIn("local:#[fg=magenta]724#[default]", footer)
-        self.assertNotIn("local:#[fg=colour33]724#[default]", footer)
+        self.assertIn("cpt? #[fg=colour33]42#[default]", footer)
+        self.assertNotIn("fresh:", footer)
+        self.assertNotIn("local", footer)
+        self.assertNotIn("724", footer)
 
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
@@ -359,7 +361,8 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertIn("#[fg=colour33]18%#[default]#[fg=colour245](15:21)#[default]", footer)
         self.assertIn("#[fg=red]91%#[default]#[fg=colour245](3d)#[default]", footer)
         self.assertIn("#[fg=colour245]--#[default]", footer)
-        self.assertIn("haman:#[fg=colour208]1200#[default]", footer)
+        self.assertIn("cpt #[fg=colour208]1200#[default]", footer)
+        self.assertNotIn("haman", footer)
 
     def test_footer_omits_empty_copilot_provider(self) -> None:
         snapshot = CostSnapshot(
@@ -1149,12 +1152,17 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             },
         )
 
+        # Footer collapses to the first account's value only — no account
+        # labels, no secondary accounts — matching the cockpit `cpt: N%` rule.
         plain = format_footer(snapshot, use_tmux_style=False)
-        self.assertIn("cpt haman:21% arc:∞", plain)
+        self.assertIn("cpt 21%", plain)
+        self.assertNotIn("haman", plain)
+        self.assertNotIn("arc", plain)
+        self.assertNotIn("∞", plain)
 
         styled = format_footer(snapshot, use_tmux_style=True)
-        self.assertIn("haman:#[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
-        self.assertIn("arc:#[fg=colour33]∞#[default]", styled)  # ∞ -> blue (stands out)
+        self.assertIn("cpt #[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
+        self.assertNotIn("∞", styled)
 
     def test_footer_marks_carried_forward_stale_values_with_green_background(self) -> None:
         snapshot = CostSnapshot(
@@ -2789,7 +2797,8 @@ class Stage8CliTests(unittest.TestCase):
             exit_code = cost_status_cli.main(["--plain"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("cpt --", stdout.getvalue())
+        self.assertNotIn("haman", stdout.getvalue())
         self.assertIn("stage8 cost status degraded: refresh failed", stderr.getvalue())
 
     def test_status_main_uses_fresh_cache_without_rebuild(self) -> None:
@@ -2871,7 +2880,8 @@ class Stage8CliTests(unittest.TestCase):
             exit_code = cost_status_cli.main(["--plain", "--no-refresh"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("cpt --", stdout.getvalue())
+        self.assertNotIn("haman", stdout.getvalue())
         cache.lock.assert_not_called()
         build_current_snapshot.assert_not_called()
 
@@ -2996,7 +3006,8 @@ class Stage8CliTests(unittest.TestCase):
             exit_code = cost_status_cli.main(["--plain"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("cpt --", stdout.getvalue())
+        self.assertNotIn("haman", stdout.getvalue())
 
     def test_status_main_degraded_snapshot_keeps_copilot_accounts_when_lock_raises(self) -> None:
         config = CostConfig(
@@ -3028,7 +3039,8 @@ class Stage8CliTests(unittest.TestCase):
             exit_code = cost_status_cli.main(["--plain"])
 
         self.assertEqual(exit_code, 0)
-        self.assertIn("cpt haman:--", stdout.getvalue())
+        self.assertIn("cpt --", stdout.getvalue())
+        self.assertNotIn("haman", stdout.getvalue())
         self.assertIn("stage8 cost status degraded: chmod denied", stderr.getvalue())
 
 

@@ -412,7 +412,7 @@ def test_disabled_codex_footer_omits_cdx_and_matches_preview() -> None:
 
     preview = preview_footer_selection(selection, payload=payload)
 
-    assert footer == "cc 5h:-- wk:-- | cpt haman:-- "
+    assert footer == "cc 5h:-- wk:-- | cpt -- "
     assert footer == preview
     assert "cdx" not in footer
 

@@ -1829,5 +1829,5 @@ def test_sample_yaml_footer_snapshot_matches_main_baseline() -> None:
     snapshot = _build_degraded_snapshot(config)
 
     assert format_footer(snapshot, use_tmux_style=False) == (
-        "cdx 5h:-- wk:-- | cc 5h:-- wk:-- | cpt haman:-- arc:-- "
+        "cdx 5h:-- wk:-- | cc 5h:-- wk:-- | cpt -- "
     )
