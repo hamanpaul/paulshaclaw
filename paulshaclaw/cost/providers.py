@@ -478,11 +478,34 @@ def _codex_local_rate_limits(codex_home: Path, now: datetime) -> dict[str, Usage
         return None
 
     windows: dict[str, UsageWindow] = {}
-    for key, raw in (("five_hour", rate_limits.get("primary")), ("weekly", rate_limits.get("secondary"))):
+    for positional_key, raw in (("five_hour", rate_limits.get("primary")), ("weekly", rate_limits.get("secondary"))):
+        key = _codex_window_key(raw, positional_key)
+        if key is None:
+            continue
         window = _codex_window(raw, now)
         if window is not None and window.reset_at is not None and window.reset_at > now:
             windows[key] = window
     return windows or None
+
+
+# Codex labels its quota slots `primary` / `secondary`, but which window sits in
+# which slot depends on the plan: a weekly-only reading (observed as
+# plan_type=prolite) arrives as `primary: {window_minutes: 10080}` with
+# `secondary: null`. Classify by the declared window length; only readings that
+# omit `window_minutes` (older Codex builds) fall back to slot position.
+_CODEX_WINDOW_MINUTES = {300: "five_hour", 10080: "weekly"}
+
+
+def _codex_window_key(raw: Any, positional_key: str) -> str | None:
+    if not isinstance(raw, Mapping):
+        return None
+    window_minutes = raw.get("window_minutes")
+    if window_minutes is None:
+        return positional_key
+    try:
+        return _CODEX_WINDOW_MINUTES.get(int(window_minutes))
+    except (TypeError, ValueError):
+        return positional_key
 
 
 def collect_codex(

@@ -1607,6 +1607,56 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         self.assertEqual(provider.windows["five_hour"].used_percent, 61)
         self.assertEqual(provider.windows["weekly"].used_percent, 10)
 
+    def test_codex_local_rate_limits_classify_by_window_minutes_not_position(self) -> None:
+        # Real Codex (plan_type=prolite) writes a weekly-only reading as
+        # `primary: {window_minutes: 10080}` with `secondary: null`. Mapping
+        # by position would mislabel the weekly quota as the 5h window and
+        # leave `wk` empty — classify by window_minutes instead.
+        now = datetime(2026, 9, 14, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        record = {
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 78.0, "window_minutes": 10080, "resets_at": epoch + 17 * 3600},
+                    "secondary": None,
+                },
+            },
+        }
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "s.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            windows = _codex_local_rate_limits(Path(tmpdir), now)
+
+        self.assertIsNotNone(windows)
+        self.assertNotIn("five_hour", windows)
+        self.assertEqual(windows["weekly"].used_percent, 78)
+        self.assertEqual(windows["weekly"].display_reset, "17h")
+
+    def test_codex_local_rate_limits_skip_unknown_window_minutes(self) -> None:
+        # An unrecognised window length is neither 5h nor weekly: drop it
+        # rather than guess a slot by position.
+        now = datetime(2026, 9, 14, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+        epoch = int(now.timestamp())
+        record = {
+            "payload": {
+                "type": "token_count",
+                "rate_limits": {
+                    "primary": {"used_percent": 30.0, "window_minutes": 1440, "resets_at": epoch + 3600},
+                    "secondary": {"used_percent": 12.0, "window_minutes": 10080, "resets_at": epoch + 6 * 86400},
+                },
+            },
+        }
+        with self.scratch_tempdir() as tmpdir:
+            sessions = Path(tmpdir) / "sessions"
+            sessions.mkdir(parents=True)
+            (sessions / "s.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+            windows = _codex_local_rate_limits(Path(tmpdir), now)
+
+        self.assertEqual(set(windows), {"weekly"})
+        self.assertEqual(windows["weekly"].used_percent, 12)
+
     def test_codex_local_rate_limits_skip_oversize_latest_session(self) -> None:
         now = datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei"))
         epoch = int(now.timestamp())
