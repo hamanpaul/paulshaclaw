@@ -7,6 +7,17 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-09-14
+
+### Changed
+- `custom-skills/bro` 收斂為單一真相源：本 repo 目錄為 canonical（CI 跑 `custom-skills/bro/tests/`），runtime 載入點 `~/.agents/skills/bro` 改為指向 repo checkout 的 symlink，不再維護第二份實體副本或靠 hardlink 同步。把先前只存在於 runtime 副本的 `scripts/notify.py`（單向通知：max gateway 優先、直打 Telegram fallback）、`tests/test_notify.py` 與 SKILL.md 的 notify 段併回 repo，讓 runtime 同時取得 repo 側 #90 之後的 reply_bridge 修正（檔案鎖、`send_message`、message-pane-map 預設路徑）。新增 `tests/test_runtime_copy_drift.py`：本機若 `~/.agents/skills/bro` 指向另一份實體副本且與 repo 不一致即紅燈並列出漂移檔，CI／乾淨 clone 無該路徑時跳過。
+- `psc` 不帶參數時不再印 usage 並以 exit 2 結束，改為等同 `paulshaclaw`（`up`）啟動 operator shell，讓 CLI 短名可直接啟動；回傳值逐字透傳 launcher。dispatcher 語意不變：`psc coordinator|deck|monitor …` 仍 shim 到 cortex CLI、`psc memory` 仍印 hippo tombstone、未知子命令仍印 usage 並 exit 2（usage 補一行說明無參數＝啟動）。`down`／`status`／`--no-cockpit` 不併入 `psc`，仍只屬 `paulshaclaw`。README §A 的安裝確認步驟改用 `paulshaclaw --version`，不再依賴「psc exit 2 屬正常」的語意。
+
+### Fixed
+- README §A end-user 安裝補上系統前置段，明列 `python3`、`python3-venv`、`git`（Ubuntu／Debian 給 `sudo apt install` 一行）並說明 git 是因為 wheel 的 hippo／cortex 依賴為 `git+https://…@<SHA>` direct reference、pip 解析時必須呼叫系統 git；step 5「確認」補排解（`pip install` 非零就停、`ls venv/bin/paulshaclaw`、stderr 含 `Cannot find command 'git'` 即缺 git）；pipx 段補 pipx 本身怎麼裝、`pipx ensurepath` 後要開新 shell、同樣需要 git。`docs/release-contract.md` §5.1 補「end-user 系統前置含 git」條款。此為 2026-08-26 Docker 四容器重現（ubuntu 24.04／22.04、Python 3.12／3.10）證實的安裝故障：無 git 的機器照 README 字面安裝 v0.2.7 會在 step 4 exit 1、`paulshaclaw` 指令不存在。
+- `scripts/preflight-tests.sh` 在沒有 `.venv` 的 checkout（Cortex preflight worktree、乾淨 clone）會選到只有 pytest、缺 repo runtime 的系統 python3，讓 11 個 collection error 淹沒真正原因。`preflight_python_has_runtime()` 改為一次驗 `import pytest, paulsha_cortex, textual`，驗不過就換下一個候選；候選順序在 `PSC_PYTHON` 之後、repo `.venv` 之前加入 `$VIRTUAL_ENV/bin/python`（僅 `VIRTUAL_ENV` 非空時），治理引擎 sanitized env 只放行 `VIRTUAL_ENV` 也能指到 operator runtime。全部候選都不合格時 `resolve_preflight_python` 會把試過的每個候選與各自缺的模組印到 stderr，`preflight-tests.sh` 的錯誤訊息改為明講所需模組並提示可設 `VIRTUAL_ENV` 或 `PSC_PYTHON`。
+- `install --apply`／`upgrade --apply` 的互動式 footer 選擇在缺 `textual` 套件的環境，先前會因 noop stub 的 `App.run()` 回 `None` 而被誤判成使用者按 esc，report 寫成 `footer_selection.mode == "cancelled"` 靜默取消。現改為在進 TUI 前依模組旗標明確判斷：report 回報 `{"mode": "skipped", "reason": "textual-missing"}`（與既有 `plan-only`／`no-tty` 的 skipped 條目同形狀），stderr 提示「請安裝 textual 或改用 `--footer <spec>`」，config 不動、exit code 維持 0（install 本身未失敗）。
+
 ## [0.2.8] - 2026-09-13
 
 ### Added
