@@ -137,9 +137,17 @@ flowchart TB
 ### A. 從 release artifact 安裝（end-user 生產安裝）
 
 正式版本以 GitHub Release artifact 為 distribution authority（裁決見 release-contract §5）。
-從對應 `vX.Y.Z` Release 下載 wheel（含 SHA-256 checksums 驗證），在專用 venv 安裝：
+從對應 `vX.Y.Z` Release 下載 wheel（含 SHA-256 checksums 驗證），在專用 venv 安裝。
+
+**系統前置（#325）**：`python3`、`python3-venv`、**`git`**。`git` 不可省——wheel 的
+`paulsha-hippo`／`paulsha-cortex` 依賴是 `git+https://…@<SHA>` direct reference，pip 解析時必須
+呼叫系統 `git` clone；沒有 git 的機器 `pip install` 會在 step 4 以 `ERROR: Cannot find command 'git'`
+exit 1，wheel 從未裝上、`paulshaclaw` 指令不存在。
 
 ```bash
+# 0. 系統前置（Ubuntu / Debian）
+sudo apt install python3 python3-venv git
+
 # 1. 建立 end-user venv（不要用系統 Python，PEP 668）
 python3 -m venv ~/.venv-paulshaclaw
 ~/.venv-paulshaclaw/bin/python -m pip install --upgrade pip
@@ -159,16 +167,20 @@ sha256sum -c checksums-sha256.txt --ignore-missing
 ~/.venv-paulshaclaw/bin/python -m pip show paulshaclaw   # 顯示版本與來源
 ```
 
+step 4 的 `pip install` **非零就停**，不要往下走：先 `ls ~/.venv-paulshaclaw/bin/paulshaclaw`
+確認指令是否裝上；stderr 出現 `Cannot find command 'git'` 就是缺 `git`，裝好後重跑 step 4 即可。
+
 > **為何不是 PyPI**：`paulsha-hippo` / `paulsha-cortex` 是 `git+<url>@<SHA>` direct reference，PyPI 上傳政策不接受 direct URL 參照，故第一階段僅以 GitHub Release 分發。詳見 release-contract §5 的實測依據。
 
-**建議改用 pipx**（指令直接進 PATH，不必進 venv）：
+**建議改用 pipx**（指令直接進 PATH，不必進 venv；系統前置同上，**一樣需要 `git`**）：
 
 ```bash
+sudo apt install pipx git && pipx ensurepath        # pipx 本身；ensurepath 後開新 shell 才看得到 ~/.local/bin
 pipx install paulshaclaw-X.Y.Z-py3-none-any.whl   # 之後任何目錄直接打 paulshaclaw / psc
 pipx upgrade paulshaclaw                            # 升級改裝新 wheel 時：pipx install --force <新 wheel>
 ```
 
-pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`，與上面手動 venv 流程等價；兩者擇一即可。
+pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`，與上面手動 venv 流程等價；兩者擇一即可。`pipx install` 非零同樣先看 stderr 有無 `Cannot find command 'git'`。
 
 #### 正式啟動（`paulshaclaw` 指令，#288）
 
