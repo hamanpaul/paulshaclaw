@@ -112,6 +112,10 @@
 正式 wheel 與 sdist 附於 `vX.Y.Z` GitHub Release，附 SHA-256 checksums 與 release notes；
 使用者從 Release artifact 安裝（`pip install <wheel>`）。不發布到 PyPI 或其他 registry。
 
+**End-user 系統前置含 `git`（#325）**：§5.2 的 `git+<url>@<SHA>` direct reference 讓 pip 在安裝
+wheel 時必須呼叫系統 `git` binary；README §A 前置段與 pipx 段須明列 `git`，release notes／安裝說明
+不得只寫「pip 會自動拉 hippo/cortex」而省略此前置。
+
 ### 5.2 實測依據
 
 `pyproject.toml` 對 `paulsha-hippo` / `paulsha-cortex` 是 `git+<url>@<SHA>` 形式的
