@@ -103,11 +103,12 @@ import paulshaclaw.cockpit as c
 assert (Path(c.__file__).parent / 'cockpit.tcss').exists(), 'cockpit.tcss 未隨安裝'
 print('import closure + tcss OK')
 "
-    # psc 是 dispatcher：無參數（或無法辨識的參數）印 usage 到 stderr 並回 2，
-    # 沒有 --help。smoke test 驗的是 console script 裝得起來、能載入模組並印出
-    # usage，不能要求 exit 0（會讓 set -e 直接中止）。
+    # psc 是 dispatcher：無法辨識的子命令印 usage 到 stderr 並回 2，沒有
+    # --help。smoke test 驗的是 console script 裝得起來、能載入模組並印出
+    # usage，不能要求 exit 0（會讓 set -e 直接中止）。#357 起裸 `psc` 等同
+    # `paulshaclaw up`（會真的啟動 operator shell），絕不可裸呼叫。
     set +e
-    psc_out="$("$clean_root/venv/bin/psc" 2>&1)"
+    psc_out="$("$clean_root/venv/bin/psc" __release-smoke__ 2>&1)"
     psc_rc=$?
     set -e
     if [[ "$psc_rc" != "2" ]] || [[ "$psc_out" != *"usage: psc"* ]]; then
