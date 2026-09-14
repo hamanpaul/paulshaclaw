@@ -4,7 +4,10 @@ import importlib.util
 import sys
 from typing import Sequence
 
-_USAGE = "usage: psc {coordinator|deck|monitor} <args...>\n"
+_USAGE = (
+    "usage: psc {coordinator|deck|monitor} <args...>\n"
+    "       psc（無參數）= paulshaclaw up；down／status／--no-cockpit 請用 paulshaclaw --help\n"
+)
 _MEMORY_MOVED = (
     "psc memory 已遷移至 paulsha-hippo（#125 Phase 1）。\n"
     "改用：hippo <subcommand>（安裝：pipx install git+https://github.com/hamanpaul/paulsha-hippo）\n"
@@ -26,8 +29,11 @@ def _has_cortex_cli() -> bool:
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
-        sys.stderr.write(_USAGE)
-        return 2
+        # #357：`psc` 裸呼叫＝正式啟動入口 `paulshaclaw`（up）。lazy import 讓
+        # dispatcher 子命令路徑不必載入 launcher；旗標仍只屬 paulshaclaw。
+        from paulshaclaw.launcher.cli import main as launcher_main
+
+        return int(launcher_main([]) or 0)
 
     head, rest = args[0], args[1:]
     if head == "memory":

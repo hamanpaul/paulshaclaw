@@ -154,8 +154,8 @@ sha256sum -c checksums-sha256.txt --ignore-missing
 # 4. 從 wheel 安裝（會依 pyproject 的 git+SHA pin 自動拉 hippo/cortex）
 ~/.venv-paulshaclaw/bin/python -m pip install paulshaclaw-X.Y.Z-py3-none-any.whl
 
-# 5. 確認（psc 是 dispatcher，無參數會印 usage 並以 exit 2 結束，這是正常行為）
-~/.venv-paulshaclaw/bin/psc
+# 5. 確認（不要直接打 psc：無參數的 psc 會啟動 operator shell，見下段）
+~/.venv-paulshaclaw/bin/paulshaclaw --version
 ~/.venv-paulshaclaw/bin/python -m pip show paulshaclaw   # 顯示版本與來源
 ```
 
@@ -194,7 +194,7 @@ pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`�
 | `paulshaclaw` | 正式啟動 | 已安裝的 release artifact | 只 pin 該 release 的版本 |
 
 - **二擇一、後起的為主**：兩者共用同一把 start lock，新啟動的那套會先停掉既有的（process 持有者送 SIGTERM、systemd 持有者走 `systemctl --user stop`），**停不掉即 fail-closed** 明確報告、絕不兩套並存。接管邊界僅及操作面自身行程與 units，不波及 cortex / hippo 常駐服務。
-- 與 `psc` 的區隔：`psc` 是轉發 coordinator/deck/monitor 給 cortex 的 **dispatcher**，`paulshaclaw` 是 operator shell 的**啟動入口**，語意不同、不要混用。
+- 與 `psc` 的區隔：`psc <子命令>` 是轉發 coordinator/deck/monitor 給 cortex 的 **dispatcher**，`paulshaclaw` 是 operator shell 的**啟動入口**。唯一交集是 **`psc` 不帶參數＝`paulshaclaw up`**（#357，短名直接啟動）；`down`／`status`／`--no-cockpit` 仍只有 `paulshaclaw` 有。
 - **僅 `paulshaclaw` 指令（release 路徑）**：cortex fallback 起不來時（#346）cockpit 仍會照常啟動，並在 stderr 印出 degraded 警告與對應 log 路徑，不再 fail-closed 擋下整個啟動；`scripts/start.sh`（開發路徑）未變，fallback 起不來仍會 fail-closed 直接退出。
 
 ### B. 開發安裝（clone + editable install）

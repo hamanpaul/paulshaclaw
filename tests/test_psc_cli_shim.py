@@ -71,12 +71,38 @@ def test_memory_tombstone_still_prints_hippo_guidance(capsys: pytest.CaptureFixt
     assert "hippo" in err
 
 
-@pytest.mark.parametrize("argv", [[], ["nosuch"]])
-def test_unknown_or_empty_argv_prints_usage(argv: list[str], capsys: pytest.CaptureFixture[str]) -> None:
-    rc = cli.main(argv)
+def test_unknown_argv_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli.main(["nosuch"])
 
     assert rc == 2
-    assert "usage: psc {coordinator|deck|monitor} <args...>" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "usage: psc {coordinator|deck|monitor} <args...>" in err
+    assert "psc（無參數）= paulshaclaw up" in err
+
+
+def test_empty_argv_launches_operator_shell(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """#357：`psc` 不帶參數等同 `paulshaclaw`（up），回傳值透傳、不印 usage。"""
+    calls: list[list[str]] = []
+
+    def fake_launcher_main(argv: list[str]) -> int:
+        calls.append(list(argv))
+        return 5
+
+    monkeypatch.setattr("paulshaclaw.launcher.cli.main", fake_launcher_main)
+
+    rc = cli.main([])
+
+    assert rc == 5
+    assert calls == [[]]
+    assert capsys.readouterr().err == ""
+
+
+def test_empty_argv_does_not_forward_launcher_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#357 非目標：launcher 旗標（--no-cockpit／down／status）不併入 psc，仍屬 paulshaclaw。"""
+    monkeypatch.setattr("paulshaclaw.launcher.cli.main", lambda argv: 0)
+
+    assert cli.main(["--no-cockpit"]) == 2
+    assert cli.main(["down"]) == 2
 
 
 def test_cli_source_no_longer_routes_to_repo_subtrees() -> None:
