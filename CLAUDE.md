@@ -71,7 +71,7 @@ policy_version: 1.0.17
 引擎 pin 已升到 v1.0.17（見 policy-check workflow 與上游 RELEASES 及 CHANGELOG）。1.0.3~1.0.12 新增的規則對本 repo 多為 opt-in：未在專案設定檔（project-policy）宣告對應欄位即不啟用（NA）。摘要如下，日後啟用再遵循：
 
 - R-14（1.0.6 起，無豁免）：四份 agent 慣例檔（CLAUDE／AGENTS／GEMINI／copilot-instructions）在 copy 模式下須完全一致，含版本欄與首行 managed-by 版本註記——改任一份或 bump 版本都要同步四份；symlink 模式則後三者須為指向 CLAUDE 的 symlink。
-- R-09（1.0.9 起）：改為 per-PR changelog 碎片模型；本 repo 目前直寫 changelog、未採碎片，故不強制。
+- R-09（1.0.9 起 per-PR 碎片模型，**1.0.12 起實際 enforce、FAIL gate**）：PR 動到 code path 就必須新增 `changelog.d/<name>.md` 直屬碎片（frontmatter `type` ∈ feat／fix／change／refactor／perf／remove／deprecate／security，`scope`／`issue` 可選；檔名慣例 `<issue>-<slug>.md`，無 issue 用 `<slug>.md`），否則上 `skip-changelog` label。直寫 `CHANGELOG.md` 的 `[Unreleased]` **不算**：切版時由引擎把碎片收整進 dated section，`[Unreleased]` 不在收整範圍。label 事後補上不會重觸發 policy，要 close→reopen 或再 push（label 走 REST API，`gh pr edit` 會被 projects-classic 弄掛）。
 - R-21 機密掃描：structural／credential 兩類偵測器**已綁定 repo visibility**（public/unknown 即 FAIL），不是單純 tier=shareable 才啟用——`tier` 只在等於 `shareable` 時對「所有」偵測類別強制升級為 FAIL（含原本只 WARN 的 marker 類）。本 repo 為 public 且不宣告 tier：已透過 `.project-policy.yml` 的 `secret_scan.allow`（`docs/superpowers/**`／`docs/research/**`／`openspec/changes/archive/**`）豁免歷史紀錄文件，並對 `tests/`、`scripts/using-git-worktrees.sh`、`custom-skills/bro/SKILL.md` 等 live 內容完成去識別化（1.0.15 升版 PR）；切勿設 `tier: shareable`。
 - R-22 doc-reference 懸空引用（diff-aware）：本次 PR 新造成的懸空為 FAIL、陳年為 advisory WARN；豁免 label 為 doc-reference。本 repo 現有約 163 筆陳年 advisory（多為 README roadmap 前向引用），不擋 merge。
 - R-23 引擎 pin 版本 attestation（需宣告 conventions engine 才啟用）；R-24 moc-alignment（opt-in moc）；R-25 doc-coverage（opt-in）；R-26 generated-fact marker（opt-in）——本 repo 皆未宣告，NA。
