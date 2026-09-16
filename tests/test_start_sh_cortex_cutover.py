@@ -580,6 +580,11 @@ def test_preflight_uses_system_python_when_worktree_has_no_operator_venv(tmp_pat
     }
     env.pop("PSC_PYTHON", None)
     env.pop("PSC_REPO_ROOT", None)
+    # start.sh 依設計優先用 $VIRTUAL_ENV/bin/python（治理引擎的 sanitized env 只轉發
+    # VIRTUAL_ENV）；本測試要驗的是「無 operator venv 時退到 PATH python3」，因此
+    # 必須把呼叫端的 VIRTUAL_ENV 也剝掉，否則在 cortex gate（cortex-manager.env 帶
+    # VIRTUAL_ENV=<repo>/.venv）下會跑到真 pytest 而非假 python3。
+    env.pop("VIRTUAL_ENV", None)
     completed = subprocess.run(
         [str(repo / "scripts" / "preflight-tests.sh")],
         cwd=repo,
