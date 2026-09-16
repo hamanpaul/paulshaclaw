@@ -62,3 +62,11 @@ work_items:
       - kind: github_issue
         ref: 'hamanpaul/paulshaclaw#341'
     excludes: []
+  cockpit-jobs-recent-done-history:
+    title: 'cockpit-jobs-recent-done-history'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#369'
+      - kind: path
+        ref: 'docs/superpowers/workstreams/cockpit-jobs-recent-done-history/todo.md'
+    excludes: []
