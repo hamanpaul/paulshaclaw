@@ -33,9 +33,7 @@ issue: 369
 ## Requirements
 
 - R1 recent_done row **不計入** `JobGroup.item_count` 與群組標題「N 件」；`summary_trailer`
-  對純 recent_done 群跟著收合後的實際群組狀態：正常完成顯示「N 已完成」，`needs_human`
-  保留「待裁決」，未知完成 token 依群組摘要改標「已結束」。面板頂層若有總計，同樣排除
-  recent_done。
+  對純 recent_done 群顯示「N 已完成」而非「N 件」。面板頂層若有總計，同樣排除 recent_done。
 - R2 recent_done row 的顯示 state 由 `gate_status` 映射：`workflow-tracked`／`passed`／
   `done` → 「已完成」；未知 token → 「已結束」（中性字樣），**不得**原樣顯示內部 token。
   `JobRow.human_state` 對 recent_done 且 `needs_human` 的既有「待裁決」語意保留不變。
