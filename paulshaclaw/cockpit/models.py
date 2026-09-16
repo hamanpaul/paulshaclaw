@@ -23,6 +23,9 @@ _IN_LINE_PHASES: frozenset[str] = frozenset(
 )
 _PENDING_PHASE: str = "claim"
 _UNCLAIMED_PHASE: str = "未認領"
+_RECENT_DONE_COMPLETED_STATES: frozenset[str] = frozenset(
+    {"workflow-tracked", "passed", "done"}
+)
 _LEGACY_GROUP_SUFFIXES: tuple[str, ...] = (
     "subagent-build",
     "adversarial-review",
@@ -180,11 +183,28 @@ class JobRow:
         return _legacy_display_name(self.slice_id)
 
     @property
+    def is_recent_done(self) -> bool:
+        return self.source_section == "recent_done"
+
+    @property
     def human_state(self) -> str:
         """區分兩種 needs_human：job 已收工待裁決 vs. slice 仍卡著等人動手。"""
         if not self.needs_human:
             return ""
         return "待裁決" if self.source_section == "recent_done" else "阻塞中"
+
+    @property
+    def display_state(self) -> str:
+        """畫面上的狀態字面：recent_done 不外漏上游內部 token。"""
+        if self.needs_human:
+            return self.human_state
+        if self.is_recent_done:
+            return (
+                "已完成"
+                if self.state.strip().lower() in _RECENT_DONE_COMPLETED_STATES
+                else "已結束"
+            )
+        return self.state
 
     @property
     def detail_line(self) -> str:
@@ -256,9 +276,17 @@ class JobGroup:
         return self.needs_human_count > 0
 
     @property
+    def recent_done_count(self) -> int:
+        return sum(1 for row in self.rows if row.is_recent_done)
+
+    @property
+    def is_recent_done_only(self) -> bool:
+        return bool(self.rows) and self.recent_done_count == len(self.rows)
+
+    @property
     def item_count(self) -> int:
-        """本群的工作總數（含各 phase）。（#322）"""
-        return len(self.rows)
+        """本群的進行中工作總數；recent_done history 不算 active 件數。（#369）"""
+        return sum(1 for row in self.rows if not row.is_recent_done)
 
     @property
     def in_line_count(self) -> int:
@@ -289,6 +317,8 @@ class JobGroup:
 
         只印非零的區段：純未認領群只顯示「不可認領」，純在管線群不顯示待認領。
         供三軸分組時讓 operator 一眼看清每群的大小與積壓結構。（#322）"""
+        if self.is_recent_done_only:
+            return f"{self.recent_done_count} 已完成"
         parts = [f"{self.item_count} 件"]
         if self.in_line_count:
             parts.append(f"{self.in_line_count} 在管線")
@@ -323,16 +353,27 @@ class JobGroup:
     def state_label(self) -> str:
         """單筆沿用原狀態；多筆講「幾個 phase、幾個等人」。"""
         if self.is_single:
-            return self.lead.state
-        waiting = self.needs_human_count
-        if waiting == len(self.rows):
-            return f"{len(self.rows)} phase 全待裁決"
+            return self.lead.display_state
+        active_rows = tuple(row for row in self.rows if not row.is_recent_done)
+        if not active_rows:
+            waiting = self.needs_human_count
+            if waiting == len(self.rows):
+                return f"{len(self.rows)} phase 全待裁決"
+            if waiting:
+                return f"{len(self.rows)} phase（{waiting} 待裁決）"
+            states = {row.display_state for row in self.rows}
+            if len(states) == 1:
+                return f"{len(self.rows)} phase {states.pop()}"
+            return f"{len(self.rows)} phase"
+        waiting = sum(1 for row in active_rows if row.needs_human)
+        if waiting == len(active_rows):
+            return f"{len(active_rows)} phase 全待裁決"
         if waiting:
-            return f"{len(self.rows)} phase（{waiting} 待裁決）"
-        states = {row.state for row in self.rows}
+            return f"{len(active_rows)} phase（{waiting} 待裁決）"
+        states = {row.display_state for row in active_rows}
         if len(states) == 1:
-            return f"{len(self.rows)} phase {states.pop()}"
-        return f"{len(self.rows)} phase"
+            return f"{len(active_rows)} phase {states.pop()}"
+        return f"{len(active_rows)} phase"
 
     @property
     def headline_state(self) -> str:
@@ -341,14 +382,16 @@ class JobGroup:
         單筆 needs_human 時 `needs_human` 與「待裁決」同義，兩個都印只是把
         次要欄的空間吃掉，讓 workflow id 這種真正要用來識別的東西被擠掉。
         """
+        if self.is_recent_done_only:
+            return "最近完成"
         if self.is_single:
-            return self.human_state or self.lead.state
+            return self.lead.display_state
         return self.state_label
 
     @property
     def raw_state(self) -> str:
         """原始 job state；與 headline 同義時不重複顯示。"""
-        if not self.is_single:
+        if not self.is_single or self.lead.is_recent_done:
             return ""
         state = self.lead.state
         return "" if state == self.headline_state or self.human_state == "待裁決" else state

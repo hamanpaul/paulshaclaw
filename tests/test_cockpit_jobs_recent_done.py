@@ -46,9 +46,67 @@ class RecentDoneHistoryRedTests(unittest.TestCase):
 
         self.assertTrue(recent_done_groups)
         for group in recent_done_groups:
-            self.assertFalse(specs_by_key[group.key].expand)
+            spec = specs_by_key[group.key]
+            self.assertFalse(spec.expand)
+            self.assertTrue(spec.children)
+            self.assertIn("最近完成", "".join(text for text, _ in spec.segments))
+            child_text = "".join(text for text, _ in spec.children[0].segments)
+            self.assertIn("已完成", child_text)
+            self.assertNotIn("passed", child_text)
 
     def test_recent_done_history_is_excluded_from_jobs_count(self) -> None:
         rows = slices_from_status(_recent_done_status_fixture())
 
         self.assertEqual(jobs_counts_summary(rows), "3 件 · 2 不可認領")
+
+    def test_recent_done_history_maps_unknown_gate_status_to_finished_label(self) -> None:
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "degraded": False,
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-history-unknown-verification",
+                            "gate_status": "mystery-finished-state",
+                        }
+                    ],
+                }
+            ),
+            axis="project",
+        )
+
+        (spec,) = build_jobs_nodes(groups, axis="project")
+        child_text = "".join(text for text, _ in spec.children[0].segments)
+
+        self.assertIn("已結束", child_text)
+        self.assertNotIn("mystery-finished-state", child_text)
+
+    def test_recent_done_history_omits_terminal_run_status_rows(self) -> None:
+        rows = slices_from_status(
+            {
+                "degraded": False,
+                "recent_done": [
+                    {"slice_id": "wf-history-keep-build", "gate_status": "passed"},
+                    {
+                        "slice_id": "wf-history-drop-done-build",
+                        "gate_status": "passed",
+                        "run_status": "done",
+                    },
+                    {
+                        "slice_id": "wf-history-drop-superseded-build",
+                        "gate_status": "passed",
+                        "run_status": "superseded",
+                    },
+                    {
+                        "slice_id": "wf-history-keep-unknown-build",
+                        "gate_status": "passed",
+                        "run_status": "archived",
+                    },
+                ],
+            }
+        )
+
+        self.assertEqual(
+            [row.slice_id for row in rows],
+            ["wf-history-keep-build", "wf-history-keep-unknown-build"],
+        )
