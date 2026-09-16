@@ -284,6 +284,17 @@ class JobGroup:
         return bool(self.rows) and self.recent_done_count == len(self.rows)
 
     @property
+    def recent_done_summary(self) -> str:
+        """recent_done 群收合時的副標：正常完成維持簡短，其餘跟著實際群組狀態。"""
+        if not self.is_recent_done_only:
+            return ""
+        if all(row.display_state == "已完成" for row in self.rows):
+            return f"{self.recent_done_count} 已完成"
+        if self.is_single:
+            return f"{self.recent_done_count} {self.lead.display_state}"
+        return self.state_label
+
+    @property
     def item_count(self) -> int:
         """本群的進行中工作總數；recent_done history 不算 active 件數。（#369）"""
         return sum(1 for row in self.rows if not row.is_recent_done)
@@ -318,7 +329,7 @@ class JobGroup:
         只印非零的區段：純未認領群只顯示「不可認領」，純在管線群不顯示待認領。
         供三軸分組時讓 operator 一眼看清每群的大小與積壓結構。（#322）"""
         if self.is_recent_done_only:
-            return f"{self.recent_done_count} 已完成"
+            return self.recent_done_summary
         parts = [f"{self.item_count} 件"]
         if self.in_line_count:
             parts.append(f"{self.in_line_count} 在管線")

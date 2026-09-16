@@ -47,9 +47,11 @@ class RecentDoneHistoryRedTests(unittest.TestCase):
         self.assertTrue(recent_done_groups)
         for group in recent_done_groups:
             spec = specs_by_key[group.key]
+            header_text = "".join(text for text, _ in spec.segments)
             self.assertFalse(spec.expand)
             self.assertTrue(spec.children)
-            self.assertIn("最近完成", "".join(text for text, _ in spec.segments))
+            self.assertIn("最近完成", header_text)
+            self.assertIn(f"{len(group.rows)} 已完成", header_text)
             child_text = "".join(text for text, _ in spec.children[0].segments)
             self.assertIn("已完成", child_text)
             self.assertNotIn("passed", child_text)
@@ -76,10 +78,46 @@ class RecentDoneHistoryRedTests(unittest.TestCase):
         )
 
         (spec,) = build_jobs_nodes(groups, axis="project")
+        header_text = "".join(text for text, _ in spec.segments)
         child_text = "".join(text for text, _ in spec.children[0].segments)
 
+        self.assertIn("1 已結束", header_text)
+        self.assertNotIn("1 已完成", header_text)
         self.assertIn("已結束", child_text)
         self.assertNotIn("mystery-finished-state", child_text)
+
+    def test_recent_done_history_preserves_pending_decision_summary_in_collapsed_header(
+        self,
+    ) -> None:
+        groups = group_job_rows(
+            slices_from_status(
+                {
+                    "degraded": False,
+                    "recent_done": [
+                        {
+                            "slice_id": "wf-e13fa4daae-subagent-build",
+                            "gate_status": "needs_human",
+                        },
+                        {
+                            "slice_id": "wf-e13fa4daae-code-review",
+                            "gate_status": "needs_human",
+                        },
+                        {
+                            "slice_id": "wf-e13fa4daae-verification",
+                            "gate_status": "needs_human",
+                        },
+                    ],
+                }
+            ),
+            axis="project",
+        )
+
+        (spec,) = build_jobs_nodes(groups, axis="project")
+        header_text = "".join(text for text, _ in spec.segments)
+
+        self.assertIn("最近完成", header_text)
+        self.assertIn("3 phase 全待裁決", header_text)
+        self.assertNotIn("3 已完成", header_text)
 
     def test_recent_done_history_omits_terminal_run_status_rows(self) -> None:
         rows = slices_from_status(
