@@ -392,13 +392,17 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
         for item in recent_done:
             if not isinstance(item, dict):
                 continue
+            run_status = _text_field(item, "run_status").lower()
+            if run_status in {"superseded", "done"}:
+                continue
             slice_id = _slice_id_from_item(item)
             if not slice_id:
                 continue
             state = str(item.get("gate_status") or item.get("state") or "done")
             # manager 的 handoff manifest 已有 gate_reason／job_id／branch，但目前的
             # recent_done provider 只挑 slice_id／gate_status／completed_at 三欄送出。
-            # 這裡前向相容地讀：上游一補上就直接生效，不必再改 cockpit。
+            # `exited_at`／`run_status` 等可選欄位先容忍接住；真正已沉到 terminal
+            # lifecycle（superseded/done）的列直接略過，不把已結案歷史擠進 cockpit。
             rows.append(
                 JobRow(
                     slice_id=slice_id,
@@ -546,7 +550,8 @@ def jobs_counts_summary(rows: tuple[JobRow, ...]) -> str:
 
     只印非零區段——純在管線群不顯示待認領，純未認領群只顯示「不可認領」，讓
     operator 一眼看出積壓結構而非只剩一個總量（#322）。"""
-    parts = [f"{len(rows)} 件"]
+    active_rows = tuple(row for row in rows if not row.is_recent_done)
+    parts = [f"{len(active_rows)} 件"]
     in_line = sum(1 for row in rows if row.is_in_line)
     pending = sum(1 for row in rows if row.is_pending_claim)
     unclaimed = sum(1 for row in rows if row.is_not_claimable)

@@ -173,7 +173,7 @@ def _layout_columns(
     name_widths = [0]
     for group in groups:
         state_widths.append(_display_width(_abbrev_label(group.headline_state)))
-        if group.is_single:
+        if group.is_single and not group.is_recent_done_only:
             # name 欄只放單列的 phase 名；群組列 name 留白、branch 走 trailer
             # 與單列同欄對齊（#314）。
             name_widths.append(
@@ -182,7 +182,7 @@ def _layout_columns(
         else:
             for row in group.rows:
                 state_widths.append(
-                    _display_width(_abbrev_label(row.human_state or row.state))
+                    _display_width(_abbrev_label(row.display_state))
                 )
     state_col = min(max(state_widths), _STATE_COL_MAX)
     # 起點統一 +2：群組列的 Tree 展開箭頭吃 2 欄，無子列由 _ROW_ALIGN_PREFIX
@@ -298,12 +298,16 @@ class JobsNodeSpec:
 
 def _group_state_key(group: JobGroup) -> str:
     """多 phase 群組的上色依據：有人在等就照 attention 上色，否則跟著領頭 slice。"""
-    return "attention" if group.needs_human else group.lead.state
+    if group.needs_human:
+        return "attention"
+    return "done" if group.is_recent_done_only else group.lead.state
 
 
 def _row_state_key(row: JobRow) -> str:
     """單一 slice 的上色依據：needs_human 一律當 attention，不管上游原始 state 字串是什麼。"""
-    return "needs_human" if row.needs_human else row.state
+    if row.needs_human:
+        return "needs_human"
+    return "done" if row.is_recent_done else row.state
 
 
 def _detail_child(key: str, detail: str) -> JobsNodeSpec:
@@ -330,7 +334,7 @@ def _legacy_phase_child(group: JobGroup, row: JobRow, state_col: int) -> tuple[t
     保留原有字面：共用群前綴從 slice_id 字剝出 phase 短名（`wf-abc-build`
     → `build`），legacy 測試斷言「顯示 build 但不顯示完整 slice_id」靠它。（#322）"""
     glyph, color = status_style(_row_state_key(row))
-    label_state = _abbrev_label(row.human_state or row.state)
+    label_state = _abbrev_label(row.display_state)
     phase_name = _abbrev_label(_group_relative_label(group.key, row))
     return (
         (f"{glyph} {_pad_display(label_state, state_col)} ", color),
@@ -401,7 +405,7 @@ def _group_spec(
     trailer_budget: int,
 ) -> JobsNodeSpec:
     """群組節點：單列直接當行顯示，多列走軸身分頭＋分 phase 行。"""
-    if group.is_single:
+    if group.is_single and not group.is_recent_done_only:
         return _single_group_spec(
             group, axis, first_col, work_col, third_col, state_col, name_col, trailer_budget
         )
@@ -475,15 +479,22 @@ def _multi_group_spec(
     """多列群：三軸行顯示「軸身分＋計数」頭＋分 phase 行；legacy 群保留舊版。"""
     has_axis_rows = any(_row_is_axis(row) for row in group.rows)
     glyph, color = status_style(_group_state_key(group))
-    trailer = _fit_trailer(
+    trailer_parts = (
         (
             group.project,
             _group_trailer_identity(group),
             group.note,
+            group.summary_trailer,
+        )
+        if group.is_recent_done_only
+        else (
+            group.project,
+            _group_trailer_identity(group),
+            group.note,
             _abbrev_label(group.raw_state),
-        ),
-        trailer_budget,
+        )
     )
+    trailer = _fit_trailer(trailer_parts, trailer_budget)
     if has_axis_rows:
         # 三軸頭：glyph + 軸身分（group.key：repo／phase／persona）+ 計数副標。
         main_segments = ((f"{glyph} {_abbrev_label(group.key)} ", color), (group.summary_trailer, ""))

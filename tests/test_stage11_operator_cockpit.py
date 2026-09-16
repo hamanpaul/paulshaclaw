@@ -382,9 +382,10 @@ class Stage11StateTests(unittest.TestCase):
         big = groups[0]
         self.assertEqual(len(big.rows), 3)
         self.assertEqual(big.state_label, "3 phase 全待裁決")
+        self.assertEqual(big.headline_state, "最近完成")
         self.assertEqual(big.display_name, "wf-e13fa4daae")
         self.assertTrue(groups[1].is_single)
-        self.assertEqual(groups[1].state_label, "needs_human")
+        self.assertEqual(groups[1].state_label, "待裁決")
 
     def test_group_job_rows_folds_plain_work_phases_by_known_suffix(self) -> None:
         """非 wf-* 的 work 也是同一組 phase（build / code-review / …），一樣要收攏。"""
@@ -1234,7 +1235,7 @@ class Stage11StateTests(unittest.TestCase):
             app._refresh_widgets()
 
         # #322：標題改成分層計數（N 件 · …），副標顯示當前行軸。
-        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS · 5 件")
+        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS · 4 件")
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "[by project]")
         # 有 rows 時 app 把分好群的 JobGroup 直接餵給 widget（渲染成 node 是 widget 自己的事）。
         (groups,), _ = widgets["#global-jobs"].set_groups.call_args
@@ -1280,8 +1281,9 @@ class Stage11StateTests(unittest.TestCase):
         self.assertIn("wf-e13fa4daae", rendered)
         # 上游有給 repo 時，project 要出現在次要欄的最前面。
         self.assertIn("paulsha-cortex", rendered)
-        # 上游沒帶 reason 時明說，而不是留一列空白狀態。
-        self.assertIn("原因未知", rendered)
+        # recent_done 群頭改成「最近完成」，缺 reason／action 的明示落在展開後 detail。
+        self.assertIn("最近完成", rendered)
+        self.assertIn("上游未帶 reason／next_actions（manager status 契約缺口）", rendered)
         # needs_human 群必須排最前面；單列 detail 預設收合，operator 仍先看到工作列。
         # （group key 會把已知 phase 後綴折回 work 身分，display_name 保留完整
         # slice_id，上面的 rendered 斷言已經驗過看得懂的名字還在。）
@@ -1492,8 +1494,8 @@ class Stage11StateTests(unittest.TestCase):
         self.assertNotIn("wf-e13fa4daae", main_text)
 
     def test_build_jobs_nodes_drops_branch_whole_when_width_is_tight(self) -> None:
-        """寬度不足時沿用 _fit_trailer 既有語意：branch 整項退讓並標示省略，
-        絕不硬切成半條分支名（width=66 → trailer 預算 20，只放得下 project）。"""
+        """#369：recent_done 群頭改成 group 版面後，66 欄仍優先保留 project +
+        branch；塞不下的是次要的 completed 計數尾段。"""
         groups = group_job_rows(
             slices_from_status(
                 {
@@ -1514,15 +1516,13 @@ class Stage11StateTests(unittest.TestCase):
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
         self.assertIn("paulsha-cortex", main_text)
-        self.assertNotIn("feat/", main_text)
+        self.assertIn("feat/294-feat-slice-executor-model", main_text)
         self.assertTrue(main_text.endswith("…"), main_text)
         self.assertLessEqual(_display_width(main_text), 66, main_text)
 
     def test_fit_trailer_ellipsizes_last_item_instead_of_blank(self) -> None:
-        """#299：退讓到只剩一項仍塞不下時要縮排顯示，不得留白。今日真實資料形狀
-        （repo=null、branch 37 字元）在窄面板（#308 自適應版面下 width=50 →
-        trailer 預算 29）下，#292 的整項退讓會讓 trailer 全空——比修之前連
-        wf-hash 都不剩。縮排後 issue 編號（branch 頭段）必須可見。"""
+        """#369：group 版面把 recent_done 單列的預算還給 trailer，50 欄下整條
+        branch 仍看得見；被退讓的是 trailing summary。"""
         groups = group_job_rows(
             slices_from_status(
                 {
@@ -1543,12 +1543,12 @@ class Stage11StateTests(unittest.TestCase):
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
         self.assertIn("feat/294", main_text)
         self.assertIn("…", main_text)
-        self.assertNotIn("feat/294-feat-slice-executor-model", main_text)
+        self.assertIn("feat/294-feat-slice-executor-model", main_text)
         self.assertLessEqual(_display_width(main_text), 50, main_text)
 
     def test_fit_trailer_stays_blank_below_ellipsize_floor(self) -> None:
-        """#299：預算低於下限（8 顯示欄）時維持留白——縮到一小截沒有資訊量，
-        寧可不顯示（#308 版面下 width=28 → trailer 預算 7）。"""
+        """#369：單列 recent_done 改成群頭後，窄到 28 欄時仍優先保住 branch
+        頭尾資訊，並以中段省略維持可辨識性。"""
         groups = group_job_rows(
             slices_from_status(
                 {
@@ -1567,8 +1567,8 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups, width=28)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertNotIn("feat", main_text)
-        self.assertNotIn("…", main_text)
+        self.assertIn("feat/", main_text)
+        self.assertIn("…", main_text)
 
     def test_build_jobs_nodes_abbreviates_verbose_labels(self) -> None:
         """#302：顯示層去贅詞——workflow-tracked→[wf]-tracked、subagent-build→
@@ -1585,8 +1585,8 @@ class Stage11StateTests(unittest.TestCase):
         groups = group_job_rows(slices_from_status(status))
         rendered = _flatten_nodes(build_jobs_nodes(groups))
 
-        self.assertIn("[wf]-tracked", rendered)
-        self.assertIn("2 ph [wf]-tracked", rendered)
+        self.assertIn("最近完成", rendered)
+        self.assertIn("已完成", rendered)
         self.assertIn("[sub]-build", rendered)
         self.assertNotIn("workflow-tracked", rendered)
         self.assertNotIn("subagent-build", rendered)
@@ -1615,9 +1615,11 @@ class Stage11StateTests(unittest.TestCase):
         nodes = build_jobs_nodes(groups, width=120)
 
         main_text = "".join(segment_text for segment_text, _ in nodes[0].segments)
-        self.assertIn("[sub]-build", main_text)
+        rendered = _flatten_nodes(nodes)
+        self.assertIn("最近完成", main_text)
         self.assertIn("paulsha-cortex", main_text)
         self.assertIn("feat/294-feat-slice-executor-model", main_text)
+        self.assertIn("[sub]-build", rendered)
         self.assertNotIn("…", main_text)
         self.assertLessEqual(_display_width(main_text), 120, main_text)
 
@@ -1648,8 +1650,8 @@ class Stage11StateTests(unittest.TestCase):
         rebuild.assert_not_called()
 
     def test_rows_align_regardless_of_tree_arrow(self) -> None:
-        """#311：頂層無子列補兩格前綴、有子列（Tree 會畫箭頭）不補——三種列的
-        state／name 欄同 x 起點；trailer 為白色（feat 串不上暗色）。"""
+        """#311 / #369：recent_done 即便單列也改成可收合群頭，與多列群同樣由
+        Tree 箭頭占位；主列 trailer 仍保持白色。"""
         groups = group_job_rows(
             slices_from_status(
                 {
@@ -1677,26 +1679,21 @@ class Stage11StateTests(unittest.TestCase):
 
         nodes = build_jobs_nodes(groups, width=100)
 
-        by_children = {bool(spec.children): spec for spec in nodes}
-        single, multi = by_children[False], by_children[True]
-        # 無子列補前綴；有子列由 Tree 箭頭吃掉同寬起點。
-        self.assertTrue(single.segments[0][0].startswith("  • "), single.segments[0][0])
+        single = next(spec for spec in nodes if spec.key == "wf-aaaa11111")
+        multi = next(spec for spec in nodes if spec.key == "wf-bbbb22222")
+        # 單列／多列 recent_done 都是可收合群頭，前綴都由 Tree 箭頭占位。
+        self.assertTrue(single.segments[0][0].startswith("• "), single.segments[0][0])
         self.assertTrue(multi.segments[0][0].startswith("• "), multi.segments[0][0])
-        # 首段（前綴＋glyph＋state pad）顯示寬相差恰為 2 → name 欄同 x 起點。
-        self.assertEqual(
-            _display_width(single.segments[0][0]),
-            _display_width(multi.segments[0][0]) + 2,
-        )
         # trailer 白色。
         self.assertEqual(single.segments[2][1], "")  # 白＝終端預設（#317）
-        # #314：群組列 name 段留白、branch 在 trailer 段——與單列的 feat/ 同一
-        # 垂直欄（前兩段顯示寬含箭頭補償後相等 → trailer 同 x 起點）。
+        # #314：群組列 name 段留白、branch 在 trailer 段。
+        self.assertEqual(single.segments[1][0].strip(), "")
         self.assertEqual(multi.segments[1][0].strip(), "")
         self.assertIn("feat/2-multi", multi.segments[2][0])
         self.assertIn("feat/1-single", single.segments[2][0])
         self.assertEqual(
             _display_width(single.segments[0][0]) + _display_width(single.segments[1][0]),
-            _display_width(multi.segments[0][0]) + 2 + _display_width(multi.segments[1][0]),
+            _display_width(multi.segments[0][0]) + _display_width(multi.segments[1][0]),
         )
 
     def test_multi_phase_group_shows_branch_from_recent_done_phase(self) -> None:
@@ -1774,7 +1771,7 @@ class Stage11StateTests(unittest.TestCase):
             app._refresh_widgets()
 
         # #322：標題的分層計數只印非零區段（本fixture無在管線／待認領／不可認領）。
-        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS · 31 件")
+        self.assertEqual(widgets["#global-jobs"].border_title, "JOBS · 21 件")
         self.assertEqual(widgets["#global-jobs"].border_subtitle, "[by project]")
 
         (groups,), _ = widgets["#global-jobs"].set_groups.call_args
@@ -1782,8 +1779,8 @@ class Stage11StateTests(unittest.TestCase):
         for run in ("wf-e13fa4daae", "wf-7f4e4a8f1b", "wf-2fa3d22552", "wf-6f0a583d0d", "wf-e6ad935ef9"):
             self.assertIn(run, rendered, f"{run} 被丟掉了")
         self.assertIn("add-cortex-version-flag-build", rendered)
-        self.assertIn("4 ph 全待裁決", rendered)
-        self.assertIn("3 ph 全待裁決", rendered)
+        self.assertIn("最近完成", rendered)
+        self.assertIn("待裁決", rendered)
 
     def test_refresh_widgets_renders_degraded_jobs_panel(self) -> None:
         app = self._minimal_app()
