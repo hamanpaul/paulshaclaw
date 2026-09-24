@@ -97,6 +97,12 @@ class WorkItem(ListItem):
 class WorkListView(ListView):
     """WORK 清單：enter 覆寫為直達 app swap action。"""
 
+    def _on_list_item__child_clicked(self, event: ListItem._ChildClicked) -> None:
+        if event.item not in self._nodes:
+            event.stop()
+            return
+        super()._on_list_item__child_clicked(event)
+
     def action_select_cursor(self) -> None:
         app = getattr(self, "app", None)
         action = getattr(app, "action_swap_selected", None)
