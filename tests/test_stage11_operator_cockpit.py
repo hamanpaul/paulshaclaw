@@ -28,6 +28,7 @@ from paulshaclaw.cockpit.app import (
     REFRESH_INTERVAL_SECONDS,
     SYSMON_INTERVAL_SECONDS,
     CockpitApp,
+    WorkItem,
     format_work_pane_subtitle,
     pane_display_label,
     _JOBS_WIDTH_FALLBACK,
@@ -1915,6 +1916,80 @@ class DummyCockpitApp:
 
 @unittest.skipUnless(HAS_TEXTUAL, "requires textual with run_test support")
 class Stage11AppTests(unittest.IsolatedAsyncioTestCase):
+    async def test_work_list_child_click_keeps_live_row_selection_flow(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
+        )
+        actions = FakeLayoutActionService()
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+            clock=lambda: 12.5,
+        )
+
+        async with app.run_test() as pilot:
+            work_list = app.query_one("#work-list")
+            clicked_item = work_list.children[2]
+
+            self.assertEqual(work_list.index, 1)
+            self.assertEqual(app.state.selected_pane.pane_id, "%1")
+
+            event = WorkItem._ChildClicked(clicked_item)
+            work_list._on_list_item__child_clicked(event)
+            await pilot.pause()
+
+            self.assertTrue(event._stop_propagation)
+            self.assertEqual(work_list.index, 2)
+            self.assertEqual(app.state.selected_pane.pane_id, "%2")
+
+        self.assertEqual(app._last_click, ("%2", 12.5))
+        self.assertEqual(actions.swaps, [])
+
+    async def test_work_list_child_click_ignores_stale_row_after_refresh_rebuild(self) -> None:
+        panes = (
+            pane_record("%0", title="cockpit", command="python", width=120, height=40),
+            pane_record("%4", title="ssh", command="bash", left=120, width=120, height=40),
+            pane_record("%1", title="agent1", command="node", top=40, width=80, height=20),
+            pane_record("%2", title="iperf", command="iperf3", left=80, top=40, width=80, height=20),
+        )
+        actions = FakeLayoutActionService()
+        app = CockpitApp.from_snapshot(
+            panes=panes,
+            cockpit_pane_id="%0",
+            cockpit_session_name="main",
+            jobs_by_pane={},
+            actions=actions,
+            clock=lambda: 12.5,
+        )
+
+        async with app.run_test() as pilot:
+            work_list = app.query_one("#work-list")
+            stale_item = work_list.children[1]
+
+            app.state = app.state.move_selection(1)
+            app._refresh_widgets()
+
+            self.assertEqual(work_list.index, 2)
+            self.assertEqual(app.state.selected_pane.pane_id, "%2")
+            self.assertNotIn(stale_item, work_list._nodes)
+
+            event = WorkItem._ChildClicked(stale_item)
+            work_list._on_list_item__child_clicked(event)
+            await pilot.pause()
+
+            self.assertTrue(event._stop_propagation)
+            self.assertEqual(work_list.index, 2)
+            self.assertEqual(app.state.selected_pane.pane_id, "%2")
+
+        self.assertIsNone(app._last_click)
+        self.assertEqual(actions.swaps, [])
+
     async def test_enter_swaps_selected_candidate_and_focuses_new_active_pane(self) -> None:
         panes = (
             pane_record("%0", title="cockpit", command="python", width=120, height=40),
