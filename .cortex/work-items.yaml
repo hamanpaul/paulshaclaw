@@ -70,3 +70,13 @@ work_items:
       - kind: path
         ref: 'docs/superpowers/workstreams/cockpit-jobs-recent-done-history/todo.md'
     excludes: []
+  cockpit-stale-workitem-click:
+    title: 'cockpit-stale-workitem-click'
+    links:
+      - kind: github_issue
+        ref: 'hamanpaul/paulshaclaw#375'
+      - kind: github_pr
+        ref: 'hamanpaul/paulshaclaw#376'
+    excludes:
+      - kind: openspec
+        ref: 'cockpit-stale-workitem-click'
