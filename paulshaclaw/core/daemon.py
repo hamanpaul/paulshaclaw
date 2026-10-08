@@ -174,7 +174,7 @@ class PaulShiaBroDaemon:
         command = self._pane_current_command(pane_id)
         if command is None:
             return "不存在或無法存取"
-        if command in _IDLE_SHELL_COMMANDS:
+        if command.lstrip("-").lower() in _IDLE_SHELL_COMMANDS:
             return f"目前沒有 agent 在跑（{command}）"
         return None
 

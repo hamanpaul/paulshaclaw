@@ -801,11 +801,14 @@ class Stage1SmokeTest(unittest.TestCase):
         config_path = self.make_config_path()
         daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
 
-        with mock.patch.object(daemon, "_pane_current_command", return_value="bash"):
-            with self.assertRaisesRegex(ValueError, "bash"):
-                daemon.handle_command("/agent attach %7")
+        # login shell 會被 tmux 回報成 `-bash`；比對前要和 `/agent start` 一樣正規化。
+        for current_command in ("bash", "-bash", "ZSH"):
+            with self.subTest(current_command=current_command):
+                with mock.patch.object(daemon, "_pane_current_command", return_value=current_command):
+                    with self.assertRaisesRegex(ValueError, "沒有 agent 在跑"):
+                        daemon.handle_command("/agent attach %7")
 
-        self.assertIsNone(daemon._attached_pane_id)
+                self.assertIsNone(daemon._attached_pane_id)
 
     def test_agent_attach_rejects_missing_pane(self) -> None:
         config_path = self.make_config_path()
@@ -909,7 +912,7 @@ class Stage1SmokeTest(unittest.TestCase):
         daemon._attached_pane_id = "%160"
         self._isolate_bro_queue_root()
 
-        for current_command in ("bash", None):
+        for current_command in ("bash", "-bash", None):
             with self.subTest(current_command=current_command):
                 with (
                     mock.patch.object(daemon, "_pane_current_command", return_value=current_command),
