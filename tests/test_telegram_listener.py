@@ -410,6 +410,26 @@ class TelegramListenerTests(unittest.TestCase):
                 },
                 "agent: already_stopped",
             ),
+            (
+                "/agent attach %160",
+                {"ok": True, "kind": "agent", "state": "running", "running": True, "pane_id": "%160", "attached": True},
+                "agent: attached (running)\npane: %160",
+            ),
+            (
+                "/agent status",
+                {"ok": True, "kind": "agent", "state": "stopped", "running": False, "pane_id": "%160", "attached": True},
+                "agent: attached (stopped)\npane: %160",
+            ),
+            (
+                "/agent detach",
+                {"ok": True, "kind": "agent", "state": "stopped", "running": False, "pane_id": "%160", "detached": True},
+                "agent: detached\npane: %160",
+            ),
+            (
+                "/agent detach",
+                {"ok": True, "kind": "agent", "state": "stopped", "running": False, "already_detached": True},
+                "agent: already_detached",
+            ),
         ]
 
         for command, response, expected_message in cases:
@@ -962,7 +982,7 @@ class ListenerMainTests(unittest.TestCase):
         api_client.assert_called_once_with("fake-token")
         validate_identity.assert_called_once()
         fake_client.set_my_commands.assert_called_once_with(fake_commands)
-        self.assertIn({"command": "agent", "description": "管理 claude-gemma4 agent"}, fake_commands)
+        self.assertIn({"command": "agent", "description": "管理控制 agent"}, fake_commands)
         build_listener_mock.assert_called_once()
         self.assertEqual(build_listener_mock.call_args.kwargs["config_path"], None)
         self.assertEqual(build_listener_mock.call_args.kwargs["poll_timeout"], 30)

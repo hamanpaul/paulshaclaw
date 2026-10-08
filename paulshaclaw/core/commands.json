@@ -77,11 +77,11 @@
     },
     {
       "name": "/agent",
-      "usage": "/agent [start %pane|startf %pane|stop|status]",
-      "summary": "管理 claude-gemma4 agent session",
+      "usage": "/agent [start %pane|startf %pane|attach %pane|detach|stop|status]",
+      "summary": "管理控制 agent session（claude-gemma4 或 attach 既有 pane）",
       "telegram_menu": {
         "command": "agent",
-        "description": "管理 claude-gemma4 agent",
+        "description": "管理控制 agent",
         "enabled": true
       },
       "func_call": {

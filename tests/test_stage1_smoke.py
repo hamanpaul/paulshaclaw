@@ -454,7 +454,7 @@ class Stage1SmokeTest(unittest.TestCase):
         result = router.handle_message(user_id=1001, text="/help")
 
         self.assertTrue(result["ok"])
-        self.assertIn("/agent [start %pane|startf %pane|stop|status]", result["message"])
+        self.assertIn("/agent [start %pane|startf %pane|attach %pane|detach|stop|status]", result["message"])
         self.assertIn("/manager [status|tick]", result["message"])
         self.assertIn("/tmate [status|start|stop]", result["message"])
         self.assertIn("/dispatch <task_id>|<pane_id> <message>", result["message"])
@@ -781,6 +781,164 @@ class Stage1SmokeTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(ValueError, "不存在或無法存取"):
                 daemon.handle_command("/agent start %7")
+
+    def test_agent_attach_pins_pane_running_an_agent(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch.object(daemon, "_pane_current_command", return_value="claude"):
+            result = daemon.handle_command("/agent attach %160")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "agent")
+        self.assertEqual(result["state"], "running")
+        self.assertTrue(result["attached"])
+        self.assertEqual(result["pane_id"], "%160")
+        self.assertEqual(daemon._attached_pane_id, "%160")
+
+    def test_agent_attach_rejects_idle_shell_pane(self) -> None:
+        """attach 到 shell 會讓 Telegram 文字被當 shell 指令執行，必須擋下。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch.object(daemon, "_pane_current_command", return_value="bash"):
+            with self.assertRaisesRegex(ValueError, "bash"):
+                daemon.handle_command("/agent attach %7")
+
+        self.assertIsNone(daemon._attached_pane_id)
+
+    def test_agent_attach_rejects_missing_pane(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        with mock.patch.object(daemon, "_pane_current_command", return_value=None):
+            with self.assertRaisesRegex(ValueError, "不存在或無法存取"):
+                daemon.handle_command("/agent attach %7")
+
+        self.assertIsNone(daemon._attached_pane_id)
+
+    def test_agent_attach_requires_exactly_one_percent_pane_id(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        for command, pattern in (
+            ("/agent attach", "pane id"),
+            ("/agent attach 160", "% 開頭"),
+            ("/agent attach %1 %2", "一個 pane id"),
+        ):
+            with self.subTest(command=command):
+                with mock.patch.object(daemon, "_pane_current_command", return_value="claude"):
+                    with self.assertRaisesRegex(ValueError, pattern):
+                        daemon.handle_command(command)
+                self.assertIsNone(daemon._attached_pane_id)
+
+    def test_agent_detach_clears_attachment(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._attached_pane_id = "%160"
+
+        result = daemon.handle_command("/agent detach")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["kind"], "agent")
+        self.assertTrue(result["detached"])
+        self.assertEqual(result["pane_id"], "%160")
+        self.assertIsNone(daemon._attached_pane_id)
+
+    def test_agent_detach_reports_already_detached(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+
+        result = daemon.handle_command("/agent detach")
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["already_detached"])
+        self.assertNotIn("pane_id", result)
+
+    def test_agent_detach_rejects_arguments(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._attached_pane_id = "%160"
+
+        with self.assertRaisesRegex(ValueError, "不接受參數"):
+            daemon.handle_command("/agent detach %160")
+
+        self.assertEqual(daemon._attached_pane_id, "%160")
+
+    def test_agent_status_reports_attached_pane_without_autodetect(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._attached_pane_id = "%160"
+
+        for current_command, state in (("claude", "running"), ("bash", "stopped"), (None, "stopped")):
+            with self.subTest(current_command=current_command):
+                with (
+                    mock.patch.object(daemon, "_pane_current_command", return_value=current_command),
+                    mock.patch.object(daemon, "_detect_agent_process") as detect_mock,
+                ):
+                    result = daemon.handle_command("/agent status")
+
+                detect_mock.assert_not_called()
+                self.assertTrue(result["attached"])
+                self.assertEqual(result["pane_id"], "%160")
+                self.assertEqual(result["state"], state)
+                self.assertEqual(daemon._attached_pane_id, "%160")
+
+    def test_daemon_route_to_agent_uses_attached_pane_without_autodetect(self) -> None:
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._attached_pane_id = "%160"
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_pane_current_command", return_value="claude"),
+            mock.patch.object(daemon, "_detect_agent_process") as detect_mock,
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}) as send_mock,
+            mock.patch.object(daemon, "_pane_tail_text", return_value="[bro:1001] hi"),
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="hi")
+
+        detect_mock.assert_not_called()
+        send_mock.assert_called_once_with("%160", "[bro:1001] hi")
+        self.assertEqual(result, "…")
+
+    def test_daemon_route_to_agent_refuses_when_attached_pane_has_no_agent(self) -> None:
+        """agent 結束後 pane 退回 shell（或 pane 消失）時，不得把訊息打進去。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._attached_pane_id = "%160"
+        self._isolate_bro_queue_root()
+
+        for current_command in ("bash", None):
+            with self.subTest(current_command=current_command):
+                with (
+                    mock.patch.object(daemon, "_pane_current_command", return_value=current_command),
+                    mock.patch.object(daemon, "_detect_agent_process") as detect_mock,
+                    mock.patch.object(daemon, "_send_to_pane") as send_mock,
+                ):
+                    result = daemon.route_to_agent(user_id=1001, text="hi")
+
+                detect_mock.assert_not_called()
+                send_mock.assert_not_called()
+                self.assertIn("%160", result)
+                self.assertIn("/agent detach", result)
+                self.assertEqual(daemon._attached_pane_id, "%160")
+
+    def test_daemon_route_to_agent_explicit_pane_id_overrides_attachment(self) -> None:
+        """#34 reply-to 指定的 pane 比 attach 更具體，維持優先。"""
+        config_path = self.make_config_path()
+        daemon = PaulShiaBroDaemon(config=load_config(config_path=config_path), coordinator=FakeCoordinator())
+        daemon._attached_pane_id = "%160"
+        self._isolate_bro_queue_root()
+
+        with (
+            mock.patch.object(daemon, "_send_to_pane", return_value={"ok": True}) as send_mock,
+            mock.patch.object(daemon, "_pane_tail_text", return_value="[bro:1001] hi"),
+        ):
+            result = daemon.route_to_agent(user_id=1001, text="hi", pane_id="%7")
+
+        send_mock.assert_called_once_with("%7", "[bro:1001] hi")
+        self.assertEqual(result, "…")
 
     def test_detect_agent_process_returns_none_when_tmux_is_unavailable(self) -> None:
         config_path = self.make_config_path()
