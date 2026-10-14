@@ -267,6 +267,9 @@ scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路�
 - `psc coordinator ...` / `psc deck ...` / `psc monitor ...`：**shim 到 `paulsha-cortex` CLI**；若未安裝 cortex，會印出 tombstone 與安裝指引。
 - `psc memory ...`：印出已遷移至 `paulsha-hippo` 的指引。
 - [`scripts/start.sh`](./scripts/start.sh)：委派 cortex `install service` / `enable --now`，必要時退回本地 fallback；同時串起 bot、cost footer 與 cockpit 所需的 operator shell 行為。
+- **bot 主動告警**（掛在 listener 既有的 polling 迴圈，不另起常駐進程；只通知、不做容量治理）：
+  - bro-queue 積壓超過 `PSC_BRO_QUEUE_ALERT_THRESHOLD_SECONDS`（預設 600 秒）未消化時告警（#275）。
+  - 主機 `MemAvailable` 低於 `PSC_MEM_ALERT_LOW_MB`（預設 3072）時告警一次，附 RSS 用量前幾名（依程序名稱彙總）；回到 `PSC_MEM_ALERT_RECOVER_MB`（預設 4096）以上送恢復通知。`PSC_MEM_ALERT_DISABLED=1` 關閉（#379）。
 - 讀設計時，先看本 README 的 repo 定位，再對照 [`docs/`](./docs/)、[`openspec/`](./openspec/) 與兩個外部 plane repo。
 
 ---

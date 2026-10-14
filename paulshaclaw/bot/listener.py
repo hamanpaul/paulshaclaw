@@ -257,6 +257,7 @@ class TelegramListener:
         cleanup: Callable[[], None] | None = None,
         queue_alert: Callable[[], None] | None = None,
         message_pane_map: MessagePaneMap | None = None,
+        mem_alert: Callable[[], None] | None = None,
     ) -> None:
         self.client = client
         self.router = router
@@ -268,6 +269,7 @@ class TelegramListener:
         self.sleep = sleep
         self.cleanup = cleanup or (lambda: None)
         self.queue_alert: Callable[[], None] | None = queue_alert
+        self.mem_alert: Callable[[], None] | None = mem_alert
         self.offset: int | None = None
         self.max_backoff = 30.0
 
@@ -288,6 +290,7 @@ class TelegramListener:
             if next_offset is not None:
                 self.offset = next_offset
         self._check_queue_backlog()
+        self._check_mem_pressure()
 
     def _check_queue_backlog(self) -> None:
         # #275：每輪 polling 結束後檢查佇列積壓；告警模組自身已吞例外，這裡再
@@ -300,6 +303,18 @@ class TelegramListener:
             raise
         except Exception as error:  # noqa: BLE001
             logger.error("QUEUE_ALERT_CHECK_ERROR error=%s", error)
+
+    def _check_mem_pressure(self) -> None:
+        # #379：每輪 polling 結束後檢查主機可用記憶體；與佇列告警相同，告警模組
+        # 自身已吞例外，這裡再包一層，確保告警失效不影響既有訊息路由。
+        if self.mem_alert is None:
+            return
+        try:
+            self.mem_alert()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as error:  # noqa: BLE001
+            logger.error("MEM_ALERT_CHECK_ERROR error=%s", error)
 
     def run_forever(self) -> None:
         backoff = 1.0
@@ -514,12 +529,22 @@ def build_listener(
     bindings_store = TelegramChatBindingStore(bindings_path)
     resolved_client = client or TelegramApiClient(settings.token)
     from paulshaclaw.core.bro_queue_alert import BroQueueAlerter, alert_threshold_seconds
+    from paulshaclaw.core.mem_pressure_alert import MemPressureAlerter, is_disabled, thresholds_from_env
 
     alerter = BroQueueAlerter(
         sender=resolved_client,
         bindings=bindings_store,
         allowed_user_ids=config.allowed_user_ids,
         threshold_seconds=alert_threshold_seconds(),
+    )
+    mem_low_mb, mem_recover_mb = thresholds_from_env()
+    mem_alerter = MemPressureAlerter(
+        sender=resolved_client,
+        bindings=bindings_store,
+        allowed_user_ids=config.allowed_user_ids,
+        low_mb=mem_low_mb,
+        recover_mb=mem_recover_mb,
+        disabled=is_disabled(),
     )
     return TelegramListener(
         client=resolved_client,
@@ -531,6 +556,7 @@ def build_listener(
         cleanup=daemon.cleanup_idle_resources,
         queue_alert=alerter.check_and_alert,
         message_pane_map=MessagePaneMap(map_path),
+        mem_alert=mem_alerter.check_and_alert,
     )
 
 

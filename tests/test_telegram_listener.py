@@ -582,6 +582,48 @@ class TelegramListenerTests(unittest.TestCase):
         listener.run_once()
         self.assertEqual(alert_calls, [])
 
+    def test_run_once_invokes_mem_alert_after_queue_alert(self) -> None:
+        calls: list[str] = []
+        listener = TelegramListener(
+            client=RecordingClient([]),
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            queue_alert=lambda: calls.append("queue"),
+            mem_alert=lambda: calls.append("mem"),
+        )
+
+        listener.run_once()
+
+        self.assertEqual(calls, ["queue", "mem"])
+
+    def test_run_once_swallows_mem_alert_failure(self) -> None:
+        def boom() -> None:
+            raise RuntimeError("mem alert crashed")
+
+        client = RecordingClient(
+            [
+                {
+                    "update_id": 21,
+                    "message": {
+                        "chat": {"id": 1001},
+                        "from": {"id": 7},
+                        "text": "/status",
+                    },
+                }
+            ]
+        )
+        listener = TelegramListener(
+            client=client,
+            router=FakeRouter({"ok": True, "message": "ok"}),
+            mem_alert=boom,
+        )
+
+        with self.assertLogs(listener_module.logger, level="ERROR"):
+            listener.run_once()
+
+        # 既有訊息路由不受影響
+        self.assertEqual(client.sent_messages, [{"chat_id": 1001, "text": "ok"}])
+        self.assertEqual(listener.offset, 22)
+
     def test_run_once_resyncs_missing_telegram_commands_before_polling(self) -> None:
         client = CommandSyncClient([], remote_commands=[])
         command_menu = [{"command": "status", "description": "顯示 runtime 狀態"}]
