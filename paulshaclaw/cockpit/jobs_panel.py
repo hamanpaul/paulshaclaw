@@ -323,9 +323,18 @@ def _group_trailer_identity(group: JobGroup) -> str:
 
 
 def _single_detail_children(group: JobGroup) -> tuple[JobsNodeSpec, ...]:
+    children = _identity_children(group.key, group.lead)
     if group.needs_human and group.detail_line:
-        return (_detail_child(f"{group.key}/detail", group.detail_line),)
-    return ()
+        children += (_detail_child(f"{group.key}/detail", group.detail_line),)
+    return children
+
+
+def _identity_children(key: str, row: JobRow) -> tuple[JobsNodeSpec, ...]:
+    identity = row.execution_identity_line
+    if not identity:
+        return ()
+    # Keep the full executor/model literal; Tree provides horizontal scrolling.
+    return (JobsNodeSpec(key=f"{key}/identity", segments=((f"↳ {identity}", ""),)),)
 
 
 def _legacy_phase_child(group: JobGroup, row: JobRow, state_col: int) -> tuple[tuple[str, str], ...]:
@@ -359,9 +368,9 @@ def _row_child(
         segments = _render_axis_row(row, first_col, work_col, third_col, axis)
     else:
         segments = _legacy_phase_child(group, row, state_col)
-    children: tuple[JobsNodeSpec, ...] = ()
+    children = _identity_children(f"{group.key}/{row.slice_id}", row)
     if row.needs_human and row.detail_line:
-        children = (_detail_child(f"{group.key}/{row.slice_id}/detail", row.detail_line),)
+        children += (_detail_child(f"{group.key}/{row.slice_id}/detail", row.detail_line),)
     return JobsNodeSpec(
         key=f"{group.key}/{row.slice_id}",
         segments=segments,

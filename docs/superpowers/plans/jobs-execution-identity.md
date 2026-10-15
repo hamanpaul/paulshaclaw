@@ -5,6 +5,8 @@ status: accepted
 
 # cockpit 實際 executor/model consumer執行計畫
 
+2026-10-15 consumer 進度：typed ingestion／三軸身份明細與隔離 producer 整合已實作，見 [使用與驗收邊界](../../cockpit-job-identity.md)。上游 merge 候選仍有跨 repo／manifest binding 缺口；保留完整交付 gate，尚未結案或部署。
+
 ## Tasks
 
 此 work item 僅擁有 paulshaclaw consumer、契約 fixtures、dependency pin 與整合測試，不寫 Cortex。先進件保持等待；Cortex producer 獨立 issue/PR merge 後，operator 核對正式欄位契約與 SHA 再 start。planned、actual、last execution 必須明確區別。

@@ -163,6 +163,17 @@ def _actions_field(item: dict[str, object], key: str = "next_actions") -> tuple[
     return tuple(entry for entry in value if isinstance(entry, str) and entry)
 
 
+def _execution_identity_fields(item: dict[str, object]) -> dict[str, str]:
+    """Cortex additive identity fields use typed defaults, including old snapshots."""
+    fields = {
+        key: _text_field(item, key).strip()
+        for key in ("executor", "model", "card", "identity_source", "execution_state")
+    }
+    if fields["identity_source"] not in {"in-flight", "last-execution", "planned", "unknown"}:
+        fields["identity_source"] = ""
+    return fields
+
+
 def _blocking_detail(item: dict[str, object]) -> str:
     """結構化卡住理由的人可讀內容。
 
@@ -207,6 +218,8 @@ def _ingest_in_flight(in_flight: object, rows: list[JobRow]) -> None:
                 state=state,
                 source_section="in_flight",
                 repo=_text_field(item, "repo", "workflow_repo"),
+                job_id=_text_field(item, "job_id"),
+                **_execution_identity_fields(item),
             )
         )
 
@@ -239,6 +252,7 @@ def _ingest_attention(attention: object, rows: list[JobRow]) -> None:
                 branch=_text_field(item, "target_branch", "branch"),
                 repo=_text_field(item, "repo", "workflow_repo"),
                 needs_human=True,
+                **_execution_identity_fields(item),
             )
         )
 
@@ -269,6 +283,8 @@ def _ingest_workflow_run(
             kind="workflow_run",
             repo=_text_field(item, "repo", "workflow_repo"),
             needs_human=state == "needs_human" or source_section == "attention",
+            job_id=_text_field(item, "job_id"),
+            **_execution_identity_fields(item),
         )
     )
 
@@ -420,6 +436,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                     branch=_text_field(item, "branch"),
                     repo=_text_field(item, "repo", "workflow_repo"),
                     needs_human=state == "needs_human",
+                    **_execution_identity_fields(item),
                 )
             )
 
