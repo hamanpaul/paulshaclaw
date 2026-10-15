@@ -1,0 +1,103 @@
+id: tc1g-readme-a-venv-install-with-git
+name: README §A venv install with git present (control group, GREEN)
+topology:
+  devices:
+    dut:
+      role: dut
+      transport: docker
+      image: ubuntu:22.04
+      image_digest: sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
+      user: testuser
+      uid: 1000
+      network: bridge
+image_comparison:
+- image: ubuntu:22.04
+  image_digest: sha256:2edbbc5dc405e9612ba3584ce95480277e3eb374407b5505fe26f17df77c7dbc
+- image: ubuntu:24.04
+  image_digest: sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+artifact_role: historical
+readme:
+  revision: v0.2.7
+  section: A
+  prerequisite_declaration:
+    source: readme-declaration
+    packages:
+    - python3
+    - python3-venv
+    - git
+steps:
+- id: S1G-0
+  action: exec
+  target: dut
+  run_as: 0
+  command: install -d -o 1000 -g 1000 /tmp/testpilot-home
+  expected_exit_code: 0
+- id: S1G-0a
+  action: install_prerequisites
+  target: dut
+  run_as: 0
+  packages_from: readme
+  expected_exit_code: 0
+- id: S1G-0b
+  action: exec
+  target: dut
+  command: command -v git
+  expected_exit_code: 0
+- id: S1G-1
+  action: exec
+  target: dut
+  command: HOME=/tmp/testpilot-home python3 -m venv /tmp/testpilot-home/.venv-paulshaclaw
+  expected_exit_code: 0
+- id: S1G-2
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/python -m pip install --upgrade pip
+  expected_exit_code: 0
+- id: S1G-3
+  action: exec
+  target: dut
+  command: cd /testpilot/artifacts && sha256sum -c checksums-sha256.txt --ignore-missing
+  expected_exit_code: 0
+- id: S1G-4
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/python -m pip install /testpilot/artifacts/paulshaclaw-0.2.7-py3-none-any.whl
+  expected_exit_code: 0
+- id: S1G-5
+  action: exec
+  target: dut
+  command: test -x /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw && test -x /tmp/testpilot-home/.venv-paulshaclaw/bin/psc
+  expected_exit_code: 0
+- id: S1G-6
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw --version
+  expected_exit_code: 0
+  stdout_equals: paulshaclaw 0.2.7
+- id: S1G-7
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw status
+  expected_exit_code: 0
+- id: S1G-8
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw --help
+  expected_exit_code: 0
+- id: S1G-9
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/psc
+  expected_exit_code: 2
+  output_contains: usage
+- id: S1G-10
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/python -m pip show paulshaclaw
+  expected_exit_code: 0
+  output_contains: 'Version: 0.2.7
+
+    '
+pass_criteria:
+- paulshaclaw 0.2.7
+- 'Version: 0.2.7'

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "paulshaclaw-deploy-testpilot"
+version = "0.1.0"
+description = "TestPilot plugin for paulshaclaw deployment and installation regression test cases"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "testpilot-core==0.3.7",
+    "pyyaml>=6.0",
+]
+
+[project.entry-points."testpilot.plugins"]
+paulshaclaw_deploy = "paulshaclaw_deploy.plugin:Plugin"
+
+[tool.setuptools.packages.find]
+include = ["paulshaclaw_deploy*"]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.package-data]
+paulshaclaw_deploy = ["cases/*.yaml", "testbed.yaml.example", "fixtures/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
