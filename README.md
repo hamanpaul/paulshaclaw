@@ -213,6 +213,7 @@ pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`�
 - **二擇一、後起的為主**：兩者共用同一把 start lock，新啟動的那套會先停掉既有的（process 持有者送 SIGTERM、systemd 持有者走 `systemctl --user stop`），**停不掉即 fail-closed** 明確報告、絕不兩套並存。接管邊界僅及操作面自身行程與 units，不波及 cortex / hippo 常駐服務。
 - 與 `psc` 的區隔：`psc <子命令>` 是轉發 coordinator/deck/monitor 給 cortex 的 **dispatcher**，`paulshaclaw` 是 operator shell 的**啟動入口**。唯一交集是 **`psc` 不帶參數＝`paulshaclaw up`**（#357，短名直接啟動）；`down`／`status`／`--no-cockpit` 仍只有 `paulshaclaw` 有。
 - **僅 `paulshaclaw` 指令（release 路徑）**：cortex fallback 起不來時（#346）cockpit 仍會照常啟動，並在 stderr 印出 degraded 警告與對應 log 路徑，不再 fail-closed 擋下整個啟動；`scripts/start.sh`（開發路徑）未變，fallback 起不來仍會 fail-closed 直接退出。
+- **Cockpit Work Panes**：前景 Claude、Codex、Copilot、pi 與 agy 會顯示統一的 `[agent] 任務標題`；沒有可用標題時顯示 `[agent] 工作目錄`。shell／Node wrapper 透過同一 tty 的前景 process group 辨識，背景 agent 不會把一般 pane 誤標。每次 refresh 與 minicom 共用一次有 timeout 的行程掃描；查詢失敗時保留既有摘要與直接回報的 agent 名稱，不讀取 pane 內容或私人任務紀錄。
 
 ### B. 開發安裝（clone + editable install）
 
@@ -275,6 +276,9 @@ scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路�
 - **bot 主動告警**（掛在 listener 既有的 polling 迴圈，不另起常駐進程；只通知、不做容量治理）：
   - bro-queue 積壓超過 `PSC_BRO_QUEUE_ALERT_THRESHOLD_SECONDS`（預設 600 秒）未消化時告警（#275）。
   - 主機 `MemAvailable` 低於 `PSC_MEM_ALERT_LOW_MB`（預設 3072）時告警一次，附 RSS 用量前幾名（依程序名稱彙總）；回到 `PSC_MEM_ALERT_RECOVER_MB`（預設 4096）以上送恢復通知。`PSC_MEM_ALERT_DISABLED=1` 關閉（#379）。
+- **磁碟容量監控**：listener 每 20 分鐘檢查 `/`，低於 `PSC_SPACE_WARN_GB=100`／`PSC_SPACE_CRITICAL_GB=50` GiB 分級通知，回到 `PSC_SPACE_RECOVER_GB=120` 才解除；`PSC_SPACE_DISABLED=1` 停用。狀態寫至 `$HOME/.agents/state/space-monitor.json`（支援 `PSC_STATE_ROOT`），有界掃描與四類建議皆不執行刪除；VHDX 未知時為 null。完整環境變數與範例見 [容量監控操作說明](docs/ops/space-monitor.md)。
+  - 掃描設定：`PSC_SPACE_INTERVAL_SECONDS`（1200）、`PSC_SPACE_SCAN_SECONDS`（10）、`PSC_SPACE_TOP_N`（10）、`PSC_SPACE_SCAN_ROOTS`、`PSC_SPACE_EXCLUDES`。
+  - 建議設定：`PSC_SPACE_TARGET_IDLE_HOURS`（24）、`PSC_SPACE_TMP_IDLE_HOURS`（6）、`PSC_SPACE_MERGE_TARGET`（`origin/main`）、`PSC_SPACE_CI_BRANCH_PATTERNS`（`ci/*:*-ci-*`）；`PSC_SPACE_VHDX_PATH` 可指定已確認可讀的 VHDX。
 - 讀設計時，先看本 README 的 repo 定位，再對照 [`docs/`](./docs/)、[`openspec/`](./openspec/) 與兩個外部 plane repo。
 
 ---
@@ -334,6 +338,13 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 寫回只更新 `cost.providers.*.enabled` 與 account 的 `enabled`，其餘 `label` / `monthly_allowance` / `org` 保留；若 `~/.config/paulshaclaw/paulshaclaw.yaml` 尚不存在，會以 bundled sample 建立。agy 例外：`--footer agy:<label>` 遇到未宣告的 label 會新建 `accounts` 條目（`accounts` 鍵原本不存在時也會一併新建），不是純粹的「只更新 enabled」。
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
 - JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。 例外：宿主沒有 PyYAML（無法讀 yaml、拿不到 account_id）的降級路徑只能以 `--footer` 給的 label 當 key（裸 `agy` 仍回 bool）。
+
+##### Copilot 多帳號呈現
+
+- 第一個 enabled 帳號是預設主帳號；沒有依工作區或最近使用自動切換。多帳號 footer 顯示所選 label，例如 `cpt personal:20%`。
+- 次要帳號告警會浮現：unknown/error > stale > critical（>=85%）> warning（>=70%）> estimated > healthy；同級依設定順序。`!` 表示無法監測（`--` 不是 0），`~` 表示保留舊值，`?` 表示估計。
+- cockpit 摘要下方按設定順序展開每帳號的 id、類型、用量、額度、來源及獨立狀態，`*` 標示摘要選中帳號。明細會換行，不因 footer 寬度被裁切；單帳號維持原本精簡外觀。
+- 任一帳號收集失敗，只保留該 account id 的舊值並標 stale；其他成功帳號仍是 fresh。停用、改 label 或重排設定會立即反映到 cache 呈現。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
 
 ##### agy 用量來源
 

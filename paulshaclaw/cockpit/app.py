@@ -745,6 +745,11 @@ class CockpitApp(App[None]):
         # 單行 cost 以整個 banner 寬、向右對齊渲染 → 接在 composed 之後、不受 mascot 欄縮排。
         if full_width_cost:
             composed += full_width_cost + "\n"
+        # Full account rows are allowed to wrap in the auto-height banner;
+        # clipping them would recreate the secondary-account blind spot.
+        account_rows = cost_bar.account_lines()
+        if account_rows:
+            composed += "\n".join(account_rows) + "\n"
         try:
             from rich.text import Text
 

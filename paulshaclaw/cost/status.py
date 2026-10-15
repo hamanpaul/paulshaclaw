@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _mark_snapshot_stale(snapshot: CostSnapshot) -> CostSnapshot:
     providers = {
         name: ProviderSnapshot(
-            source_status="stale" if provider.source_status == "fresh" else provider.source_status,
+            source_status="stale" if provider.source_status in {"fresh", "estimated"} else provider.source_status,
             source=provider.source,
             windows=dict(provider.windows),
             accounts=tuple(provider.accounts),
@@ -111,18 +111,22 @@ def _filter_snapshot_by_enabled(snapshot: CostSnapshot, config) -> CostSnapshot:
             providers["agy"] = dataclasses.replace(agy_provider, label=active_label)
             changed = True
 
-    copilot_provider = providers.get("cpt")
+    copilot_provider = providers.get("cpt", ProviderSnapshot(source_status="unknown"))
     copilot_accounts = getattr(config, "copilot_accounts", None)
-    if copilot_provider is not None and copilot_accounts is not None:
-        enabled_account_ids = {
-            account.account_id
-            for account in copilot_accounts
-            if getattr(account, "enabled", True)
-        }
+    if copilot_accounts is not None:
+        enabled_accounts = [account for account in copilot_accounts if getattr(account, "enabled", True)]
+        enabled_account_ids = {account.account_id for account in enabled_accounts}
+        cached_accounts = {account.account_id: account for account in copilot_provider.accounts}
         accounts = tuple(
-            account
-            for account in copilot_provider.accounts
-            if account.account_id in enabled_account_ids
+            dataclasses.replace(
+                cached_accounts[account.account_id], label=account.label, kind=account.kind,
+                monthly_allowance=account.monthly_allowance,
+            ) if account.account_id in cached_accounts else CopilotAccountUsage(
+                account_id=account.account_id, label=account.label, kind=account.kind,
+                used_requests=None, monthly_allowance=account.monthly_allowance,
+                source="unknown", source_status="unknown",
+            )
+            for account in enabled_accounts
         )
         if accounts != copilot_provider.accounts:
             changed = True

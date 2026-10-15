@@ -142,8 +142,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cdx 5h:18%(15:21) wk:41%(3d)", footer)
         self.assertIn("cc 5h:-- wk:--", footer)
-        self.assertIn("cpt 724", footer)
-        self.assertNotIn("haman", footer)
+        self.assertIn("cpt haman:724", footer)
         self.assertNotIn("arc", footer)
 
     def test_footer_marks_stale_provider(self) -> None:
@@ -320,10 +319,8 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("cpt? #[fg=colour33]42#[default]", footer)
+        self.assertIn("cpt local:#[fg=magenta]724#[default]?", footer)
         self.assertNotIn("fresh:", footer)
-        self.assertNotIn("local", footer)
-        self.assertNotIn("724", footer)
 
     def test_footer_uses_tmux_style_by_default(self) -> None:
         snapshot = CostSnapshot(
@@ -1152,16 +1149,15 @@ class Stage8ConfigProviderTests(unittest.TestCase):
             },
         )
 
-        # Footer collapses to the first account's value only — no account
-        # labels, no secondary accounts — matching the cockpit `cpt: N%` rule.
+        # Both accounts are healthy: retain the default primary, with its label
+        # so an alert-driven selection remains distinguishable.
         plain = format_footer(snapshot, use_tmux_style=False)
-        self.assertIn("cpt 21%", plain)
-        self.assertNotIn("haman", plain)
+        self.assertIn("cpt haman:21%", plain)
         self.assertNotIn("arc", plain)
         self.assertNotIn("∞", plain)
 
         styled = format_footer(snapshot, use_tmux_style=True)
-        self.assertIn("cpt #[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
+        self.assertIn("cpt haman:#[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
         self.assertNotIn("∞", styled)
 
     def test_footer_marks_carried_forward_stale_values_with_green_background(self) -> None:
@@ -3197,8 +3193,7 @@ class CockpitFooterRenderTests(unittest.TestCase):
 
 
 class CockpitFooterCptTests(unittest.TestCase):
-    """cockpit cost 列的 cpt 段：只顯示單一 ``cpt: N%``（拔掉帳號名與 arc），
-    cdx/cc 的 reset 時間仍保留。"""
+    """cockpit 摘要採告警優先，cdx/cc 的 reset 時間仍保留。"""
 
     def _cpt_snapshot(self) -> "CostSnapshot":
         from paulshaclaw.cost.models import CopilotAccountUsage
@@ -3233,14 +3228,15 @@ class CockpitFooterCptTests(unittest.TestCase):
             },
         )
 
-    def test_cpt_collapses_to_single_value_without_labels(self) -> None:
+    def test_cpt_surfaces_unavailable_secondary_with_label(self) -> None:
         from paulshaclaw.cost.formatter import format_cockpit_footer
 
         line = format_cockpit_footer(self._cpt_snapshot())
         self.assertIn("cpt: ", line)
-        self.assertIn("92%", line)
+        self.assertIn("arc:", line)
+        self.assertIn("--", line)
+        self.assertIn("!", line)
         self.assertNotIn("haman", line)
-        self.assertNotIn("arc", line)
 
     def test_cc_reset_times_are_kept(self) -> None:
         from paulshaclaw.cost.formatter import format_cockpit_footer

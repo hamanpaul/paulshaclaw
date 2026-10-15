@@ -4,7 +4,7 @@
 Stage 11 operator cockpit: multi-session tmux pane listing, cockpit-session active-slot selection, Enter-to-swap across sessions, and hotkey help.
 ## Requirements
 ### Requirement: Cockpit lists panes from all local tmux sessions
-The Stage 11 cockpit SHALL enumerate panes from every local tmux session visible to the tmux server. Each pane record MUST include the pane ID, session name, window index, title, command, geometry, and active flag. The cockpit MUST NOT capture pane preview content: a periodic refresh tick SHALL consist of a single `list-panes` invocation (plus the bounded `ps` lookup for title-less minicom panes only).
+The Stage 11 cockpit SHALL enumerate panes from every local tmux session visible to the tmux server. Each pane record MUST include the pane ID, session name, window index, title, command, geometry, and active flag. The cockpit MUST NOT capture pane preview content: a periodic refresh tick SHALL consist of a single `list-panes` invocation plus one bounded `ps` scan shared by minicom and foreground-agent detection across all panes.
 
 #### Scenario: All-session pane scan includes session and window metadata
 - **WHEN** the tmux server contains panes in sessions `main` and `work`
@@ -20,6 +20,23 @@ The Stage 11 cockpit SHALL display a flat work list rather than grouping panes b
 #### Scenario: Candidate list shows session-window context
 - **WHEN** the candidate list contains pane `%12` from session `work`, window index `2`, with title `pytest`
 - **THEN** the cockpit MUST render a candidate label containing `work:2 %12 pytest`
+
+### Requirement: Work panes identify foreground coding agents
+Stage 11 cockpit SHALL 在 candidate 與 active slot 的共用摘要中，以 `[claude]`、`[codex]`、`[copilot]`、`[pi]`、`[agy]` 前綴識別前景 agent。摘要 SHALL 保留可用的 pane title（包含 Claude 原有任務圖示）；title 為空或 hostname 時使用 cwd basename，cwd 亦缺失時只顯示 badge。相同 badge 已在 title 開頭時 MUST NOT 重複加上。
+
+tmux command 直接為 agent 時 SHALL 可直接識別；shell 或 interpreter wrapper 下 SHALL 從同一 tty、`pgid == tpgid > 0` 的行程辨識 agent executable 或已知 Node CLI entrypoint。背景行程、未綁 tty 的行程、參數中僅提及 agent 的非 agent 命令 MUST NOT 產生 badge。偵測 SHALL 使用與 minicom 共用的單次、1 秒 timeout process scan；查詢失敗 MUST 保留 title／cwd／command fallback 與 tmux 直接回報的 agent 身份，不阻止 refresh。
+
+#### Scenario: Wrapped foreground agent keeps identity
+- **WHEN** pane command 為 `node`，title 是 hostname，cwd 為 `/projects/repo`，該 tty 的前景 process group 包含 Copilot CLI entrypoint
+- **THEN** candidate 與 active slot 的摘要 MUST 為 `[copilot] repo`
+
+#### Scenario: Background agent does not label the foreground editor
+- **WHEN** tty 上有背景 Codex 行程，而 editor 位於另一個前景 process group
+- **THEN** cockpit MUST NOT 因該背景 Codex 行程替 pane 加上 `[codex]`
+
+#### Scenario: Many panes share one process scan
+- **WHEN** refresh 掃描多個 agent、minicom 與一般 shell panes
+- **THEN** cockpit MUST 僅執行一次 `ps`，各 pane 依自己的 tty 取得摘要，不逐 pane fork
 
 ### Requirement: Active slot selection is scoped to the cockpit session
 The Stage 11 cockpit SHALL derive the cockpit session from the cockpit pane record at startup. Startup active-slot selection MUST exclude the cockpit pane itself and MUST choose only from panes whose `session_name` matches the cockpit session.

@@ -258,6 +258,7 @@ class TelegramListener:
         queue_alert: Callable[[], None] | None = None,
         message_pane_map: MessagePaneMap | None = None,
         mem_alert: Callable[[], None] | None = None,
+        space_alert: Callable[[], None] | None = None,
     ) -> None:
         self.client = client
         self.router = router
@@ -270,6 +271,7 @@ class TelegramListener:
         self.cleanup = cleanup or (lambda: None)
         self.queue_alert: Callable[[], None] | None = queue_alert
         self.mem_alert: Callable[[], None] | None = mem_alert
+        self.space_alert: Callable[[], None] | None = space_alert
         self.offset: int | None = None
         self.max_backoff = 30.0
 
@@ -291,6 +293,7 @@ class TelegramListener:
                 self.offset = next_offset
         self._check_queue_backlog()
         self._check_mem_pressure()
+        self._check_space_pressure()
 
     def _check_queue_backlog(self) -> None:
         # #275：每輪 polling 結束後檢查佇列積壓；告警模組自身已吞例外，這裡再
@@ -315,6 +318,16 @@ class TelegramListener:
             raise
         except Exception as error:  # noqa: BLE001
             logger.error("MEM_ALERT_CHECK_ERROR error=%s", error)
+
+    def _check_space_pressure(self) -> None:
+        if self.space_alert is None:
+            return
+        try:
+            self.space_alert()
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except Exception as error:  # noqa: BLE001 - 監控失敗不可中斷 polling
+            logger.error("SPACE_ALERT_CHECK_ERROR error=%s", error)
 
     def run_forever(self) -> None:
         backoff = 1.0
@@ -547,6 +560,13 @@ def build_listener(
         allowed_user_ids=config.allowed_user_ids,
         threshold_seconds=alert_threshold_seconds(),
     )
+    from paulshaclaw.core.space_pressure_alert import SpacePressureAlerter
+
+    space_alerter = SpacePressureAlerter(
+        sender=resolved_client,
+        bindings=bindings_store,
+        allowed_user_ids=config.allowed_user_ids,
+    )
     mem_low_mb, mem_recover_mb = thresholds_from_env()
     mem_alerter = MemPressureAlerter(
         sender=resolved_client,
@@ -567,6 +587,7 @@ def build_listener(
         queue_alert=alerter.check_and_alert,
         message_pane_map=MessagePaneMap(map_path),
         mem_alert=mem_alerter.check_and_alert,
+        space_alert=space_alerter.check_and_alert,
     )
 
 

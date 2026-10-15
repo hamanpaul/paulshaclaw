@@ -32,6 +32,26 @@ class CopilotAccountUsage:
     # `unlimited` flags business/enterprise seats whose premium quota is uncapped.
     percent_used: int | None = None
     unlimited: bool = False
+    # Optional for cache compatibility; new collectors record each account's
+    # freshness independently of the provider aggregate.
+    source_status: str | None = None
+
+    @property
+    def has_data(self) -> bool:
+        return self.unlimited or self.percent_used is not None or self.used_requests is not None
+
+    def effective_status(self, provider_status: str) -> str:
+        if not self.has_data:
+            return "error" if self.source_status == "error" else "unknown"
+        if provider_status == "stale":
+            return "stale"
+        if self.source_status is not None:
+            return self.source_status
+        if self.source == "local_observed":
+            return "estimated"
+        if provider_status in {"error", "estimated"}:
+            return provider_status
+        return "fresh"
 
     def to_jsonable(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -42,6 +62,8 @@ class CopilotAccountUsage:
             "monthly_allowance": self.monthly_allowance,
             "source": self.source,
         }
+        if self.source_status is not None:
+            payload["source_status"] = self.source_status
         if self.percent_used is not None:
             payload["percent_used"] = self.percent_used
         if self.unlimited:
