@@ -28,9 +28,8 @@ cost:
     critical_percent: 85
   providers:
     copilot:
-      # 多帳號：unknown/error > stale > critical >=85% > warning >=70%
-      # > estimated > healthy；同級依設定順序。footer 如 cpt arc:95%，
-      # ! 表示無資料/錯誤，~ 表示 stale，? 表示估計值；單帳號維持 cpt N%。
+      # footer/cockpit 僅顯示第一個 enabled 帳號的已用用量（cpt 87%），不顯示帳號名。
+      # 其餘帳號仍收集至 snapshot JSON，不取代主帳號或展開於 banner。
       accounts:
         - id: hamanpaul
           label: haman           # 第一個 enabled 為預設主帳號；無 workspace 自動綁定
@@ -38,7 +37,7 @@ cost:
           monthly_allowance: 1500
           enabled: true
         - id: org-a
-          label: arc             # 次要告警可優先顯示；cockpit 展開所有 enabled 帳號
+          label: arc             # 次帳號仍收集，但不顯示於 footer/cockpit
           kind: company
           monthly_allowance: 300
           org: example-org

@@ -7,6 +7,11 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-10-15
+
+### Fixed
+- 恢復 cpt 單值呈現：footer/cockpit 只顯示第一個 enabled 帳號的已用用量，不顯示帳號名或多行明細；次帳號 unknown/stale/critical 不再取代主帳號。保留逐帳號收集與 cache，主帳號缺資料與 stale 仍誠實標示。
+
 ## [0.2.10] - 2026-10-15
 
 ### Added

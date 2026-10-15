@@ -142,7 +142,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         self.assertIn("cdx 5h:18%(15:21) wk:41%(3d)", footer)
         self.assertIn("cc 5h:-- wk:--", footer)
-        self.assertIn("cpt haman:724", footer)
+        self.assertIn("cpt 724", footer)
         self.assertNotIn("arc", footer)
 
     def test_footer_marks_stale_provider(self) -> None:
@@ -287,7 +287,7 @@ class Stage8ModelFormatterTests(unittest.TestCase):
         self.assertNotIn("haman", footer)
         self.assertNotIn("#[fg=colour33]724#[default]", footer)
 
-    def test_footer_marks_mixed_copilot_local_observed_account_estimated(self) -> None:
+    def test_footer_uses_primary_when_secondary_is_locally_estimated(self) -> None:
         snapshot = CostSnapshot(
             generated_at=datetime(2026, 4, 29, 15, 0, tzinfo=ZoneInfo("Asia/Taipei")),
             timezone="Asia/Taipei",
@@ -319,7 +319,8 @@ class Stage8ModelFormatterTests(unittest.TestCase):
 
         footer = format_footer(snapshot)
 
-        self.assertIn("cpt local:#[fg=magenta]724#[default]?", footer)
+        self.assertIn("cpt #[fg=colour33]42#[default]", footer)
+        self.assertNotIn("cpt?", footer)
         self.assertNotIn("fresh:", footer)
 
     def test_footer_uses_tmux_style_by_default(self) -> None:
@@ -1152,12 +1153,12 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         # Both accounts are healthy: retain the default primary, with its label
         # so an alert-driven selection remains distinguishable.
         plain = format_footer(snapshot, use_tmux_style=False)
-        self.assertIn("cpt haman:21%", plain)
+        self.assertIn("cpt 21%", plain)
         self.assertNotIn("arc", plain)
         self.assertNotIn("∞", plain)
 
         styled = format_footer(snapshot, use_tmux_style=True)
-        self.assertIn("cpt haman:#[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
+        self.assertIn("cpt #[fg=colour33]21%#[default]", styled)  # 21% -> low -> blue
         self.assertNotIn("∞", styled)
 
     def test_footer_marks_carried_forward_stale_values_with_green_background(self) -> None:
@@ -3193,7 +3194,7 @@ class CockpitFooterRenderTests(unittest.TestCase):
 
 
 class CockpitFooterCptTests(unittest.TestCase):
-    """cockpit 摘要採告警優先，cdx/cc 的 reset 時間仍保留。"""
+    """cockpit 摘要只顯示主帳號用量，cdx/cc 的 reset 時間仍保留。"""
 
     def _cpt_snapshot(self) -> "CostSnapshot":
         from paulshaclaw.cost.models import CopilotAccountUsage
@@ -3228,14 +3229,14 @@ class CockpitFooterCptTests(unittest.TestCase):
             },
         )
 
-    def test_cpt_surfaces_unavailable_secondary_with_label(self) -> None:
+    def test_cpt_keeps_primary_when_secondary_is_unavailable(self) -> None:
         from paulshaclaw.cost.formatter import format_cockpit_footer
 
         line = format_cockpit_footer(self._cpt_snapshot())
         self.assertIn("cpt: ", line)
-        self.assertIn("arc:", line)
-        self.assertIn("--", line)
-        self.assertIn("!", line)
+        self.assertNotIn("arc", line)
+        self.assertIn("92%", line)
+        self.assertNotIn("!", line)
         self.assertNotIn("haman", line)
 
     def test_cc_reset_times_are_kept(self) -> None:
