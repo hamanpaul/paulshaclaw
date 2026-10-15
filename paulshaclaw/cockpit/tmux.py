@@ -41,6 +41,13 @@ _NODE_AGENT_ENTRYPOINTS = {
     "@mariozechner/pi-coding-agent/dist/cli.js": "pi",
     "@anthropic-ai/claude-code/cli.js": "claude",
 }
+_NODE_SWITCHES = frozenset({
+    "--enable-source-maps", "--no-warnings", "--trace-warnings", "--inspect", "--inspect-brk",
+})
+_NODE_VALUE_OPTIONS = frozenset({
+    "-r", "--require", "--import", "--loader", "--experimental-loader", "--title",
+    "--max-old-space-size", "--stack-size", "-C", "--conditions",
+})
 
 
 def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
@@ -141,7 +148,23 @@ def _agent_from_args(args: str) -> str | None:
         return command
     if command not in {"node", "nodejs"} or len(argv) < 2:
         return None
-    entrypoint = argv[1]
+    index = 1
+    while index < len(argv) and argv[index].startswith("-"):
+        option, separator, _ = argv[index].partition("=")
+        if option == "--":
+            index += 1
+            break
+        if option in _NODE_SWITCHES:
+            index += 1
+        elif option in _NODE_VALUE_OPTIONS:
+            index += 1 if separator else 2
+        else:
+            # In particular -e/-p/--eval/--print execute code, not a CLI file.
+            # Unknown options fail closed rather than interpreting their values.
+            return None
+    if index >= len(argv):
+        return None
+    entrypoint = argv[index]
     if Path(entrypoint).name in _AGENT_COMMANDS:
         return Path(entrypoint).name
     for suffix, agent in _NODE_AGENT_ENTRYPOINTS.items():

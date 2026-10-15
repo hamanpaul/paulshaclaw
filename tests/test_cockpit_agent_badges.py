@@ -98,3 +98,23 @@ def test_process_scan_failure_preserves_direct_agent_badge(monkeypatch):
 def test_agent_title_preserves_task_without_repeating_badge(monkeypatch):
     panes = scan(monkeypatch, "pts/1 100 100 codex\n", title="[codex] review changes")
     assert panes[0].summary == "[codex] review changes"
+
+
+@pytest.mark.parametrize("options", [
+    "--enable-source-maps", "--", "--require bootstrap.js",
+    "--import=bootstrap", "--max-old-space-size=4096", "--inspect=localhost:9229",
+])
+def test_node_options_do_not_hide_agent_entrypoint(monkeypatch, options):
+    processes = f"pts/1 100 100 node {options} /usr/lib/node_modules/@github/copilot/index.js\n"
+    assert scan(monkeypatch, processes)[0].summary == "[copilot] repo"
+
+
+@pytest.mark.parametrize("args", [
+    "node -e /usr/lib/node_modules/@github/copilot/index.js",
+    "node --eval=/usr/lib/node_modules/@github/copilot/index.js",
+    "node -p /usr/lib/node_modules/@github/copilot/index.js",
+    "node --require /usr/lib/node_modules/@github/copilot/index.js report.js",
+    "node --title copilot report.js",
+])
+def test_node_option_values_are_not_agent_entrypoints(monkeypatch, args):
+    assert scan(monkeypatch, f"pts/1 100 100 {args}\n")[0].summary == "repo"
