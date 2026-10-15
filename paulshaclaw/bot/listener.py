@@ -324,6 +324,8 @@ class TelegramListener:
             return
         try:
             self.space_alert()
+        except (KeyboardInterrupt, SystemExit):
+            raise
         except Exception as error:  # noqa: BLE001 - 監控失敗不可中斷 polling
             logger.error("SPACE_ALERT_CHECK_ERROR error=%s", error)
 

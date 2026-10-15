@@ -425,3 +425,17 @@ def test_worker_does_not_load_another_checkout_from_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(other)
     result = module().scan_bounded(scan_config(cache))
     assert result['top_dirs'] and result['top_dirs'][0]['path'] == str(cache)
+
+
+def test_excluded_symlink_itself_is_not_removed_with_its_parent(repositories, tmp_path):
+    _, merged, _, proc = repositories
+    target = merged / 'target'
+    target.mkdir()
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    keep_link = target / 'keep-link'
+    keep_link.symlink_to(outside, target_is_directory=True)
+    age_tree(target)
+    os.utime(keep_link, (1, 1), follow_symlinks=False)
+    result = module().scan_paths(scan_config(merged, excludes=(str(keep_link),)), proc=proc)
+    assert not any(item['action'] in ('remove_worktree', 'remove_target') for item in result['suggestions'])

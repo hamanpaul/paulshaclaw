@@ -275,6 +275,8 @@ def _exclusions(config: SpaceConfig, scan: _Scan) -> set[Path]:
     for pattern in config.excludes:
         for match in glob.iglob(os.path.expandvars(os.path.expanduser(pattern))):
             scan.remaining()
+            # Keep the symlink entry itself as well as its destination.
+            excluded.add(Path(match).absolute())
             excluded.add(Path(match).resolve())
             if len(excluded) > 256:
                 raise TimeoutError('exclusion candidate limit exceeded')
