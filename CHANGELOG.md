@@ -7,6 +7,32 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-10-15
+
+### Added
+- 新增獨立部署 TestPilot 子專案：固定 v0.2.7 歷史 README／wheel，在 Docker
+  保留缺 git 安裝 RED、entry-point 與雙 Ubuntu git 控制組 GREEN；每步結果與
+  container 清理均有原始報告，preflight 和 CI 分別驗證 plugin 與真實 Docker 矩陣。
+- Work Panes 為前景 Claude、Codex、Copilot、pi、agy 加上統一的 agent badge，保留任務標題或工作目錄；以單次行程掃描識別 wrapper 下的 agent，並排除背景行程與僅在參數中提及 agent 的命令。
+- Copilot 多帳號 footer 改採告警優先並標示所選帳號；cockpit 展開所有啟用帳號的完整配額與來源狀態。逐帳號保存 stale 舊值，避免次要帳號失敗被主帳號 fresh 掩蓋；cache 呈現同步當前設定順序、標籤與停用狀態。
+- Telegram bot listener 每輪 polling 會檢查主機 `MemAvailable`：低於 `PSC_MEM_ALERT_LOW_MB`（預設 3072 MB）時對已綁定 chat 推一則告警，附 RSS 用量前幾名（依程序名稱彙總）；回到 `PSC_MEM_ALERT_RECOVER_MB`（預設 4096 MB）以上才解除並送恢復通知，同一次低水位只告警一次。只做通知、不做容量治理，`PSC_MEM_ALERT_DISABLED=1` 可關閉。
+- 新增 WSL 磁碟容量監控：listener 每 20 分鐘量測、三級 Telegram 遲滯告警、原子 JSON 狀態與有界目錄掃描；輸出四類唯讀回收建議，保守排除 busy／未知行程與不完整 Git 證據。支援環境變數設定，預設且永遠不執行自動刪除。
+- 新增 `/agent attach %pane` 與 `/agent detach`：可把既有、正在跑 agent 的 tmux pane（例如 Claude Code session）固定為控制 agent，非 reply 的 Telegram 訊息改送進該 pane，優先於 claude-gemma4 自動偵測；reply-to 指定的 pane 仍最優先。attach 目標為 idle shell 或不存在時拒絕；attach 後若 pane 消失或 agent 退回 shell，訊息不送出並提示重新 attach 或 detach。attach 只存在 daemon 記憶體，listener 重啟後需重新 attach。
+
+### Changed
+- 發行 artifact 安裝前需 Python 3.10 以上與系統 `git`；請先驗證 `checksums-sha256.txt`，再以 pip／pipx 安裝 wheel。外部依賴維持原有不可變 SHA pin。
+- Copilot footer 維持精簡單值；多帳號時改採告警優先並帶帳號標籤，完整逐帳號資訊由 cockpit 展開。
+
+### Fixed
+- cockpit 缺少權威狀態時維持 unknown，歷史失敗與 archived 狀態不再混成完成。
+  bot manager 摘要補齊 attention 的原因、可選動作與上游提示，空 tick 結果不再顯示 done；
+  較長回覆依 Telegram 長度限制分段保留純文字。補齊已安裝 runtime 身分、唯讀 smoke
+  與薄操作層效益量測，維持不擴張平台責任的停止條件。
+- Cockpit JOBS 的 `recent_done` 歷史群預設收合且不計入 active 件數；保留失敗、archived 與 unknown 的實際語意，避免歷史紀錄冒充仍在執行。
+- Cockpit WORK 清單在 `_refresh_widgets()` clear/append 重建後，若舊 `WorkItem` 的 child-click 事件晚到，現在會先停掉 stale 事件而不再對已移除列做 index 查找，避免偶發 `ValueError` 崩潰，同時保留現役列的單擊選取、雙擊 swap 與 enter swap 行為。
+- Stage 8 cost 的 cdx（Codex）本地 quota 讀取改依 `rate_limits.*.window_minutes` 分類視窗（300→5h、10080→weekly），不再靠 `primary`／`secondary` 的槽位位置猜。實際 session 紀錄有兩種形狀：舊式 `primary=300 + secondary=10080`，以及目前主流（plan_type=prolite）的 `primary=10080 + secondary=null`；後者先前被位置對應誤標成 `5h:78%`、`wk:--`，footer 與 cockpit 同時錯（兩者共用同一份 provider snapshot）。缺 `window_minutes` 的舊紀錄維持位置對應；`window_minutes` 為未知長度時該槽跳過而非誤標。
+- `test_preflight_uses_system_python_when_worktree_has_no_operator_venv` 未剝除呼叫端的 `VIRTUAL_ENV`，而 `start.sh` 依設計優先用 `$VIRTUAL_ENV/bin/python`；在 cortex gate（`cortex-manager.env` 帶 `VIRTUAL_ENV=<repo>/.venv`）下會跑到真 pytest 回 rc 5 而非假 `python3`，使任何派進本 repo 的 cortex build 在 worktree-isolation 卡即 `GateContradictionError`。測試改為同時 `env.pop("VIRTUAL_ENV")`，本機與 gate env 皆綠。
+
 ## [0.2.9] - 2026-09-14
 
 ### Changed
