@@ -2,8 +2,7 @@
 
 This script must be run from outside the checkout after installing the plugin.
 It deliberately imports the real core API and treats an unavailable core as an
-infrastructure error; the checkout-only fallback in the plugin is not an
-installation-success path.
+infrastructure error.
 """
 
 from __future__ import annotations

@@ -5,4 +5,4 @@
 - [x] 3. 固定歷史 wheel／README／Ubuntu digest，四案與雙 image git control，原始 FAIL 和 oracle 分離。
 - [x] 4. GitHub CI 實跑 Docker 矩陣，保存原始逐步報告，infra failure 不當 expected RED。
 - [x] 5. 本機 Docker 實跑、精確 oracle 與完整 preflight 通過。
-- [ ] 6. GitHub CI/review 與 PR 交付。
+- [x] 6. PR 已建立，GitHub CI/Docker 與實際 Copilot review 完成；兩個 low findings 已修正。

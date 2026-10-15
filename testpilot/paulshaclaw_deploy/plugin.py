@@ -9,7 +9,6 @@ import os
 import re
 import shlex
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,8 +16,6 @@ import yaml
 
 from testpilot.api import API_VERSION as CORE_API_VERSION
 from testpilot.api import PluginBase, load_cases_dir
-
-CORE_IMPORT_ERROR = None
 
 
 try:
@@ -431,13 +428,15 @@ class Plugin(PluginBase):
         self._active_case = case
         self._setup_failure = None
         case_id = str(case.get("id", ""))
+        readme = self._readme_metadata(case)
+        artifacts = self._artifact_catalog()
         self._active_report = {
             "case_id": case_id,
             "attempt": _as_int(case.get("_attempt_index")) or 1,
             "core_version": CORE_VERSION,
             "core_api_version": CORE_API_VERSION,
-            "readme": self._readme_metadata(case),
-            "artifacts": self._artifact_catalog(),
+            "readme": readme,
+            "artifacts": artifacts,
             "transport": {},
             "steps": [],
             "infrastructure_errors": [],
@@ -447,8 +446,8 @@ class Plugin(PluginBase):
             "case_id": case_id,
             "core_version": CORE_VERSION,
             "core_api_version": CORE_API_VERSION,
-            "readme": self._readme_metadata(case),
-            "artifacts": self._artifact_catalog(),
+            "readme": dict(readme),
+            "artifacts": {role: dict(spec) for role, spec in artifacts.items()},
         }
 
         supplied_transport = getattr(topology, "transport", None)
@@ -592,7 +591,8 @@ class Plugin(PluginBase):
 
     def _step_command(self, case: dict[str, Any], step: dict[str, Any]) -> str:
         if str(step.get("action", "")).strip().lower() == "install_prerequisites":
-            metadata = self._readme_metadata(case)
+            metadata = (self._active_report["readme"] if self._active_report is not None
+                        and self._active_case is case else self._readme_metadata(case))
             packages = [
                 package
                 for package in metadata.get("packages", [])
