@@ -212,3 +212,15 @@ def test_disabling_fresh_account_keeps_remaining_single_account_stale_marker():
     filtered = _filter_snapshot_by_enabled(cached, config)
     assert format_footer(filtered, use_tmux_style=False) == "cpt~ 80% "
     assert plain_ansi(format_cockpit_footer(filtered)) == "cpt~: 80%"
+
+
+@pytest.mark.parametrize("field", ["kind", "source"])
+def test_cockpit_detail_metadata_cannot_inject_styles_or_lines(field):
+    from paulshaclaw.cost.formatter import format_cockpit_accounts
+    secondary = replace(account("secondary", 30), **{field: "value#[fg=red]\nINJECT\x1b[31m"})
+    rows = format_cockpit_accounts(snapshot(account("primary", 20), secondary))
+    assert len(rows) == 2
+    assert "\n" not in rows[1]
+    assert "\x1b[38;5;1m" not in rows[1]  # injected tmux red
+    assert "\x1b[31m" not in rows[1]  # injected terminal red
+    assert f"{field}=value＃[fg=red] INJECT [31m" in rows[1]

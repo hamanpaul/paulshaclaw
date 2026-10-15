@@ -149,10 +149,10 @@ def _styled_account_value(provider: ProviderSnapshot, account: CopilotAccountUsa
     return _wrap(_account_value(account), level, use_tmux_style, stale=status == "stale")
 
 
-def _account_display_label(account: CopilotAccountUsage) -> str:
-    # Account labels are config text, never tmux directives or terminal controls.
+def _account_display_text(value: str) -> str:
+    # Account metadata is plain text, never tmux directives or terminal controls.
     return "".join(" " if ord(char) < 32 or ord(char) == 127 else char
-                   for char in account.label).replace("#", "＃")
+                   for char in value).replace("#", "＃")
 
 
 def _copilot_value(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
@@ -162,7 +162,7 @@ def _copilot_value(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
         return value
     status = account.effective_status(provider.source_status)
     marker = {"unknown": "!", "error": "!", "stale": "~", "estimated": "?"}.get(status, "")
-    return f"{_account_display_label(account)}:{value}{marker}"
+    return f"{_account_display_text(account.label)}:{value}{marker}"
 
 
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
@@ -183,13 +183,15 @@ def format_cockpit_accounts(snapshot: CostSnapshot) -> list[str]:
     for account in provider.accounts:
         status = account.effective_status(provider.source_status)
         value = _styled_account_value(provider, account, True)
-        label = _account_display_label(account)
-        identity = _account_display_label(dataclasses.replace(account, label=account.account_id))
+        label = _account_display_text(account.label)
+        identity = _account_display_text(account.account_id)
+        kind = _account_display_text(account.kind)
+        source = _account_display_text(account.source)
         count = "--" if account.used_requests is None else str(account.used_requests)
         allowance = "--" if account.monthly_allowance is None else str(account.monthly_allowance)
         rows.append(tmux_to_ansi_fg(
             f"cpt {'*' if account is selected else '-'} {label}: {value} [{status}] "
-            f"id={identity} kind={account.kind} requests={count} allowance={allowance} source={account.source}"
+            f"id={identity} kind={kind} requests={count} allowance={allowance} source={source}"
         ))
     return rows
 
