@@ -270,6 +270,9 @@ scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路�
 - **bot 主動告警**（掛在 listener 既有的 polling 迴圈，不另起常駐進程；只通知、不做容量治理）：
   - bro-queue 積壓超過 `PSC_BRO_QUEUE_ALERT_THRESHOLD_SECONDS`（預設 600 秒）未消化時告警（#275）。
   - 主機 `MemAvailable` 低於 `PSC_MEM_ALERT_LOW_MB`（預設 3072）時告警一次，附 RSS 用量前幾名（依程序名稱彙總）；回到 `PSC_MEM_ALERT_RECOVER_MB`（預設 4096）以上送恢復通知。`PSC_MEM_ALERT_DISABLED=1` 關閉（#379）。
+- **磁碟容量監控**：listener 每 20 分鐘檢查 `/`，低於 `PSC_SPACE_WARN_GB=100`／`PSC_SPACE_CRITICAL_GB=50` GiB 分級通知，回到 `PSC_SPACE_RECOVER_GB=120` 才解除；`PSC_SPACE_DISABLED=1` 停用。狀態寫至 `$HOME/.agents/state/space-monitor.json`（支援 `PSC_STATE_ROOT`），有界掃描與四類建議皆不執行刪除；VHDX 未知時為 null。完整環境變數與範例見 [容量監控操作說明](docs/ops/space-monitor.md)。
+  - 掃描設定：`PSC_SPACE_INTERVAL_SECONDS`（1200）、`PSC_SPACE_SCAN_SECONDS`（10）、`PSC_SPACE_TOP_N`（10）、`PSC_SPACE_SCAN_ROOTS`、`PSC_SPACE_EXCLUDES`。
+  - 建議設定：`PSC_SPACE_TARGET_IDLE_HOURS`（24）、`PSC_SPACE_TMP_IDLE_HOURS`（6）、`PSC_SPACE_MERGE_TARGET`（`origin/main`）、`PSC_SPACE_CI_BRANCH_PATTERNS`（`ci/*:*-ci-*`）；`PSC_SPACE_VHDX_PATH` 可指定已確認可讀的 VHDX。
 - 讀設計時，先看本 README 的 repo 定位，再對照 [`docs/`](./docs/)、[`openspec/`](./openspec/) 與兩個外部 plane repo。
 
 ---
