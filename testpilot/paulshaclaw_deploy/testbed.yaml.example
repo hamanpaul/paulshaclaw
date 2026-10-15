@@ -1,0 +1,28 @@
+topology:
+  base_image: ubuntu:24.04
+  image_digest: sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+  user: testuser
+  uid: 1000
+  network: bridge
+  network_requirements:
+  - pypi.org
+  - github.com
+  default_timeout_seconds: 300
+artifacts:
+  root: artifacts
+  historical:
+    wheel:
+      filename: paulshaclaw-0.2.7-py3-none-any.whl
+      sha256: cc2e0771ba09030b23280ba1ab19a898ce147f8ef4e942a226bf10ddcd2be13f
+    checksums_file: checksums-sha256.txt
+    readme_revision: v0.2.7
+  candidate:
+    wheel:
+      path: ''
+      sha256: ''
+    readme_revision: ''
+readme:
+  revision: ddc4ab74f77e680ecb621a2ba511af5e4041828a
+  section: A
+  path: ''
+  sha256: ed87ae8fe9f64e82e478bfb490bba0f741a221b407a3819e4e9bf3b11b933979

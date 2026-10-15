@@ -1,0 +1,71 @@
+id: tc1c-entry-points-intact-no-deps
+name: Entry points intact with --no-deps (control group, GREEN without git)
+topology:
+  devices:
+    dut:
+      role: dut
+      transport: docker
+      image: ubuntu:24.04
+      user: testuser
+      uid: 1000
+      network: bridge
+artifact_role: historical
+readme:
+  revision: v0.2.7
+  section: A
+  prerequisite_declaration:
+    source: issue-baseline
+    packages:
+    - python3
+    - python3-venv
+steps:
+- id: S1C-0
+  action: exec
+  target: dut
+  run_as: 0
+  command: install -d -o 1000 -g 1000 /tmp/testpilot-home
+  expected_exit_code: 0
+- id: S1C-0a
+  action: install_prerequisites
+  target: dut
+  run_as: 0
+  packages_from: readme
+  expected_exit_code: 0
+- id: S1C-1
+  action: exec
+  target: dut
+  command: HOME=/tmp/testpilot-home python3 -m venv /tmp/testpilot-home/.venv-paulshaclaw
+  expected_exit_code: 0
+- id: S1C-2
+  action: exec
+  target: dut
+  command: test -z "$(command -v git 2>/dev/null)"
+  expected_exit_code: 0
+- id: S1C-3
+  action: exec
+  target: dut
+  command: cd /testpilot/artifacts && sha256sum -c checksums-sha256.txt --ignore-missing
+  expected_exit_code: 0
+- id: S1C-4
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/python -m pip install --no-index --no-deps /testpilot/artifacts/paulshaclaw-0.2.7-py3-none-any.whl
+  expected_exit_code: 0
+- id: S1C-5
+  action: exec
+  target: dut
+  command: test -x /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw && test -x /tmp/testpilot-home/.venv-paulshaclaw/bin/psc
+  expected_exit_code: 0
+- id: S1C-6
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw --version
+  expected_exit_code: 0
+  stdout_equals: paulshaclaw 0.2.7
+- id: S1C-7
+  action: exec
+  target: dut
+  command: /tmp/testpilot-home/.venv-paulshaclaw/bin/paulshaclaw --help
+  expected_exit_code: 0
+pass_criteria:
+- paulshaclaw 0.2.7

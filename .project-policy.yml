@@ -18,3 +18,7 @@ preflight:
       kind: tests
       argv: ["./scripts/preflight-tests.sh"]
       timeout_seconds: 1800
+    - name: testpilot
+      kind: tests
+      argv: ["./testpilot/scripts/preflight.sh"]
+      timeout_seconds: 600

@@ -1,0 +1,36 @@
+name: Deploy TestPilot
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  deploy-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Installed plugin discovery and stub tests
+        run: ./testpilot/scripts/preflight.sh
+      - name: Download the historical release artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/deploy-artifacts"
+          gh release download v0.2.7 --repo hamanpaul/paulshaclaw --dir "$RUNNER_TEMP/deploy-artifacts" --pattern 'paulshaclaw-0.2.7-py3-none-any.whl' --pattern checksums-sha256.txt
+          cd "$RUNNER_TEMP/deploy-artifacts"
+          sha256sum -c checksums-sha256.txt --ignore-missing
+      - name: Run Docker matrix and check the precise historical RED oracle
+        run: |
+          testpilot/.venv/bin/python testpilot/scripts/run_historical.py --artifact-dir "$RUNNER_TEMP/deploy-artifacts" --report-dir "$RUNNER_TEMP/deploy-reports"
+      - name: Preserve raw step and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-regression-reports
+          path: ${{ runner.temp }}/deploy-reports
+          if-no-files-found: warn
