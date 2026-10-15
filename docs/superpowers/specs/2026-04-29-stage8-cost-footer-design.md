@@ -46,7 +46,7 @@ GitHub 文件也標示 Copilot billing 會在 2026-06-01 從 request-based billi
 | provider 縮寫 | `cdx` = Codex, `cc` = Claude Code, `cpt` = GitHub Copilot | 短、穩定、易掃描 |
 | Copilot account | Config-driven 0/1/N accounts | 上線環境可能不是 `hamanpaul` / `org-a` |
 | Copilot reset | v1 預留欄位但不抓、不顯示 | 降低初版資料來源風險 |
-| 顏色 | 低於 70% 綠，70-89% 黃，90% 以上紅 | 讓 footer 一眼顯示風險 |
+| 顏色 | 低於 70% 藍，70-84% 橘，85% 以上紅 | 讓 footer 一眼顯示風險 |
 
 ## 3. 資料模型
 
@@ -139,8 +139,12 @@ cost:
 Runtime rules:
 
 - `accounts: []`: omit the `cpt` footer segment.
-- One account: `cpt haman:724`.
-- Multiple accounts: preserve config order, e.g. `cpt haman:724 arc:127`.
+- One account: `cpt 724`; cockpit `cpt: 724`。
+- Multiple accounts: alert-first footer，完整規格見 [Stage 8 multi-account contract](../../../openspec/specs/stage8-cost-footer/spec.md)。第一個 enabled 是固定預設主帳號，沒有 workspace binding 或自動登入切換。
+- 選擇順序：unknown/error > stale > critical（>=85%）> warning（>=70%）> estimated > healthy；同級採設定順序，footer 顯示所選 label（如 `cpt arc:95%`），`!`/`~`/`?` 分別表示 unavailable/stale/estimated。
+- Cockpit 摘要下方完整展開所有帳號，保留 id、kind、usage、allowance、source 與每帳號 source_status，`*` 指出選中帳號；明細允許換行，避免窄版面再次隱藏次要帳號。
+- Partial refresh 只按 account id 保留失敗帳號的舊值並標 stale；成功帳號維持 fresh，已停用/刪除帳號不復活。舊 cache 可缺少 per-account source_status；新 cache 明確保存它。
+- AGY 的單一登入 `/usage` 沒有帳號識別，既有 active-account 限制保持；不能把相同資料偽裝成多帳號配額。
 - `label` is the footer label; `id` is the provider account identifier.
 - `monthly_allowance` is used only for color threshold calculation and is not shown in footer.
 - If the operator sees `ha` / `haman` / `arc`, that text comes from `cost.providers.copilot.accounts[].label`.

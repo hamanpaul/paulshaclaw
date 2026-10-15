@@ -330,6 +330,13 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
 - JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。 例外：宿主沒有 PyYAML（無法讀 yaml、拿不到 account_id）的降級路徑只能以 `--footer` 給的 label 當 key（裸 `agy` 仍回 bool）。
 
+##### Copilot 多帳號呈現
+
+- 第一個 enabled 帳號是預設主帳號；沒有依工作區或最近使用自動切換。多帳號 footer 顯示所選 label，例如 `cpt personal:20%`。
+- 次要帳號告警會浮現：unknown/error > stale > critical（>=85%）> warning（>=70%）> estimated > healthy；同級依設定順序。`!` 表示無法監測（`--` 不是 0），`~` 表示保留舊值，`?` 表示估計。
+- cockpit 摘要下方按設定順序展開每帳號的 id、類型、用量、額度、來源及獨立狀態，`*` 標示摘要選中帳號。明細會換行，不因 footer 寬度被裁切；單帳號維持原本精簡外觀。
+- 任一帳號收集失敗，只保留該 account id 的舊值並標 stale；其他成功帳號仍是 fresh。停用、改 label 或重排設定會立即反映到 cache 呈現。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
+
 ##### agy 用量來源
 
 - `cost.providers.agy` 啟用後優先讀 agy 的 print-mode 唯讀 slash command（`agy -p "/usage" --output-format json`）：不起 agent turn、零 token、不讀任何 credential 檔（`~/.gemini/google_accounts.json`、`oauth_creds.json`、`antigravity-oauth-token` 一律不碰，`accounts[]` 的多帳號設定同樣不改變這條零讀取守衛）。`/usage` 本身不含帳號識別，故多帳號模式下的用量一律附掛到**第一個 enabled 帳號**（`active_account`）；若 `accounts[]` 非空但全部 disabled，agy 視為未生效（不 collect、不出現在 footer），即使頂層 `enabled: true`。
