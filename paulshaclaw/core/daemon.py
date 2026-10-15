@@ -78,6 +78,9 @@ class PaulShiaBroDaemon:
         self.manager_client = manager_client or control_client
         self._cockpit_pane_id = next((pane.pane_id for pane in self.config.pane_assignments if pane.title == "cockpit"), None)
         self._agent_pane_id: str | None = None
+        # `/agent attach %N` 固定的控制 agent pane；優先於自動偵測，只存記憶體，
+        # listener 重啟後需重新 attach。
+        self._attached_pane_id: str | None = None
         self.command_dispatcher = CommandDispatcher(
             registry=self.command_registry,
             python_handlers={
@@ -165,6 +168,22 @@ class PaulShiaBroDaemon:
             raise ValueError(
                 f"pane {pane_id} 正在執行 {command}（非 idle shell），請先釋放或改用其他 pane"
             )
+
+    def _attached_pane_problem(self, pane_id: str) -> str | None:
+        """回傳 attach pane 不能收訊息的原因；pane 上仍有非 shell 程式時回傳 None。"""
+        command = self._pane_current_command(pane_id)
+        if command is None:
+            return "不存在或無法存取"
+        if command.lstrip("-").lower() in _IDLE_SHELL_COMMANDS:
+            return f"目前沒有 agent 在跑（{command}）"
+        return None
+
+    def _attached_status_payload(self, pane_id: str) -> dict[str, object]:
+        payload = self._agent_status_payload(pane_id=pane_id)
+        if self._attached_pane_problem(pane_id) is not None:
+            payload.update({"state": "stopped", "running": False})
+        payload["attached"] = True
+        return payload
 
     def _is_agent_command(self, command: str) -> bool:
         if not command:
@@ -319,7 +338,16 @@ class PaulShiaBroDaemon:
 
     def route_to_agent(self, *, user_id: int, text: str, pane_id: str | None = None) -> str:
         # pane_id 顯式指定時信任呼叫端、略過自動偵測（#34 多 pane 路由的落點）；
-        # 未給時維持今天的自動偵測行為，行為不變。
+        # 未給時先看 `/agent attach` 固定的 pane，沒有 attach 才自動偵測。
+        if pane_id is None and self._attached_pane_id is not None:
+            problem = self._attached_pane_problem(self._attached_pane_id)
+            if problem is not None:
+                # agent 結束後 pane 會退回 shell，這時送字會被當 shell 指令執行。
+                return (
+                    f"已 attach 的 pane {self._attached_pane_id} {problem}，"
+                    "請 /agent attach 其他 pane 或 /agent detach"
+                )
+            pane_id = self._attached_pane_id
         if pane_id is None:
             detected = self._detect_agent_process()
             if detected is None:
@@ -435,11 +463,37 @@ class PaulShiaBroDaemon:
     def _handle_agent_command(self, args: list[str], command: CommandSpec) -> dict[str, object]:
         action = args[0] if args else "status"
         extra = args[1:]
-        if action in {"status", "stop"} and extra:
+        if action in {"status", "stop", "detach"} and extra:
             raise ValueError(f"/agent {action} 不接受參數")
         if action in {"start", "startf"} and len(extra) > 1:
             raise ValueError("/agent start 只接受一個 pane id（例如 /agent start %7）")
+        if action == "attach":
+            if len(extra) > 1:
+                raise ValueError("/agent attach 只接受一個 pane id（例如 /agent attach %7）")
+            target_pane_id = extra[0] if extra else None
+            if not target_pane_id:
+                raise ValueError("請指定要 attach 的 pane id，例如 /agent attach %7")
+            if not target_pane_id.startswith("%"):
+                raise ValueError(f"pane id 需以 % 開頭（例如 %7），收到：{target_pane_id}")
+            problem = self._attached_pane_problem(target_pane_id)
+            if problem is not None:
+                raise ValueError(f"pane {target_pane_id} {problem}，無法 attach")
+            self._attached_pane_id = target_pane_id
+            return self._attached_status_payload(target_pane_id)
+
+        if action == "detach":
+            pane_id = self._attached_pane_id
+            self._attached_pane_id = None
+            payload = self._agent_status_payload()
+            if pane_id is None:
+                payload["already_detached"] = True
+            else:
+                payload.update({"detached": True, "pane_id": pane_id})
+            return payload
+
         if action == "status":
+            if self._attached_pane_id is not None:
+                return self._attached_status_payload(self._attached_pane_id)
             detected = self._detect_agent_process()
             if detected is None:
                 self._agent_pane_id = None
@@ -503,7 +557,7 @@ class PaulShiaBroDaemon:
             self._agent_pane_id = rechecked_pane_id
             return self._agent_status_payload(pane_id=rechecked_pane_id, pid=rechecked_pid)
 
-        raise ValueError("/agent 只接受 start/startf/stop/status")
+        raise ValueError("/agent 只接受 start/startf/attach/detach/stop/status")
 
     def _format_manager_status(self, status: dict[str, object]) -> str:
         daemon = status.get("daemon")

@@ -23,7 +23,7 @@ class CommandRegistryTests(unittest.TestCase):
                 {"command": "dispatch", "description": "派工或送訊息到 pane"},
                 {"command": "tmate", "description": "管理 tmate remote access"},
                 {"command": "manager", "description": "查看或觸發 manager"},
-                {"command": "agent", "description": "管理 claude-gemma4 agent"},
+                {"command": "agent", "description": "管理控制 agent"},
             ],
         )
         self.assertTrue(all(command.telegram_menu.enabled for command in registry.commands))
@@ -102,7 +102,7 @@ class CommandRegistryTests(unittest.TestCase):
         help_text = registry.render_help()
         self.assertIn("/help [command] - 列出可用命令，或顯示單一命令用法", help_text)
         self.assertIn("/manager [status|tick] - 查看或觸發 persona manager", help_text)
-        self.assertIn("/agent [start %pane|startf %pane|stop|status] - 管理 claude-gemma4 agent session", help_text)
+        self.assertIn("/agent [start %pane|startf %pane|attach %pane|detach|stop|status] - 管理控制 agent session（claude-gemma4 或 attach 既有 pane）", help_text)
         self.assertIn("/tmate [status|start|stop]", registry.render_help("/tmate"))
         self.assertEqual(registry.render_help("tmate"), registry.render_help("/tmate"))
 
