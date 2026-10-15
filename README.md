@@ -342,6 +342,7 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 ##### Copilot 用量呈現
 
 - footer 只顯示設定中第一個 enabled 帳號的已用用量，例如 `cpt 87%`；cockpit 顯示 `cpt: 87%`。不顯示帳號名、不展開帳號明細。
+- cockpit 的完整用量列會依視窗寬度自動換行；縮窄視窗時仍保留 cdx／cc／cpt／agy 的全部用量與重置時間，不截斷尾端。
 - 次帳號的 unknown、stale 或高用量不會取代主帳號。主帳號缺資料顯示 `--`，不借用其他帳號數值；主帳號 stale 仍保留 `cpt~` 標記。
 - 其餘啟用帳號仍收集並保留於 snapshot JSON；逐帳號 cache 與停用／排序設定沿用。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
 

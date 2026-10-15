@@ -7,6 +7,11 @@ and this project adheres to Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-10-15
+
+### Fixed
+- Cockpit 用量列改依內容寬自動換行，完整保留 cdx／cc／cpt／agy 的用量與重置時間；移除預先截斷與固定寬度分流，縮放視窗不再遺失尾端資訊。cpt 維持主帳號單值顯示。
+
 ## [0.2.11] - 2026-10-15
 
 ### Fixed
