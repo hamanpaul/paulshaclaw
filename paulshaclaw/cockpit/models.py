@@ -149,6 +149,39 @@ class JobRow:
     phase: str = ""
     run_id: str = ""
     kind: str = ""
+    executor: str = ""
+    model: str = ""
+    card: str = ""
+    identity_source: str = ""
+    execution_state: str = ""
+
+    @property
+    def execution_identity_line(self) -> str:
+        """唯讀呈現 producer 的身份來源；角色與 job_id 都不是身份證據。"""
+        if not (self.kind == "workflow_run" or self.work_id or self.identity_source):
+            return ""
+        source = self.identity_source
+        if source == "in-flight":
+            label = "執行中" if self.execution_state == "running" else "已派工"
+        elif source == "last-execution":
+            label = "上次執行"
+        elif source == "planned":
+            label = "預定／未派工"
+        elif self.execution_state == "not-dispatched" or self.is_pending_claim or self.is_not_claimable:
+            label = "未派工"
+        else:
+            label = "身份未提供"
+        proven = source in {"in-flight", "last-execution", "planned"}
+        executor = self.executor if proven else ""
+        model = self.model if proven else ""
+        parts = [label, executor or "executor 未提供", model or "model 未提供"]
+        if self.execution_state:
+            parts.append(f"狀態 {self.execution_state}")
+        if self.card:
+            parts.append(f"card {self.card}")
+        if self.job_id:
+            parts.append(f"job {self.job_id}")
+        return " · ".join(parts)
 
     @property
     def project(self) -> str:

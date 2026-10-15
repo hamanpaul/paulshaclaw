@@ -17,9 +17,9 @@ dependencies = [
     # 尚未發版：詞彙聯集在 hippo main 但未收進 tag，下次 hippo 發版時改指向該 tag
     # 的 SHA（v0.1.1 + hamanpaul/paulsha-hippo#126）
     "paulsha-hippo @ git+https://github.com/hamanpaul/paulsha-hippo@96513bcf298f22dfb94ff5e85c3836dd781486b0",
-    # v0.1.10+78＝origin/main 2026-09-10（#347：v0.1.10 tag 本身仍讀不了含
-    # next_step_hint 的 coordinator 狀態檔；tag 僅人讀標記，pin 為不可變 SHA）
-    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@739cde17b5b891bcdd575cb98ea07280f428ebaf",
+    # #328：包含 workflow executor/model producer 的 PR #865 merge SHA；
+    # 同時保留 #347 所需 next_step_hint 相容性，pin 為不可變 SHA。
+    "paulsha-cortex @ git+https://github.com/hamanpaul/paulsha-cortex@8d077b1dd3dbf1b0319bd9426a2b1be557d35c97",
 ]
 
 [project.scripts]
