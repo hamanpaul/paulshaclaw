@@ -28,6 +28,12 @@ def _format_message(result: dict[str, object]) -> str:
             title = "agent: started"
         elif result.get("stopped"):
             title = "agent: stopped"
+        elif result.get("attached"):
+            title = f"agent: attached ({result.get('state', 'unknown')})"
+        elif result.get("detached"):
+            title = "agent: detached"
+        elif result.get("already_detached"):
+            title = "agent: already_detached"
         else:
             title = f"agent: {result.get('state', 'unknown')}"
 
