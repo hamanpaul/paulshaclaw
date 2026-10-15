@@ -335,6 +335,40 @@ class TelegramReplyRuntimeWiringTests(unittest.TestCase):
             payload = json.loads(bindings_path.read_text(encoding="utf-8"))
             self.assertEqual(payload, {"7": 1001})
 
+    def test_build_listener_wires_mem_pressure_alert_with_env_config(self) -> None:
+        # #379：build_listener 依環境變數組好記憶體告警並接到 polling hook。
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "daemon_name": "psc",
+                        "default_project": "demo",
+                        "allowed_user_ids": [7],
+                        "coordinator": {"phase": "stage1", "default_payload": {}},
+                        "pane_assignments": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            env = {
+                "PSC_TELEGRAM_BINDINGS_PATH": str(Path(tmpdir) / "bindings.json"),
+                "PSC_MEM_ALERT_LOW_MB": "2048",
+                "PSC_MEM_ALERT_RECOVER_MB": "2500",
+                "PSC_MEM_ALERT_DISABLED": "1",
+            }
+            with mock.patch.dict(os.environ, env, clear=False):
+                listener = build_listener(
+                    config_path=str(config_path),
+                    settings=BotSettings(token="fake-token"),
+                    client=mock.Mock(),
+                )
+
+            alerter = listener.mem_alert.__self__
+            self.assertEqual((alerter.low_mb, alerter.recover_mb), (2048, 2500))
+            self.assertTrue(alerter.disabled)
+            self.assertEqual(alerter.allowed_user_ids, (7,))
+
     def test_build_listener_does_not_persist_unauthorized_private_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             config_path = Path(tmpdir) / "config.json"
