@@ -42,7 +42,7 @@
 遵循 [Semantic Versioning](https://semver.org/)：`MAJOR.MINOR.PATCH`。
 
 - `0.x.y` 階段：初始開發期，任何 breaking change 可進 `MINOR`；`PATCH` 僅用於向下相容的修正。
-- 目前基線 `0.1.0`（與 `VERSION` / `pyproject.toml` 一致）；第一次正式 release 由 owner 裁決版本號。
+- 目前版本以 `VERSION` / `pyproject.toml` 與 §2.2 一致性 gate 為準；本文件不另維護版本副本。
 - pre-release / build metadata（`-alpha.1` / `+build.5`）暫不使用，待有需求再於本契約增補。
 
 ### 2.4 Release authority
@@ -154,6 +154,55 @@ hippo/cortex 的 package publication，不在本 umbrella 內隱性擴張。
 2. 從上一穩定版本的 GitHub Release 下載 wheel。
 3. 在目標 venv `pip install --force-reinstall <舊版 wheel>`。
 4. runtime 狀態（`~/.agents/`）**不隨 artifact 變動**，回滾 operator shell 不會動到 state/secret。
+
+### 6.1 現行安裝身分與唯讀 smoke
+
+README 的 release wheel 安裝入口與本契約合為 current install/operation authority。
+依實際 package manager 選一個 interpreter，勿從 sibling checkout 猜路徑：
+
+```bash
+# pipx 安裝（先以 command -v / readlink 核對 PATH 指向）
+command -v paulshaclaw
+readlink -f "$(command -v paulshaclaw)"
+psc_install_python="$(pipx environment --value PIPX_LOCAL_VENVS)/paulshaclaw/bin/python"
+# 若使用 README 的手動 venv，改設：
+# psc_install_python="$HOME/.venv-paulshaclaw/bin/python"
+
+# -I 排除 checkout / PYTHONPATH；-B 不寫 bytecode。
+"$psc_install_python" -I -B - <<'PY'
+import importlib
+import importlib.metadata
+import json
+from pathlib import Path
+import sys
+
+print("python:", sys.executable)
+for package, module in (("paulshaclaw", "paulshaclaw"),
+                        ("paulsha-cortex", "paulsha_cortex"),
+                        ("paulsha-hippo", "paulsha_hippo")):
+    origin = Path(importlib.import_module(module).__file__).resolve()
+    print(package, importlib.metadata.version(package), origin)
+    print("inside installed prefix:", origin.is_relative_to(Path(sys.prefix)))
+from paulsha_cortex.control.client import read_status
+status = read_status()
+print(json.dumps({"schema_version": status.get("schema_version"),
+                  "updated_at": status.get("updated_at"),
+                  "degraded": status.get("degraded"),
+                  "counts": {key: len(status.get(key, [])) for key in
+                             ("ready", "in_flight", "attention", "recent_done")}}))
+PY
+```
+
+`control.client.read_status()` 是此版本支援的公開 control API；不可把未提供的
+`paulsha_cortex.sdk` namespace 當成已驗證。`degraded=true` 表示資料不可用，需依 Cortex
+診斷；`updated_at` 是 snapshot 時間，不是執行成功證據。上例刻意不輸出完整 snapshot、
+environment、token、工作內容或帳號資訊；分享結果時將家目錄匿名化。
+
+唯讀 CLI 對照是 `psc coordinator status` 與 `cortex status`；bot 的 `/manager status`
+是聊天命令，不是這兩個 CLI 的 `manager status` 子命令。不要為查版本執行裸 `psc`
+或 `paulshaclaw`：它們會啟動及接管 operator shell。此 smoke 證明安裝可 import 與讀取
+control snapshot，不代表現有常駐服務已載入此版本。更新／回滾仍由 operator 明確使用
+驗過 checksum 的 wheel，依 §6 與 §9 的啟動契約處理；不新增自動下載或升級權威。
 
 
 ## 7. 相關檔案

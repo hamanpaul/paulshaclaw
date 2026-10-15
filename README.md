@@ -133,6 +133,8 @@ flowchart TB
 - **Developer 開發安裝**：clone repo 後 editable install，含可跑測試的完整 runtime（見 §B）。
 
 完整 release 契約（版本來源一致性、前置 gate、失敗重跑、撤回規則、distribution strategy 裁決）見 [`docs/release-contract.md`](./docs/release-contract.md)。
+安裝後的 entrypoint／import origin／唯讀 control API 查核以該文件 §6.1 為準；
+[薄操作層驗收紀錄](./docs/research/2026-10-15-thin-shell-acceptance.md) 區分已安裝版本、候選程式與實測限制。
 
 ### A. 從 release artifact 安裝（end-user 生產安裝）
 
@@ -177,7 +179,8 @@ step 4 的 `pip install` **非零就停**，不要往下走：先 `ls ~/.venv-pa
 ```bash
 sudo apt install pipx git && pipx ensurepath        # pipx 本身；ensurepath 後開新 shell 才看得到 ~/.local/bin
 pipx install paulshaclaw-X.Y.Z-py3-none-any.whl   # 之後任何目錄直接打 paulshaclaw / psc
-pipx upgrade paulshaclaw                            # 升級改裝新 wheel 時：pipx install --force <新 wheel>
+# 更新時先下載並驗證新 release wheel，再明確替換：
+pipx install --force paulshaclaw-X.Y.Z-py3-none-any.whl
 ```
 
 pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`，與上面手動 venv 流程等價；兩者擇一即可。`pipx install` 非零同樣先看 stderr 有無 `Cannot find command 'git'`。
@@ -185,6 +188,8 @@ pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`�
 #### 正式啟動（`paulshaclaw` 指令，#288）
 
 裝好 wheel 後，operator shell 的**正式啟動路徑**是 `paulshaclaw` console script——不需要 clone repo：
+下例使用手動 venv；若選 pipx，將 `~/.venv-paulshaclaw/bin/paulshaclaw` 改成 PATH 上的
+`paulshaclaw`，並先依 release-contract §6.1 核對其實際入口，勿混用兩份安裝。
 
 ```bash
 # tmux 內啟動（含 cockpit TUI）
@@ -271,6 +276,9 @@ scripts/cutover-to-planes.sh            # 預設對本 repo；或傳 <repo 路�
 - **bot 主動告警**（掛在 listener 既有的 polling 迴圈，不另起常駐進程；只通知、不做容量治理）：
   - bro-queue 積壓超過 `PSC_BRO_QUEUE_ALERT_THRESHOLD_SECONDS`（預設 600 秒）未消化時告警（#275）。
   - 主機 `MemAvailable` 低於 `PSC_MEM_ALERT_LOW_MB`（預設 3072）時告警一次，附 RSS 用量前幾名（依程序名稱彙總）；回到 `PSC_MEM_ALERT_RECOVER_MB`（預設 4096）以上送恢復通知。`PSC_MEM_ALERT_DISABLED=1` 關閉（#379）。
+- **磁碟容量監控**：listener 每 20 分鐘檢查 `/`，低於 `PSC_SPACE_WARN_GB=100`／`PSC_SPACE_CRITICAL_GB=50` GiB 分級通知，回到 `PSC_SPACE_RECOVER_GB=120` 才解除；`PSC_SPACE_DISABLED=1` 停用。狀態寫至 `$HOME/.agents/state/space-monitor.json`（支援 `PSC_STATE_ROOT`），有界掃描與四類建議皆不執行刪除；VHDX 未知時為 null。完整環境變數與範例見 [容量監控操作說明](docs/ops/space-monitor.md)。
+  - 掃描設定：`PSC_SPACE_INTERVAL_SECONDS`（1200）、`PSC_SPACE_SCAN_SECONDS`（10）、`PSC_SPACE_TOP_N`（10）、`PSC_SPACE_SCAN_ROOTS`、`PSC_SPACE_EXCLUDES`。
+  - 建議設定：`PSC_SPACE_TARGET_IDLE_HOURS`（24）、`PSC_SPACE_TMP_IDLE_HOURS`（6）、`PSC_SPACE_MERGE_TARGET`（`origin/main`）、`PSC_SPACE_CI_BRANCH_PATTERNS`（`ci/*:*-ci-*`）；`PSC_SPACE_VHDX_PATH` 可指定已確認可讀的 VHDX。
 - 讀設計時，先看本 README 的 repo 定位，再對照 [`docs/`](./docs/)、[`openspec/`](./openspec/) 與兩個外部 plane repo。
 
 ---
@@ -330,6 +338,13 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 寫回只更新 `cost.providers.*.enabled` 與 account 的 `enabled`，其餘 `label` / `monthly_allowance` / `org` 保留；若 `~/.config/paulshaclaw/paulshaclaw.yaml` 尚不存在，會以 bundled sample 建立。agy 例外：`--footer agy:<label>` 遇到未宣告的 label 會新建 `accounts` 條目（`accounts` 鍵原本不存在時也會一併新建），不是純粹的「只更新 enabled」。
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
 - JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。 例外：宿主沒有 PyYAML（無法讀 yaml、拿不到 account_id）的降級路徑只能以 `--footer` 給的 label 當 key（裸 `agy` 仍回 bool）。
+
+##### Copilot 多帳號呈現
+
+- 第一個 enabled 帳號是預設主帳號；沒有依工作區或最近使用自動切換。多帳號 footer 顯示所選 label，例如 `cpt personal:20%`。
+- 次要帳號告警會浮現：unknown/error > stale > critical（>=85%）> warning（>=70%）> estimated > healthy；同級依設定順序。`!` 表示無法監測（`--` 不是 0），`~` 表示保留舊值，`?` 表示估計。
+- cockpit 摘要下方按設定順序展開每帳號的 id、類型、用量、額度、來源及獨立狀態，`*` 標示摘要選中帳號。明細會換行，不因 footer 寬度被裁切；單帳號維持原本精簡外觀。
+- 任一帳號收集失敗，只保留該 account id 的舊值並標 stale；其他成功帳號仍是 fresh。停用、改 label 或重排設定會立即反映到 cache 呈現。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
 
 ##### agy 用量來源
 

@@ -1197,6 +1197,7 @@ def _unknown_account(account: CopilotAccountConfig) -> CopilotAccountUsage:
         used_requests=None,
         monthly_allowance=account.monthly_allowance,
         source="unknown",
+        source_status="unknown",
     )
 
 
@@ -1527,6 +1528,7 @@ def collect_copilot(
                         used_requests=None,
                         monthly_allowance=account.monthly_allowance,
                         source="github_copilot_quota",
+                        source_status="fresh",
                         percent_used=percent_used,
                         unlimited=unlimited,
                     )
@@ -1549,6 +1551,7 @@ def collect_copilot(
                     used_requests=int(used_requests),
                     monthly_allowance=account.monthly_allowance,
                     source=str(source),
+                    source_status="fresh",
                 )
             )
             has_fresh = True
@@ -1567,6 +1570,7 @@ def collect_copilot(
                     used_requests=int(resolved_local_observed[account.account_id]),
                     monthly_allowance=account.monthly_allowance,
                     source="local_observed",
+                    source_status="estimated",
                 )
             )
             has_estimated = True
@@ -1649,6 +1653,26 @@ def carry_forward_degraded(
     result: dict[str, ProviderSnapshot] = {}
     for name, provider in new_providers.items():
         old = old_providers.get(name)
+        if name == "cpt" and name not in skipped and old is not None:
+            # Match current enabled accounts by identity, never copy the old
+            # tuple wholesale (it may contain removed or disabled accounts).
+            old_accounts = {account.account_id: account for account in old.accounts}
+            accounts = []
+            for account in provider.accounts:
+                previous = old_accounts.get(account.account_id)
+                if not account.has_data and previous is not None and previous.has_data:
+                    account = dataclasses.replace(
+                        account, used_requests=previous.used_requests,
+                        percent_used=previous.percent_used, unlimited=previous.unlimited,
+                        source=previous.source, source_status="stale",
+                    )
+                accounts.append(account)
+            statuses = {account.effective_status(provider.source_status) for account in accounts}
+            status = provider.source_status
+            if "stale" in statuses and not statuses.intersection({"fresh", "estimated"}):
+                status = "stale"
+            result[name] = dataclasses.replace(provider, accounts=tuple(accounts), source_status=status)
+            continue
         if (
             name not in skipped
             and old is not None

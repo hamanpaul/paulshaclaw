@@ -1,0 +1,111 @@
+{
+  "observed_at_utc": "2026-10-15T05:25:01.606211+00:00",
+  "python_version": "3.12.3",
+  "python_executable": "$HOME/.local/share/pipx/venvs/paulshaclaw/bin/python",
+  "cwd": "/tmp",
+  "isolated_mode": true,
+  "bytecode_writes_disabled": true,
+  "distributions": {
+    "paulshaclaw": {
+      "version": "0.2.9",
+      "source": {
+        "kind": "local-wheel",
+        "editable": false,
+        "artifact_basename": "paulshaclaw-0.2.9-py3-none-any.whl"
+      }
+    },
+    "paulsha-cortex": {
+      "version": "0.1.10",
+      "source": {
+        "kind": "vcs",
+        "editable": false,
+        "commit_id": "739cde17b5b891bcdd575cb98ea07280f428ebaf"
+      }
+    },
+    "paulsha-hippo": {
+      "version": "0.1.1",
+      "source": {
+        "kind": "vcs",
+        "editable": false,
+        "commit_id": "96513bcf298f22dfb94ff5e85c3836dd781486b0"
+      }
+    }
+  },
+  "imports": {
+    "paulshaclaw": {
+      "origin": "$HOME/.local/share/pipx/venvs/paulshaclaw/lib/python3.12/site-packages/paulshaclaw/__init__.py",
+      "within_installed_prefix": true
+    },
+    "paulsha_cortex": {
+      "origin": "$HOME/.local/share/pipx/venvs/paulshaclaw/lib/python3.12/site-packages/paulsha_cortex/__init__.py",
+      "within_installed_prefix": true
+    },
+    "paulsha_hippo": {
+      "origin": "$HOME/.local/share/pipx/venvs/paulshaclaw/lib/python3.12/site-packages/paulsha_hippo/__init__.py",
+      "within_installed_prefix": true
+    },
+    "paulsha_cortex.control.client": {
+      "origin": "$HOME/.local/share/pipx/venvs/paulshaclaw/lib/python3.12/site-packages/paulsha_cortex/control/client.py",
+      "within_installed_prefix": true
+    }
+  },
+  "sdk_namespace_available": false,
+  "version_command": {
+    "exit_code": 0,
+    "stdout": "paulshaclaw 0.2.9",
+    "blocked_operations": [],
+    "command": "Installed shebang Python -I -B; runpy.run_path(<resolved-paulshaclaw-entrypoint>, run_name=\"__main__\"), argv=[<entrypoint>, \"--version\"]"
+  },
+  "readonly_smoke": {
+    "api": "paulsha_cortex.control.client.read_status",
+    "real_installed_runtime": true,
+    "synthetic_data": false,
+    "status_file_exists": true,
+    "control_path": "<installed-runtime-control>/status.json",
+    "elapsed_ms": 0.511,
+    "schema_version": 1,
+    "degraded": false,
+    "degraded_reason": null,
+    "updated_at": "2026-10-15T05:24:55.083525+00:00",
+    "counts": {
+      "ready": 0,
+      "held": 0,
+      "slices": 0,
+      "attention": 14,
+      "not_claimable": 2,
+      "in_flight": 0,
+      "recent_done": 10
+    }
+  },
+  "readonly_guard": {
+    "blocked_operations": [],
+    "attempted_mutations": 0,
+    "files_opened_readonly": 36,
+    "signal_zero_checks": 1,
+    "subprocess_calls": 0,
+    "socket_creations": 0
+  },
+  "entrypoints": {
+    "paulshaclaw": {
+      "command_path": "$HOME/.local/bin/paulshaclaw",
+      "realpath": "$HOME/.local/share/pipx/venvs/paulshaclaw/bin/paulshaclaw",
+      "shebang": "#!$HOME/.local/share/pipx/venvs/paulshaclaw/bin/python"
+    },
+    "psc": {
+      "command_path": "$HOME/.local/bin/psc",
+      "realpath": "$HOME/.local/share/pipx/venvs/paulshaclaw/bin/psc",
+      "shebang": "#!$HOME/.local/share/pipx/venvs/paulshaclaw/bin/python"
+    },
+    "cortex": {
+      "command_path": "$HOME/.local/bin/cortex",
+      "realpath": "$HOME/.local/share/pipx/venvs/paulsha-cortex/bin/cortex",
+      "shebang": "#!$HOME/.local/share/pipx/venvs/paulsha-cortex/bin/python"
+    }
+  },
+  "limitations": [
+    "No install, upgrade, deployment, launcher up/down/status, tmux takeover, request submission, or service mutation was performed.",
+    "Read-only API smoke does not prove candidate branch deployment, running service version, new SDK availability, end-to-end UI lifecycle behavior, or released-artifact provenance.",
+    "The installed SDK namespace paulsha_cortex.sdk is absent; control.client.read_status is the actual installed public control API tested.",
+    "Elapsed time measures one SDK read, not human usability or operator ROI."
+  ]
+}

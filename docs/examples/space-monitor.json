@@ -1,0 +1,12 @@
+{
+  "checked_at": "2026-10-15T00:00:00+00:00",
+  "root": {"mount": "/", "avail_gb": 99, "used_gb": 800, "size_gb": 1000, "use_pct": 80},
+  "vhdx": {"path": null, "size_gb": null, "note": "未知：未提供可讀取的 vhdx 路徑"},
+  "thresholds": {"warn_gb": 100, "critical_gb": 50, "recover_gb": 120},
+  "level": "warn",
+  "alerting": true,
+  "top_dirs": [{"path": "/workspace/demo-worktrees/old/target", "size_gb": 30, "kind": "cargo_target", "busy": false, "reclaimable": true}],
+  "suggestions": [{"action": "remove_target", "path": "/workspace/demo-worktrees/old/target", "reason": "乾淨 worktree，所有內容超過 24 小時未修改，未觀察到使用中行程"}],
+  "scan_errors": [],
+  "auto_reclaim": false
+}

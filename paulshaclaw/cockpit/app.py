@@ -163,6 +163,14 @@ def _actions_field(item: dict[str, object], key: str = "next_actions") -> tuple[
     return tuple(entry for entry in value if isinstance(entry, str) and entry)
 
 
+def _state_field(item: dict[str, object], *keys: str) -> str:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "unknown"
+
+
 def _blocking_detail(item: dict[str, object]) -> str:
     """結構化卡住理由的人可讀內容。
 
@@ -200,7 +208,7 @@ def _ingest_in_flight(in_flight: object, rows: list[JobRow]) -> None:
         slice_id = _slice_id_from_item(item)
         if not slice_id:
             continue
-        state = str(item.get("state") or "running")
+        state = _state_field(item, "state")
         rows.append(
             JobRow(
                 slice_id=slice_id,
@@ -255,7 +263,7 @@ def _ingest_workflow_run(
     phase = _text_field(item, "current_phase")
     run_id = _text_field(item, "run_id")
     slice_id = _slice_id_from_item(item) or work_id
-    state = str(item.get("gate_state") or item.get("slice_state") or "running")
+    state = _state_field(item, "gate_state", "slice_state", "state")
     rows.append(
         JobRow(
             slice_id=slice_id,
@@ -285,9 +293,7 @@ def _ingest_slices(slices: object, rows: list[JobRow]) -> None:
         slice_id = _slice_id_from_item(item)
         if not slice_id:
             continue
-        state = str(
-            item.get("slice_state") or item.get("gate_state") or item.get("state") or "running"
-        )
+        state = _state_field(item, "slice_state", "gate_state", "state")
         phase = _text_field(item, "phase") or state
         rows.append(
             JobRow(
@@ -404,7 +410,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
             slice_id = _slice_id_from_item(item)
             if not slice_id:
                 continue
-            state = str(item.get("gate_status") or item.get("state") or "done")
+            state = _state_field(item, "gate_status", "state")
             # manager 的 handoff manifest 已有 gate_reason／job_id／branch，但目前的
             # recent_done provider 只挑 slice_id／gate_status／completed_at 三欄送出。
             # `exited_at`／`run_status` 等可選欄位先容忍接住；真正已沉到 terminal
@@ -414,6 +420,7 @@ def slices_from_status(status: dict[str, object]) -> tuple[JobRow, ...]:
                     slice_id=slice_id,
                     state=state,
                     source_section="recent_done",
+                    run_status=run_status,
                     reason=_text_field(item, "gate_reason", "reason"),
                     next_actions=_actions_field(item),
                     job_id=_text_field(item, "job_id"),
@@ -738,6 +745,11 @@ class CockpitApp(App[None]):
         # 單行 cost 以整個 banner 寬、向右對齊渲染 → 接在 composed 之後、不受 mascot 欄縮排。
         if full_width_cost:
             composed += full_width_cost + "\n"
+        # Full account rows are allowed to wrap in the auto-height banner;
+        # clipping them would recreate the secondary-account blind spot.
+        account_rows = cost_bar.account_lines()
+        if account_rows:
+            composed += "\n".join(account_rows) + "\n"
         try:
             from rich.text import Text
 
