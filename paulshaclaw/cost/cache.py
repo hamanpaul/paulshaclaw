@@ -128,6 +128,8 @@ def _load_account(raw: Any) -> CopilotAccountUsage | None:
         source=source,
         percent_used=percent_used,
         unlimited=bool(raw.get("unlimited", False)),
+        source_status=(raw.get("source_status") if raw.get("source_status") in
+                       ("fresh", "estimated", "stale", "unknown", "error") else None),
     )
 
 

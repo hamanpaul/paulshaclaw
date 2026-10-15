@@ -29,7 +29,7 @@ Stage 8 SHALL provide a tmux footer status command invocable as `python -m pauls
 - **WHEN** the snapshot contains Codex 5h usage `18` with reset display `15:21`, weekly usage `41` with reset display `3d`, Claude unknown data, and two Copilot accounts `haman=724` and `arc=127`
 - **THEN** the footer MUST include `cdx 5h:18%(15:21) wk:41%(3d)`
 - **THEN** the footer MUST include `cc 5h:-- wk:--`
-- **THEN** the footer MUST include `cpt haman:724 arc:127`
+- **THEN** the footer MUST include `cpt haman:724` when both accounts are healthy
 
 #### Scenario: Stale provider is marked
 
@@ -65,15 +65,41 @@ Stage 8 SHALL load Copilot accounts from configuration. Runtime behavior MUST su
 - **WHEN** Copilot account config is empty
 - **THEN** the footer MUST omit the `cpt` segment
 
-#### Scenario: One Copilot account renders one label
+#### Scenario: One Copilot account preserves the compact value
 
-- **WHEN** Copilot account config contains one account with label `haman` and usage `724`
-- **THEN** the footer MUST include `cpt haman:724`
+- **WHEN** one enabled account has usage `724`
+- **THEN** the footer MUST render `cpt 724` and cockpit summary MUST render `cpt: 724`
 
-#### Scenario: Multiple Copilot accounts preserve config order
+### Requirement: Alert-first multi-account presentation
 
-- **WHEN** Copilot account config contains labels `haman` and `arc` in that order
-- **THEN** the footer MUST render `cpt haman:<usage> arc:<usage>` in the same order
+多帳號 SHALL 採告警優先摘要與 cockpit 完整明細。設定中第一個 `enabled: true` 帳號（收集後的 `accounts[0]`）SHALL 是預設主帳號；這個順序不是主備切換、最近使用紀錄或 workspace binding。系統 MUST NOT 根據目前目錄推斷帳號，也 MUST NOT 在資料來源沒有帳號識別時把同一數值分配給不同帳號。
+
+footer 與 cockpit 摘要 SHALL 依下列優先序選出一個帳號：`unknown/error`（無法監測）> `stale`（保留舊值）> `critical`（>=85%）> `warning`（>=70%）> `estimated`（本機觀測）> healthy。同一層級 SHALL 保留設定順序；即使雙危為 85% 與 99%，仍選先設定的帳號。百分比不存在但請求數及 allowance 可用時 SHALL 依比例判斷告警；unlimited SHALL 不產生額度告警。沒有抓到的值 MUST 是 `--`，不得視為 0。
+
+多帳號 footer SHALL 顯示所選 label 與值（例如 `cpt company:95%`），並以 `!` 標示 unknown/error、`~` 標示 stale、`?` 標示 estimated。單一 stale 帳號仍 SHALL 保留 footer `cpt~` 與 cockpit `cpt~:` 文字標記，避免窄化或停用其他帳號後丟失告警。每個帳號的 `source_status` SHALL 獨立保存與 cache roundtrip；舊 cache 缺少此欄位時 SHALL 依資料可用性、來源與 provider 狀態推斷。部分帳號失敗時 SHALL 只依同一 account id 保留該帳號前值並標 stale，保留當前設定的順序/label/allowance，MUST NOT 復活已停用或刪除帳號。下次成功收集 SHALL 清除該帳號 stale。
+
+cockpit SHALL 於摘要下方按設定順序展開所有 enabled 帳號完整明細（label、id、kind、值、source_status、requests、allowance、source），以 `*` 指出被摘要選中的帳號；明細 SHALL 換行而不依 footer 寬度截斷。讀取過期 cache SHALL 標 stale，讀取 MUST 保持唯讀且不得發出網路請求。設定重排或停用 SHALL 立即套用到 cached 呈現，新啟用但尚無 cache 的帳號 SHALL 顯示 unknown。
+
+此契約 MAY 由後續 provider 重用，但 AGY 現有 `/usage` 只代表目前登入帳號且沒有帳號識別，因此目前仍只呈現第一個 enabled 的 active account；MUST NOT 宣稱已收集其他 AGY 帳號的配額。
+
+#### Scenario: Secondary critical account is visible
+
+- **WHEN** primary is 20% and secondary is 95%
+- **THEN** the footer SHALL render `cpt secondary:95%`
+- **THEN** cockpit details SHALL include both accounts and mark secondary selected
+
+#### Scenario: Secondary unavailable or stale outranks quota alerts
+
+- **WHEN** primary is 95% and secondary has no usable value
+- **THEN** the footer SHALL render `cpt secondary:--!`
+- **WHEN** the secondary's previous value is retained at 80%
+- **THEN** the footer SHALL render `cpt secondary:80%~` and cockpit SHALL show its stale status
+
+#### Scenario: Configuration order breaks equal alerts
+
+- **WHEN** the first enabled account is 85% and the second is 99%
+- **THEN** the footer SHALL select the first account
+- **THEN** cockpit SHALL retain both values in configuration order
 
 ### Requirement: Copilot online usage source priority
 
@@ -121,11 +147,11 @@ Stage 8 SHALL cache snapshots under the agent state tree with a default TTL of 1
 
 ### Requirement: Footer color thresholds
 
-Stage 8 SHALL apply tmux style coloring by usage threshold. Usage below 70 percent MUST use the low-risk style. Usage from 70 through 89 percent MUST use the warning style. Usage at or above 90 percent MUST use the critical style. Unknown or error data MUST use a neutral or dim style. Estimated data MUST use the estimated style so operators can distinguish fallback estimates from trusted quota values.
+Stage 8 SHALL apply tmux style coloring by usage threshold. Usage below 70 percent MUST use the low-risk style. Usage from 70 through 84 percent MUST use the warning style. Usage at or above 85 percent MUST use the critical style. Unknown or error data MUST use a neutral or dim style. Estimated data MUST use the estimated style so operators can distinguish fallback estimates from trusted quota values.
 
 #### Scenario: Threshold boundaries are deterministic
 
-- **WHEN** provider usage is 69, 70, 89, and 90 percent
+- **WHEN** provider usage is 69, 70, 84, and 85 percent
 - **THEN** Stage 8 MUST classify them as low-risk, warning, warning, and critical respectively
 
 #### Scenario: Copilot color uses allowance without showing max

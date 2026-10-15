@@ -25,17 +25,20 @@ cost:
   tmux_refresh_seconds: 30
   colors:
     warning_percent: 70
-    critical_percent: 90
+    critical_percent: 85
   providers:
     copilot:
+      # 多帳號：unknown/error > stale > critical >=85% > warning >=70%
+      # > estimated > healthy；同級依設定順序。footer 如 cpt arc:95%，
+      # ! 表示無資料/錯誤，~ 表示 stale，? 表示估計值；單帳號維持 cpt N%。
       accounts:
         - id: hamanpaul
-          label: haman           # first enabled account: footer/cockpit show its value only (cpt N%)
+          label: haman           # 第一個 enabled 為預設主帳號；無 workspace 自動綁定
           kind: personal
           monthly_allowance: 1500
           enabled: true
         - id: org-a
-          label: arc             # further accounts are collected but not rendered in the footer
+          label: arc             # 次要告警可優先顯示；cockpit 展開所有 enabled 帳號
           kind: company
           monthly_allowance: 300
           org: example-org

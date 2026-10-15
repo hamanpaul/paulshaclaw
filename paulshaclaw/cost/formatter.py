@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+
 from paulshaclaw.cost.models import CopilotAccountUsage, CostSnapshot, ProviderSnapshot, UsageWindow
 
 # Usage colours (all readable on tmux's default bg=green status bar):
@@ -121,19 +123,77 @@ def _account_value(account: CopilotAccountUsage) -> str:
     return _abbrev_count(account.used_requests)
 
 
-def _primary_account_value(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
-    """cpt 收斂規則（footer 與 cockpit 共用）：只取第一個帳號的值，不列帳號名、
-    不列其餘帳號。呼叫端須先確認 ``provider.accounts`` 非空。"""
-    account = provider.accounts[0]
-    value = _account_value(account)
-    # Colour only the value; the label stays default. `∞` (no limit) is blue
-    # like a healthy usage level, to stand out from the dim reset times.
-    level = "low" if account.unlimited else _account_level(provider, account)
-    return _wrap(value, level, use_tmux_style, stale=provider.source_status == "stale")
+def _account_priority(provider: ProviderSnapshot, account: CopilotAccountUsage) -> int:
+    status = account.effective_status(provider.source_status)
+    if status in {"error", "unknown"}:
+        return 5
+    if status == "stale":
+        return 4
+    percent = account.percent_used
+    if percent is None and account.used_requests is not None and account.monthly_allowance:
+        percent = int(account.used_requests / account.monthly_allowance * 100)
+    level = "low" if account.unlimited else classify_usage(percent)
+    return {"critical": 3, "warning": 2}.get(level, 1 if status == "estimated" else 0)
+
+
+def _selected_account(provider: ProviderSnapshot) -> CopilotAccountUsage:
+    # max preserves configuration order for ties. Healthy accounts therefore
+    # retain the first enabled account as the default primary.
+    return max(provider.accounts, key=lambda account: _account_priority(provider, account))
+
+
+def _styled_account_value(provider: ProviderSnapshot, account: CopilotAccountUsage,
+                          use_tmux_style: bool) -> str:
+    status = account.effective_status(provider.source_status)
+    level = "estimated" if status == "estimated" else _account_level(provider, account)
+    return _wrap(_account_value(account), level, use_tmux_style, stale=status == "stale")
+
+
+def _account_display_text(value: str) -> str:
+    # Account metadata is plain text, never tmux directives or terminal controls.
+    return "".join(" " if ord(char) < 32 or ord(char) == 127 else char
+                   for char in value).replace("#", "＃")
+
+
+def _copilot_value(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
+    account = _selected_account(provider)
+    value = _styled_account_value(provider, account, use_tmux_style)
+    if len(provider.accounts) == 1:
+        return value
+    status = account.effective_status(provider.source_status)
+    marker = {"unknown": "!", "error": "!", "stale": "~", "estimated": "?"}.get(status, "")
+    return f"{_account_display_text(account.label)}:{value}{marker}"
 
 
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
-    return f"{_provider_label(name, provider)} {_primary_account_value(provider, use_tmux_style)}"
+    label = name
+    if len(provider.accounts) == 1:
+        status = provider.accounts[0].effective_status(provider.source_status)
+        label = _provider_label(name, dataclasses.replace(provider, source_status=status))
+    return f"{label} {_copilot_value(provider, use_tmux_style)}"
+
+
+def format_cockpit_accounts(snapshot: CostSnapshot) -> list[str]:
+    """Full multi-account details; callers must wrap these rows, never clip them."""
+    provider = snapshot.providers.get("cpt")
+    if provider is None or len(provider.accounts) < 2:
+        return []
+    rows = []
+    selected = _selected_account(provider)
+    for account in provider.accounts:
+        status = account.effective_status(provider.source_status)
+        value = _styled_account_value(provider, account, True)
+        label = _account_display_text(account.label)
+        identity = _account_display_text(account.account_id)
+        kind = _account_display_text(account.kind)
+        source = _account_display_text(account.source)
+        count = "--" if account.used_requests is None else str(account.used_requests)
+        allowance = "--" if account.monthly_allowance is None else str(account.monthly_allowance)
+        rows.append(tmux_to_ansi_fg(
+            f"cpt {'*' if account is selected else '-'} {label}: {value} [{status}] "
+            f"id={identity} kind={kind} requests={count} allowance={allowance} source={source}"
+        ))
+    return rows
 
 
 def _format_agy_value(provider: ProviderSnapshot) -> tuple[str, str]:
@@ -249,11 +309,13 @@ def tmux_to_ansi_fg(text: str) -> str:
 
 
 def _format_cockpit_cpt(provider: ProviderSnapshot) -> str:
-    """cockpit 版 cpt 段：只顯示第一個帳號的值（如 haman），標為 ``cpt: N%``，
-    不列帳號名、也不列其餘帳號（如 arc）。無帳號回空字串。"""
+    """Compact selected-account summary; full details appear below the banner."""
     if not provider.accounts:
         return ""
-    return f"cpt: {_primary_account_value(provider, True)}"
+    label = "cpt"
+    if len(provider.accounts) == 1 and provider.accounts[0].effective_status(provider.source_status) == "stale":
+        label += "~"
+    return f"{label}: {_copilot_value(provider, True)}"
 
 
 def _join_cockpit_segments(segments: list[str]) -> str:
@@ -297,7 +359,7 @@ def format_cockpit_rest(snapshot: CostSnapshot) -> str:
 def format_cockpit_footer(snapshot: CostSnapshot) -> str:
     """整條 cockpit cost 列（cdx | cc | cpt），ANSI 前景色、無背景色。
 
-    cdx/cc windows 含 reset 時間；cpt 收斂成單一 ``cpt: N%``（只取主帳號）。
+    cdx/cc windows 含 reset 時間；cpt 多帳號以告警優先選擇摘要。
     """
     cdx = format_cockpit_cdx(snapshot)
     rest = format_cockpit_rest(snapshot)
