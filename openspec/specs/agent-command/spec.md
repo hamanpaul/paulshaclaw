@@ -1,7 +1,7 @@
 # agent-command Specification
 
 ## Purpose
-Operator `/agent` commands (start, startf, stop, status) that manage the claude-gemma4 agent tmux pane via the PaulShiaBro Telegram daemon.
+Operator `/agent` commands (start, startf, attach, detach, stop, status) that manage the control agent tmux pane (claude-gemma4, or an attached existing pane) via the PaulShiaBro Telegram daemon.
 ## Requirements
 ### Requirement: Agent start creates tmux pane and launches claude-gemma4
 The system SHALL create a new tmux pane by horizontally splitting the cockpit pane (`tmux split-window -h`) and execute `claude-gemma4` in the new pane when the operator sends `/agent start`.
@@ -46,6 +46,29 @@ The system SHALL check the tmux process tree for a claude-gemma4 process and rep
 #### Scenario: Agent stopped
 - **WHEN** operator sends `/agent status` and no claude-gemma4 process is detected
 - **THEN** system replies with "stopped"
+
+### Requirement: Agent attach pins an existing agent pane as the control agent
+The system SHALL let the operator pin an existing tmux pane that is already running an agent (e.g. a Claude Code session) as the control agent via `/agent attach %pane`. Non-reply Telegram text MUST then route to the attached pane instead of claude-gemma4 auto-detection. A Telegram reply-to target pane (#34) MUST still take precedence over the attachment. The attachment is held in daemon memory only and MUST be re-issued after the listener restarts.
+
+#### Scenario: Attach a pane running an agent
+- **WHEN** operator sends `/agent attach %160` and pane `%160` exists with a non-shell foreground command
+- **THEN** system records `%160` as the attached pane and replies `agent: attached (running)` with the pane ID
+
+#### Scenario: Refuse to attach a shell or missing pane
+- **WHEN** operator sends `/agent attach %7` and pane `%7` is missing or its foreground command is an idle shell
+- **THEN** system replies with an error and MUST NOT change the attachment, so Telegram text is never typed into a shell
+
+#### Scenario: Attached pane no longer runs an agent
+- **WHEN** non-reply Telegram text arrives and the attached pane is missing or has fallen back to an idle shell
+- **THEN** system MUST NOT send the text and replies with the pane ID and a hint to `/agent attach` another pane or `/agent detach`
+
+#### Scenario: Detach restores auto-detection
+- **WHEN** operator sends `/agent detach`
+- **THEN** system clears the attachment, replies `agent: detached` with the previous pane ID (or `agent: already_detached`), and non-reply text routes via claude-gemma4 auto-detection again
+
+#### Scenario: Status while attached
+- **WHEN** operator sends `/agent status` while a pane is attached
+- **THEN** system reports the attached pane ID and whether it still runs an agent, without process-tree auto-detection
 
 ### Requirement: Agent process detection via process tree scan
 The system SHALL detect claude-gemma4 by scanning tmux pane process trees rather than relying solely on daemon-held state. This MUST allow rediscovery of agent processes after daemon restart.
