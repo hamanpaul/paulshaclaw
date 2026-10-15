@@ -1,0 +1,151 @@
+{
+  "cli": {
+    "measured_at": "2026-10-15T05:27:14.757704+00:00",
+    "observer": "agent",
+    "scope": "real installed CLI, live control-plane snapshot, no TUI interaction or Telegram transport",
+    "human_decision_seconds": null,
+    "commands": {
+      "claw_cli": {
+        "argv": [
+          "psc",
+          "coordinator",
+          "status"
+        ],
+        "elapsed_ms": [
+          205.785,
+          203.75,
+          199.424,
+          189.472,
+          202.863
+        ],
+        "median_ms": 202.863,
+        "snapshot": {
+          "exit": 0,
+          "degraded": false,
+          "updated_at": "2026-10-15T05:26:22.077650+00:00",
+          "counts": {
+            "ready": 0,
+            "held": 0,
+            "in_flight": 0,
+            "attention": 14,
+            "recent_done": 10,
+            "slices": 0,
+            "not_claimable": 2
+          },
+          "attention_with_reason": 14,
+          "attention_with_next_actions": 14
+        },
+        "same_snapshot_all_samples": true
+      },
+      "native_cli": {
+        "argv": [
+          "cortex",
+          "status"
+        ],
+        "elapsed_ms": [
+          206.053,
+          192.521,
+          204.479,
+          206.695,
+          217.545
+        ],
+        "median_ms": 206.053,
+        "snapshot": {
+          "exit": 0,
+          "degraded": false,
+          "updated_at": "2026-10-15T05:26:22.077650+00:00",
+          "counts": {
+            "ready": 0,
+            "held": 0,
+            "in_flight": 0,
+            "attention": 14,
+            "recent_done": 10,
+            "slices": 0,
+            "not_claimable": 2
+          },
+          "attention_with_reason": 14,
+          "attention_with_next_actions": 14
+        },
+        "same_snapshot_all_samples": true
+      }
+    }
+  },
+  "installed_presentation": {
+    "snapshot_updated_at": "2026-10-15T05:30:16.195377+00:00",
+    "snapshot_digest": "164e266761a57124341e64dbba007277c74d3efa9ecdae00948895844c67b59d",
+    "source_candidate": false,
+    "synthetic_snapshot": false,
+    "sdk_read_ms": [
+      0.469,
+      0.371,
+      0.441,
+      0.359,
+      0.349
+    ],
+    "bot_format_ms": [
+      0.014,
+      0.009,
+      0.007,
+      0.006,
+      0.005
+    ],
+    "cockpit_projection_ms": [
+      0.434,
+      0.362,
+      0.304,
+      0.294,
+      0.317
+    ],
+    "bot_chars": 663,
+    "attention_count": 14,
+    "bot_attention_header": false,
+    "bot_reasons_present": 0,
+    "bot_action_sets_present": 0,
+    "bot_hints_present": 0,
+    "cockpit_rows": 26,
+    "cockpit_group_count": 1
+  },
+  "candidate_presentation": {
+    "snapshot_updated_at": "2026-10-15T05:30:16.195377+00:00",
+    "snapshot_digest": "164e266761a57124341e64dbba007277c74d3efa9ecdae00948895844c67b59d",
+    "source_candidate": true,
+    "synthetic_snapshot": false,
+    "sdk_read_ms": [
+      0.399,
+      0.422,
+      0.356,
+      0.309,
+      0.37
+    ],
+    "bot_format_ms": [
+      0.052,
+      0.041,
+      0.034,
+      0.031,
+      0.04
+    ],
+    "cockpit_projection_ms": [
+      0.338,
+      0.241,
+      0.214,
+      0.207,
+      0.219
+    ],
+    "bot_chars": 8443,
+    "attention_count": 14,
+    "bot_attention_header": true,
+    "bot_reasons_present": 14,
+    "bot_action_sets_present": 14,
+    "bot_hints_present": 14,
+    "cockpit_rows": 16,
+    "cockpit_group_count": 1
+  },
+  "method": {
+    "runtime": "installed pipx Python and dependencies; candidate run adds this worktree through PYTHONPATH",
+    "sample_count": 5,
+    "timing": "time.perf_counter, milliseconds; CLI includes process startup, presentation excludes imports",
+    "human_cognition_measured": false,
+    "telegram_transport_measured": false,
+    "terminal_ui_interaction_measured": false
+  }
+}

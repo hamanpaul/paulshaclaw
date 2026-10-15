@@ -300,14 +300,14 @@ def _group_state_key(group: JobGroup) -> str:
     """多 phase 群組的上色依據：有人在等就照 attention 上色，否則跟著領頭 slice。"""
     if group.needs_human:
         return "attention"
-    return "done" if group.is_recent_done_only else group.lead.state
+    return group.lead.state
 
 
 def _row_state_key(row: JobRow) -> str:
     """單一 slice 的上色依據：needs_human 一律當 attention，不管上游原始 state 字串是什麼。"""
     if row.needs_human:
         return "needs_human"
-    return "done" if row.is_recent_done else row.state
+    return row.state
 
 
 def _detail_child(key: str, detail: str) -> JobsNodeSpec:
