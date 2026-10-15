@@ -1,5 +1,7 @@
 # JOBS 執行身份
 
+狀態：deferred。依 2026-10-15 operator 決議，Cortex 正在重構並已改名為 htala；本候選保留 consumer 準備，等待重構後的上游契約，不修補 Cortex、不自行遷移，也不 merge。以下 Cortex pin 僅為既有驗證候選，不代表未來遷移決定。
+
 在 JOBS 工作列按 Enter／Space 或點展開箭頭，即可查看 executor、model、來源、執行狀態、card 與 job。三個分組軸都提供同樣明細；模型名稱完整保留，超寬可水平捲動。角色 persona 與既有 reason／next_actions／run_id 繼續保留。
 
 | 顯示 | 意義 |
@@ -20,4 +22,4 @@ consumer 測試包含三個 status sections、四種身份來源、新舊 schema
 
 2026-10-15 本機驗證：新增回歸先見 12 failed，修正後 focused／alignment 為 69 passed；完整 gate 為 1058 passed、34 subtests passed，僅既有 tarfile deprecation warning。preflight 的 policy、OpenSpec 與完整 tests 全部 PASS。另建 wheel 安裝於隔離 venv，以 `python -I` 確認 consumer 來自 site-packages，再跑同源 fixture、實際 producer 與 Textual 刷新，輸出 `INSTALLED PRODUCER -> INSTALLED CONSUMER PASS`。有界獨立 consumer review 無新 finding。
 
-尚未完成的 producer 驗收：該 SHA 與已核對的 Cortex main `4572f19ddad68e09e8ca23f64c7cb38909c28d66` 仍接受缺 repo 的 job，且 manifest 有 run_id、缺 card 時會忽略明示的 repo／phase 不符。consumer status 缺少完整來源 binding，無法自行補證；這項缺口須由 Cortex 修正並更新 pin 後才可完成端到端結案。服務與共享 runtime 未部署。
+既有 producer 驗收缺口：該 SHA 與已核對的 Cortex main `4572f19ddad68e09e8ca23f64c7cb38909c28d66` 仍接受缺 repo 的 job，且 manifest 有 run_id、缺 card 時會忽略明示的 repo／phase 不符。consumer status 缺少完整來源 binding，無法自行補證。依本輪 operator 決議，後續驗收延後至重構後的上游契約確立，再決定依賴與整合方式；本輪不修補 Cortex。Draft 與 issue 保持開放，服務與共享 runtime 未部署。

@@ -5,7 +5,7 @@ status: accepted
 
 # cockpit 實際 executor/model consumer執行計畫
 
-2026-10-15 consumer 進度：typed ingestion／三軸身份明細與隔離 producer 整合已實作，見 [使用與驗收邊界](../../cockpit-job-identity.md)。上游 merge 候選仍有跨 repo／manifest binding 缺口；保留完整交付 gate，尚未結案或部署。
+2026-10-15 consumer 進度：typed ingestion／三軸身份明細與隔離 producer 整合已實作，見 [使用與驗收邊界](../../cockpit-job-identity.md)。依本輪 operator 決議改為 deferred：Cortex 正在重構並已改名為 htala，本輪不修補 Cortex、不自行遷移；等待重構後上游契約。既有 pin 僅供 consumer 候選驗證，不代表未來遷移決定；Draft 不 merge，issue 保持開放。以下原計畫尚未完成項目隨此決議延後。
 
 ## Tasks
 

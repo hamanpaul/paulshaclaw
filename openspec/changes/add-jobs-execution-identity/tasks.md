@@ -5,4 +5,4 @@
 - [x] 1.3 實作 typed ingestion、身份來源 detail 與缺值 fallback。
 - [x] 1.4 以隔離環境固定 producer SHA，驗 registry→status→consumer 與 headless refresh。
 - [x] 1.5 完成 full suite、preflight、review 與 installed wheel 驗收。
-- [ ] 1.6 修復上游跨 repo／manifest binding 缺口後更新 pin 並重驗；下游結案與 merge 由整合 owner 執行。
+- [ ] 1.6 deferred：依 2026-10-15 operator 決議等待重構後上游契約；本輪不修補 Cortex、不自行遷移。現 pin 僅為 consumer 驗證候選；Draft 不 merge、issue 保持開放。

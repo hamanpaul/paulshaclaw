@@ -11,4 +11,4 @@ JOBS 目前只有角色，operator 看不到 Cortex 記錄的 executor／model�
 ## Impact
 
 影響 Stage 11 JOBS consumer 與 Cortex dependency pin；不修改 Cortex registry 或服務。
-跨 repo 身份綁定仍由 producer 負責；已知上游缺口見本變更 tasks 與整合證據。
+跨 repo 身份綁定仍由 producer 負責。依 2026-10-15 operator 決議，本候選 deferred 等待重構後上游契約；不修補 Cortex、不自行遷移或 merge，現 pin 不代表未來遷移決定。已知上游缺口見本變更 tasks 與整合證據。
