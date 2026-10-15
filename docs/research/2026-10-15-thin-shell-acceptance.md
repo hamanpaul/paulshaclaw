@@ -124,4 +124,4 @@ operator 決定。此次程式的回復路徑是回到前一候選 commit；已�
 若日後部署新 release，使用 release-contract §6 的前版 wheel 回滾，state／secret 仍保留。
 
 本次沒有執行部署、服務重啟、真實 Telegram 發送或操控現有 tmux。已安裝 API 實測、候選
-projection 使用真實 snapshot、合成 lifecycle 回歸與人體操作效益各自標示，互不代替。
+projection 使用真實 snapshot、合成 lifecycle 回歸與人工操作效益各自標示，互不代替。
