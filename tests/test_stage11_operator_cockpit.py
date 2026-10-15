@@ -60,7 +60,7 @@ from paulshaclaw.cockpit.models import JobGroup, JobRow, JobSummary, PaneRecord,
 from paulshaclaw.cockpit.store import CockpitState, choose_startup_slot
 from paulshaclaw.cockpit.tmux import (
     TmuxClient,
-    _minicom_map,
+    _process_maps,
     _minicom_summary,
     derive_summary,
     parse_list_panes,
@@ -698,14 +698,14 @@ class Stage11StateTests(unittest.TestCase):
         completed = subprocess.CompletedProcess(
             args=[], returncode=0,
             stdout=(
-                "pts/9 /usr/bin/minicom -D /dev/pts/8 -C /opt/x/b-log/mini_COM0_x.log\n"
-                "pts/3 -bash\n"
-                "?     /usr/lib/systemd/systemd\n"
-                "pts/5 man minicom\n"
+                "pts/9 100 100 /usr/bin/minicom -D /dev/pts/8 -C /opt/x/b-log/mini_COM0_x.log\n"
+                "pts/3 200 200 -bash\n"
+                "?     300 -1 /usr/lib/systemd/systemd\n"
+                "pts/5 400 400 man minicom\n"
             ),
         )
         with patch("paulshaclaw.cockpit.tmux.subprocess.run", return_value=completed):
-            self.assertEqual(_minicom_map(), {"pts/9": "minicom COM0"})
+            self.assertEqual(_process_maps(), ({"pts/9": "minicom COM0"}, {}))
 
     def test_minicom_summary_returns_none_on_ps_timeout(self) -> None:
         # ps 逾時（TimeoutExpired ⊂ SubprocessError）須 fail-soft 回 None（Min-5）。
@@ -721,7 +721,7 @@ class Stage11StateTests(unittest.TestCase):
 
     def test_derive_summary_prefers_pane_title(self) -> None:
         pane = pane_record("%3", title="Debug thing", command="claude")
-        self.assertEqual(derive_summary(pane), "Debug thing")
+        self.assertEqual(derive_summary(pane), "[claude] Debug thing")
 
     def test_parse_list_panes_reads_pane_tty(self) -> None:
         raw = "%0\tmain\t0\t\tminicom\t0\t0\t120\t40\t1\t/dev/pts/7\n"

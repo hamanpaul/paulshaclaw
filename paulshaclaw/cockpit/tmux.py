@@ -33,6 +33,14 @@ _MINICOM_DEVICE_RE = re.compile(r"-D\s+(\S+)")
 # #{pane_current_command} 回報的是 shell 而非 minicom。這組 shell 名用來判斷
 # 「值得對該 pane 的 tty 探一次 minicom」，把成本鎖在真正可能藏 minicom 的 pane。
 _SHELL_COMMANDS = frozenset({"bash", "sh", "zsh", "dash", "ash", "fish"})
+_AGENT_COMMANDS = frozenset({"claude", "codex", "copilot", "pi", "agy"})
+# Match executable entrypoints, never arbitrary prompt/filename substrings.
+_NODE_AGENT_ENTRYPOINTS = {
+    "@openai/codex/bin/codex.js": "codex",
+    "@github/copilot/index.js": "copilot",
+    "@mariozechner/pi-coding-agent/dist/cli.js": "pi",
+    "@anthropic-ai/claude-code/cli.js": "claude",
+}
 
 
 def parse_list_panes(raw: str) -> tuple[PaneRecord, ...]:
@@ -123,33 +131,61 @@ def _run_ps(argv: list[str]) -> str | None:
     return completed.stdout
 
 
-def _minicom_map() -> dict[str, str]:
-    """One ``ps`` for the whole refresh → ``{bare-tty: "minicom COMx"}``.
+def _agent_from_args(args: str) -> str | None:
+    """Recognize a direct agent executable or a known Node CLI entrypoint."""
+    argv = args.split()
+    if not argv:
+        return None
+    command = Path(argv[0]).name
+    if command in _AGENT_COMMANDS:
+        return command
+    if command not in {"node", "nodejs"} or len(argv) < 2:
+        return None
+    entrypoint = argv[1]
+    if Path(entrypoint).name in _AGENT_COMMANDS:
+        return Path(entrypoint).name
+    for suffix, agent in _NODE_AGENT_ENTRYPOINTS.items():
+        if entrypoint == suffix or entrypoint.endswith("/" + suffix):
+            return agent
+    return None
 
-    Replaces N per-pane ``ps`` calls (one per title-less shell pane) with a single
-    process scan, so a refresh can't fan out into many synchronous forks — nor block
-    the UI for seconds if several ttys are slow. First minicom per tty wins."""
-    stdout = _run_ps(["ps", "-e", "-o", "tty=", "-o", "args="])
+
+def _process_maps() -> tuple[dict[str, str], dict[str, str]]:
+    """One bounded scan supplies minicom labels and foreground agents by tty.
+
+    Agent detection requires a positive foreground process group matching the
+    process's group. Background jobs sharing the tty cannot label an idle shell.
+    Existing minicom detection remains independent of foreground job control."""
+    stdout = _run_ps(["ps", "-e", "-o", "tty=,pgid=,tpgid=,args="])
     if stdout is None:
-        return {}
-    result: dict[str, str] = {}
+        return {}, {}
+    minicom_by_tty: dict[str, str] = {}
+    agent_by_tty: dict[str, str] = {}
     for line in stdout.splitlines():
-        parts = line.split(None, 1)
-        if len(parts) != 2:
+        parts = line.split(None, 3)
+        if len(parts) != 4:
             continue
-        tty_name, args = parts
+        tty_name, pgid, tpgid, args = parts
         if tty_name in ("?", "-"):
             continue
         label = _minicom_label_from_args(args)
-        if label and tty_name not in result:
-            result[tty_name] = label
-    return result
+        if label:
+            minicom_by_tty.setdefault(tty_name, label)
+        try:
+            foreground = int(pgid) == int(tpgid) and int(tpgid) > 0
+        except ValueError:
+            continue
+        if foreground:
+            agent = _agent_from_args(args)
+            if agent:
+                agent_by_tty.setdefault(tty_name, agent)
+    return minicom_by_tty, agent_by_tty
 
 
 def _minicom_summary(tty: str) -> str | None:
     """Per-pane fallback: derive ``minicom COMx`` from the minicom process on ``tty``.
 
-    Prefer :func:`_minicom_map` (one ``ps`` for the whole refresh); this single-tty
+    Prefer :func:`_process_maps` (one ``ps`` for the whole refresh); this single-tty
     probe is the fallback for direct callers that have no precomputed map. Returns
     ``None`` for an empty tty without spawning ``ps``."""
     if not tty:
@@ -172,7 +208,8 @@ def _lookup_minicom(tty: str, minicom_by_tty: dict[str, str] | None) -> str | No
 
 
 def derive_summary(
-    pane: PaneRecord, minicom_by_tty: dict[str, str] | None = None
+    pane: PaneRecord, minicom_by_tty: dict[str, str] | None = None,
+    agent_by_tty: dict[str, str] | None = None,
 ) -> str:
     """A readable work-list label: the title when set, else a command fallback.
 
@@ -180,9 +217,21 @@ def derive_summary(
     reports the pane command as a shell rather than ``minicom``; for title-less shell
     panes we consult the minicom-by-tty map (or a per-pane probe when no map is given)
     so the pane is still labeled by its COM port. Pass ``minicom_by_tty`` — the result
-    of :func:`_minicom_map` — to avoid a per-pane ``ps`` on every refresh."""
+    of :func:`_process_maps` — to avoid a per-pane ``ps`` on every refresh.
+    Foreground agents keep a consistent badge before their title or cwd."""
     title = pane.title.strip()
     host_short = pane.host_short.strip()
+    agent = (agent_by_tty or {}).get(_bare_tty(pane.pane_tty))
+    if not agent and pane.command in _AGENT_COMMANDS:
+        agent = pane.command
+    if agent:
+        badge = f"[{agent}]"
+        detail = title if title and title != host_short else (
+            (Path(pane.pane_current_path).name or "/") if pane.pane_current_path else ""
+        )
+        if detail == badge or detail.startswith(badge + " "):
+            return detail
+        return f"{badge} {detail}" if detail else badge
     if title and title != host_short:
         return title
     if pane.command == "minicom" or pane.command in _SHELL_COMMANDS:
@@ -200,8 +249,8 @@ class TmuxClient:
     def list_panes(self, *, cockpit_pane_id: str) -> tuple[PaneRecord, ...]:
         """List panes with a readable summary per pane.
 
-        三層版面後 refresh 恆為一次 ``list-panes``（外加 title 缺失 minicom pane
-        的小 ``ps``）；cockpit 不再抓任何 pane preview。``cockpit_pane_id`` 保留
+        refresh 恆為一次 ``list-panes`` 加一次共用 ``ps``；cockpit 不抓任何
+        pane preview。``cockpit_pane_id`` 保留
         為 loader 契約參數（呼叫端以 keyword 傳入）。"""
         try:
             completed = subprocess.run(
@@ -214,13 +263,13 @@ class TmuxClient:
             return ()
         panes = parse_list_panes(completed.stdout)
         # One ``ps`` scan for the whole refresh, shared across all panes, so
-        # wrapped-minicom detection can't fan out into a per-pane fork storm.
-        minicom_by_tty = _minicom_map()
+        # agent/minicom detection can't fan out into a per-pane fork storm.
+        minicom_by_tty, agent_by_tty = _process_maps()
         _ = cockpit_pane_id
         return tuple(
             replace(
                 pane,
-                summary=derive_summary(pane, minicom_by_tty),
+                summary=derive_summary(pane, minicom_by_tty, agent_by_tty),
             )
             for pane in panes
         )
