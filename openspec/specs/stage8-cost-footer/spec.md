@@ -229,3 +229,13 @@ footer 與 cockpit SHALL 僅顯示設定中第一個 enabled Copilot 帳號的�
 - **WHEN** the first enabled account retains its previous 80% as stale
 - **THEN** the footer SHALL render `cpt~ 80%` and cockpit SHALL render `cpt~: 80%`
 
+
+### Requirement: Cockpit cost values remain visible across pane widths
+
+Cockpit SHALL retain the full formatted cost text and wrap it to the banner content width. Border and padding SHALL be excluded from the available width. Resizing SHALL preserve every enabled provider's usage and reset values; formatting SHALL NOT truncate data before layout.
+
+#### Scenario: Cost footer exceeds the current pane width
+- **GIVEN** cdx, cc, cpt and agy have usage data whose formatted text exceeds the pane width
+- **WHEN** the cockpit is rendered at 68 or 50 columns, or resized between narrow and wide panes
+- **THEN** all four providers' usage and reset values SHALL remain visible on wrapped lines
+- **THEN** cpt SHALL retain its compact primary-account value without an account label

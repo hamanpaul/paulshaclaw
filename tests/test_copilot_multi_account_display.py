@@ -126,7 +126,7 @@ def test_cockpit_cache_honors_disabled_accounts(monkeypatch, tmp_path):
         CopilotAccountConfig("disabled", "disabled", "company", 300, enabled=False),
     ))
     monkeypatch.setattr(cost_bar, "load_cost_config", lambda: config)
-    assert plain_ansi(cost_bar.cost_line(100)) == "cpt: 20%"
+    assert plain_ansi(cost_bar.cost_line()) == "cpt: 20%"
 
 
 def test_secondary_error_and_estimate_do_not_change_primary_summary():
@@ -158,7 +158,7 @@ def test_cockpit_marks_expired_cached_accounts_stale(monkeypatch, tmp_path):
         CopilotAccountConfig("secondary", "secondary", "company", 300),
     ))
     monkeypatch.setattr(cost_bar, "load_cost_config", lambda: config)
-    assert plain_ansi(cost_bar.cost_line(100)) == "cpt~: 20%"
+    assert plain_ansi(cost_bar.cost_line()) == "cpt~: 20%"
 
 
 def test_expired_estimated_cache_shows_stale_account_markers(monkeypatch, tmp_path):
@@ -171,7 +171,7 @@ def test_expired_estimated_cache_shows_stale_account_markers(monkeypatch, tmp_pa
         CopilotAccountConfig("secondary", "secondary", "company", 300),
     ))
     monkeypatch.setattr(cost_bar, "load_cost_config", lambda: config)
-    assert plain_ansi(cost_bar.cost_line(100)) == "cpt~: 50"
+    assert plain_ansi(cost_bar.cost_line()) == "cpt~: 50"
 
 
 def test_enabling_copilot_without_cached_provider_exposes_unknown_accounts():

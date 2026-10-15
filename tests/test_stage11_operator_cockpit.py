@@ -2306,8 +2306,7 @@ class BannerComposeExtraStatLinesTests(unittest.TestCase):
 
 
 class BannerCostFooterIntegrationTests(unittest.TestCase):
-    """cost footer 自適應版面：banner 寬 >= 62 → 單行延伸滿 banner 寬；< 62 → cdx 併 Net
-    行、cc+cpt 下一行。fail-soft：無資料時 banner 照常。"""
+    """完整 cost footer 由 Textual 自動換行；短列靠右、無資料時 banner 照常。"""
 
     def _app(self) -> CockpitApp:
         return CockpitApp.from_snapshot(
@@ -2320,28 +2319,13 @@ class BannerCostFooterIntegrationTests(unittest.TestCase):
             actions=LayoutActionService(),
         )
 
-    def test_wide_banner_uses_single_full_width_line(self) -> None:
-        from paulshaclaw.cockpit import cost_bar
-
-        app = self._app()
-        with patch.object(app, "_banner_raw_width", return_value=80), patch.object(
-            cost_bar, "cost_line", return_value="SINGLEMARK cc"
-        ) as cline, patch.object(cost_bar, "cost_split") as csplit:
-            rendered = app._brand_banner_renderable()
-        text = rendered.plain if hasattr(rendered, "plain") else str(rendered)
-        self.assertIn("SINGLEMARK", text)
-        csplit.assert_not_called()
-        # 單行以「整個 banner 寬」渲染（cost_line 收到 full banner width 80，非 stat 欄寬）。
-        cline.assert_called_once()
-        self.assertEqual(cline.call_args.args[0], 80)
-
     def test_wide_single_line_is_right_aligned(self) -> None:
         from paulshaclaw.cockpit import cost_bar
 
         app = self._app()
         with patch.object(app, "_banner_raw_width", return_value=80), patch.object(
             cost_bar, "cost_line", return_value="RIGHTCOST"  # 可見 9 字
-        ), patch.object(cost_bar, "cost_split"):
+        ):
             rendered = app._brand_banner_renderable()
         text = rendered.plain if hasattr(rendered, "plain") else str(rendered)
         cost_lines = [line for line in text.split("\n") if "RIGHTCOST" in line]
@@ -2357,27 +2341,10 @@ class BannerCostFooterIntegrationTests(unittest.TestCase):
             app.on_resize(None)  # resize 時立即重排（含右對齊）
         refresh.assert_called_once()
 
-    def test_narrow_banner_splits_cdx_to_net_line(self) -> None:
-        from paulshaclaw.cockpit import cost_bar
-
-        app = self._app()
-        with patch.object(app, "_banner_raw_width", return_value=50), patch.object(
-            cost_bar, "cost_split", return_value=("  | CDXMARK", "RESTMARK")
-        ), patch.object(cost_bar, "cost_line") as cline:
-            rendered = app._brand_banner_renderable()
-        text = rendered.plain if hasattr(rendered, "plain") else str(rendered)
-        net_lines = [line for line in text.split("\n") if "Net" in line]
-        self.assertTrue(net_lines, "banner 應有 Net 行")
-        self.assertIn("CDXMARK", net_lines[0])
-        self.assertTrue(any("RESTMARK" in line for line in text.split("\n")))
-        cline.assert_not_called()
-
     def test_banner_ok_when_cost_unavailable(self) -> None:
         from paulshaclaw.cockpit import cost_bar
 
         app = self._app()
-        with patch.object(cost_bar, "cost_line", return_value=None), patch.object(
-            cost_bar, "cost_split", return_value=(None, None)
-        ):
+        with patch.object(cost_bar, "cost_line", return_value=None):
             rendered = app._brand_banner_renderable()  # 不應 raise
         self.assertIsNotNone(rendered)

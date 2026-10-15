@@ -590,10 +590,6 @@ DOUBLE_CLICK_SECONDS = 0.4
 # 故能用 htop 的 ~1.5s 步調而幾乎不佔資源；就地 update + 固定寬橫條 → Textual 只重繪變動的 cell，不閃。
 SYSMON_INTERVAL_SECONDS = 1.5
 
-# cost footer 版面切換門檻：banner 寬 >= 此值 → 單行延伸滿 banner 寬；否則 cdx 併 Net 行、
-# cc+cpt 另成一列（單行 cost 約 61 字，故需 >= 62 才塞得下整條）。
-_COST_SINGLE_LINE_MIN_WIDTH = 62
-
 
 class CockpitApp(App[None]):
     TITLE = "PaulShiaBro Cockpit"
@@ -719,30 +715,17 @@ class CockpitApp(App[None]):
             stat_lines = sysmon.format_stat_lines(stats, bar_width=self._monitor_bar_width())
         except Exception:
             stat_lines = []
-        # cost footer（Stage 8）自適應版面（唯讀 cache、fail-soft）：
-        #   banner 寬 >= 62 → 單行延伸滿整個 banner 寬（放在 banner 底下、不縮排 stat 欄）；
-        #   < 62         → cdx 併到 Net 那行、cc+cpt 另成一列（窄版兩行解）。
+        # 保留完整 cost 文字，讓 Textual 依內容寬自然換行；寬版仍靠右。
         full_width_cost: str | None = None
         try:
-            full_w = self._banner_raw_width()
-            if full_w >= _COST_SINGLE_LINE_MIN_WIDTH:
-                line = cost_bar.cost_line(full_w)
-                if line:
-                    # 向右對齊：前導補白到貼齊 banner 右緣。pad 依當下 full_w 計算，
-                    # 故每次 render（含 resize，見 on_resize）都重新靠右。
-                    pad = max(0, full_w - len(branding.strip_ansi(line)))
-                    full_width_cost = " " * pad + line
-            else:
-                net_width = len(branding.strip_ansi(stat_lines[-1])) if stat_lines else 0
-                net_suffix, cost_rest = cost_bar.cost_split(self._cost_line_width(), net_width)
-                if net_suffix and stat_lines:
-                    stat_lines[-1] = stat_lines[-1] + net_suffix
-                if cost_rest:
-                    stat_lines = [*stat_lines, cost_rest]
+            line = cost_bar.cost_line()
+            if line:
+                pad = max(0, self._banner_raw_width() - len(branding.strip_ansi(line)))
+                full_width_cost = " " * pad + line
         except Exception:
-            full_width_cost = None
+            pass
         composed = self._compose_banner_stats(banner_lines, stat_lines)
-        # 單行 cost 以整個 banner 寬、向右對齊渲染 → 接在 composed 之後、不受 mascot 欄縮排。
+        # 完整 cost 接在 sysmon 下方，短列靠右，長列自然換行。
         if full_width_cost:
             composed += full_width_cost + "\n"
         try:
@@ -753,10 +736,10 @@ class CockpitApp(App[None]):
             return composed
 
     def _banner_raw_width(self) -> int:
-        """banner pane 的可見寬（brand-banner widget → app → 退回 80）。"""
+        """banner 內容可見寬（扣除 border/padding；未 mount 時 app → 80）。"""
         width = 0
         try:  # 優先用 brand-banner widget 自身寬度（= pane 內容寬）
-            width = int(self.query_one("#brand-banner").size.width)
+            width = int(self.query_one("#brand-banner").content_size.width)
         except Exception:
             pass
         if width <= 0:
@@ -773,10 +756,6 @@ class CockpitApp(App[None]):
         # 每監控列固定開銷：label(3)+space+"["+"]"+space+percent(4) = 11（百分比在 ] 右側）；
         # 再扣 banner 欄+間距。長條內仍疊 used/total（Mem/Swp）。
         return max(4, min(200, self._banner_raw_width() - self._MON_COL - self._MON_GAP - 11))
-
-    def _cost_line_width(self) -> int:
-        """cost footer 可用寬 = banner 寬 - mascot 欄 - 間距（自由格式，無 sysmon 的 11 開銷）。"""
-        return max(4, min(240, self._banner_raw_width() - self._MON_COL - self._MON_GAP))
 
     def _compose_banner_stats(self, banner_lines, stat_lines):
         """把 banner 各列補到固定可見寬後，於右側接上監控列（依可見寬對齊）。
