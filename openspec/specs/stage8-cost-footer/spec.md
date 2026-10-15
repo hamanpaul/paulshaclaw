@@ -29,7 +29,7 @@ Stage 8 SHALL provide a tmux footer status command invocable as `python -m pauls
 - **WHEN** the snapshot contains Codex 5h usage `18` with reset display `15:21`, weekly usage `41` with reset display `3d`, Claude unknown data, and two Copilot accounts `haman=724` and `arc=127`
 - **THEN** the footer MUST include `cdx 5h:18%(15:21) wk:41%(3d)`
 - **THEN** the footer MUST include `cc 5h:-- wk:--`
-- **THEN** the footer MUST include `cpt haman:724` when both accounts are healthy
+- **THEN** the footer MUST include `cpt 724` without account labels
 
 #### Scenario: Stale provider is marked
 
@@ -69,37 +69,6 @@ Stage 8 SHALL load Copilot accounts from configuration. Runtime behavior MUST su
 
 - **WHEN** one enabled account has usage `724`
 - **THEN** the footer MUST render `cpt 724` and cockpit summary MUST render `cpt: 724`
-
-### Requirement: Alert-first multi-account presentation
-
-多帳號 SHALL 採告警優先摘要與 cockpit 完整明細。設定中第一個 `enabled: true` 帳號（收集後的 `accounts[0]`）SHALL 是預設主帳號；這個順序不是主備切換、最近使用紀錄或 workspace binding。系統 MUST NOT 根據目前目錄推斷帳號，也 MUST NOT 在資料來源沒有帳號識別時把同一數值分配給不同帳號。
-
-footer 與 cockpit 摘要 SHALL 依下列優先序選出一個帳號：`unknown/error`（無法監測）> `stale`（保留舊值）> `critical`（>=85%）> `warning`（>=70%）> `estimated`（本機觀測）> healthy。同一層級 SHALL 保留設定順序；即使雙危為 85% 與 99%，仍選先設定的帳號。百分比不存在但請求數及 allowance 可用時 SHALL 依比例判斷告警；unlimited SHALL 不產生額度告警。沒有抓到的值 MUST 是 `--`，不得視為 0。
-
-多帳號 footer SHALL 顯示所選 label 與值（例如 `cpt company:95%`），並以 `!` 標示 unknown/error、`~` 標示 stale、`?` 標示 estimated。單一 stale 帳號仍 SHALL 保留 footer `cpt~` 與 cockpit `cpt~:` 文字標記，避免窄化或停用其他帳號後丟失告警。每個帳號的 `source_status` SHALL 獨立保存與 cache roundtrip；舊 cache 缺少此欄位時 SHALL 依資料可用性、來源與 provider 狀態推斷。部分帳號失敗時 SHALL 只依同一 account id 保留該帳號前值並標 stale，保留當前設定的順序/label/allowance，MUST NOT 復活已停用或刪除帳號。下次成功收集 SHALL 清除該帳號 stale。
-
-cockpit SHALL 於摘要下方按設定順序展開所有 enabled 帳號完整明細（label、id、kind、值、source_status、requests、allowance、source），以 `*` 指出被摘要選中的帳號；明細 SHALL 換行而不依 footer 寬度截斷。讀取過期 cache SHALL 標 stale，讀取 MUST 保持唯讀且不得發出網路請求。設定重排或停用 SHALL 立即套用到 cached 呈現，新啟用但尚無 cache 的帳號 SHALL 顯示 unknown。
-
-此契約 MAY 由後續 provider 重用，但 AGY 現有 `/usage` 只代表目前登入帳號且沒有帳號識別，因此目前仍只呈現第一個 enabled 的 active account；MUST NOT 宣稱已收集其他 AGY 帳號的配額。
-
-#### Scenario: Secondary critical account is visible
-
-- **WHEN** primary is 20% and secondary is 95%
-- **THEN** the footer SHALL render `cpt secondary:95%`
-- **THEN** cockpit details SHALL include both accounts and mark secondary selected
-
-#### Scenario: Secondary unavailable or stale outranks quota alerts
-
-- **WHEN** primary is 95% and secondary has no usable value
-- **THEN** the footer SHALL render `cpt secondary:--!`
-- **WHEN** the secondary's previous value is retained at 80%
-- **THEN** the footer SHALL render `cpt secondary:80%~` and cockpit SHALL show its stale status
-
-#### Scenario: Configuration order breaks equal alerts
-
-- **WHEN** the first enabled account is 85% and the second is 99%
-- **THEN** the footer SHALL select the first account
-- **THEN** cockpit SHALL retain both values in configuration order
 
 ### Requirement: Copilot online usage source priority
 
@@ -230,4 +199,33 @@ Stage 8 SHALL 將本地觀測（local_observed）的 premium-request 與 AIU 用
 
 - **WHEN** 設定檔無 `kind: company` 帳號，且本地觀測 AIU > 0
 - **THEN** 該 AIU SHALL 不被歸屬到任何帳號（略過，不報錯）
+
+### Requirement: Compact primary-account presentation
+
+footer 與 cockpit SHALL 僅顯示設定中第一個 enabled Copilot 帳號的已用用量，不顯示帳號名、id、類型或逐帳號明細。第一個 enabled 的順序 SHALL 由設定決定，不以帳號名稱寫死，不依次帳號告警、工作目錄或最近使用切換。其他啟用帳號 SHALL 繼續收集並保留在 snapshot JSON。
+
+主帳號缺資料 SHALL 顯示 `--`，不得以 0 或其他帳號用量代替；主帳號 stale SHALL 保留 `cpt~` 標記及既有 stale 樣式。次帳號狀態 MUST NOT 影響摘要選擇或標記。讀取 cache SHALL 保持唯讀，不發出網路請求。
+
+逐帳號 source_status 與 cache roundtrip SHALL 繼續保存；部分失敗 SHALL 只按同一 account id 回填舊值並標 stale，成功帳號保持 fresh，停用或刪除帳號不得復活。設定重排 SHALL 決定新的主帳號。AGY 的既有單一 active account 行為不變。
+
+#### Scenario: Secondary unknown does not replace primary
+
+- **WHEN** the first enabled account is 87% and a secondary account is unknown
+- **THEN** the footer SHALL render `cpt 87%` and cockpit SHALL render `cpt: 87%`
+- **THEN** no account labels or account detail rows SHALL appear in the cockpit banner
+
+#### Scenario: Secondary critical does not replace primary
+
+- **WHEN** the first enabled account is 20% and the secondary is 99%
+- **THEN** the footer SHALL render `cpt 20%`
+
+#### Scenario: Primary unavailable does not borrow secondary
+
+- **WHEN** the first enabled account has no usable value and the secondary is 99%
+- **THEN** the footer SHALL render `cpt --` and cockpit SHALL render `cpt: --`
+
+#### Scenario: Primary stale remains explicit
+
+- **WHEN** the first enabled account retains its previous 80% as stale
+- **THEN** the footer SHALL render `cpt~ 80%` and cockpit SHALL render `cpt~: 80%`
 

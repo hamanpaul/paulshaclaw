@@ -27,22 +27,22 @@ def plain_ansi(text):
 
 
 @pytest.mark.parametrize("first,second,want", [
-    (20, 69, "cpt primary:20% "),
-    (20, 70, "cpt secondary:70% "),
-    (70, 85, "cpt secondary:85% "),
-    (85, 99, "cpt primary:85% "),  # equal alert class retains config order
+    (20, 69, "cpt 20% "),
+    (20, 70, "cpt 20% "),
+    (70, 85, "cpt 70% "),
+    (85, 99, "cpt 85% "),  # equal alert class retains config order
 ])
-def test_footer_selects_worst_alert_then_config_order(first, second, want):
+def test_footer_always_uses_configured_primary(first, second, want):
     assert format_footer(snapshot(account("primary", first), account("secondary", second)),
                          use_tmux_style=False) == want
 
 
-def test_unknown_secondary_is_visible_even_when_primary_is_critical():
+def test_unknown_secondary_does_not_hide_critical_primary():
     snap = snapshot(account("primary", 95), account("secondary", source="unknown"))
-    assert format_footer(snap, use_tmux_style=False) == "cpt secondary:--! "
+    assert format_footer(snap, use_tmux_style=False) == "cpt 95% "
 
 
-def test_partial_refresh_carries_only_failed_account_and_exposes_stale():
+def test_partial_refresh_preserves_secondary_stale_without_replacing_primary():
     old = snapshot(account("primary", 10), account("secondary", 80))
     new = snapshot(account("primary", 20), account("secondary", source="unknown"))
     providers = carry_forward_degraded(new.providers, old.providers)
@@ -50,8 +50,8 @@ def test_partial_refresh_carries_only_failed_account_and_exposes_stale():
     assert providers["cpt"].accounts[0].percent_used == 20
     assert providers["cpt"].accounts[1].percent_used == 80
     assert providers["cpt"].accounts[1].source_status == "stale"
-    assert format_footer(result, use_tmux_style=False) == "cpt secondary:80%~ "
-    assert "bg=colour22" in format_footer(result)
+    assert format_footer(result, use_tmux_style=False) == "cpt 20% "
+    assert "bg=colour22" not in format_footer(result)
 
 
 def test_carry_forward_never_resurrects_disabled_or_removed_accounts():
@@ -72,7 +72,7 @@ def test_account_status_survives_cache_and_recovers_after_fresh_fetch(tmp_path):
     assert loaded.providers["cpt"].accounts[1].source_status == "stale"
     fresh = snapshot(account("primary", 22), account("secondary", 30))
     recovered = replace(fresh, providers=carry_forward_degraded(fresh.providers, loaded.providers))
-    assert format_footer(recovered, use_tmux_style=False) == "cpt primary:22% "
+    assert format_footer(recovered, use_tmux_style=False) == "cpt 22% "
 
 
 def test_collector_keeps_per_account_status_and_enabled_order():
@@ -90,21 +90,6 @@ def test_collector_keeps_per_account_status_and_enabled_order():
         ("first", "fresh"), ("second", "unknown")]
 
 
-def test_cockpit_multiline_details_include_every_account_without_clipping(monkeypatch):
-    from paulshaclaw.cockpit import cost_bar
-    from paulshaclaw.cockpit.app import CockpitApp
-    snap = snapshot(account("primary", 20), account("secondary", source="unknown"))
-    monkeypatch.setattr(cost_bar, "read_snapshot", lambda: snap)
-    app = CockpitApp.from_snapshot(panes=(), cockpit_pane_id="%0",
-                                   cockpit_session_name="test", jobs_by_pane={}, actions=None)
-    rendered = app._brand_banner_renderable()
-    text = rendered.plain if hasattr(rendered, "plain") else plain_ansi(rendered)
-    assert "primary: 20% [fresh]" in text
-    assert "secondary: -- [unknown]" in text
-    assert "source=github_copilot_quota" in text
-    assert "allowance=300" in text
-
-
 def test_single_account_display_stays_compatible():
     snap = snapshot(account("primary", 20))
     assert format_footer(snap, use_tmux_style=False) == "cpt 20% "
@@ -119,7 +104,7 @@ def test_current_config_order_and_labels_control_cached_primary():
         CopilotAccountConfig("old", "old", "personal", 300),
     ))
     filtered = _filter_snapshot_by_enabled(cached, config)
-    assert format_footer(filtered, use_tmux_style=False) == "cpt renamed:40% "
+    assert format_footer(filtered, use_tmux_style=False) == "cpt 40% "
 
 
 def test_newly_enabled_account_is_unknown_until_first_collection():
@@ -129,7 +114,7 @@ def test_newly_enabled_account_is_unknown_until_first_collection():
         CopilotAccountConfig("new", "new", "company", 300),
     ))
     filtered = _filter_snapshot_by_enabled(snapshot(account("primary", 20)), config)
-    assert format_footer(filtered, use_tmux_style=False) == "cpt new:--! "
+    assert format_footer(filtered, use_tmux_style=False) == "cpt 20% "
 
 
 def test_cockpit_cache_honors_disabled_accounts(monkeypatch, tmp_path):
@@ -142,19 +127,18 @@ def test_cockpit_cache_honors_disabled_accounts(monkeypatch, tmp_path):
     ))
     monkeypatch.setattr(cost_bar, "load_cost_config", lambda: config)
     assert plain_ansi(cost_bar.cost_line(100)) == "cpt: 20%"
-    assert cost_bar.account_lines() == []
 
 
-def test_error_secondary_and_estimated_secondary_have_explicit_markers():
+def test_secondary_error_and_estimate_do_not_change_primary_summary():
     error = account("secondary", source="unknown", source_status="error")
-    assert format_footer(snapshot(account("primary", 95), error), use_tmux_style=False) == "cpt secondary:--! "
+    assert format_footer(snapshot(account("primary", 95), error), use_tmux_style=False) == "cpt 95% "
     estimated = replace(account("secondary", source="local_observed", source_status="estimated"), used_requests=50)
-    assert format_footer(snapshot(account("primary", 20), estimated), use_tmux_style=False) == "cpt secondary:50? "
+    assert format_footer(snapshot(account("primary", 20), estimated), use_tmux_style=False) == "cpt 20% "
 
 
 def test_unlimited_secondary_does_not_override_healthy_primary():
     assert format_footer(snapshot(account("primary", 20), account("secondary", unlimited=True)),
-                         use_tmux_style=False) == "cpt primary:20% "
+                         use_tmux_style=False) == "cpt 20% "
 
 
 def test_label_control_text_cannot_inject_tmux_style_or_a_second_line():
@@ -162,7 +146,7 @@ def test_label_control_text_cannot_inject_tmux_style_or_a_second_line():
     line = format_footer(snapshot(account("primary", 20), account(bad_label, 95)), use_tmux_style=False)
     assert "#[" not in line
     assert "\n" not in line
-    assert "95%" in line
+    assert line == "cpt 20% "
 
 
 def test_cockpit_marks_expired_cached_accounts_stale(monkeypatch, tmp_path):
@@ -174,7 +158,7 @@ def test_cockpit_marks_expired_cached_accounts_stale(monkeypatch, tmp_path):
         CopilotAccountConfig("secondary", "secondary", "company", 300),
     ))
     monkeypatch.setattr(cost_bar, "load_cost_config", lambda: config)
-    assert "[stale]" in plain_ansi(cost_bar.account_lines()[1])
+    assert plain_ansi(cost_bar.cost_line(100)) == "cpt~: 20%"
 
 
 def test_expired_estimated_cache_shows_stale_account_markers(monkeypatch, tmp_path):
@@ -187,8 +171,7 @@ def test_expired_estimated_cache_shows_stale_account_markers(monkeypatch, tmp_pa
         CopilotAccountConfig("secondary", "secondary", "company", 300),
     ))
     monkeypatch.setattr(cost_bar, "load_cost_config", lambda: config)
-    assert "[stale]" in plain_ansi(cost_bar.account_lines()[1])
-    assert plain_ansi(cost_bar.cost_line(100)) == "cpt: primary:50~"
+    assert plain_ansi(cost_bar.cost_line(100)) == "cpt~: 50"
 
 
 def test_enabling_copilot_without_cached_provider_exposes_unknown_accounts():
@@ -198,7 +181,7 @@ def test_enabling_copilot_without_cached_provider_exposes_unknown_accounts():
         CopilotAccountConfig("secondary", "secondary", "company", 300),
     ))
     filtered = _filter_snapshot_by_enabled(replace(snapshot(), providers={}), config)
-    assert format_footer(filtered, use_tmux_style=False) == "cpt primary:--! "
+    assert format_footer(filtered, use_tmux_style=False) == "cpt -- "
     assert len(filtered.providers["cpt"].accounts) == 2
 
 
@@ -212,15 +195,3 @@ def test_disabling_fresh_account_keeps_remaining_single_account_stale_marker():
     filtered = _filter_snapshot_by_enabled(cached, config)
     assert format_footer(filtered, use_tmux_style=False) == "cpt~ 80% "
     assert plain_ansi(format_cockpit_footer(filtered)) == "cpt~: 80%"
-
-
-@pytest.mark.parametrize("field", ["kind", "source"])
-def test_cockpit_detail_metadata_cannot_inject_styles_or_lines(field):
-    from paulshaclaw.cost.formatter import format_cockpit_accounts
-    secondary = replace(account("secondary", 30), **{field: "value#[fg=red]\nINJECT\x1b[31m"})
-    rows = format_cockpit_accounts(snapshot(account("primary", 20), secondary))
-    assert len(rows) == 2
-    assert "\n" not in rows[1]
-    assert "\x1b[38;5;1m" not in rows[1]  # injected tmux red
-    assert "\x1b[31m" not in rows[1]  # injected terminal red
-    assert f"{field}=value＃[fg=red] INJECT [31m" in rows[1]

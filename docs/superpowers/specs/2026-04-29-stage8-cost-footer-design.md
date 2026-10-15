@@ -140,14 +140,13 @@ Runtime rules:
 
 - `accounts: []`: omit the `cpt` footer segment.
 - One account: `cpt 724`; cockpit `cpt: 724`。
-- Multiple accounts: alert-first footer，完整規格見 [Stage 8 multi-account contract](../../../openspec/specs/stage8-cost-footer/spec.md)。第一個 enabled 是固定預設主帳號，沒有 workspace binding 或自動登入切換。
-- 選擇順序：unknown/error > stale > critical（>=85%）> warning（>=70%）> estimated > healthy；同級採設定順序，footer 顯示所選 label（如 `cpt arc:95%`），`!`/`~`/`?` 分別表示 unavailable/stale/estimated。
-- Cockpit 摘要下方完整展開所有帳號，保留 id、kind、usage、allowance、source 與每帳號 source_status，`*` 指出選中帳號；明細允許換行，避免窄版面再次隱藏次要帳號。
+- Multiple accounts: 僅顯示第一個 enabled 帳號的已用用量，footer `cpt 87%`、cockpit `cpt: 87%`；不顯示 label 或帳號明細。次帳號告警不得取代主帳號。
+- 主帳號無值顯示 `--`，不得借用次帳號；主帳號 stale 保留 `cpt~`。其他帳號的狀態不影響摘要標記。
 - Partial refresh 只按 account id 保留失敗帳號的舊值並標 stale；成功帳號維持 fresh，已停用/刪除帳號不復活。舊 cache 可缺少 per-account source_status；新 cache 明確保存它。
 - AGY 的單一登入 `/usage` 沒有帳號識別，既有 active-account 限制保持；不能把相同資料偽裝成多帳號配額。
-- `label` is the footer label; `id` is the provider account identifier.
+- `label` 與 `id` 保留在設定與 snapshot JSON，不顯示於 cpt 摘要。
 - `monthly_allowance` is used only for color threshold calculation and is not shown in footer.
-- If the operator sees `ha` / `haman` / `arc`, that text comes from `cost.providers.copilot.accounts[].label`.
+- 完整帳號資料由 snapshot JSON 檢視；cockpit banner 不展開。
 
 ## 5. Provider Adapters
 
@@ -239,13 +238,13 @@ Implementation must use session-local options and avoid global `-g`. If an exist
 Normal format:
 
 ```text
-cdx 5h:18%(15:21) wk:41%(3d)  cc 5h:-- wk:--  cpt haman:724 arc:127
+cdx 5h:18%(15:21) wk:41%(3d)  cc 5h:-- wk:--  cpt 724
 ```
 
 Stale / narrow example:
 
 ```text
-cdx~ 5h:18%(15:21) wk:41%(3d)  cpt haman:724
+cdx~ 5h:18%(15:21) wk:41%(3d)  cpt 724
 ```
 
 Rules:

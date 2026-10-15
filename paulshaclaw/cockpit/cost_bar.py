@@ -14,7 +14,6 @@ from paulshaclaw.cost.cache import SnapshotCache
 from paulshaclaw.cost.config import load_cost_config
 from paulshaclaw.cost.formatter import (
     format_cockpit_cdx,
-    format_cockpit_accounts,
     format_cockpit_footer,
     format_cockpit_rest,
 )
@@ -96,12 +95,3 @@ def cost_split(cost_width: int, net_width: int) -> tuple[str | None, str | None]
             net_suffix = _ansi_clip(f"  {_SEP_ANSI} {cdx}", budget)
     rest_line = _ansi_clip(rest, cost_width) if rest.strip() else None
     return (net_suffix, rest_line)
-
-
-def account_lines() -> list[str]:
-    """Return complete account rows for the wrapping banner, without network I/O."""
-    try:
-        snapshot = read_snapshot()
-        return format_cockpit_accounts(snapshot) if snapshot is not None else []
-    except Exception:
-        return []

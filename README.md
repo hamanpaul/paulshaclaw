@@ -339,12 +339,11 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
 - JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。 例外：宿主沒有 PyYAML（無法讀 yaml、拿不到 account_id）的降級路徑只能以 `--footer` 給的 label 當 key（裸 `agy` 仍回 bool）。
 
-##### Copilot 多帳號呈現
+##### Copilot 用量呈現
 
-- 第一個 enabled 帳號是預設主帳號；沒有依工作區或最近使用自動切換。多帳號 footer 顯示所選 label，例如 `cpt personal:20%`。
-- 次要帳號告警會浮現：unknown/error > stale > critical（>=85%）> warning（>=70%）> estimated > healthy；同級依設定順序。`!` 表示無法監測（`--` 不是 0），`~` 表示保留舊值，`?` 表示估計。
-- cockpit 摘要下方按設定順序展開每帳號的 id、類型、用量、額度、來源及獨立狀態，`*` 標示摘要選中帳號。明細會換行，不因 footer 寬度被裁切；單帳號維持原本精簡外觀。
-- 任一帳號收集失敗，只保留該 account id 的舊值並標 stale；其他成功帳號仍是 fresh。停用、改 label 或重排設定會立即反映到 cache 呈現。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
+- footer 只顯示設定中第一個 enabled 帳號的已用用量，例如 `cpt 87%`；cockpit 顯示 `cpt: 87%`。不顯示帳號名、不展開帳號明細。
+- 次帳號的 unknown、stale 或高用量不會取代主帳號。主帳號缺資料顯示 `--`，不借用其他帳號數值；主帳號 stale 仍保留 `cpt~` 標記。
+- 其餘啟用帳號仍收集並保留於 snapshot JSON；逐帳號 cache 與停用／排序設定沿用。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
 
 ##### agy 用量來源
 

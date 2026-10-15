@@ -123,25 +123,6 @@ def _account_value(account: CopilotAccountUsage) -> str:
     return _abbrev_count(account.used_requests)
 
 
-def _account_priority(provider: ProviderSnapshot, account: CopilotAccountUsage) -> int:
-    status = account.effective_status(provider.source_status)
-    if status in {"error", "unknown"}:
-        return 5
-    if status == "stale":
-        return 4
-    percent = account.percent_used
-    if percent is None and account.used_requests is not None and account.monthly_allowance:
-        percent = int(account.used_requests / account.monthly_allowance * 100)
-    level = "low" if account.unlimited else classify_usage(percent)
-    return {"critical": 3, "warning": 2}.get(level, 1 if status == "estimated" else 0)
-
-
-def _selected_account(provider: ProviderSnapshot) -> CopilotAccountUsage:
-    # max preserves configuration order for ties. Healthy accounts therefore
-    # retain the first enabled account as the default primary.
-    return max(provider.accounts, key=lambda account: _account_priority(provider, account))
-
-
 def _styled_account_value(provider: ProviderSnapshot, account: CopilotAccountUsage,
                           use_tmux_style: bool) -> str:
     status = account.effective_status(provider.source_status)
@@ -149,51 +130,16 @@ def _styled_account_value(provider: ProviderSnapshot, account: CopilotAccountUsa
     return _wrap(_account_value(account), level, use_tmux_style, stale=status == "stale")
 
 
-def _account_display_text(value: str) -> str:
-    # Account metadata is plain text, never tmux directives or terminal controls.
-    return "".join(" " if ord(char) < 32 or ord(char) == 127 else char
-                   for char in value).replace("#", "＃")
-
-
 def _copilot_value(provider: ProviderSnapshot, use_tmux_style: bool) -> str:
-    account = _selected_account(provider)
-    value = _styled_account_value(provider, account, use_tmux_style)
-    if len(provider.accounts) == 1:
-        return value
-    status = account.effective_status(provider.source_status)
-    marker = {"unknown": "!", "error": "!", "stale": "~", "estimated": "?"}.get(status, "")
-    return f"{_account_display_text(account.label)}:{value}{marker}"
+    return _styled_account_value(provider, provider.accounts[0], use_tmux_style)
 
 
 def _format_copilot_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
-    label = name
-    if len(provider.accounts) == 1:
-        status = provider.accounts[0].effective_status(provider.source_status)
-        label = _provider_label(name, dataclasses.replace(provider, source_status=status))
-    return f"{label} {_copilot_value(provider, use_tmux_style)}"
-
-
-def format_cockpit_accounts(snapshot: CostSnapshot) -> list[str]:
-    """Full multi-account details; callers must wrap these rows, never clip them."""
-    provider = snapshot.providers.get("cpt")
-    if provider is None or len(provider.accounts) < 2:
-        return []
-    rows = []
-    selected = _selected_account(provider)
-    for account in provider.accounts:
-        status = account.effective_status(provider.source_status)
-        value = _styled_account_value(provider, account, True)
-        label = _account_display_text(account.label)
-        identity = _account_display_text(account.account_id)
-        kind = _account_display_text(account.kind)
-        source = _account_display_text(account.source)
-        count = "--" if account.used_requests is None else str(account.used_requests)
-        allowance = "--" if account.monthly_allowance is None else str(account.monthly_allowance)
-        rows.append(tmux_to_ansi_fg(
-            f"cpt {'*' if account is selected else '-'} {label}: {value} [{status}] "
-            f"id={identity} kind={kind} requests={count} allowance={allowance} source={source}"
-        ))
-    return rows
+    primary = provider.accounts[0]
+    primary_provider = dataclasses.replace(
+        provider, accounts=(primary,), source_status=primary.effective_status(provider.source_status)
+    )
+    return f"{_provider_label(name, primary_provider)} {_copilot_value(primary_provider, use_tmux_style)}"
 
 
 def _format_agy_value(provider: ProviderSnapshot) -> tuple[str, str]:
@@ -309,11 +255,11 @@ def tmux_to_ansi_fg(text: str) -> str:
 
 
 def _format_cockpit_cpt(provider: ProviderSnapshot) -> str:
-    """Compact selected-account summary; full details appear below the banner."""
+    """Render only the first enabled account, without an account label."""
     if not provider.accounts:
         return ""
     label = "cpt"
-    if len(provider.accounts) == 1 and provider.accounts[0].effective_status(provider.source_status) == "stale":
+    if provider.accounts[0].effective_status(provider.source_status) == "stale":
         label += "~"
     return f"{label}: {_copilot_value(provider, True)}"
 
