@@ -133,6 +133,8 @@ flowchart TB
 - **Developer 開發安裝**：clone repo 後 editable install，含可跑測試的完整 runtime（見 §B）。
 
 完整 release 契約（版本來源一致性、前置 gate、失敗重跑、撤回規則、distribution strategy 裁決）見 [`docs/release-contract.md`](./docs/release-contract.md)。
+安裝後的 entrypoint／import origin／唯讀 control API 查核以該文件 §6.1 為準；
+[薄操作層驗收紀錄](./docs/research/2026-10-15-thin-shell-acceptance.md) 區分已安裝版本、候選程式與實測限制。
 
 ### A. 從 release artifact 安裝（end-user 生產安裝）
 
@@ -177,7 +179,8 @@ step 4 的 `pip install` **非零就停**，不要往下走：先 `ls ~/.venv-pa
 ```bash
 sudo apt install pipx git && pipx ensurepath        # pipx 本身；ensurepath 後開新 shell 才看得到 ~/.local/bin
 pipx install paulshaclaw-X.Y.Z-py3-none-any.whl   # 之後任何目錄直接打 paulshaclaw / psc
-pipx upgrade paulshaclaw                            # 升級改裝新 wheel 時：pipx install --force <新 wheel>
+# 更新時先下載並驗證新 release wheel，再明確替換：
+pipx install --force paulshaclaw-X.Y.Z-py3-none-any.whl
 ```
 
 pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`，與上面手動 venv 流程等價；兩者擇一即可。`pipx install` 非零同樣先看 stderr 有無 `Cannot find command 'git'`。
@@ -185,6 +188,8 @@ pipx 會自建隔離 venv 並把 `paulshaclaw`／`psc` 露出到 `~/.local/bin`�
 #### 正式啟動（`paulshaclaw` 指令，#288）
 
 裝好 wheel 後，operator shell 的**正式啟動路徑**是 `paulshaclaw` console script——不需要 clone repo：
+下例使用手動 venv；若選 pipx，將 `~/.venv-paulshaclaw/bin/paulshaclaw` 改成 PATH 上的
+`paulshaclaw`，並先依 release-contract §6.1 核對其實際入口，勿混用兩份安裝。
 
 ```bash
 # tmux 內啟動（含 cockpit TUI）

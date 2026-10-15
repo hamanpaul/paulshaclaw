@@ -375,7 +375,17 @@ class TelegramListener:
     def _safe_send(self, *, chat_id: int, text: str) -> None:
         logger.info("OUT chat=%d text=%r", chat_id, OUTBOUND_LOG_REDACTOR.redact(text).text)
         try:
-            self.client.send_message(chat_id=chat_id, text=text)
+            # sendMessage is plain text (no parse_mode/entities). Bound UTF-16
+            # units conservatively, keeping every Unicode code point intact.
+            start = units = 0
+            for index, character in enumerate(text):
+                size = 2 if ord(character) > 0xFFFF else 1
+                if units + size > 4000:
+                    self.client.send_message(chat_id=chat_id, text=text[start:index])
+                    start, units = index, 0
+                units += size
+            if start < len(text):
+                self.client.send_message(chat_id=chat_id, text=text[start:])
         except TelegramApiError as error:
             logger.error("SEND_ERROR chat=%d error=%s", chat_id, error)
 

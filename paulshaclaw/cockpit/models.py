@@ -149,6 +149,8 @@ class JobRow:
     phase: str = ""
     run_id: str = ""
     kind: str = ""
+    # Lifecycle and gate outcome are independent upstream facts.
+    run_status: str = ""
 
     @property
     def project(self) -> str:
@@ -196,14 +198,19 @@ class JobRow:
     @property
     def display_state(self) -> str:
         """畫面上的狀態字面：recent_done 不外漏上游內部 token。"""
-        if self.needs_human:
+        if self.needs_human and not self.is_recent_done:
             return self.human_state
         if self.is_recent_done:
-            return (
-                "已完成"
-                if self.state.strip().lower() in _RECENT_DONE_COMPLETED_STATES
-                else "已結束"
-            )
+            state = self.state.strip().lower()
+            if self.needs_human:
+                label = self.human_state
+            elif state in _RECENT_DONE_COMPLETED_STATES:
+                label = "已完成"
+            elif state in {"unknown", "failed", "error", "blocked", "submitted", "running"}:
+                label = state
+            else:
+                label = "已結束"
+            return f"archived · {label}" if self.run_status == "archived" else label
         return self.state
 
     @property

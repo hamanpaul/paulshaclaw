@@ -512,6 +512,7 @@ class PaulShiaBroDaemon:
         held = list(status.get("held", []))
         in_flight = list(status.get("in_flight", []))
         recent_done = list(status.get("recent_done", []))
+        attention = list(status.get("attention", []))
         lines = [
             "manager status",
             f"updated_at: {status.get('updated_at') or '--'}",
@@ -519,6 +520,7 @@ class PaulShiaBroDaemon:
             f"ready({len(ready)}): {', '.join(str(item) for item in ready) if ready else '--'}",
             f"held({len(held)}): {self._format_manager_held_items(held)}",
             f"in_flight({len(in_flight)}): {self._format_manager_items(in_flight, state_key='state')}",
+            f"attention({len(attention)}): {self._format_manager_items(attention, state_key='job_state')}",
             f"recent_done({len(recent_done)}): {self._format_manager_items(recent_done, state_key='gate_status')}",
         ]
         if status.get("degraded"):
@@ -530,8 +532,36 @@ class PaulShiaBroDaemon:
         for item in items:
             if not isinstance(item, dict):
                 continue
-            rendered.append(f"{item.get('slice_id', '--')}({item.get(state_key, '--')})")
+            identity = self._manager_text(item, "slice_id", "work_id", "run_id")
+            state = self._manager_text(item, state_key, "gate_state", "slice_state", "state")
+            text = f"{identity}({state})"
+            run_status = self._manager_text(item, "run_status")
+            if run_status != "unknown":
+                text += f" run_status={run_status}"
+            blocking = item.get("blocking_reason")
+            reason = self._manager_text(blocking, "detail", "reason") if isinstance(blocking, dict) else "unknown"
+            if reason == "unknown":
+                reason = self._manager_text(item, "reason", "gate_reason")
+            if reason != "unknown" or state in {"failed", "error", "blocked", "needs_human"}:
+                text += f" reason={reason}"
+            actions = item.get("next_actions")
+            if isinstance(actions, list):
+                choices = [action for action in actions if isinstance(action, str) and action]
+                if choices:
+                    text += f" next_actions={'|'.join(choices)}"
+            hint = self._manager_text(item, "next_step_hint")
+            if hint != "unknown":
+                text += f" next_step_hint={hint}"
+            rendered.append(text)
         return ", ".join(rendered) if rendered else "--"
+
+    @staticmethod
+    def _manager_text(item: dict[str, object], *keys: str) -> str:
+        for key in keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return "unknown"
 
     def _format_manager_held_items(self, items: list[object]) -> str:
         rendered: list[str] = []
@@ -546,9 +576,9 @@ class PaulShiaBroDaemon:
     def _format_manager_tick_result(self, req_id: str, done: dict[str, object] | None) -> str:
         if done is None:
             return "queued, check /manager status"
-        status = str(done.get("status", "unknown"))
+        status = self._manager_text(done, "status")
         if status == "error":
-            return f"manager tick: error\nreq_id: {req_id}\nerror: {done.get('error') or '--'}"
+            return f"manager tick: error\nreq_id: {req_id}\nerror: {self._manager_text(done, 'error')}"
 
         result = done.get("result")
         parts: list[str] = []
@@ -561,7 +591,7 @@ class PaulShiaBroDaemon:
                     parts.append(f"{key}={len(value)}")
                 else:
                     parts.append(f"{key}={value}")
-        detail = ", ".join(parts) if parts else "done"
+        detail = ", ".join(parts) if parts else "result: unknown"
         return f"manager tick: {status}\nreq_id: {req_id}\n{detail}"
 
     def handle_command(self, command: str) -> dict[str, object]:
