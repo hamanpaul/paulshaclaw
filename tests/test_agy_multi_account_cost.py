@@ -24,6 +24,7 @@ from paulshaclaw.cost.config import (
     ClaudeProviderConfig,
     CodexProviderConfig,
     CostConfig,
+    GrokProviderConfig,
     SAMPLE_CONFIG_PATH,
     load_cost_config,
     parse_cost_config_payload,
@@ -402,6 +403,7 @@ def test_collect_all_skips_agy_when_all_declared_accounts_disabled(collect_agy_m
                 enabled=True,
                 accounts=(AgyAccountConfig(account_id="a", label="a", enabled=False),),
             ),
+            grok=GrokProviderConfig(enabled=False),
         )
     )
     collect_agy_mock.assert_not_called()
@@ -520,6 +522,7 @@ def _agy_only_config(*, accounts: tuple[AgyAccountConfig, ...]) -> CostConfig:
         codex=CodexProviderConfig(enabled=False),
         claude=ClaudeProviderConfig(enabled=False),
         agy=AgyProviderConfig(enabled=True, accounts=accounts),
+        grok=GrokProviderConfig(enabled=False),
     )
 
 

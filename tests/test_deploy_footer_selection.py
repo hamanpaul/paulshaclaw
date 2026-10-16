@@ -65,6 +65,7 @@ def test_parse_footer_argument_supports_multi_provider_and_bare_copilot() -> Non
     none = parse_footer_argument("none")
 
     assert set(parsed["providers"]) == {"codex", "claude", "copilot", "agy"}
+    assert "grok" not in parsed["providers"]
     assert parsed["providers"]["copilot"]["labels"] == ["haman", "arc"]
     assert parsed["providers"]["copilot"]["all_accounts"] is False
     assert bare_copilot["providers"]["copilot"]["all_accounts"] is True
@@ -96,6 +97,7 @@ def test_detect_agents_never_reads_guarded_paths(tmp_path: Path, monkeypatch) ->
         encoding="utf-8",
     )
     (home / ".gemini" / "google_accounts.json").write_text("[]", encoding="utf-8")
+    (home / ".grok").mkdir()
 
     guarded = {(home / relative).resolve() for relative in _NEVER_READ}
     original_read_text = Path.read_text
@@ -123,12 +125,13 @@ def test_detect_agents_never_reads_guarded_paths(tmp_path: Path, monkeypatch) ->
     detected = detect_agents(home=home, which=lambda name: f"/usr/bin/{name}")
     detected_by_name = {agent.name: agent for agent in detected}
 
-    assert tuple(agent.name for agent in detected) == ("codex", "claude", "copilot", "agy")
+    assert tuple(agent.name for agent in detected) == ("codex", "claude", "copilot", "agy", "grok")
     assert all(isinstance(agent, DetectedAgent) for agent in detected)
     assert detected_by_name["codex"].binary == Path("/usr/bin/codex")
     assert detected_by_name["claude"].binary == Path("/usr/bin/claude")
     assert detected_by_name["copilot"].binary == Path("/usr/bin/copilot")
     assert detected_by_name["agy"].binary == Path("/usr/bin/agy")
+    assert detected_by_name["grok"].binary == Path("/usr/bin/grok")
     assert all(agent.state_present for agent in detected)
 
 
@@ -222,11 +225,15 @@ def test_write_footer_config_creates_backup_and_only_mutates_enabled(
     assert result["status"] == "written"
     assert backup_path.name == "paulshaclaw.yaml.bak-20260911T093000Z"
     assert backup_path.read_text(encoding="utf-8") == original_text
-    assert _drop_enabled(after) == _drop_enabled(before)
+    after_shape = _drop_enabled(after)
+    before_shape = _drop_enabled(before)
+    after_shape["cost"]["providers"].pop("grok", None)
+    assert after_shape == before_shape
     assert after["cost"]["providers"]["codex"]["enabled"] is True
     assert after["cost"]["providers"]["claude"]["enabled"] is True
     assert copilot_accounts == {"haman": True, "arc": False}
     assert after["cost"]["providers"]["agy"]["enabled"] is True
+    assert after["cost"]["providers"]["grok"]["enabled"] is False
 
     written_text = config_path.read_text(encoding="utf-8")
     second = write_footer_config(parse_footer_argument("none"), home_dir=home)
@@ -257,6 +264,7 @@ def test_write_footer_config_uses_sample_fallback_when_config_missing(tmp_path: 
     assert payload["cost"]["providers"]["claude"]["enabled"] is False
     assert copilot_accounts == {"haman": True, "arc": True}
     assert payload["cost"]["providers"]["agy"]["enabled"] is True
+    assert payload["cost"]["providers"]["grok"]["enabled"] is False
 
 
 def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeypatch) -> None:
@@ -275,13 +283,14 @@ def test_prepare_footer_selection_reports_cancelled_mode(tmp_path: Path, monkeyp
     )
 
     assert selection is None
-    assert {agent.name for agent in detected} == {"codex", "claude", "copilot", "agy"}
+    assert {agent.name for agent in detected} == {"codex", "claude", "copilot", "agy", "grok"}
     assert report["mode"] == "cancelled"
     assert report["enabled"] == {
         "codex": True,
         "claude": True,
         "copilot": {"hamanpaul": True, "org-a": True},
         "agy": False,
+        "grok": True,
     }
 
 
@@ -310,7 +319,7 @@ def test_prepare_footer_selection_skips_when_textual_missing(
 
     captured = capsys.readouterr()
     assert selection is None
-    assert {agent.name for agent in detected} == {"codex", "claude", "copilot", "agy"}
+    assert {agent.name for agent in detected} == {"codex", "claude", "copilot", "agy", "grok"}
     assert report == {"mode": "skipped", "reason": "textual-missing"}
     assert captured.out == ""
     assert "textual" in captured.err

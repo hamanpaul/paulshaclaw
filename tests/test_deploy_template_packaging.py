@@ -79,7 +79,7 @@ def _assert_footer_report(
     assert "detected_agents" in payload
     detected = payload["detected_agents"]
     assert isinstance(detected, list)
-    assert [entry["name"] for entry in detected] == ["codex", "claude", "copilot", "agy"]
+    assert [entry["name"] for entry in detected] == ["codex", "claude", "copilot", "agy", "grok"]
     for entry in detected:
         assert set(entry) == {"name", "binary", "state_present"}
         assert entry["binary"] is None or isinstance(entry["binary"], str)
@@ -93,7 +93,7 @@ def _assert_footer_report(
         assert "enabled" not in selection
     else:
         assert isinstance(enabled, dict)
-        assert set(enabled) == {"codex", "claude", "copilot", "agy"}
+        assert set(enabled) == {"codex", "claude", "copilot", "agy", "grok"}
     if expected_enabled not in (_MISSING, None):
         assert enabled == expected_enabled
     selection_text = json.dumps(selection, ensure_ascii=False)
@@ -340,6 +340,7 @@ def test_plan_only_install_template_failure_is_one_json_report(monkeypatch, tmp_
                 "claude": False,
                 "copilot": {"hamanpaul": True, "org-a": True},
                 "agy": False,
+                "grok": False,
             },
         ),
         (
@@ -350,6 +351,7 @@ def test_plan_only_install_template_failure_is_one_json_report(monkeypatch, tmp_
                 "claude": False,
                 "copilot": {"hamanpaul": False, "org-a": False},
                 "agy": False,
+                "grok": False,
             },
         ),
     ],
@@ -812,6 +814,7 @@ def test_install_apply_tui_invalid_config_reports_config_invalid(
             "claude": False,
             "copilot": {},
             "agy": False,
+            "grok": False,
         },
     )
     assert payload["footer_selection"]["config_warning"] == "config.cost 必須是 mapping"

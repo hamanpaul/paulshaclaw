@@ -73,7 +73,7 @@ except ImportError:  # pragma: no cover - textual is a runtime dependency, keep 
         def focus(self) -> None:
             pass
 
-_PROVIDER_ORDER = ("codex", "claude", "copilot", "agy")
+_PROVIDER_ORDER = ("codex", "claude", "copilot", "agy", "grok")
 
 
 def textual_available() -> bool:
@@ -177,6 +177,7 @@ def build_selection_options(
     claude_detected = _agent_is_detected(detected_by_name.get("claude"))
     copilot_detected = _agent_is_detected(detected_by_name.get("copilot"))
     agy_detected = _agent_is_detected(detected_by_name.get("agy"))
+    grok_detected = _agent_is_detected(detected_by_name.get("grok"))
     options = [
         FooterSelectionOption(
             label=f"codex{_provider_suffix('codex', detected_by_name)}",
@@ -216,6 +217,13 @@ def build_selection_options(
             selected=config.agy.enabled and account.enabled and agy_detected,
         )
         for account in config.agy.accounts
+    )
+    options.append(
+        FooterSelectionOption(
+            label=f"grok{_provider_suffix('grok', detected_by_name)}",
+            value=_provider_value("grok"),
+            selected=config.grok.enabled and grok_detected,
+        )
     )
     return options
 

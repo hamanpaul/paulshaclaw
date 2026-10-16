@@ -21,6 +21,7 @@ from paulshaclaw.cost.config import (
     CodexProviderConfig,
     CopilotAccountConfig,
     CostConfig,
+    GrokProviderConfig,
     SAMPLE_CONFIG_PATH,
     load_cost_config,
 )
@@ -1592,6 +1593,7 @@ def test_collect_all_omits_disabled_codex_claude_copilot_and_agy(
                 ),
             ),
             agy=AgyProviderConfig(enabled=False),
+            grok=GrokProviderConfig(enabled=False),
         )
     )
 
@@ -1612,6 +1614,7 @@ def test_collect_all_passes_config_timezone_to_agy(collect_agy_mock) -> None:
         codex=CodexProviderConfig(enabled=False),
         claude=ClaudeProviderConfig(enabled=False),
         agy=AgyProviderConfig(enabled=True, cli_path=_FAKE_AGY_CLI_PATH),
+        grok=GrokProviderConfig(enabled=False),
     )
 
     collect_all(cfg)
@@ -1777,7 +1780,7 @@ def test_build_degraded_snapshot_omits_disabled_codex_provider() -> None:
     )
 
     assert "cdx" not in snapshot.providers
-    assert format_footer(snapshot, use_tmux_style=False) == "cc 5h:-- wk:-- "
+    assert format_footer(snapshot, use_tmux_style=False) == "cc 5h:-- wk:-- | grok wk:-- "
 
 
 def test_status_main_omits_disabled_codex_from_cached_snapshot(tmp_path: Path) -> None:
@@ -1829,5 +1832,5 @@ def test_sample_yaml_footer_snapshot_matches_main_baseline() -> None:
     snapshot = _build_degraded_snapshot(config)
 
     assert format_footer(snapshot, use_tmux_style=False) == (
-        "cdx 5h:-- wk:-- | cc 5h:-- wk:-- | cpt -- "
+        "cdx 5h:-- wk:-- | cc 5h:-- wk:-- | cpt -- | grok wk:-- "
     )
