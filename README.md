@@ -334,7 +334,7 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 
 - `install` / `upgrade --apply` 在有 TTY 且未帶 `--footer` 時，會以 SelectionList TUI 勾選要顯示的 footer providers/accounts。
 - headless / CI / 未帶 `--apply` 不會跳互動式 UI；JSON report 仍會帶 `detected_agents` 與 `footer_selection`。
-- 明確指定時可用 `--footer codex,claude,copilot:haman:arc,agy`、`--footer copilot`（啟用目前已設定的全部 copilot accounts）或 `--footer none`。agy 比照 copilot 支援 `--footer agy:<label>[:<label>...]`（多帳號子集）與裸 `agy`（啟用目前已設定的全部 agy accounts）；與 copilot 不同的是，agy 遇到**尚未在 yaml 宣告**的 label 會直接新建一筆 `{id, label, enabled: true}` 條目而非報錯 —— accounts[] 一律只來自這裡的顯式宣告或 TUI／`--footer` 操作，不會主動枚舉或讀取 `~/.gemini/google_accounts.json` 等任何帳號檔。install TUI 有 `accounts[]` 時會在 `agy` 父列下展開各帳號子列可個別勾選，但 TUI 本身只能 toggle 既有條目、不會新建。label 含 `:` 或 `,` 無法經 `--footer` 正確表達（會被切成多個 label，可能新建非預期的垃圾條目）：這類 label 只能用 yaml 直接宣告 `accounts[]`，勿經 `--footer`。
+- 明確指定時可用 `--footer codex,claude,copilot:haman:arc,agy,grok`、`--footer copilot`（啟用目前已設定的全部 copilot accounts）或 `--footer none`。`grok` 與 `codex`／`claude` 一樣只有一個 bool `enabled`，沒有帳號子項。agy 比照 copilot 支援 `--footer agy:<label>[:<label>...]`（多帳號子集）與裸 `agy`（啟用目前已設定的全部 agy accounts）；與 copilot 不同的是，agy 遇到**尚未在 yaml 宣告**的 label 會直接新建一筆 `{id, label, enabled: true}` 條目而非報錯 —— accounts[] 一律只來自這裡的顯式宣告或 TUI／`--footer` 操作，不會主動枚舉或讀取 `~/.gemini/google_accounts.json` 等任何帳號檔。install TUI 有 `accounts[]` 時會在 `agy` 父列下展開各帳號子列可個別勾選，但 TUI 本身只能 toggle 既有條目、不會新建。label 含 `:` 或 `,` 無法經 `--footer` 正確表達（會被切成多個 label，可能新建非預期的垃圾條目）：這類 label 只能用 yaml 直接宣告 `accounts[]`，勿經 `--footer`。
 - 寫回只更新 `cost.providers.*.enabled` 與 account 的 `enabled`，其餘 `label` / `monthly_allowance` / `org` 保留；若 `~/.config/paulshaclaw/paulshaclaw.yaml` 尚不存在，會以 bundled sample 建立。agy 例外：`--footer agy:<label>` 遇到未宣告的 label 會新建 `accounts` 條目（`accounts` 鍵原本不存在時也會一併新建），不是純粹的「只更新 enabled」。
 - 設定寫回會由 PyYAML 重寫整份 `paulshaclaw.yaml`：key 順序會盡量保留，但 YAML 註解與原始排版不保證保留；原檔會先備份成 `paulshaclaw.yaml.bak-<UTC 時戳>`，同秒重跑也不覆寫既有備份。
 - JSON report 的 `footer_selection.enabled.agy`：未宣告 `accounts[]` 時維持既有的 bool；一旦 `accounts[]` 非空，改成 `{<account_id>: bool}`（與 `enabled.copilot` 同形狀）。 例外：宿主沒有 PyYAML（無法讀 yaml、拿不到 account_id）的降級路徑只能以 `--footer` 給的 label 當 key（裸 `agy` 仍回 bool）。
@@ -342,7 +342,7 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 ##### Copilot 用量呈現
 
 - footer 只顯示設定中第一個 enabled 帳號的已用用量，例如 `cpt 87%`；cockpit 顯示 `cpt: 87%`。不顯示帳號名、不展開帳號明細。
-- cockpit 的完整用量列會依視窗寬度自動換行；縮窄視窗時仍保留 cdx／cc／cpt／agy 的全部用量與重置時間，不截斷尾端。
+- cockpit 的完整用量列會依視窗寬度自動換行；縮窄視窗時仍保留 cdx／cc／cpt／agy／grok 的全部用量與重置時間，不截斷尾端。
 - 次帳號的 unknown、stale 或高用量不會取代主帳號。主帳號缺資料顯示 `--`，不借用其他帳號數值；主帳號 stale 仍保留 `cpt~` 標記。
 - 其餘啟用帳號仍收集並保留於 snapshot JSON；逐帳號 cache 與停用／排序設定沿用。完整行為見 [Stage 8 規格](openspec/specs/stage8-cost-footer/spec.md)。
 
@@ -352,6 +352,12 @@ python -c "import paulshaclaw; print('ok')"  # 確認可 import
 - 單次呼叫耗時約 2.5～4s，故以 `refresh_seconds`（預設 300s）節流：sidecar `~/.agents/state/cost/agy_usage.json`（owner-only，只存 `attempted_at`／`fetched_at`／`note`／`windows`，不存 CLI 原始輸出；`windows` 只存 CLI 的原始解析值，絕不在寫入前 roll-forward）。一輪只有兩種結果：兩個視窗都解析成功時整塊替換 `windows`／`fetched_at`＝now／`note`＝null；其他任何情況（`timeout`／`nonzero`／`invalid-json`／`status-not-success`／`group-missing`／`window-unparsed`／`cli-missing`，PATH 上找不到 `agy` 也算一次失敗嘗試）都只更新 `attempted_at`／`note`，`windows`／`fetched_at` 原樣不動——不再 merge、不再有 per-window `fetched_at`。`attempted_at` 只決定要不要節流；`fresh`／`stale` 只看 `fetched_at` 是否落在 `refresh_seconds` 內。過期視窗只在 `fresh` 時才於**呈現層**（不影響 sidecar 內容）roll-forward；`stale` 狀態下不會被歸零，其 `reset_at` 若已過期，footer 顯示 `(exp)` 而非過去的時鐘時間或假造的 `0%`。新增 `stale_max_age_seconds`（預設 3600）：`fetched_at` 比它更舊時該輪不輸出視窗（sidecar 檔仍保留），落到既有 `local_fallback`（讀本地 state.json）或 `unknown`，`note` 保留最後失敗原因。讀到升級前的舊格式 sidecar（第三輪的 per-window `fetched_at`，或更早、只有單一頂層 `fetched_at` 的版本）不會炸：取可得的最舊 `fetched_at`（或視為無 `fetched_at`），下一次實際寫入即升級為現行格式。
 - `group`（預設 `gemini`，可設 `3p`）依 bucket id 前綴（`gemini-*` / `3p-*`）選取 five_hour／weekly 兩個視窗；`cli_path` 未指定時在 PATH 上找 `agy`。
 - footer／cockpit 呈現：有視窗資料時 agy 比照 `cdx`／`cc` 顯示 `agy 5h:N%(reset) wk:N%(reset)`；沒有時維持原本 `agy N%` / `agy ?` 呈現。宣告 `accounts[]` 後，segment 名稱從 `agy` 換成 `agy/<active 帳號 label>`（例如 `agy/work 5h:..(..) wk:..`、`agy/work ?`）；沒有 `accounts[]` 時逐字元不變，仍是 `agy`。這只是顯示別名——`/usage` 本身不含帳號識別，實際讀到的用量仍只反映目前登入 agy 的那個帳號，並非真的分帳號查詢。頂層 `label` 與 `accounts[]` 的優先序：宣告 `accounts[]` 後 footer 顯示名一律取第一個 enabled 帳號的 label，頂層 `label` 只在無 `accounts[]` 時生效。
+
+##### grok 用量來源
+
+- `cost.providers.grok` 預設啟用。只讀本機 `~/.grok/logs/unified.jsonl`（可用 `GROK_HOME` 或 `log_path` 改路徑）裡最後一筆 `msg == "billing: fetched credits config"` 且 `ctx.config.creditUsagePercent` 有值的行。該數字已是百分比（`2.0` 表示 2%）。重置時間取 `currentPeriod.end`，沒有才用 `billingPeriodEnd`。
+- 新鮮度看該行的 `ts`，不看檔案 mtime，也不打網路、不啟動 headless。`max_age_seconds` 預設 3600：逾時仍顯示數字並在名稱後加 `~`（`grok~ wk:N%(reset)`）；沒有可用行或沒有可解析的重置時間才顯示 `grok wk:--`。
+- footer 與 cockpit 只印週池 `grok wk:N%(reset)`，不印 `5h`。偵測條件與其他 agent 相同：PATH 上有 `grok` 且 `~/.grok` 存在。`--footer` 沒點到 `grok` 時寫入 `enabled: false`。
 
 #### 查詢目前安裝版本
 

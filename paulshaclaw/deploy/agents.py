@@ -15,7 +15,7 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
     from paulshaclaw.cost.config import CostConfig
     from paulshaclaw.cost.models import ProviderSnapshot
 
-_FOOTER_PROVIDERS = ("codex", "claude", "copilot", "agy")
+_FOOTER_PROVIDERS = ("codex", "claude", "copilot", "agy", "grok")
 _NEVER_READ = (
     ".codex/auth.json",
     ".gemini/oauth_creds.json",
@@ -109,6 +109,7 @@ def _state_paths(home: Path) -> dict[str, Path]:
         "claude": home / ".claude",
         "copilot": home / ".config" / "github-copilot",
         "agy": home / ".gemini",
+        "grok": home / ".grok",
     }
 
 
@@ -202,6 +203,7 @@ def _default_footer_enabled() -> dict[str, object]:
         "claude": True,
         "copilot": {},
         "agy": False,
+        "grok": True,
     }
 
 
@@ -235,6 +237,7 @@ def _selection_enabled_fallback(
         "claude": bool(not disable_all and "claude" in selected),
         "copilot": copilot_enabled,
         "agy": agy_enabled,
+        "grok": bool(not disable_all and "grok" in selected),
     }
 
 
@@ -270,6 +273,8 @@ def _preview_providers(config: CostConfig) -> dict[str, ProviderSnapshot]:
             accounts=(),
             label=active.label if active is not None else None,
         )
+    if config.grok.enabled:
+        providers["grok"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
     return providers
 
 
@@ -401,6 +406,7 @@ def resolve_footer_enabled(
             if config.agy.accounts
             else config.agy.enabled
         ),
+        "grok": config.grok.enabled,
     }
 
 
@@ -415,7 +421,7 @@ def apply_footer_selection_payload(
     selected = selected if isinstance(selected, dict) else {}
     disable_all = bool(selection.get("disable_all", False))
 
-    for provider_name in ("codex", "claude"):
+    for provider_name in ("codex", "claude", "grok"):
         provider = _ensure_mapping(
             providers,
             provider_name,

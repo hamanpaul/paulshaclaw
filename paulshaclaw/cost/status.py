@@ -81,6 +81,9 @@ def _build_degraded_snapshot(config) -> CostSnapshot:
             note='source="unknown"',
             label=active.label if active is not None else None,
         )
+    grok = getattr(config, "grok", None)
+    if getattr(grok, "enabled", False):
+        providers["grok"] = ProviderSnapshot(source_status="unknown", source="unknown", windows={})
 
     return build_snapshot(
         timezone=getattr(config, "timezone", "Asia/Taipei"),
@@ -98,6 +101,10 @@ def _filter_snapshot_by_enabled(snapshot: CostSnapshot, config) -> CostSnapshot:
         changed = True
     if not getattr(getattr(config, "claude", None), "enabled", True) and "cc" in providers:
         providers.pop("cc", None)
+        changed = True
+    grok_config = getattr(config, "grok", None)
+    if grok_config is not None and not getattr(grok_config, "enabled", True) and "grok" in providers:
+        providers.pop("grok", None)
         changed = True
     agy_config = getattr(config, "agy", None)
     if not getattr(agy_config, "effective_enabled", False) and "agy" in providers:

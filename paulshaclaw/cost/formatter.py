@@ -86,6 +86,14 @@ def _format_window_provider(name: str, provider: ProviderSnapshot, use_tmux_styl
     )
 
 
+def _format_weekly_only_provider(name: str, provider: ProviderSnapshot, use_tmux_style: bool) -> str:
+    """只有週池的 provider。不印 5h:-- 佔位。"""
+    return (
+        f"{_provider_label(name, provider)} "
+        f"wk:{_format_window(provider.windows.get('weekly'), use_tmux_style, provider=provider)}"
+    )
+
+
 def _account_level(provider: ProviderSnapshot, account: CopilotAccountUsage) -> str:
     if account.unlimited:
         return "low"
@@ -199,6 +207,10 @@ def format_footer(snapshot: CostSnapshot, *, use_tmux_style: bool = True) -> str
         else:
             segments.append(_format_agy_provider(agy, use_tmux_style, name=agy_name))
 
+    grok = snapshot.providers.get("grok")
+    if grok is not None:
+        segments.append(_format_weekly_only_provider("grok", grok, use_tmux_style))
+
     # Divider between cdx / cc / cpt so the segments don't blur together, plus a
     # trailing space so the line doesn't sit flush against the terminal edge.
     separator = _wrap("|", "separator", use_tmux_style)
@@ -282,9 +294,9 @@ def format_cockpit_cdx(snapshot: CostSnapshot) -> str:
 
 
 def format_cockpit_rest(snapshot: CostSnapshot) -> str:
-    """cockpit cost 列的 cc + cpt 段（cdx 除外），ANSI 前景色。無資料回空字串。
+    """cockpit cost 列的 cc + cpt + agy + grok 段（cdx 除外），ANSI 前景色。無資料回空字串。
 
-    供 banner 放在 Net（含 cdx）的下一行。"""
+    grok 只有週池，段面是 ``grok wk:N%(reset)``，不印 5h。供 banner 放在 Net（含 cdx）的下一行。"""
     segments: list[str] = []
     cc = snapshot.providers.get("cc")
     if cc is not None:
@@ -299,13 +311,16 @@ def format_cockpit_rest(snapshot: CostSnapshot) -> str:
             segments.append(_format_window_provider(agy_name, agy, True))
         else:
             segments.append(_format_agy_provider(agy, True, name=agy_name))
+    grok = snapshot.providers.get("grok")
+    if grok is not None:
+        segments.append(_format_weekly_only_provider("grok", grok, True))
     return _join_cockpit_segments(segments)
 
 
 def format_cockpit_footer(snapshot: CostSnapshot) -> str:
-    """整條 cockpit cost 列（cdx | cc | cpt），ANSI 前景色、無背景色。
+    """整條 cockpit cost 列（cdx | cc | cpt | agy | grok），ANSI 前景色、無背景色。
 
-    cdx/cc windows 含 reset 時間；cpt 多帳號以告警優先選擇摘要。
+    cdx/cc/agy windows 含 5h 與週池；grok 只有週池。cpt 多帳號以告警優先選擇摘要。
     """
     cdx = format_cockpit_cdx(snapshot)
     rest = format_cockpit_rest(snapshot)

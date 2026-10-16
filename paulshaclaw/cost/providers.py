@@ -16,7 +16,12 @@ from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from paulshaclaw.config import paths
-from paulshaclaw.cost.config import AgyProviderConfig, CopilotAccountConfig, CostConfig
+from paulshaclaw.cost.config import (
+    AgyProviderConfig,
+    CopilotAccountConfig,
+    CostConfig,
+    GrokProviderConfig,
+)
 from paulshaclaw.cost.models import CopilotAccountUsage, ProviderSnapshot, UsageWindow
 
 CopilotFetcher = Callable[[CopilotAccountConfig], tuple[int, str]]
@@ -1593,6 +1598,110 @@ def collect_copilot(
     )
 
 
+_GROK_BILLING_MSG = "billing: fetched credits config"
+_GROK_LOG_TAIL_BYTES = 1_048_576
+
+
+def _read_grok_log_tail(path: Path) -> str:
+    try:
+        size = path.stat().st_size
+        with path.open("rb") as handle:
+            if size > _GROK_LOG_TAIL_BYTES:
+                handle.seek(size - _GROK_LOG_TAIL_BYTES)
+                raw = handle.read()
+                newline = raw.find(b"\n")
+                if newline >= 0:
+                    raw = raw[newline + 1 :]
+            else:
+                raw = handle.read()
+    except OSError:
+        return ""
+    return raw.decode("utf-8", errors="replace")
+
+
+def _latest_grok_billing(text: str) -> dict[str, Any] | None:
+    found: dict[str, Any] | None = None
+    for line in text.splitlines():
+        if _GROK_BILLING_MSG not in line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict) or obj.get("msg") != _GROK_BILLING_MSG:
+            continue
+        ctx = obj.get("ctx")
+        config = ctx.get("config") if isinstance(ctx, dict) else None
+        if not isinstance(config, dict) or config.get("creditUsagePercent") is None:
+            continue
+        found = obj
+    return found
+
+
+def _unknown_grok(note: str) -> ProviderSnapshot:
+    return ProviderSnapshot(
+        source_status="unknown",
+        source="unknown",
+        windows={},
+        note=note,
+    )
+
+
+def collect_grok(
+    config: GrokProviderConfig,
+    *,
+    timezone_name: str,
+    now: datetime | None = None,
+) -> ProviderSnapshot:
+    """讀本機 unified log 最後一筆有 creditUsagePercent 的 billing 行。
+
+    百分比已是 0–100（2.0 表示 2%）。新鮮度看該行 ts，不看檔案 mtime。
+    逾時仍顯示數字並標 stale；沒有可用週池就回 unknown。不打網路。
+    """
+    zone = _display_zone(timezone_name)
+    current = (now or _now_utc()).astimezone(zone)
+    record = _latest_grok_billing(_read_grok_log_tail(config.log_path))
+    if record is None:
+        return _unknown_grok("grok billing log unavailable")
+
+    ctx = record.get("ctx")
+    billing = ctx.get("config") if isinstance(ctx, dict) else None
+    if not isinstance(billing, dict):
+        return _unknown_grok("grok billing log unavailable")
+
+    try:
+        used_percent = max(0, min(100, int(round(float(billing["creditUsagePercent"])))))
+    except (TypeError, ValueError, OverflowError):
+        return _unknown_grok("grok billing log unavailable")
+
+    period = billing.get("currentPeriod")
+    reset_raw = period.get("end") if isinstance(period, dict) else None
+    if not reset_raw:
+        reset_raw = billing.get("billingPeriodEnd")
+    reset_at = _parse_reset_value(reset_raw, zone)
+    if reset_at is None:
+        return _unknown_grok("grok weekly reset unavailable")
+
+    fetched_at = _parse_event_timestamp(record.get("ts"))
+    if fetched_at is None:
+        source_status = "stale"
+    else:
+        age = (current.astimezone(timezone.utc) - fetched_at).total_seconds()
+        source_status = "fresh" if 0 <= age <= config.max_age_seconds else "stale"
+
+    return ProviderSnapshot(
+        source_status=source_status,
+        source="local_log",
+        windows={
+            "weekly": UsageWindow(
+                used_percent=used_percent,
+                reset_at=reset_at,
+                display_reset=_display_reset(reset_at, current),
+            )
+        },
+    )
+
+
 def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
     providers: dict[str, ProviderSnapshot] = {}
     if config.codex.enabled:
@@ -1618,6 +1727,8 @@ def collect_all(config: CostConfig) -> dict[str, ProviderSnapshot]:
         agy = collect_agy(config.agy, timezone_name=config.timezone)
         if agy is not None:
             providers["agy"] = agy
+    if config.grok.enabled:
+        providers["grok"] = collect_grok(config.grok, timezone_name=config.timezone)
     return providers
 
 

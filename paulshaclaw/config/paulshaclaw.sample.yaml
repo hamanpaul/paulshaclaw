@@ -103,3 +103,12 @@ cost:
       #   - id: work
       #     label: work
       #     enabled: false
+    grok:
+      # 週池只讀本機 unified log 最後一筆
+      # msg == "billing: fetched credits config" 且 ctx.config.creditUsagePercent
+      # 有值的行。該數字已是百分比（2.0 = 2%）。重置時間取
+      # currentPeriod.end，沒有才用 billingPeriodEnd。新鮮度看該行 ts，
+      # 不看檔案 mtime，也不打網路。footer／cockpit 只印 wk:，不印 5h。
+      enabled: true
+      log_path: ~/.grok/logs/unified.jsonl
+      max_age_seconds: 3600

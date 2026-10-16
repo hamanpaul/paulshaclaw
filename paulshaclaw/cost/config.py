@@ -67,6 +67,16 @@ def default_agy_state_dir() -> Path:
     return paths.home_path(".gemini")
 
 
+def default_grok_log_path() -> Path:
+    """Grok 互動 shell 寫入的 unified log。週用量在最後一筆 billing 行。
+
+    未設 ``GROK_HOME`` 時走 ``paths.home_path``，讓 ``PSC_HOME_ROOT`` 隔離生效。
+    """
+    grok_home = os.environ.get("GROK_HOME", "").strip()
+    root = Path(grok_home).expanduser() if grok_home else paths.home_path(".grok")
+    return root / "logs" / "unified.jsonl"
+
+
 @dataclass(frozen=True)
 class AgyAccountConfig:
     account_id: str
@@ -113,6 +123,16 @@ class AgyProviderConfig:
 
 
 @dataclass(frozen=True)
+class GrokProviderConfig:
+    """Grok 週池。creditUsagePercent 已是百分比，不另乘 100。"""
+
+    enabled: bool = True
+    log_path: Path = field(default_factory=default_grok_log_path)
+    # 互動 shell 每個 turn 才寫一筆。300 秒會在兩輪之間把數字塗掉。
+    max_age_seconds: int = 3600
+
+
+@dataclass(frozen=True)
 class CostConfig:
     timezone: str = "Asia/Taipei"
     cache_ttl_seconds: int = 120
@@ -125,6 +145,7 @@ class CostConfig:
     claude: ClaudeProviderConfig = field(default_factory=ClaudeProviderConfig)
     codex: CodexProviderConfig = field(default_factory=CodexProviderConfig)
     agy: AgyProviderConfig = field(default_factory=AgyProviderConfig)
+    grok: GrokProviderConfig = field(default_factory=GrokProviderConfig)
 
 
 def _resolve_config_source(config_path: Path | None) -> Path | None:
@@ -338,6 +359,21 @@ def _parse_agy_provider(raw: Any) -> AgyProviderConfig:
     )
 
 
+def _parse_grok_provider(raw: Any) -> GrokProviderConfig:
+    item = _mapping(raw, "config.cost.providers.grok")
+    log_path = item.get("log_path")
+    max_age = item.get("max_age_seconds")
+    return GrokProviderConfig(
+        enabled=_bool_value(item.get("enabled"), default=True),
+        log_path=(
+            Path(str(log_path)).expanduser()
+            if log_path
+            else default_grok_log_path()
+        ),
+        max_age_seconds=int(max_age) if max_age is not None else 3600,
+    )
+
+
 def parse_cost_config_payload(payload: dict[str, Any] | None) -> CostConfig:
     if payload is None:
         payload = {}
@@ -350,6 +386,7 @@ def parse_cost_config_payload(payload: dict[str, Any] | None) -> CostConfig:
     claude = _mapping(providers.get("claude"), "config.cost.providers.claude")
     codex = _mapping(providers.get("codex"), "config.cost.providers.codex")
     agy = _mapping(providers.get("agy"), "config.cost.providers.agy")
+    grok = _mapping(providers.get("grok"), "config.cost.providers.grok")
     colors = _mapping(cost.get("colors"), "config.cost.colors")
 
     cache_dir_raw = cost.get("cache_dir")
@@ -368,6 +405,7 @@ def parse_cost_config_payload(payload: dict[str, Any] | None) -> CostConfig:
         claude=_parse_claude_provider(claude),
         codex=_parse_codex_provider(codex),
         agy=_parse_agy_provider(agy),
+        grok=_parse_grok_provider(grok),
         cache_dir=(
             Path(str(cache_dir_raw)).expanduser()
             if cache_dir_raw
