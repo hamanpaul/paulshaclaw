@@ -68,9 +68,12 @@ def default_agy_state_dir() -> Path:
 
 
 def default_grok_log_path() -> Path:
-    """Grok 互動 shell 寫入的 unified log。週用量在最後一筆 billing 行。"""
+    """Grok 互動 shell 寫入的 unified log。週用量在最後一筆 billing 行。
+
+    未設 ``GROK_HOME`` 時走 ``paths.home_path``，讓 ``PSC_HOME_ROOT`` 隔離生效。
+    """
     grok_home = os.environ.get("GROK_HOME", "").strip()
-    root = Path(grok_home).expanduser() if grok_home else Path.home() / ".grok"
+    root = Path(grok_home).expanduser() if grok_home else paths.home_path(".grok")
     return root / "logs" / "unified.jsonl"
 
 

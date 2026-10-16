@@ -8,12 +8,14 @@ import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from paulshaclaw.config import paths
 from paulshaclaw.cost.config import (
     AgyProviderConfig,
     ClaudeProviderConfig,
     CodexProviderConfig,
     CostConfig,
     GrokProviderConfig,
+    default_grok_log_path,
     parse_cost_config_payload,
 )
 from paulshaclaw.cost.formatter import format_cockpit_footer, format_cockpit_rest, format_footer
@@ -209,6 +211,21 @@ def test_degraded_snapshot_includes_enabled_grok() -> None:
     footer = format_footer(snapshot, use_tmux_style=False)
     assert footer == "grok wk:-- "
     assert "5h" not in footer
+
+
+def test_default_log_path_follows_home_facade(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.delenv("GROK_HOME", raising=False)
+    monkeypatch.setenv("PSC_HOME_ROOT", str(tmp_path))
+
+    assert default_grok_log_path() == paths.home_path(".grok", "logs", "unified.jsonl")
+    assert default_grok_log_path() == tmp_path / ".grok" / "logs" / "unified.jsonl"
+
+
+def test_grok_home_overrides_default_log_path(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "custom"))
+    monkeypatch.setenv("PSC_HOME_ROOT", str(tmp_path / "ignored-home"))
+
+    assert default_grok_log_path() == tmp_path / "custom" / "logs" / "unified.jsonl"
 
 
 def test_unknown_provider_snapshot_still_names_grok() -> None:
