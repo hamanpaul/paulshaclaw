@@ -27,7 +27,6 @@ from paulshaclaw.cost import config as cost_config_module
 from paulshaclaw.cost.config import (
     ClaudeProviderConfig,
     CodexProviderConfig,
-    GrokProviderConfig,
     CostConfig,
     load_cost_config,
 )
@@ -1420,10 +1419,7 @@ class Stage8ConfigProviderTests(unittest.TestCase):
         )
 
     def test_collect_all_omits_copilot_when_no_accounts_are_configured(self) -> None:
-        cfg = CostConfig(
-            codex=CodexProviderConfig(enabled=False),
-            grok=GrokProviderConfig(enabled=False),
-        )
+        cfg = CostConfig(codex=CodexProviderConfig(enabled=False))
 
         with (
             patch(
@@ -1448,7 +1444,6 @@ class Stage8ConfigProviderTests(unittest.TestCase):
     def test_collect_all_includes_copilot_when_accounts_are_configured(self) -> None:
         cfg = CostConfig(
             codex=CodexProviderConfig(enabled=False),
-            grok=GrokProviderConfig(enabled=False),
             copilot_accounts=(
                 load_cost_config(
                     config_path=self.write_config(
@@ -1515,7 +1510,6 @@ class Stage8ConfigProviderTests(unittest.TestCase):
                 max_age_seconds=34,
                 local_fallback=True,
             ),
-            grok=GrokProviderConfig(enabled=False),
         )
 
         with (
@@ -2894,7 +2888,6 @@ class Stage8CliTests(unittest.TestCase):
             cache_ttl_seconds=120,
             codex=CodexProviderConfig(enabled=False),
             claude=ClaudeProviderConfig(enabled=True),
-            grok=GrokProviderConfig(enabled=False),
         )
         cache = Mock()
         cache.read_if_fresh.return_value = None
